@@ -192,6 +192,31 @@ def sheet_title(keywords: list[str], start_month: str | None, end_month: str | N
     return f"VPO Royalties - {keyword_part}{period_part}"
 
 
+def column_width(column_name: str) -> int:
+    lower_name = column_name.lower()
+
+    if "match_text" in lower_name:
+        return 420
+    if "title" in lower_name or "artist" in lower_name:
+        return 220
+    if "statement_file" in lower_name:
+        return 260
+    if "generated_at" in lower_name:
+        return 180
+    if "url" in lower_name:
+        return 260
+    if lower_name in {"amount_usd", "song_level_amount_usd", "net_amount"}:
+        return 125
+    if lower_name in {"units", "rows", "song_level_rows", "raw_sample_rows"}:
+        return 110
+    if "month" in lower_name or lower_name in {"source", "account", "content_type"}:
+        return 130
+    if "isrc" in lower_name:
+        return 140
+
+    return 160
+
+
 def create_google_sheet(
     tables,
     keywords: list[str],
@@ -300,10 +325,23 @@ def create_google_sheet(
         for sheet in metadata["sheets"]
     }
 
+    amount_headers = {
+        "amount_usd",
+        "song_level_amount_usd",
+        "net_amount",
+    }
+    integer_headers = {
+        "units",
+        "rows",
+        "song_level_rows",
+        "raw_sample_rows",
+    }
+
     requests = []
     for sheet_name, dataframe in tables.items():
         sheet_id = sheet_id_by_title[sheet_name]
         column_count = max(1, len(dataframe.columns))
+        row_count = max(1, len(dataframe.index) + 1)
         requests.extend([
             {
                 "repeatCell": {
@@ -342,6 +380,79 @@ def create_google_sheet(
                 }
             },
         ])
+
+        requests.append({
+            "setBasicFilter": {
+                "filter": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": 0,
+                        "endRowIndex": row_count,
+                        "startColumnIndex": 0,
+                        "endColumnIndex": column_count,
+                    }
+                }
+            }
+        })
+
+        for idx, column_name in enumerate(dataframe.columns):
+            requests.append({
+                "updateDimensionProperties": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "dimension": "COLUMNS",
+                        "startIndex": idx,
+                        "endIndex": idx + 1,
+                    },
+                    "properties": {
+                        "pixelSize": column_width(str(column_name)),
+                    },
+                    "fields": "pixelSize",
+                }
+            })
+
+            if column_name in amount_headers:
+                requests.append({
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "startRowIndex": 1,
+                            "endRowIndex": row_count,
+                            "startColumnIndex": idx,
+                            "endColumnIndex": idx + 1,
+                        },
+                        "cell": {
+                            "userEnteredFormat": {
+                                "numberFormat": {
+                                    "type": "CURRENCY",
+                                    "pattern": "$#,##0.00",
+                                }
+                            }
+                        },
+                        "fields": "userEnteredFormat.numberFormat",
+                    }
+                })
+            elif column_name in integer_headers:
+                requests.append({
+                    "repeatCell": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "startRowIndex": 1,
+                            "endRowIndex": row_count,
+                            "startColumnIndex": idx,
+                            "endColumnIndex": idx + 1,
+                        },
+                        "cell": {
+                            "userEnteredFormat": {
+                                "numberFormat": {
+                                    "type": "NUMBER",
+                                    "pattern": "#,##0",
+                                }
+                            }
+                        },
+                        "fields": "userEnteredFormat.numberFormat",
+                    }
+                })
 
     if requests:
         try:

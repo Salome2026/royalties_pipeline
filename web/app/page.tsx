@@ -150,6 +150,9 @@ export default function Home() {
 
     const data = await response.json();
     setLastSheetUrl(data.url);
+    if (data.url) {
+      window.open(data.url, "_blank", "noopener,noreferrer");
+    }
     setMessage({ type: "ok", text: "Google Sheet creado correctamente." });
     setGoogleLoading(false);
   }
