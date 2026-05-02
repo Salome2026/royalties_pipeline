@@ -268,20 +268,23 @@ def build_report(
     raw_limit: int,
     start_month: str | None = None,
     end_month: str | None = None,
+    song_path: Path = SONG_PATH,
+    standardized_path: Path = STANDARDIZED_PATH,
+    output_dir: Path = REPORTS,
 ) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     slug = re.sub(r"[^A-Za-z0-9]+", "_", "_".join(keywords)).strip("_").lower()[:60]
     period_slug = ""
     if start_month or end_month:
         period_slug = f"_{start_month or 'start'}_to_{end_month or 'end'}"
-    output_path = REPORTS / f"keyword_royalty_report_{slug}{period_slug}_{timestamp}.xlsx"
+    output_path = output_dir / f"keyword_royalty_report_{slug}{period_slug}_{timestamp}.xlsx"
 
-    song_cols = existing_columns(SONG_PATH)
+    song_cols = existing_columns(song_path)
     song_filter = build_filter(song_cols, SEARCH_COLUMNS_SONG, keywords, mode)
 
     song = (
         add_period_filter(
-            add_match_text(pl.scan_parquet(SONG_PATH), song_cols, SEARCH_COLUMNS_SONG),
+            add_match_text(pl.scan_parquet(song_path), song_cols, SEARCH_COLUMNS_SONG),
             song_cols,
             start_month,
             end_month,
@@ -291,7 +294,7 @@ def build_report(
     )
 
     if song.height == 0:
-        REPORTS.mkdir(parents=True, exist_ok=True)
+        output_dir.mkdir(parents=True, exist_ok=True)
         with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
             instructions_dataframe().to_excel(writer, index=False, sheet_name="instructions")
             overview = pd.DataFrame([{
@@ -358,13 +361,13 @@ def build_report(
     )
 
     raw_sample = pl.DataFrame()
-    if STANDARDIZED_PATH.exists():
-        raw_cols = existing_columns(STANDARDIZED_PATH)
+    if standardized_path.exists():
+        raw_cols = existing_columns(standardized_path)
         raw_filter = build_filter(raw_cols, SEARCH_COLUMNS_STANDARDIZED, keywords, mode)
 
         raw_sample = (
             add_period_filter(
-                add_match_text(pl.scan_parquet(STANDARDIZED_PATH), raw_cols, SEARCH_COLUMNS_STANDARDIZED),
+                add_match_text(pl.scan_parquet(standardized_path), raw_cols, SEARCH_COLUMNS_STANDARDIZED),
                 raw_cols,
                 start_month,
                 end_month,
@@ -393,7 +396,7 @@ def build_report(
             .collect()
         )
 
-    REPORTS.mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
         instructions_dataframe().to_excel(writer, index=False, sheet_name="instructions")

@@ -25,6 +25,7 @@ staging/
 reports/
 exports/
 _cleanup_archive/
+cache/
 
 # Generated spreadsheets / data extracts
 *.xlsx

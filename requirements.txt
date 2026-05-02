@@ -1,4 +1,5 @@
 duckdb
+fastapi
 fastexcel
 google-cloud-storage
 openpyxl
@@ -6,3 +7,4 @@ pandas
 polars
 pyarrow
 requests
+uvicorn
