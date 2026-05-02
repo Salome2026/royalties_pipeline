@@ -3,6 +3,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 const SESSION_COOKIE = "vpo_web_session";
 
+export const maxDuration = 60;
+
 export async function POST(request: NextRequest) {
   const cookieStore = await cookies();
   if (cookieStore.get(SESSION_COOKIE)?.value !== "ok") {
@@ -36,7 +38,8 @@ export async function POST(request: NextRequest) {
       const payload = await response.json();
       detail = payload.detail || payload.error || detail;
     } catch {
-      detail = await response.text();
+      const text = await response.text();
+      detail = text || detail;
     }
     return NextResponse.json({ error: detail }, { status: response.status });
   }
