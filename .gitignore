@@ -1,0 +1,50 @@
+# Python / environment
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+
+# Local secrets and configuration
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*credentials*.json
+*service_account*.json
+client_secret*.json
+
+# Raw/private royalty data
+input_raw/
+warehouse/
+staging/
+reports/
+exports/
+_cleanup_archive/
+
+# Generated spreadsheets / data extracts
+*.xlsx
+*.xls
+*.csv
+*.tsv
+*.parquet
+*.duckdb
+*.db
+
+# Keep docs tracked even if they contain markdown notes.
+!docs/
+!docs/**/*.md
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Logs
+*.log
+logs/

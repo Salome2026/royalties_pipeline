@@ -1,0 +1,7 @@
+duckdb
+fastexcel
+openpyxl
+pandas
+polars
+pyarrow
+requests
