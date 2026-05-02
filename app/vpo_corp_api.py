@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from google.cloud import storage
 from google.oauth2 import service_account
 from googleapiclient.discovery import build as google_build
+from googleapiclient.errors import HttpError
 from pydantic import BaseModel, Field
 
 
@@ -191,13 +192,19 @@ def create_google_sheet(
     drive_service = google_build("drive", "v3", credentials=credentials, cache_discovery=False)
 
     sheet_names = list(tables.keys())
-    spreadsheet = sheets_service.spreadsheets().create(
-        body={
-            "properties": {"title": sheet_title(keywords, start_month, end_month)},
-            "sheets": [{"properties": {"title": name}} for name in sheet_names],
-        },
-        fields="spreadsheetId,spreadsheetUrl,sheets.properties",
-    ).execute()
+    try:
+        spreadsheet = sheets_service.spreadsheets().create(
+            body={
+                "properties": {"title": sheet_title(keywords, start_month, end_month)},
+                "sheets": [{"properties": {"title": name}} for name in sheet_names],
+            },
+            fields="spreadsheetId,spreadsheetUrl,sheets.properties",
+        ).execute()
+    except HttpError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Google Sheets create failed: {exc.reason}",
+        ) from exc
 
     spreadsheet_id = spreadsheet["spreadsheetId"]
     spreadsheet_url = spreadsheet["spreadsheetUrl"]
@@ -207,12 +214,18 @@ def create_google_sheet(
         if not values:
             continue
 
-        sheets_service.spreadsheets().values().update(
-            spreadsheetId=spreadsheet_id,
-            range=f"'{sheet_name}'!A1",
-            valueInputOption="USER_ENTERED",
-            body={"values": values},
-        ).execute()
+        try:
+            sheets_service.spreadsheets().values().update(
+                spreadsheetId=spreadsheet_id,
+                range=f"'{sheet_name}'!A1",
+                valueInputOption="USER_ENTERED",
+                body={"values": values},
+            ).execute()
+        except HttpError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Google Sheets write failed on {sheet_name}: {exc.reason}",
+            ) from exc
 
     metadata = sheets_service.spreadsheets().get(
         spreadsheetId=spreadsheet_id,
@@ -267,21 +280,33 @@ def create_google_sheet(
         ])
 
     if requests:
-        sheets_service.spreadsheets().batchUpdate(
-            spreadsheetId=spreadsheet_id,
-            body={"requests": requests},
-        ).execute()
+        try:
+            sheets_service.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body={"requests": requests},
+            ).execute()
+        except HttpError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Google Sheets format failed: {exc.reason}",
+            ) from exc
 
     if GOOGLE_SHEETS_SHARE_EMAIL:
-        drive_service.permissions().create(
-            fileId=spreadsheet_id,
-            body={
-                "type": "user",
-                "role": "writer",
-                "emailAddress": GOOGLE_SHEETS_SHARE_EMAIL,
-            },
-            sendNotificationEmail=False,
-        ).execute()
+        try:
+            drive_service.permissions().create(
+                fileId=spreadsheet_id,
+                body={
+                    "type": "user",
+                    "role": "writer",
+                    "emailAddress": GOOGLE_SHEETS_SHARE_EMAIL,
+                },
+                sendNotificationEmail=False,
+            ).execute()
+        except HttpError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Google Drive share failed for {GOOGLE_SHEETS_SHARE_EMAIL}: {exc.reason}",
+            ) from exc
 
     return spreadsheet_url
 
@@ -355,11 +380,16 @@ def keyword_google_sheet(
         standardized_path=marts[STANDARDIZED_FILE],
     )
 
-    spreadsheet_url = create_google_sheet(
-        tables=tables,
-        keywords=keywords,
-        start_month=request.start_month,
-        end_month=request.end_month,
-    )
+    try:
+        spreadsheet_url = create_google_sheet(
+            tables=tables,
+            keywords=keywords,
+            start_month=request.start_month,
+            end_month=request.end_month,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Google Sheet generation failed: {exc}") from exc
 
     return {"url": spreadsheet_url}
