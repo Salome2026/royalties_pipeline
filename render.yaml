@@ -22,3 +22,5 @@ services:
         sync: false
       - key: GOOGLE_DRIVE_FOLDER_ID
         sync: false
+      - key: GOOGLE_OAUTH_TOKEN_JSON
+        sync: false

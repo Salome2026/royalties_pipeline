@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+import polars as pl
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 from google.cloud import storage
@@ -24,6 +26,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from build_keyword_royalty_report import build_report, build_report_tables, normalize_keywords  # noqa: E402
+from build_statement_report_from_mart import build_statement_report_from_mart  # noqa: E402
 
 
 def load_local_env(path: Path) -> None:
@@ -64,6 +67,10 @@ class KeywordReportRequest(BaseModel):
     end_month: str | None = None
     mode: Literal["any", "all"] = "any"
     raw_limit: int = Field(default=5000, ge=0, le=50000)
+    refresh_cache: bool = False
+
+
+class RefreshRequest(BaseModel):
     refresh_cache: bool = False
 
 
@@ -555,6 +562,28 @@ def keyword_report(
     )
 
 
+@app.post("/reports/statement")
+def statement_report(
+    request: RefreshRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> FileResponse:
+    require_api_key(x_vpo_api_key)
+    marts = ensure_marts(refresh_cache=request.refresh_cache)
+    VPO_API_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    output_path = VPO_API_REPORTS_DIR / f"reporte_ingresos_por_statement_marts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+    output_path = build_statement_report_from_mart(
+        standardized_path=marts[STANDARDIZED_FILE],
+        output_path=output_path,
+    )
+
+    return FileResponse(
+        path=output_path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=output_path.name,
+    )
+
+
 @app.post("/reports/google-sheet")
 def keyword_google_sheet(
     request: KeywordReportRequest,
@@ -594,3 +623,37 @@ def keyword_google_sheet(
         raise HTTPException(status_code=500, detail=f"Google Sheet generation failed: {exc}") from exc
 
     return {"url": spreadsheet_url}
+
+
+@app.get("/participation/distributors")
+def distributor_participation(
+    refresh_cache: bool = False,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    marts = ensure_marts(refresh_cache=refresh_cache)
+
+    df = (
+        pl.scan_parquet(marts[SONG_FILE])
+        .group_by("source")
+        .agg(pl.sum("amount_usd").alias("amount_usd"))
+        .sort("amount_usd", descending=True)
+        .collect()
+    )
+
+    total = float(df["amount_usd"].sum()) if df.height else 0.0
+
+    items = []
+    for row in df.iter_rows(named=True):
+        amount = float(row["amount_usd"] or 0)
+        items.append({
+            "source": row["source"],
+            "amount_usd": amount,
+            "percentage": (amount / total * 100) if total else 0,
+        })
+
+    return {
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+        "total_amount_usd": total,
+        "items": items,
+    }
