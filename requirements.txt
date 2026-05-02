@@ -1,5 +1,6 @@
 duckdb
 fastexcel
+google-cloud-storage
 openpyxl
 pandas
 polars
