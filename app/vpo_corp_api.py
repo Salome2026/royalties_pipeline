@@ -76,7 +76,7 @@ class RefreshRequest(BaseModel):
     refresh_cache: bool = False
 
 
-ParticipationPreset = Literal["last_month", "last_3_months", "last_year", "custom"]
+ParticipationPreset = Literal["last_month", "last_3_months", "last_year", "all_history", "custom"]
 
 
 app = FastAPI(title="VPO Corp Royalties API", version="0.1.0")
@@ -700,6 +700,9 @@ def distributor_participation(
         effective_end = available_end
     elif preset == "last_3_months":
         effective_start = shift_month(available_end, -2)
+        effective_end = available_end
+    elif preset == "all_history":
+        effective_start = available_start
         effective_end = available_end
     else:
         effective_start = shift_month(available_end, -11)
