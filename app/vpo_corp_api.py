@@ -28,7 +28,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from build_keyword_royalty_report import build_report, build_report_tables, normalize_keywords  # noqa: E402
-from build_statement_report_from_mart import build_statement_report_from_mart  # noqa: E402
+from build_statement_report_from_mart import build_statement_report_from_summary  # noqa: E402
 
 
 def load_local_env(path: Path) -> None:
@@ -60,7 +60,8 @@ GOOGLE_DRIVE_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
 SONG_FILE = "song_level_all_sources.parquet"
 STANDARDIZED_FILE = "standardized_raw_all_sources.parquet"
 CATALOG_FILE = "catalog_candidates.parquet"
-REQUIRED_MART_FILES = [SONG_FILE, STANDARDIZED_FILE, CATALOG_FILE]
+STATEMENT_SUMMARY_FILE = "statement_summary_all_sources.parquet"
+REQUIRED_MART_FILES = [SONG_FILE, STANDARDIZED_FILE, CATALOG_FILE, STATEMENT_SUMMARY_FILE]
 
 
 class KeywordReportRequest(BaseModel):
@@ -160,7 +161,7 @@ def object_name(filename: str) -> str:
     return f"{GCS_PREFIX}/{filename}" if GCS_PREFIX else filename
 
 
-def ensure_marts(refresh_cache: bool = False) -> dict[str, Path]:
+def ensure_marts(refresh_cache: bool = False, filenames: list[str] | None = None) -> dict[str, Path]:
     if not GCS_BUCKET:
         raise HTTPException(status_code=500, detail="GCS_BUCKET is not configured.")
 
@@ -170,7 +171,7 @@ def ensure_marts(refresh_cache: bool = False) -> dict[str, Path]:
 
     paths: dict[str, Path] = {}
 
-    for filename in REQUIRED_MART_FILES:
+    for filename in filenames or REQUIRED_MART_FILES:
         local_path = VPO_API_CACHE_DIR / filename
         paths[filename] = local_path
 
@@ -571,7 +572,7 @@ def keyword_report(
     if not keywords:
         raise HTTPException(status_code=400, detail="At least one keyword is required.")
 
-    marts = ensure_marts(refresh_cache=request.refresh_cache)
+    marts = ensure_marts(refresh_cache=request.refresh_cache, filenames=[SONG_FILE, STANDARDIZED_FILE])
 
     output_path = build_report(
         keywords=keywords,
@@ -597,12 +598,12 @@ def statement_report(
     x_vpo_api_key: str | None = Header(default=None),
 ) -> FileResponse:
     require_api_key(x_vpo_api_key)
-    marts = ensure_marts(refresh_cache=request.refresh_cache)
+    marts = ensure_marts(refresh_cache=request.refresh_cache, filenames=[STATEMENT_SUMMARY_FILE])
     VPO_API_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     output_path = VPO_API_REPORTS_DIR / f"reporte_ingresos_por_statement_marts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
-    output_path = build_statement_report_from_mart(
-        standardized_path=marts[STANDARDIZED_FILE],
+    output_path = build_statement_report_from_summary(
+        summary_path=marts[STATEMENT_SUMMARY_FILE],
         output_path=output_path,
     )
 
@@ -627,7 +628,7 @@ def keyword_google_sheet(
     if not keywords:
         raise HTTPException(status_code=400, detail="At least one keyword is required.")
 
-    marts = ensure_marts(refresh_cache=request.refresh_cache)
+    marts = ensure_marts(refresh_cache=request.refresh_cache, filenames=[SONG_FILE, STANDARDIZED_FILE])
 
     tables = build_report_tables(
         keywords=keywords,
@@ -663,7 +664,7 @@ def distributor_participation(
     x_vpo_api_key: str | None = Header(default=None),
 ) -> dict:
     require_api_key(x_vpo_api_key)
-    marts = ensure_marts(refresh_cache=refresh_cache)
+    marts = ensure_marts(refresh_cache=refresh_cache, filenames=[SONG_FILE])
 
     month_bounds = (
         pl.scan_parquet(marts[SONG_FILE])

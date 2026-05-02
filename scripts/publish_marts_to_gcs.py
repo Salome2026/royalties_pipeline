@@ -14,6 +14,7 @@ DEFAULT_FILES = [
     "standardized_raw_all_sources.parquet",
     "song_level_all_sources.parquet",
     "catalog_candidates.parquet",
+    "statement_summary_all_sources.parquet",
 ]
 
 
@@ -61,14 +62,21 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Ejecuta la subida. Sin esto solo muestra un dry-run.",
     )
+    parser.add_argument(
+        "--only",
+        nargs="+",
+        default=None,
+        help="Sube solo estos archivos dentro de warehouse/marts.",
+    )
     return parser
 
 
-def collect_uploads(prefix: str) -> list[UploadItem]:
+def collect_uploads(prefix: str, only: list[str] | None = None) -> list[UploadItem]:
     normalized_prefix = prefix.strip("/").replace("\\", "/")
     uploads = []
+    filenames = only or DEFAULT_FILES
 
-    for filename in DEFAULT_FILES:
+    for filename in filenames:
         local_path = MARTS_DIR / filename
         if not local_path.exists():
             raise FileNotFoundError(f"No existe mart requerido: {local_path}")
@@ -113,7 +121,7 @@ def main() -> None:
     if args.apply and not credentials_path.exists():
         parser.error(f"No existe credentials JSON: {credentials_path}")
 
-    uploads = collect_uploads(args.prefix or "")
+    uploads = collect_uploads(args.prefix or "", args.only)
 
     print("PUBLISH MARTS TO GCS")
     print(f"Bucket:      {args.bucket}")

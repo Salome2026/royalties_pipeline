@@ -12,6 +12,7 @@ BASE = Path(r"C:\royalties_pipeline")
 MARTS_DIR = BASE / "warehouse" / "marts"
 REPORTS_DIR = BASE / "reports"
 STANDARDIZED_ALL_PATH = MARTS_DIR / "standardized_raw_all_sources.parquet"
+STATEMENT_SUMMARY_PATH = MARTS_DIR / "statement_summary_all_sources.parquet"
 
 FUGA_STATEMENT_FACTOR = 0.977832
 
@@ -224,14 +225,37 @@ def aggregate_statement_data(standardized_path: Path) -> tuple[pd.DataFrame, pd.
     return totals, fuga_eur
 
 
-def build_statement_report_from_mart(
-    standardized_path: Path = STANDARDIZED_ALL_PATH,
-    output_path: Path | None = None,
-) -> Path:
-    if output_path is None:
-        output_path = REPORTS_DIR / "reporte_ingresos_digitales_por_mes_de_statement_marts.xlsx"
+def aggregate_statement_summary(summary_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if not summary_path.exists():
+        raise FileNotFoundError(f"No existe mart statement summary: {summary_path}")
 
-    df, fuga_eur_df = aggregate_statement_data(standardized_path)
+    df = pl.read_parquet(summary_path).to_pandas()
+    if df.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    artist_rows = df.loc[df["row_type"] == "artist_total"].copy()
+    fuga_eur_rows = df.loc[df["row_type"] == "fuga_eur_total"].copy()
+
+    totals = artist_rows[
+        ["source", "account", "artist", "statement_period", "total", "has_share_in_out"]
+    ].copy()
+    totals["total"] = pd.to_numeric(totals["total"], errors="coerce").fillna(0.0)
+    totals["has_share_in_out"] = pd.to_numeric(
+        totals["has_share_in_out"],
+        errors="coerce",
+    ).fillna(0).astype(int)
+
+    fuga_eur = pd.DataFrame(columns=["source", "account", "statement_period", "total_eur"])
+    if not fuga_eur_rows.empty:
+        fuga_eur = fuga_eur_rows[
+            ["source", "account", "statement_period", "total_eur"]
+        ].copy()
+        fuga_eur["total_eur"] = pd.to_numeric(fuga_eur["total_eur"], errors="coerce").fillna(0.0)
+
+    return totals, fuga_eur
+
+
+def write_statement_report(df: pd.DataFrame, fuga_eur_df: pd.DataFrame, output_path: Path) -> Path:
     if df.empty:
         raise ValueError("No hay datos para generar el reporte por statement.")
 
@@ -314,6 +338,28 @@ def build_statement_report_from_mart(
             format_sheet(writer.sheets[sheet_name], pivot, f"{str(source).upper()} - {account}", share_flags)
 
     return output_path
+
+
+def build_statement_report_from_mart(
+    standardized_path: Path = STANDARDIZED_ALL_PATH,
+    output_path: Path | None = None,
+) -> Path:
+    if output_path is None:
+        output_path = REPORTS_DIR / "reporte_ingresos_digitales_por_mes_de_statement_marts.xlsx"
+
+    df, fuga_eur_df = aggregate_statement_data(standardized_path)
+    return write_statement_report(df, fuga_eur_df, output_path)
+
+
+def build_statement_report_from_summary(
+    summary_path: Path = STATEMENT_SUMMARY_PATH,
+    output_path: Path | None = None,
+) -> Path:
+    if output_path is None:
+        output_path = REPORTS_DIR / "reporte_ingresos_digitales_por_mes_de_statement_marts.xlsx"
+
+    df, fuga_eur_df = aggregate_statement_summary(summary_path)
+    return write_statement_report(df, fuga_eur_df, output_path)
 
 
 def main():

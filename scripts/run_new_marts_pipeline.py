@@ -20,6 +20,7 @@ STEPS = [
     ("Song level", "build_song_level_soundon.py"),
 
     ("Consolidated marts", "build_consolidated_marts.py"),
+    ("Consolidated marts", "build_statement_summary_mart.py"),
     ("Audit", "audit_marts_general.py"),
     ("Audit", "audit_consolidated_marts.py"),
 
