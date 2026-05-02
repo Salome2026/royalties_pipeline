@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: vpo-corp-api
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.vpo_corp_api:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GCS_BUCKET
+        value: vpo-corp-royalties-marts
+      - key: GCS_PREFIX
+        value: marts
+      - key: VPO_API_CACHE_DIR
+        value: /tmp/vpo-corp/gcs_marts
+      - key: VPO_API_REPORTS_DIR
+        value: /tmp/vpo-corp/reports
+      - key: VPO_API_KEY
+        sync: false
+      - key: GCS_SERVICE_ACCOUNT_JSON
+        sync: false

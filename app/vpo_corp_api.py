@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -11,7 +12,7 @@ from google.cloud import storage
 from pydantic import BaseModel, Field
 
 
-BASE = Path(r"C:\royalties_pipeline")
+BASE = Path(__file__).resolve().parents[1]
 SCRIPTS = BASE / "scripts"
 ENV_PATH = BASE / ".env"
 
@@ -39,6 +40,7 @@ load_local_env(ENV_PATH)
 GCS_BUCKET = os.environ.get("GCS_BUCKET", "")
 GCS_PREFIX = os.environ.get("GCS_PREFIX", "marts").strip("/")
 GOOGLE_APPLICATION_CREDENTIALS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
+GCS_SERVICE_ACCOUNT_JSON = os.environ.get("GCS_SERVICE_ACCOUNT_JSON", "")
 VPO_API_KEY = os.environ.get("VPO_API_KEY", "change-me")
 VPO_API_CACHE_DIR = Path(os.environ.get("VPO_API_CACHE_DIR", BASE / "cache" / "gcs_marts"))
 VPO_API_REPORTS_DIR = Path(os.environ.get("VPO_API_REPORTS_DIR", BASE / "reports" / "api"))
@@ -73,14 +75,25 @@ def require_api_key(x_vpo_api_key: str | None) -> None:
 
 
 def gcs_client() -> storage.Client:
-    if not GOOGLE_APPLICATION_CREDENTIALS:
-        raise HTTPException(status_code=500, detail="GOOGLE_APPLICATION_CREDENTIALS is not configured.")
+    if GCS_SERVICE_ACCOUNT_JSON:
+        try:
+            service_account_info = json.loads(GCS_SERVICE_ACCOUNT_JSON)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=500, detail=f"GCS_SERVICE_ACCOUNT_JSON is invalid JSON: {exc}") from exc
 
-    credentials_path = Path(GOOGLE_APPLICATION_CREDENTIALS)
-    if not credentials_path.exists():
-        raise HTTPException(status_code=500, detail=f"Credentials file not found: {credentials_path}")
+        return storage.Client.from_service_account_info(service_account_info)
 
-    return storage.Client.from_service_account_json(str(credentials_path))
+    if GOOGLE_APPLICATION_CREDENTIALS:
+        credentials_path = Path(GOOGLE_APPLICATION_CREDENTIALS)
+        if not credentials_path.exists():
+            raise HTTPException(status_code=500, detail=f"Credentials file not found: {credentials_path}")
+
+        return storage.Client.from_service_account_json(str(credentials_path))
+
+    raise HTTPException(
+        status_code=500,
+        detail="Configure GCS_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS.",
+    )
 
 
 def object_name(filename: str) -> str:
