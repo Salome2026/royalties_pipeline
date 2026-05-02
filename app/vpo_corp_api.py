@@ -192,29 +192,45 @@ def sheet_title(keywords: list[str], start_month: str | None, end_month: str | N
     return f"VPO Royalties - {keyword_part}{period_part}"
 
 
-def column_width(column_name: str) -> int:
+def column_width(column_name: str, dataframe) -> int:
     lower_name = column_name.lower()
 
-    if "match_text" in lower_name:
-        return 420
-    if "title" in lower_name or "artist" in lower_name:
-        return 220
-    if "statement_file" in lower_name:
-        return 260
-    if "generated_at" in lower_name:
-        return 180
-    if "url" in lower_name:
-        return 260
-    if lower_name in {"amount_usd", "song_level_amount_usd", "net_amount"}:
-        return 125
-    if lower_name in {"units", "rows", "song_level_rows", "raw_sample_rows"}:
-        return 110
-    if "month" in lower_name or lower_name in {"source", "account", "content_type"}:
-        return 130
-    if "isrc" in lower_name:
-        return 140
+    sample_values = [str(column_name)]
+    if column_name in dataframe.columns:
+        sample_values.extend(
+            str(value)
+            for value in dataframe[column_name].head(80).fillna("").tolist()
+        )
 
-    return 160
+    max_len = max((len(value) for value in sample_values), default=10)
+    calculated = max_len * 7 + 24
+
+    min_width = 90
+    max_width = 220
+
+    if "texto coincidente" in lower_name:
+        max_width = 360
+        min_width = 180
+    elif "tema" in lower_name or "title" in lower_name or "artista" in lower_name or "artist" in lower_name:
+        max_width = 260
+        min_width = 140
+    elif "archivo" in lower_name:
+        max_width = 280
+        min_width = 160
+    elif "generado" in lower_name:
+        max_width = 180
+        min_width = 130
+    elif lower_name in {"ingresos usd", "importe neto"}:
+        max_width = 130
+        min_width = 115
+    elif lower_name in {"unidades", "filas", "filas song level", "filas raw"}:
+        max_width = 120
+        min_width = 95
+    elif lower_name in {"desde", "hasta", "mes", "fuente", "cuenta", "tipo de contenido", "isrc"}:
+        max_width = 150
+        min_width = 100
+
+    return int(min(max(calculated, min_width), max_width))
 
 
 def create_google_sheet(
@@ -329,12 +345,18 @@ def create_google_sheet(
         "amount_usd",
         "song_level_amount_usd",
         "net_amount",
+        "Ingresos USD",
+        "Importe neto",
     }
     integer_headers = {
         "units",
         "rows",
         "song_level_rows",
         "raw_sample_rows",
+        "Unidades",
+        "Filas",
+        "Filas song level",
+        "Filas raw",
     }
 
     requests = []
@@ -405,7 +427,7 @@ def create_google_sheet(
                         "endIndex": idx + 1,
                     },
                     "properties": {
-                        "pixelSize": column_width(str(column_name)),
+                        "pixelSize": column_width(str(column_name), dataframe),
                     },
                     "fields": "pixelSize",
                 }

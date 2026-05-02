@@ -62,6 +62,42 @@ TOTAL_FONT = Font(bold=True)
 CENTER = Alignment(horizontal="center", vertical="center")
 LEFT = Alignment(horizontal="left", vertical="center")
 
+DISPLAY_HEADERS = {
+    "keywords": "Filtro",
+    "mode": "Coincidencia",
+    "start_month": "Desde",
+    "end_month": "Hasta",
+    "song_level_rows": "Filas song level",
+    "song_level_amount_usd": "Ingresos USD",
+    "raw_sample_rows": "Filas raw",
+    "generated_at": "Generado el",
+    "source": "Fuente",
+    "account": "Cuenta",
+    "transaction_month": "Mes",
+    "amount_usd": "Ingresos USD",
+    "units": "Unidades",
+    "rows": "Filas",
+    "asset_isrc": "ISRC",
+    "track_statement_style": "Tema",
+    "asset_title_statement": "Asset title",
+    "artist_statement_style": "Artista",
+    "asset_artist_statement": "Asset artist",
+    "content_type": "Tipo de contenido",
+    "first_month": "Desde",
+    "last_month": "Hasta",
+    "source_sheet": "Hoja origen",
+    "revenue_basis": "Base ingreso",
+    "match_text": "Texto coincidente",
+    "statement_period": "Periodo statement",
+    "net_amount": "Importe neto",
+    "store_name": "Tienda",
+    "territory": "Territorio",
+    "statement_file_name": "Archivo statement",
+    "hoja": "Hoja",
+    "contenido": "Contenido",
+    "resultado": "Resultado",
+}
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -170,6 +206,10 @@ def safe_select(df: pl.DataFrame, columns: list[str]) -> pl.DataFrame:
     return df.select(existing)
 
 
+def display_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
+    return dataframe.rename(columns={col: DISPLAY_HEADERS.get(col, col) for col in dataframe.columns})
+
+
 def prepare_sheet(ws):
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
@@ -183,12 +223,18 @@ def prepare_sheet(ws):
         "amount_usd",
         "song_level_amount_usd",
         "net_amount",
+        "Ingresos USD",
+        "Importe neto",
     }
     integer_headers = {
         "units",
         "rows",
         "song_level_rows",
         "raw_sample_rows",
+        "Unidades",
+        "Filas",
+        "Filas song level",
+        "Filas raw",
     }
 
     header_by_column = {
@@ -302,8 +348,8 @@ def build_report_tables(
     if song.height == 0:
         print("No hubo matches en song_level_all_sources.")
         return {
-            "instructions": instructions_dataframe(),
-            "overview": pd.DataFrame([{
+            "instructions": display_dataframe(instructions_dataframe()),
+            "overview": display_dataframe(pd.DataFrame([{
                 "keywords": ", ".join(keywords),
                 "mode": mode,
                 "start_month": start_month or "",
@@ -312,10 +358,10 @@ def build_report_tables(
                 "song_level_amount_usd": 0,
                 "raw_sample_rows": 0,
                 "generated_at": datetime.now().isoformat(timespec="seconds"),
-            }]),
-            "sin_resultados": pd.DataFrame([{
+            }])),
+            "sin_resultados": display_dataframe(pd.DataFrame([{
                 "resultado": "Sin coincidencias para los parametros ingresados."
-            }]),
+            }])),
         }
 
     source_summary = (
@@ -399,8 +445,8 @@ def build_report_tables(
         )
 
     tables = {
-        "instructions": instructions_dataframe(),
-        "overview": pd.DataFrame([{
+        "instructions": display_dataframe(instructions_dataframe()),
+        "overview": display_dataframe(pd.DataFrame([{
             "keywords": ", ".join(keywords),
             "mode": mode,
             "start_month": start_month or "",
@@ -409,11 +455,11 @@ def build_report_tables(
             "song_level_amount_usd": song["amount_usd"].sum(),
             "raw_sample_rows": raw_sample.height if raw_sample.height > 0 else 0,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
-        }]),
-        "source_summary": source_summary.to_pandas(),
-        "monthly_summary": monthly_summary.to_pandas(),
-        "track_summary": track_summary.to_pandas(),
-        "song_matches": safe_select(
+        }])),
+        "source_summary": display_dataframe(source_summary.to_pandas()),
+        "monthly_summary": display_dataframe(monthly_summary.to_pandas()),
+        "track_summary": display_dataframe(track_summary.to_pandas()),
+        "song_matches": display_dataframe(safe_select(
             song.sort("amount_usd", descending=True),
             [
                 "source",
@@ -431,11 +477,11 @@ def build_report_tables(
                 "revenue_basis",
                 "match_text",
             ],
-        ).to_pandas(),
+        ).to_pandas()),
     }
 
     if raw_sample.height > 0:
-        tables["raw_matches_sample"] = raw_sample.to_pandas()
+        tables["raw_matches_sample"] = display_dataframe(raw_sample.to_pandas())
 
     return tables
 
