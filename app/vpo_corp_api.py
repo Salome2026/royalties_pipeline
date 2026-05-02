@@ -195,6 +195,11 @@ def shift_month(month: str, delta: int) -> str:
     return f"{shifted_year:04d}-{shifted_month:02d}"
 
 
+def previous_calendar_month(today: date | None = None) -> str:
+    current = today or date.today()
+    return shift_month(f"{current.year:04d}-{current.month:02d}", -1)
+
+
 def first_business_day(month: str) -> str:
     year, month_number = (int(part) for part in month.split("-", 1))
     current = date(year, month_number, 1)
@@ -693,24 +698,25 @@ def distributor_participation(
             "items": [],
         }
 
+    report_end_month = previous_calendar_month()
+
     if preset == "custom":
         effective_start = start_month or available_start
-        effective_end = end_month or available_end
+        effective_end = end_month or report_end_month
     elif preset == "last_month":
-        effective_start = available_end
-        effective_end = available_end
+        effective_start = report_end_month
+        effective_end = report_end_month
     elif preset == "last_3_months":
-        effective_start = shift_month(available_end, -2)
-        effective_end = available_end
+        effective_start = shift_month(report_end_month, -2)
+        effective_end = report_end_month
     elif preset == "all_history":
         effective_start = available_start
-        effective_end = available_end
+        effective_end = report_end_month
     else:
-        effective_start = shift_month(available_end, -11)
-        effective_end = available_end
+        effective_start = shift_month(report_end_month, -11)
+        effective_end = report_end_month
 
     effective_start = max(effective_start, available_start)
-    effective_end = min(effective_end, available_end)
 
     if effective_start > effective_end:
         raise HTTPException(status_code=400, detail="start_month cannot be greater than end_month.")

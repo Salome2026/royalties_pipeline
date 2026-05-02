@@ -501,7 +501,6 @@ export default function Home() {
                       type="month"
                       value={participationStartMonth}
                       min={participation?.available_start_month || undefined}
-                      max={participation?.available_end_month || undefined}
                       onChange={(event) => setParticipationStartMonth(event.target.value)}
                     />
                   </div>
@@ -512,7 +511,6 @@ export default function Home() {
                       type="month"
                       value={participationEndMonth}
                       min={participation?.available_start_month || undefined}
-                      max={participation?.available_end_month || undefined}
                       onChange={(event) => setParticipationEndMonth(event.target.value)}
                     />
                   </div>
