@@ -9,6 +9,7 @@ from typing import Literal
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 from google.cloud import storage
+from google.oauth2.credentials import Credentials as UserCredentials
 from google.oauth2 import service_account
 from googleapiclient.discovery import build as google_build
 from googleapiclient.errors import HttpError
@@ -44,6 +45,7 @@ GCS_BUCKET = os.environ.get("GCS_BUCKET", "")
 GCS_PREFIX = os.environ.get("GCS_PREFIX", "marts").strip("/")
 GOOGLE_APPLICATION_CREDENTIALS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
 GCS_SERVICE_ACCOUNT_JSON = os.environ.get("GCS_SERVICE_ACCOUNT_JSON", "")
+GOOGLE_OAUTH_TOKEN_JSON = os.environ.get("GOOGLE_OAUTH_TOKEN_JSON", "")
 VPO_API_KEY = os.environ.get("VPO_API_KEY", "change-me")
 VPO_API_CACHE_DIR = Path(os.environ.get("VPO_API_CACHE_DIR", BASE / "cache" / "gcs_marts"))
 VPO_API_REPORTS_DIR = Path(os.environ.get("VPO_API_REPORTS_DIR", BASE / "reports" / "api"))
@@ -107,6 +109,14 @@ def gcs_client() -> storage.Client:
 
 
 def google_credentials(scopes: list[str]):
+    if GOOGLE_OAUTH_TOKEN_JSON:
+        try:
+            token_info = json.loads(GOOGLE_OAUTH_TOKEN_JSON)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=500, detail=f"GOOGLE_OAUTH_TOKEN_JSON is invalid JSON: {exc}") from exc
+
+        return UserCredentials.from_authorized_user_info(token_info, scopes=scopes)
+
     if GCS_SERVICE_ACCOUNT_JSON:
         try:
             service_account_info = json.loads(GCS_SERVICE_ACCOUNT_JSON)
@@ -367,10 +377,14 @@ def create_google_sheet(
 
 @app.get("/health")
 def health() -> dict[str, str]:
+    sheets_auth_mode = "oauth_user" if GOOGLE_OAUTH_TOKEN_JSON else "service_account"
     return {
         "status": "ok",
         "bucket": GCS_BUCKET,
         "prefix": GCS_PREFIX,
+        "sheets_auth_mode": sheets_auth_mode,
+        "drive_folder_configured": "yes" if GOOGLE_DRIVE_FOLDER_ID else "no",
+        "share_email_configured": "yes" if GOOGLE_SHEETS_SHARE_EMAIL else "no",
     }
 
 
