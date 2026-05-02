@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, MouseEvent, useEffect, useState } from "react";
 
 type Message = {
   type: "ok" | "error";
@@ -120,7 +120,10 @@ export default function Home() {
     setLoading(false);
   }
 
-  async function createGoogleSheet() {
+  async function createGoogleSheet(event?: MouseEvent<HTMLButtonElement>) {
+    event?.preventDefault();
+    event?.stopPropagation();
+
     setMessage(null);
     setLastFile("");
     setLastSheetUrl("");
@@ -247,9 +250,6 @@ export default function Home() {
             />
 
             <button type="submit" disabled={loading || googleLoading}>{loading ? "Generando..." : "Descargar Excel"}</button>
-            <button type="button" disabled={loading || googleLoading} onClick={createGoogleSheet}>
-              {googleLoading ? "Creando..." : "Crear Google Sheet"}
-            </button>
           </form>
 
           <div>
@@ -270,6 +270,14 @@ export default function Home() {
                 <p className="filename">{lastFile}</p>
               </section>
             )}
+
+            <section className="panel" style={{ marginTop: 24 }}>
+              <h2>Google Sheets</h2>
+              <p>Crea el mismo reporte como spreadsheet editable en Google Drive.</p>
+              <button type="button" disabled={loading || googleLoading} onClick={createGoogleSheet}>
+                {googleLoading ? "Creando..." : "Crear Google Sheet"}
+              </button>
+            </section>
 
             {lastSheetUrl && (
               <section className="panel" style={{ marginTop: 24 }}>
