@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 import polars as pl
+from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -22,6 +23,7 @@ ARTIST_FILL = PatternFill(start_color="D9EAF7", end_color="D9EAF7", fill_type="s
 TOTAL_FILL = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid")
 TITLE_FILL = PatternFill(start_color="EAF2F8", end_color="EAF2F8", fill_type="solid")
 SHARE_ALERT_FILL = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
+CONFIG_FILL = PatternFill(start_color="E2F0D9", end_color="E2F0D9", fill_type="solid")
 
 TITLE_FONT = Font(size=16, bold=True, color="1F4E78")
 TOTAL_FONT = Font(bold=True)
@@ -139,6 +141,111 @@ def add_totals_and_clean(pivot):
     pivot["TOTAL"] = pivot.sum(axis=1)
     pivot = pivot[pivot["TOTAL"].round(2) != 0]
     return pivot
+
+
+def scope_key(source, account) -> str:
+    return f"{source}_{account}"
+
+
+def add_config_sheet(writer, scopes: list[tuple[str, str]]) -> dict[str, int]:
+    ws = writer.book.create_sheet("Config", 0)
+    headers = ["Distribuidora/Cuenta", "Incluir en TOTAL"]
+    ws.append(headers)
+
+    scope_rows = {}
+    for row_idx, (source, account) in enumerate(scopes, start=2):
+        key = scope_key(source, account)
+        ws.cell(row=row_idx, column=1).value = key
+        ws.cell(row=row_idx, column=2).value = "NO" if key == "onerpm_gusty_dj" else "SI"
+        scope_rows[key] = row_idx
+
+    for cell in ws[1]:
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+        cell.alignment = CENTER_ALIGN
+
+    for row in range(2, len(scopes) + 2):
+        ws.cell(row=row, column=1).fill = CONFIG_FILL
+        ws.cell(row=row, column=2).alignment = CENTER_ALIGN
+
+    validation = DataValidation(type="list", formula1='"SI,NO"', allow_blank=False)
+    ws.add_data_validation(validation)
+    validation.add(f"B2:B{len(scopes) + 1}")
+
+    ws.column_dimensions["A"].width = 32
+    ws.column_dimensions["B"].width = 18
+    ws.freeze_panes = "A2"
+    return scope_rows
+
+
+def enable_formula_recalculation(workbook) -> None:
+    try:
+        workbook.calculation.fullCalcOnLoad = True
+        workbook.calculation.forceFullCalc = True
+    except Exception:
+        pass
+
+
+def add_total_data_sheet(writer, total_source: pd.DataFrame, config_rows: int) -> int:
+    detail = (
+        total_source
+        .groupby(["artist", "_scope_key", "statement_period"], dropna=False, as_index=False)["total"]
+        .sum()
+    )
+    detail = detail.sort_values(["artist", "_scope_key", "statement_period"])
+    detail["include_flag"] = 0
+
+    sheet_name = "_TOTAL_DATA"
+    detail.to_excel(writer, sheet_name=sheet_name, index=False)
+    ws = writer.sheets[sheet_name]
+
+    last_row = len(detail) + 1
+    for row in range(2, last_row + 1):
+        ws.cell(row=row, column=5).value = (
+            f'=IFERROR(--(VLOOKUP(B{row},Config!$A$2:$B${config_rows},2,FALSE)="SI"),0)'
+        )
+
+    for cell in ws[1]:
+        cell.fill = HEADER_FILL
+        cell.font = HEADER_FONT
+        cell.alignment = CENTER_ALIGN
+
+    ws.column_dimensions["A"].width = 32
+    ws.column_dimensions["B"].width = 28
+    ws.column_dimensions["C"].width = 14
+    ws.column_dimensions["D"].width = 14
+    ws.column_dimensions["E"].width = 12
+    ws.sheet_state = "hidden"
+    return last_row
+
+
+def apply_total_config_formulas(ws, pivot_total, total_data_last_row: int) -> None:
+    first_amount_col = 2
+    last_col = len(pivot_total.columns) + 1
+    total_col = last_col
+    total_row = 2 + len(pivot_total)
+
+    data_sheet = "'_TOTAL_DATA'"
+    amount_range = f"{data_sheet}!$D$2:$D${total_data_last_row}"
+    artist_range = f"{data_sheet}!$A$2:$A${total_data_last_row}"
+    period_range = f"{data_sheet}!$C$2:$C${total_data_last_row}"
+    include_range = f"{data_sheet}!$E$2:$E${total_data_last_row}"
+
+    for row in range(3, total_row):
+        for col in range(first_amount_col, total_col):
+            letter = get_column_letter(col)
+            ws.cell(row=row, column=col).value = (
+                f"=SUMIFS({amount_range},{artist_range},$A{row},"
+                f"{period_range},{letter}$2,{include_range},1)"
+            )
+
+        first_letter = get_column_letter(first_amount_col)
+        previous_letter = get_column_letter(total_col - 1)
+        ws.cell(row=row, column=total_col).value = f"=SUM({first_letter}{row}:{previous_letter}{row})"
+
+    for col in range(first_amount_col, total_col + 1):
+        letter = get_column_letter(col)
+        ws.cell(row=total_row, column=col).value = f"=SUM({letter}3:{letter}{total_row - 1})"
 
 
 def aggregate_statement_data(standardized_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -262,7 +369,23 @@ def write_statement_report(df: pd.DataFrame, fuga_eur_df: pd.DataFrame, output_p
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        pivot_total = df.pivot_table(
+        scopes = sorted(
+            {
+                (str(source), str(account))
+                for source, account in df[["source", "account"]].drop_duplicates().itertuples(index=False, name=None)
+            }
+        )
+        add_config_sheet(writer, scopes)
+        config_rows = len(scopes) + 1
+
+        total_source = df.copy()
+        total_source["_scope_key"] = total_source.apply(
+            lambda row: scope_key(row["source"], row["account"]),
+            axis=1,
+        )
+        total_data_last_row = add_total_data_sheet(writer, total_source, config_rows)
+
+        pivot_total = total_source.pivot_table(
             index="artist",
             columns="statement_period",
             values="total",
@@ -278,6 +401,7 @@ def write_statement_report(df: pd.DataFrame, fuga_eur_df: pd.DataFrame, output_p
             pivot_total = pd.concat([pivot_total, total_general.to_frame().T])
             pivot_total.to_excel(writer, sheet_name="TOTAL", startrow=1)
             format_sheet(writer.sheets["TOTAL"], pivot_total, "SALDO TOTAL ARTISTAS")
+            apply_total_config_formulas(writer.sheets["TOTAL"], pivot_total, total_data_last_row)
 
         for (source, account), group in df.groupby(["source", "account"], dropna=False):
             pivot = group.pivot_table(
@@ -336,6 +460,8 @@ def write_statement_report(df: pd.DataFrame, fuga_eur_df: pd.DataFrame, output_p
             sheet_name = f"{source}_{account}"[:31]
             pivot.to_excel(writer, sheet_name=sheet_name, startrow=1)
             format_sheet(writer.sheets[sheet_name], pivot, f"{str(source).upper()} - {account}", share_flags)
+
+        enable_formula_recalculation(writer.book)
 
     return output_path
 
