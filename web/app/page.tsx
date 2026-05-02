@@ -28,7 +28,15 @@ type ParticipationData = {
   items: ParticipationItem[];
 };
 
+type ParticipationCache = {
+  data: ParticipationData;
+  preset: string;
+  startMonth: string;
+  endMonth: string;
+};
+
 const PIE_COLORS = ["#17324d", "#0f766e", "#b54708", "#6941c6", "#b42318", "#475467", "#2e90fa"];
+const PARTICIPATION_CACHE_KEY = "vpo_participation_last_result";
 
 function filenameFromDisposition(disposition: string | null, fallback: string) {
   if (!disposition) return fallback;
@@ -87,6 +95,15 @@ export default function Home() {
 
   useEffect(() => {
     if (authenticated && view === "participation" && !participation) {
+      const cached = loadParticipationCache();
+      if (cached) {
+        setParticipation(cached.data);
+        setParticipationPreset(cached.preset);
+        setParticipationStartMonth(cached.startMonth);
+        setParticipationEndMonth(cached.endMonth);
+        return;
+      }
+
       loadParticipation(false);
     }
   }, [authenticated, view, participation]);
@@ -241,6 +258,36 @@ export default function Home() {
     setStatementLoading(false);
   }
 
+  function loadParticipationCache(): ParticipationCache | null {
+    try {
+      const raw = window.localStorage.getItem(PARTICIPATION_CACHE_KEY);
+      if (!raw) return null;
+
+      const cached = JSON.parse(raw) as ParticipationCache;
+      if (!cached?.data?.items) return null;
+
+      return cached;
+    } catch {
+      return null;
+    }
+  }
+
+  function saveParticipationCache(data: ParticipationData) {
+    try {
+      window.localStorage.setItem(
+        PARTICIPATION_CACHE_KEY,
+        JSON.stringify({
+          data,
+          preset: participationPreset,
+          startMonth: participationStartMonth,
+          endMonth: participationEndMonth,
+        }),
+      );
+    } catch {
+      // Si el navegador bloquea localStorage, la torta sigue funcionando sin cache.
+    }
+  }
+
   async function loadParticipation(refresh: boolean) {
     setMessage(null);
 
@@ -274,7 +321,9 @@ export default function Home() {
       return;
     }
 
-    setParticipation(await response.json());
+    const data = await response.json();
+    setParticipation(data);
+    saveParticipationCache(data);
     setParticipationLoading(false);
   }
 
