@@ -47,6 +47,7 @@ Secrets:
 VPO_API_KEY=<choose-a-long-random-secret>
 GCS_SERVICE_ACCOUNT_JSON=<paste the full Google service account JSON>
 GOOGLE_SHEETS_SHARE_EMAIL=<your-google-email>
+GOOGLE_DRIVE_FOLDER_ID=<google-drive-folder-id>
 ```
 
 Do not commit service account JSON to GitHub.
@@ -92,6 +93,15 @@ Then add:
 
 ```text
 GOOGLE_SHEETS_SHARE_EMAIL=<your-google-email>
+GOOGLE_DRIVE_FOLDER_ID=<google-drive-folder-id>
 ```
 
-The service account creates the Sheet and shares it with this email.
+Create a Google Drive folder for generated reports and share it as Editor with:
+
+```text
+vpo-marts-publisher@vpo-corp-royalties.iam.gserviceaccount.com
+```
+
+Then copy the folder id from the Drive URL and use it as `GOOGLE_DRIVE_FOLDER_ID`.
+
+The service account creates the Sheet inside that folder and shares it with `GOOGLE_SHEETS_SHARE_EMAIL`.

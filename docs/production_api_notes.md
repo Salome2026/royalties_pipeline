@@ -75,6 +75,18 @@ Set this environment variable so the created spreadsheet is shared with your Goo
 GOOGLE_SHEETS_SHARE_EMAIL=your-google-email@example.com
 ```
 
+Recommended: create a Google Drive folder for reports, share it as Editor with the service account, and set:
+
+```text
+GOOGLE_DRIVE_FOLDER_ID=<folder-id-from-drive-url>
+```
+
+Service account email:
+
+```text
+vpo-marts-publisher@vpo-corp-royalties.iam.gserviceaccount.com
+```
+
 Then call:
 
 ```powershell

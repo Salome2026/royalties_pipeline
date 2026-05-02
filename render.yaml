@@ -20,3 +20,5 @@ services:
         sync: false
       - key: GOOGLE_SHEETS_SHARE_EMAIL
         sync: false
+      - key: GOOGLE_DRIVE_FOLDER_ID
+        sync: false

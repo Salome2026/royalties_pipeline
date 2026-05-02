@@ -48,6 +48,7 @@ VPO_API_KEY = os.environ.get("VPO_API_KEY", "change-me")
 VPO_API_CACHE_DIR = Path(os.environ.get("VPO_API_CACHE_DIR", BASE / "cache" / "gcs_marts"))
 VPO_API_REPORTS_DIR = Path(os.environ.get("VPO_API_REPORTS_DIR", BASE / "reports" / "api"))
 GOOGLE_SHEETS_SHARE_EMAIL = os.environ.get("GOOGLE_SHEETS_SHARE_EMAIL", "").strip()
+GOOGLE_DRIVE_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
 
 SONG_FILE = "song_level_all_sources.parquet"
 STANDARDIZED_FILE = "standardized_raw_all_sources.parquet"
@@ -192,22 +193,75 @@ def create_google_sheet(
     drive_service = google_build("drive", "v3", credentials=credentials, cache_discovery=False)
 
     sheet_names = list(tables.keys())
-    try:
-        spreadsheet = sheets_service.spreadsheets().create(
-            body={
-                "properties": {"title": sheet_title(keywords, start_month, end_month)},
-                "sheets": [{"properties": {"title": name}} for name in sheet_names],
-            },
-            fields="spreadsheetId,spreadsheetUrl,sheets.properties",
-        ).execute()
-    except HttpError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Google Sheets create failed: {exc.reason}",
-        ) from exc
+    title = sheet_title(keywords, start_month, end_month)
 
-    spreadsheet_id = spreadsheet["spreadsheetId"]
-    spreadsheet_url = spreadsheet["spreadsheetUrl"]
+    if GOOGLE_DRIVE_FOLDER_ID:
+        try:
+            drive_file = drive_service.files().create(
+                body={
+                    "name": title,
+                    "mimeType": "application/vnd.google-apps.spreadsheet",
+                    "parents": [GOOGLE_DRIVE_FOLDER_ID],
+                },
+                fields="id,webViewLink",
+                supportsAllDrives=True,
+            ).execute()
+        except HttpError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Google Drive file create failed in folder {GOOGLE_DRIVE_FOLDER_ID}: {exc.reason}",
+            ) from exc
+
+        spreadsheet_id = drive_file["id"]
+        spreadsheet_url = drive_file.get("webViewLink") or f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
+
+        try:
+            metadata = sheets_service.spreadsheets().get(
+                spreadsheetId=spreadsheet_id,
+                fields="sheets.properties(sheetId,title)",
+            ).execute()
+            first_sheet_id = metadata["sheets"][0]["properties"]["sheetId"]
+            setup_requests = [
+                {
+                    "updateSheetProperties": {
+                        "properties": {
+                            "sheetId": first_sheet_id,
+                            "title": sheet_names[0],
+                        },
+                        "fields": "title",
+                    }
+                }
+            ]
+            setup_requests.extend(
+                {"addSheet": {"properties": {"title": name}}}
+                for name in sheet_names[1:]
+            )
+            sheets_service.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body={"requests": setup_requests},
+            ).execute()
+        except HttpError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Google Sheets setup failed: {exc.reason}",
+            ) from exc
+    else:
+        try:
+            spreadsheet = sheets_service.spreadsheets().create(
+                body={
+                    "properties": {"title": title},
+                    "sheets": [{"properties": {"title": name}} for name in sheet_names],
+                },
+                fields="spreadsheetId,spreadsheetUrl,sheets.properties",
+            ).execute()
+        except HttpError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Google Sheets create failed: {exc.reason}",
+            ) from exc
+
+        spreadsheet_id = spreadsheet["spreadsheetId"]
+        spreadsheet_url = spreadsheet["spreadsheetUrl"]
 
     for sheet_name, dataframe in tables.items():
         values = dataframe_values(dataframe)
