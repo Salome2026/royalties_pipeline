@@ -46,6 +46,7 @@ Secrets:
 ```text
 VPO_API_KEY=<choose-a-long-random-secret>
 GCS_SERVICE_ACCOUNT_JSON=<paste the full Google service account JSON>
+GOOGLE_SHEETS_SHARE_EMAIL=<your-google-email>
 ```
 
 Do not commit service account JSON to GitHub.
@@ -80,3 +81,17 @@ Invoke-WebRequest `
 
 The first request can take longer because the service downloads marts from GCS into `/tmp`.
 
+## Optional Google Sheets Output
+
+Before using Google Sheets output, enable these APIs in the same Google Cloud project:
+
+- Google Sheets API
+- Google Drive API
+
+Then add:
+
+```text
+GOOGLE_SHEETS_SHARE_EMAIL=<your-google-email>
+```
+
+The service account creates the Sheet and shares it with this email.

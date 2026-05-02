@@ -23,8 +23,10 @@ export default function Home() {
   const [mode, setMode] = useState("any");
   const [rawLimit, setRawLimit] = useState("5000");
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [message, setMessage] = useState<Message | null>(null);
   const [lastFile, setLastFile] = useState("");
+  const [lastSheetUrl, setLastSheetUrl] = useState("");
 
   useEffect(() => {
     fetch("/api/session")
@@ -62,12 +64,25 @@ export default function Home() {
     setAuthenticated(false);
     setMessage(null);
     setLastFile("");
+    setLastSheetUrl("");
   }
 
-  async function generateReport(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function buildPayload(output: "excel" | "google_sheet") {
+    return {
+      keywords: keywords.split(/[;,]/).map((item) => item.trim()).filter(Boolean),
+      start_month: startMonth || null,
+      end_month: endMonth || null,
+      mode,
+      raw_limit: Number(rawLimit) || 0,
+      refresh_cache: false,
+      output,
+    };
+  }
+
+  async function generateExcel() {
     setMessage(null);
     setLastFile("");
+    setLastSheetUrl("");
 
     if (startMonth && endMonth && startMonth > endMonth) {
       setMessage({ type: "error", text: "El periodo desde no puede ser mayor que hasta." });
@@ -76,19 +91,10 @@ export default function Home() {
 
     setLoading(true);
 
-    const payload = {
-      keywords: keywords.split(/[;,]/).map((item) => item.trim()).filter(Boolean),
-      start_month: startMonth || null,
-      end_month: endMonth || null,
-      mode,
-      raw_limit: Number(rawLimit) || 0,
-      refresh_cache: false,
-    };
-
     const response = await fetch("/api/report", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(buildPayload("excel")),
     });
 
     if (!response.ok) {
@@ -112,6 +118,42 @@ export default function Home() {
     setLastFile(filename);
     setMessage({ type: "ok", text: "Reporte generado correctamente." });
     setLoading(false);
+  }
+
+  async function createGoogleSheet() {
+    setMessage(null);
+    setLastFile("");
+    setLastSheetUrl("");
+
+    if (startMonth && endMonth && startMonth > endMonth) {
+      setMessage({ type: "error", text: "El periodo desde no puede ser mayor que hasta." });
+      return;
+    }
+
+    setGoogleLoading(true);
+
+    const response = await fetch("/api/report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildPayload("google_sheet")),
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({ error: "No se pudo crear el Google Sheet." }));
+      setMessage({ type: "error", text: data.error || "No se pudo crear el Google Sheet." });
+      setGoogleLoading(false);
+      return;
+    }
+
+    const data = await response.json();
+    setLastSheetUrl(data.url);
+    setMessage({ type: "ok", text: "Google Sheet creado correctamente." });
+    setGoogleLoading(false);
+  }
+
+  function submitForm(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    generateExcel();
   }
 
   if (checkingSession) {
@@ -156,7 +198,7 @@ export default function Home() {
       <main>
         {message && <div className={`message ${message.type === "error" ? "error" : ""}`}>{message.text}</div>}
         <div className="grid">
-          <form className="panel" onSubmit={generateReport}>
+          <form className="panel" onSubmit={submitForm}>
             <h1>Reporte de royalties</h1>
             <label htmlFor="keywords">Palabras clave</label>
             <input
@@ -204,7 +246,10 @@ export default function Home() {
               onChange={(event) => setRawLimit(event.target.value)}
             />
 
-            <button type="submit" disabled={loading}>{loading ? "Generando..." : "Generar XLSX"}</button>
+            <button type="submit" disabled={loading || googleLoading}>{loading ? "Generando..." : "Descargar Excel"}</button>
+            <button type="button" disabled={loading || googleLoading} onClick={createGoogleSheet}>
+              {googleLoading ? "Creando..." : "Crear Google Sheet"}
+            </button>
           </form>
 
           <div>
@@ -223,6 +268,13 @@ export default function Home() {
               <section className="panel" style={{ marginTop: 24 }}>
                 <h2>Ultimo reporte</h2>
                 <p className="filename">{lastFile}</p>
+              </section>
+            )}
+
+            {lastSheetUrl && (
+              <section className="panel" style={{ marginTop: 24 }}>
+                <h2>Google Sheet</h2>
+                <p><a className="button" href={lastSheetUrl} target="_blank" rel="noreferrer">Abrir Google Sheet</a></p>
               </section>
             )}
           </div>

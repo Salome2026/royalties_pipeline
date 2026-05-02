@@ -262,7 +262,21 @@ def instructions_dataframe() -> pd.DataFrame:
     ])
 
 
-def build_report(
+def report_output_path(
+    keywords: list[str],
+    start_month: str | None,
+    end_month: str | None,
+    output_dir: Path,
+) -> Path:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", "_".join(keywords)).strip("_").lower()[:60]
+    period_slug = ""
+    if start_month or end_month:
+        period_slug = f"_{start_month or 'start'}_to_{end_month or 'end'}"
+    return output_dir / f"keyword_royalty_report_{slug}{period_slug}_{timestamp}.xlsx"
+
+
+def build_report_tables(
     keywords: list[str],
     mode: str,
     raw_limit: int,
@@ -270,15 +284,7 @@ def build_report(
     end_month: str | None = None,
     song_path: Path = SONG_PATH,
     standardized_path: Path = STANDARDIZED_PATH,
-    output_dir: Path = REPORTS,
-) -> Path:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    slug = re.sub(r"[^A-Za-z0-9]+", "_", "_".join(keywords)).strip("_").lower()[:60]
-    period_slug = ""
-    if start_month or end_month:
-        period_slug = f"_{start_month or 'start'}_to_{end_month or 'end'}"
-    output_path = output_dir / f"keyword_royalty_report_{slug}{period_slug}_{timestamp}.xlsx"
-
+) -> dict[str, pd.DataFrame]:
     song_cols = existing_columns(song_path)
     song_filter = build_filter(song_cols, SEARCH_COLUMNS_SONG, keywords, mode)
 
@@ -294,10 +300,10 @@ def build_report(
     )
 
     if song.height == 0:
-        output_dir.mkdir(parents=True, exist_ok=True)
-        with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-            instructions_dataframe().to_excel(writer, index=False, sheet_name="instructions")
-            overview = pd.DataFrame([{
+        print("No hubo matches en song_level_all_sources.")
+        return {
+            "instructions": instructions_dataframe(),
+            "overview": pd.DataFrame([{
                 "keywords": ", ".join(keywords),
                 "mode": mode,
                 "start_month": start_month or "",
@@ -306,15 +312,11 @@ def build_report(
                 "song_level_amount_usd": 0,
                 "raw_sample_rows": 0,
                 "generated_at": datetime.now().isoformat(timespec="seconds"),
-            }])
-            overview.to_excel(writer, index=False, sheet_name="overview")
-            pd.DataFrame([{
+            }]),
+            "sin_resultados": pd.DataFrame([{
                 "resultado": "Sin coincidencias para los parametros ingresados."
-            }]).to_excel(writer, index=False, sheet_name="sin_resultados")
-            style_workbook(writer)
-
-        print("No hubo matches en song_level_all_sources.")
-        return output_path
+            }]),
+        }
 
     source_summary = (
         song
@@ -396,11 +398,9 @@ def build_report(
             .collect()
         )
 
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
-        instructions_dataframe().to_excel(writer, index=False, sheet_name="instructions")
-        overview = pd.DataFrame([{
+    tables = {
+        "instructions": instructions_dataframe(),
+        "overview": pd.DataFrame([{
             "keywords": ", ".join(keywords),
             "mode": mode,
             "start_month": start_month or "",
@@ -409,14 +409,11 @@ def build_report(
             "song_level_amount_usd": song["amount_usd"].sum(),
             "raw_sample_rows": raw_sample.height if raw_sample.height > 0 else 0,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
-        }])
-
-        overview.to_excel(writer, index=False, sheet_name="overview")
-        source_summary.to_pandas().to_excel(writer, index=False, sheet_name="source_summary")
-        monthly_summary.to_pandas().to_excel(writer, index=False, sheet_name="monthly_summary")
-        track_summary.to_pandas().to_excel(writer, index=False, sheet_name="track_summary")
-
-        safe_select(
+        }]),
+        "source_summary": source_summary.to_pandas(),
+        "monthly_summary": monthly_summary.to_pandas(),
+        "track_summary": track_summary.to_pandas(),
+        "song_matches": safe_select(
             song.sort("amount_usd", descending=True),
             [
                 "source",
@@ -434,10 +431,41 @@ def build_report(
                 "revenue_basis",
                 "match_text",
             ],
-        ).to_pandas().to_excel(writer, index=False, sheet_name="song_matches")
+        ).to_pandas(),
+    }
 
-        if raw_sample.height > 0:
-            raw_sample.to_pandas().to_excel(writer, index=False, sheet_name="raw_matches_sample")
+    if raw_sample.height > 0:
+        tables["raw_matches_sample"] = raw_sample.to_pandas()
+
+    return tables
+
+
+def build_report(
+    keywords: list[str],
+    mode: str,
+    raw_limit: int,
+    start_month: str | None = None,
+    end_month: str | None = None,
+    song_path: Path = SONG_PATH,
+    standardized_path: Path = STANDARDIZED_PATH,
+    output_dir: Path = REPORTS,
+) -> Path:
+    output_path = report_output_path(keywords, start_month, end_month, output_dir)
+    tables = build_report_tables(
+        keywords=keywords,
+        mode=mode,
+        raw_limit=raw_limit,
+        start_month=start_month,
+        end_month=end_month,
+        song_path=song_path,
+        standardized_path=standardized_path,
+    )
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+        for sheet_name, dataframe in tables.items():
+            dataframe.to_excel(writer, index=False, sheet_name=sheet_name)
 
         style_workbook(writer)
 

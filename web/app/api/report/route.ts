@@ -17,7 +17,11 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json();
-  const response = await fetch(`${apiUrl.replace(/\/$/, "")}/reports/keyword`, {
+  const output = body.output === "google_sheet" ? "google_sheet" : "excel";
+  const endpoint = output === "google_sheet" ? "reports/google-sheet" : "reports/keyword";
+  delete body.output;
+
+  const response = await fetch(`${apiUrl.replace(/\/$/, "")}/${endpoint}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -35,6 +39,11 @@ export async function POST(request: NextRequest) {
       detail = await response.text();
     }
     return NextResponse.json({ error: detail }, { status: response.status });
+  }
+
+  if (output === "google_sheet") {
+    const payload = await response.json();
+    return NextResponse.json(payload);
   }
 
   const buffer = await response.arrayBuffer();

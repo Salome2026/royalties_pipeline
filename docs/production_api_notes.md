@@ -62,3 +62,42 @@ Invoke-WebRequest `
 
 The first request may take longer because it downloads marts from GCS into the local cache.
 
+## Generate Google Sheet
+
+Enable these APIs in Google Cloud first:
+
+- Google Sheets API
+- Google Drive API
+
+Set this environment variable so the created spreadsheet is shared with your Google account:
+
+```text
+GOOGLE_SHEETS_SHARE_EMAIL=your-google-email@example.com
+```
+
+Then call:
+
+```powershell
+$headers = @{ "X-VPO-API-Key" = "YOUR_API_KEY" }
+$body = @{
+  keywords = @("juli savioli")
+  start_month = "2025-01"
+  end_month = "2026-02"
+  mode = "any"
+  raw_limit = 5000
+  refresh_cache = $false
+} | ConvertTo-Json
+
+Invoke-WebRequest `
+  -Uri http://127.0.0.1:8010/reports/google-sheet `
+  -Method POST `
+  -Headers $headers `
+  -ContentType "application/json" `
+  -Body $body
+```
+
+The API returns:
+
+```json
+{"url":"https://docs.google.com/spreadsheets/d/..."}
+```

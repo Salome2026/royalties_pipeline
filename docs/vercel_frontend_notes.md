@@ -12,6 +12,12 @@ It is a Next.js app. The browser never receives the Render API key. Instead:
 Browser -> Vercel API route -> Render API -> Google Cloud Storage -> XLSX
 ```
 
+For Google Sheets output:
+
+```text
+Browser -> Vercel API route -> Render API -> Google Sheets API -> Google Sheet URL
+```
+
 ## Local Development
 
 ```powershell
@@ -59,4 +65,3 @@ Build Command: npm run build
 Output Directory: .next
 Install Command: npm install
 ```
-
