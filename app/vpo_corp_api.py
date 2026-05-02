@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import sys
+from calendar import monthrange
+from datetime import date
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -72,6 +74,9 @@ class KeywordReportRequest(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_cache: bool = False
+
+
+ParticipationPreset = Literal["last_month", "last_3_months", "last_year", "custom"]
 
 
 app = FastAPI(title="VPO Corp Royalties API", version="0.1.0")
@@ -179,6 +184,30 @@ def ensure_marts(refresh_cache: bool = False) -> dict[str, Path]:
         blob.download_to_filename(str(local_path))
 
     return paths
+
+
+def shift_month(month: str, delta: int) -> str:
+    year, month_number = (int(part) for part in month.split("-", 1))
+    month_index = year * 12 + month_number - 1 + delta
+    shifted_year = month_index // 12
+    shifted_month = month_index % 12 + 1
+    return f"{shifted_year:04d}-{shifted_month:02d}"
+
+
+def first_business_day(month: str) -> str:
+    year, month_number = (int(part) for part in month.split("-", 1))
+    current = date(year, month_number, 1)
+    while current.weekday() >= 5:
+        current = current.replace(day=current.day + 1)
+    return current.isoformat()
+
+
+def last_business_day(month: str) -> str:
+    year, month_number = (int(part) for part in month.split("-", 1))
+    current = date(year, month_number, monthrange(year, month_number)[1])
+    while current.weekday() >= 5:
+        current = current.replace(day=current.day - 1)
+    return current.isoformat()
 
 
 def dataframe_values(dataframe) -> list[list[object]]:
@@ -628,13 +657,65 @@ def keyword_google_sheet(
 @app.get("/participation/distributors")
 def distributor_participation(
     refresh_cache: bool = False,
+    preset: ParticipationPreset = "last_year",
+    start_month: str | None = None,
+    end_month: str | None = None,
     x_vpo_api_key: str | None = Header(default=None),
 ) -> dict:
     require_api_key(x_vpo_api_key)
     marts = ensure_marts(refresh_cache=refresh_cache)
 
+    month_bounds = (
+        pl.scan_parquet(marts[SONG_FILE])
+        .filter(pl.col("transaction_month").is_not_null())
+        .select([
+            pl.min("transaction_month").alias("min_month"),
+            pl.max("transaction_month").alias("max_month"),
+        ])
+        .collect()
+    )
+
+    available_start = month_bounds["min_month"][0]
+    available_end = month_bounds["max_month"][0]
+
+    if not available_end:
+        return {
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+            "preset": preset,
+            "start_month": None,
+            "end_month": None,
+            "start_date": None,
+            "end_date": None,
+            "available_start_month": None,
+            "available_end_month": None,
+            "total_amount_usd": 0.0,
+            "items": [],
+        }
+
+    if preset == "custom":
+        effective_start = start_month or available_start
+        effective_end = end_month or available_end
+    elif preset == "last_month":
+        effective_start = available_end
+        effective_end = available_end
+    elif preset == "last_3_months":
+        effective_start = shift_month(available_end, -2)
+        effective_end = available_end
+    else:
+        effective_start = shift_month(available_end, -11)
+        effective_end = available_end
+
+    effective_start = max(effective_start, available_start)
+    effective_end = min(effective_end, available_end)
+
+    if effective_start > effective_end:
+        raise HTTPException(status_code=400, detail="start_month cannot be greater than end_month.")
+
     df = (
         pl.scan_parquet(marts[SONG_FILE])
+        .filter(pl.col("transaction_month").is_not_null())
+        .filter(pl.col("transaction_month") >= effective_start)
+        .filter(pl.col("transaction_month") <= effective_end)
         .group_by("source")
         .agg(pl.sum("amount_usd").alias("amount_usd"))
         .sort("amount_usd", descending=True)
@@ -654,6 +735,13 @@ def distributor_participation(
 
     return {
         "updated_at": datetime.now().isoformat(timespec="seconds"),
+        "preset": preset,
+        "start_month": effective_start,
+        "end_month": effective_end,
+        "start_date": first_business_day(effective_start),
+        "end_date": last_business_day(effective_end),
+        "available_start_month": available_start,
+        "available_end_month": available_end,
         "total_amount_usd": total,
         "items": items,
     }

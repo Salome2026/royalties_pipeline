@@ -17,6 +17,13 @@ type ParticipationItem = {
 
 type ParticipationData = {
   updated_at: string;
+  preset: string;
+  start_month: string | null;
+  end_month: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  available_start_month: string | null;
+  available_end_month: string | null;
   total_amount_usd: number;
   items: ParticipationItem[];
 };
@@ -66,6 +73,9 @@ export default function Home() {
   const [lastFile, setLastFile] = useState("");
   const [lastSheetUrl, setLastSheetUrl] = useState("");
   const [participation, setParticipation] = useState<ParticipationData | null>(null);
+  const [participationPreset, setParticipationPreset] = useState("last_year");
+  const [participationStartMonth, setParticipationStartMonth] = useState("");
+  const [participationEndMonth, setParticipationEndMonth] = useState("");
 
   useEffect(() => {
     fetch("/api/session")
@@ -233,9 +243,30 @@ export default function Home() {
 
   async function loadParticipation(refresh: boolean) {
     setMessage(null);
+
+    if (
+      participationPreset === "custom"
+      && participationStartMonth
+      && participationEndMonth
+      && participationStartMonth > participationEndMonth
+    ) {
+      setMessage({ type: "error", text: "El periodo desde no puede ser mayor que hasta." });
+      return;
+    }
+
     setParticipationLoading(true);
 
-    const response = await fetch(`/api/participation?refresh=${refresh ? "1" : "0"}`, { cache: "no-store" });
+    const params = new URLSearchParams({
+      refresh: refresh ? "1" : "0",
+      preset: participationPreset,
+    });
+
+    if (participationPreset === "custom") {
+      if (participationStartMonth) params.set("start_month", participationStartMonth);
+      if (participationEndMonth) params.set("end_month", participationEndMonth);
+    }
+
+    const response = await fetch(`/api/participation?${params.toString()}`, { cache: "no-store" });
     if (!response.ok) {
       const data = await response.json().catch(() => ({ error: "No se pudo cargar participacion." }));
       setMessage({ type: "error", text: data.error || "No se pudo cargar participacion." });
@@ -386,12 +417,71 @@ export default function Home() {
             <div className="section-heading">
               <div>
                 <h1>Participacion en distribuidoras</h1>
-                <p>Ultima actualizacion: {participation?.updated_at || "sin cargar"}</p>
+                <p>
+                  Ultima actualizacion: {participation?.updated_at || "sin cargar"}
+                  {participation?.start_month && participation?.end_month ? ` · ${participation.start_month} a ${participation.end_month}` : ""}
+                </p>
               </div>
               <button type="button" onClick={() => loadParticipation(true)} disabled={participationLoading}>
                 {participationLoading ? "Actualizando..." : "Actualizar"}
               </button>
             </div>
+
+            <div className="period-controls">
+              <div>
+                <label htmlFor="participation_preset">Periodo</label>
+                <select
+                  id="participation_preset"
+                  value={participationPreset}
+                  onChange={(event) => setParticipationPreset(event.target.value)}
+                >
+                  <option value="last_month">Ultimo mes</option>
+                  <option value="last_3_months">Ultimos tres meses</option>
+                  <option value="last_year">Ultimo ano</option>
+                  <option value="custom">Rango</option>
+                </select>
+              </div>
+
+              {participationPreset === "custom" && (
+                <>
+                  <div>
+                    <label htmlFor="participation_start">Desde</label>
+                    <input
+                      id="participation_start"
+                      type="month"
+                      value={participationStartMonth}
+                      min={participation?.available_start_month || undefined}
+                      max={participation?.available_end_month || undefined}
+                      onChange={(event) => setParticipationStartMonth(event.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="participation_end">Hasta</label>
+                    <input
+                      id="participation_end"
+                      type="month"
+                      value={participationEndMonth}
+                      min={participation?.available_start_month || undefined}
+                      max={participation?.available_end_month || undefined}
+                      onChange={(event) => setParticipationEndMonth(event.target.value)}
+                    />
+                  </div>
+                </>
+              )}
+
+              <button type="button" onClick={() => loadParticipation(false)} disabled={participationLoading}>
+                {participationLoading ? "Cargando..." : "Aplicar"}
+              </button>
+            </div>
+
+            {participation?.start_date && participation?.end_date && (
+              <div className="period-meta">
+                <strong>Rango aplicado</strong>
+                <span>{participation.start_date} a {participation.end_date}</span>
+                <strong>Total</strong>
+                <span>{money(participation.total_amount_usd)}</span>
+              </div>
+            )}
 
             <div className="pie-layout">
               <div className="pie" style={pieStyle} aria-label="Participacion por distribuidora" />
