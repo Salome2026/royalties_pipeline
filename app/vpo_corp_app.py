@@ -39,10 +39,10 @@ def load_local_env(path: Path) -> None:
 
 load_local_env(ENV_PATH)
 
-APP_USER = os.environ.get("VPM_USER", "admin")
-APP_PASSWORD = os.environ.get("VPM_PASSWORD", "change-me")
-APP_HOST = os.environ.get("VPM_HOST", "127.0.0.1")
-APP_PORT = int(os.environ.get("VPM_PORT", "8000"))
+APP_USER = os.environ.get("VPO_USER", "admin")
+APP_PASSWORD = os.environ.get("VPO_PASSWORD", "change-me")
+APP_HOST = os.environ.get("VPO_HOST", "127.0.0.1")
+APP_PORT = int(os.environ.get("VPO_PORT", "8000"))
 
 SESSIONS: set[str] = set()
 
@@ -214,7 +214,7 @@ def page(title: str, body: str, authenticated: bool = True) -> bytes:
 <body>
   <div class="shell">
     <header>
-      <div class="brand">VPM Corp</div>
+      <div class="brand">VPO Corp</div>
       <div class="userbar"><span>{user}</span>{logout}</div>
     </header>
     {body}
@@ -228,7 +228,7 @@ def login_page(error: str = "") -> bytes:
     body = f"""
 <div class="login">
   <form class="panel" method="post" action="/login">
-    <h1>VPM Corp</h1>
+    <h1>VPO Corp</h1>
     {error_html}
     <label for="username">Usuario</label>
     <input id="username" name="username" autocomplete="username" required>
@@ -238,7 +238,7 @@ def login_page(error: str = "") -> bytes:
   </form>
 </div>
 """
-    return page("VPM Corp", body, authenticated=False)
+    return page("VPO Corp", body, authenticated=False)
 
 
 def dashboard(message: str = "", error: str = "", report_name: str = "") -> bytes:
@@ -307,7 +307,7 @@ def dashboard(message: str = "", error: str = "", report_name: str = "") -> byte
   </div>
 </main>
 """
-    return page("VPM Corp | Reportes", body)
+    return page("VPO Corp | Reportes", body)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -347,7 +347,7 @@ class Handler(BaseHTTPRequestHandler):
                 SESSIONS.add(token)
                 self.send_response(HTTPStatus.SEE_OTHER)
                 self.send_header("Location", "/")
-                self.send_header("Set-Cookie", f"vpm_session={token}; HttpOnly; SameSite=Lax; Path=/")
+                self.send_header("Set-Cookie", f"vpo_session={token}; HttpOnly; SameSite=Lax; Path=/")
                 self.end_headers()
                 return
             self.respond(HTTPStatus.UNAUTHORIZED, login_page("Usuario o contrasena incorrectos."))
@@ -370,17 +370,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def is_authenticated(self) -> bool:
         cookie = SimpleCookie(self.headers.get("Cookie", ""))
-        token = cookie.get("vpm_session")
+        token = cookie.get("vpo_session")
         return bool(token and token.value in SESSIONS)
 
     def logout(self) -> None:
         cookie = SimpleCookie(self.headers.get("Cookie", ""))
-        token = cookie.get("vpm_session")
+        token = cookie.get("vpo_session")
         if token:
             SESSIONS.discard(token.value)
         self.send_response(HTTPStatus.SEE_OTHER)
         self.send_header("Location", "/login")
-        self.send_header("Set-Cookie", "vpm_session=; Max-Age=0; Path=/")
+        self.send_header("Set-Cookie", "vpo_session=; Max-Age=0; Path=/")
         self.end_headers()
 
     def generate_report(self, data: dict[str, list[str]]) -> None:
@@ -459,9 +459,9 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     server = ThreadingHTTPServer((APP_HOST, APP_PORT), Handler)
-    print(f"VPM Corp corriendo en http://{APP_HOST}:{APP_PORT}")
+    print(f"VPO Corp corriendo en http://{APP_HOST}:{APP_PORT}")
     print(f"Usuario: {APP_USER}")
-    print("Para cambiar credenciales: set VPM_USER=... ; set VPM_PASSWORD=...")
+    print("Para cambiar credenciales: set VPO_USER=... ; set VPO_PASSWORD=...")
     server.serve_forever()
 
 
