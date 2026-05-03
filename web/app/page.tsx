@@ -563,7 +563,7 @@ export default function Home() {
                 >
                   <option value="last_month">Ultimo mes</option>
                   <option value="last_3_months">Ultimos tres meses</option>
-                  <option value="last_year">Ultimo ano</option>
+                  <option value="last_year">Ultimo año</option>
                   <option value="all_history">Historico</option>
                   <option value="custom">Rango</option>
                 </select>
