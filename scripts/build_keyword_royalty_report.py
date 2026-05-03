@@ -318,7 +318,7 @@ def instructions_dataframe() -> pd.DataFrame:
         },
         {
             "hoja": "song_matches",
-            "contenido": "Detalle agregado a nivel tema usado para calcular los totales del reporte.",
+            "contenido": "Detalle usado para calcular los totales. En criterio statement puede estar limitado por raw_limit para respetar el limite de Excel.",
         },
         {
             "hoja": "raw_matches_sample",
@@ -513,6 +513,10 @@ def build_report_tables(
             .collect()
         )
 
+    song_matches = song.sort("amount_usd", descending=True)
+    if period_column == "statement_period":
+        song_matches = song_matches.head(raw_limit)
+
     tables = {
         "instructions": display_dataframe(instructions_dataframe()),
         "overview": display_dataframe(pd.DataFrame([{
@@ -530,7 +534,7 @@ def build_report_tables(
         "monthly_summary": display_dataframe(monthly_summary.to_pandas()),
         "track_summary": display_dataframe(track_summary.to_pandas()),
         "song_matches": display_dataframe(safe_select(
-            song.sort("amount_usd", descending=True),
+            song_matches,
             [
                 "source",
                 "account",
