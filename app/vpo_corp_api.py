@@ -68,6 +68,7 @@ class KeywordReportRequest(BaseModel):
     keywords: list[str] = Field(..., min_length=1)
     start_month: str | None = None
     end_month: str | None = None
+    period_basis: Literal["transaction_month", "statement_period"] = "transaction_month"
     mode: Literal["any", "all"] = "any"
     raw_limit: int = Field(default=5000, ge=0, le=50000)
     refresh_cache: bool = False
@@ -585,6 +586,7 @@ def keyword_report(
         raw_limit=request.raw_limit,
         start_month=request.start_month,
         end_month=request.end_month,
+        period_basis=request.period_basis,
         song_path=marts[SONG_FILE],
         standardized_path=marts[STANDARDIZED_FILE],
         output_dir=VPO_API_REPORTS_DIR,
@@ -641,6 +643,7 @@ def keyword_google_sheet(
         raw_limit=request.raw_limit,
         start_month=request.start_month,
         end_month=request.end_month,
+        period_basis=request.period_basis,
         song_path=marts[SONG_FILE],
         standardized_path=marts[STANDARDIZED_FILE],
     )

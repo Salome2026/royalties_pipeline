@@ -71,6 +71,7 @@ export default function Home() {
   const [keywords, setKeywords] = useState("");
   const [startMonth, setStartMonth] = useState("");
   const [endMonth, setEndMonth] = useState("");
+  const [periodBasis, setPeriodBasis] = useState("transaction_month");
   const [mode, setMode] = useState("any");
   const [rawLimit, setRawLimit] = useState("5000");
   const [loading, setLoading] = useState(false);
@@ -159,6 +160,7 @@ export default function Home() {
       keywords: keywords.split(/[;,]/).map((item) => item.trim()).filter(Boolean),
       start_month: startMonth || null,
       end_month: endMonth || null,
+      period_basis: periodBasis,
       mode,
       raw_limit: Number(rawLimit) || 0,
       refresh_cache: false,
@@ -422,6 +424,12 @@ export default function Home() {
                   <input id="end_month" type="month" value={endMonth} onChange={(event) => setEndMonth(event.target.value)} />
                 </div>
               </div>
+
+              <label htmlFor="period_basis">Criterio de periodo</label>
+              <select id="period_basis" value={periodBasis} onChange={(event) => setPeriodBasis(event.target.value)}>
+                <option value="transaction_month">Performance / mes de consumo</option>
+                <option value="statement_period">Liquidacion / mes de statement</option>
+              </select>
 
               <label htmlFor="mode">Coincidencia</label>
               <select id="mode" value={mode} onChange={(event) => setMode(event.target.value)}>

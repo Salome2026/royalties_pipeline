@@ -65,15 +65,17 @@ LEFT = Alignment(horizontal="left", vertical="center")
 DISPLAY_HEADERS = {
     "keywords": "Filtro",
     "mode": "Coincidencia",
+    "period_basis": "Criterio periodo",
     "start_month": "Desde",
     "end_month": "Hasta",
-    "song_level_rows": "Filas song level",
+    "song_level_rows": "Filas resultado",
     "song_level_amount_usd": "Ingresos USD",
     "raw_sample_rows": "Filas raw",
     "generated_at": "Generado el",
     "source": "Fuente",
     "account": "Cuenta",
     "transaction_month": "Mes",
+    "period_month": "Mes",
     "amount_usd": "Ingresos USD",
     "units": "Unidades",
     "rows": "Filas",
@@ -96,6 +98,11 @@ DISPLAY_HEADERS = {
     "hoja": "Hoja",
     "contenido": "Contenido",
     "resultado": "Resultado",
+}
+
+PERIOD_BASIS_LABELS = {
+    "transaction_month": "Performance / mes de consumo",
+    "statement_period": "Liquidacion / mes de statement",
 }
 
 
@@ -126,7 +133,13 @@ def parse_args():
     )
     parser.add_argument(
         "--end-month",
-        help="Mes final YYYY-MM. Filtra por transaction_month.",
+        help="Mes final YYYY-MM.",
+    )
+    parser.add_argument(
+        "--period-basis",
+        choices=["transaction_month", "statement_period"],
+        default="transaction_month",
+        help="transaction_month = performance; statement_period = liquidacion.",
     )
     return parser.parse_args()
 
@@ -261,15 +274,21 @@ def prepare_sheet(ws):
         ws.column_dimensions[col_letter].width = min(max_len + 2, 50)
 
 
-def add_period_filter(lf: pl.LazyFrame, columns: set[str], start_month: str | None, end_month: str | None) -> pl.LazyFrame:
-    if "transaction_month" not in columns:
+def add_period_filter(
+    lf: pl.LazyFrame,
+    columns: set[str],
+    start_month: str | None,
+    end_month: str | None,
+    period_column: str,
+) -> pl.LazyFrame:
+    if period_column not in columns:
         return lf
 
     if start_month:
-        lf = lf.filter(pl.col("transaction_month").cast(pl.Utf8) >= start_month)
+        lf = lf.filter(pl.col(period_column).cast(pl.Utf8) >= start_month)
 
     if end_month:
-        lf = lf.filter(pl.col("transaction_month").cast(pl.Utf8) <= end_month)
+        lf = lf.filter(pl.col(period_column).cast(pl.Utf8) <= end_month)
 
     return lf
 
@@ -291,7 +310,7 @@ def instructions_dataframe() -> pd.DataFrame:
         },
         {
             "hoja": "monthly_summary",
-            "contenido": "Totales agrupados por mes de transaccion.",
+            "contenido": "Totales agrupados por el criterio de periodo elegido.",
         },
         {
             "hoja": "track_summary",
@@ -328,22 +347,70 @@ def build_report_tables(
     raw_limit: int,
     start_month: str | None = None,
     end_month: str | None = None,
+    period_basis: str = "transaction_month",
     song_path: Path = SONG_PATH,
     standardized_path: Path = STANDARDIZED_PATH,
 ) -> dict[str, pd.DataFrame]:
+    period_column = "statement_period" if period_basis == "statement_period" else "transaction_month"
+    period_label = PERIOD_BASIS_LABELS.get(period_column, period_column)
+
     song_cols = existing_columns(song_path)
     song_filter = build_filter(song_cols, SEARCH_COLUMNS_SONG, keywords, mode)
+    standardized_cols = existing_columns(standardized_path)
 
-    song = (
-        add_period_filter(
-            add_match_text(pl.scan_parquet(song_path), song_cols, SEARCH_COLUMNS_SONG),
-            song_cols,
-            start_month,
-            end_month,
+    if period_column == "statement_period":
+        raw_filter = build_filter(standardized_cols, SEARCH_COLUMNS_STANDARDIZED, keywords, mode)
+
+        song = (
+            add_period_filter(
+                add_match_text(pl.scan_parquet(standardized_path), standardized_cols, SEARCH_COLUMNS_STANDARDIZED),
+                standardized_cols,
+                start_month,
+                end_month,
+                period_column,
+            )
+            .filter(raw_filter)
+            .select([
+                col for col in [
+                    "source",
+                    "account",
+                    "statement_period",
+                    "transaction_month",
+                    "asset_isrc",
+                    "track_statement_style",
+                    "asset_title_statement",
+                    "artist_statement_style",
+                    "asset_artist_statement",
+                    "content_type",
+                    "amount_usd",
+                    "units",
+                    "source_sheet",
+                    "revenue_basis",
+                    "match_text",
+                ]
+                if col in standardized_cols or col == "match_text"
+            ])
+            .with_columns([
+                pl.lit(None).cast(pl.Utf8).alias("content_type")
+                if "content_type" not in standardized_cols
+                else pl.col("content_type"),
+                pl.col(period_column).cast(pl.Utf8).alias("period_month"),
+            ])
+            .collect()
         )
-        .filter(song_filter)
-        .collect()
-    )
+    else:
+        song = (
+            add_period_filter(
+                add_match_text(pl.scan_parquet(song_path), song_cols, SEARCH_COLUMNS_SONG),
+                song_cols,
+                start_month,
+                end_month,
+                period_column,
+            )
+            .filter(song_filter)
+            .with_columns(pl.col(period_column).cast(pl.Utf8).alias("period_month"))
+            .collect()
+        )
 
     if song.height == 0:
         print("No hubo matches en song_level_all_sources.")
@@ -352,6 +419,7 @@ def build_report_tables(
             "overview": display_dataframe(pd.DataFrame([{
                 "keywords": ", ".join(keywords),
                 "mode": mode,
+                "period_basis": period_label,
                 "start_month": start_month or "",
                 "end_month": end_month or "",
                 "song_level_rows": 0,
@@ -377,13 +445,13 @@ def build_report_tables(
 
     monthly_summary = (
         song
-        .group_by(["transaction_month"])
+        .group_by(["period_month"])
         .agg([
             pl.sum("amount_usd").alias("amount_usd"),
             pl.sum("units").alias("units"),
             pl.len().alias("rows"),
         ])
-        .sort("transaction_month")
+        .sort("period_month")
     )
 
     track_summary = (
@@ -401,8 +469,8 @@ def build_report_tables(
         .agg([
             pl.sum("amount_usd").alias("amount_usd"),
             pl.sum("units").alias("units"),
-            pl.min("transaction_month").alias("first_month"),
-            pl.max("transaction_month").alias("last_month"),
+            pl.min("period_month").alias("first_month"),
+            pl.max("period_month").alias("last_month"),
             pl.len().alias("rows"),
         ])
         .sort("amount_usd", descending=True)
@@ -410,7 +478,7 @@ def build_report_tables(
 
     raw_sample = pl.DataFrame()
     if standardized_path.exists():
-        raw_cols = existing_columns(standardized_path)
+        raw_cols = standardized_cols
         raw_filter = build_filter(raw_cols, SEARCH_COLUMNS_STANDARDIZED, keywords, mode)
 
         raw_sample = (
@@ -419,6 +487,7 @@ def build_report_tables(
                 raw_cols,
                 start_month,
                 end_month,
+                period_column,
             )
             .filter(raw_filter)
             .select([
@@ -449,6 +518,7 @@ def build_report_tables(
         "overview": display_dataframe(pd.DataFrame([{
             "keywords": ", ".join(keywords),
             "mode": mode,
+            "period_basis": period_label,
             "start_month": start_month or "",
             "end_month": end_month or "",
             "song_level_rows": song.height,
@@ -464,6 +534,7 @@ def build_report_tables(
             [
                 "source",
                 "account",
+                "statement_period",
                 "transaction_month",
                 "asset_isrc",
                 "track_statement_style",
@@ -492,6 +563,7 @@ def build_report(
     raw_limit: int,
     start_month: str | None = None,
     end_month: str | None = None,
+    period_basis: str = "transaction_month",
     song_path: Path = SONG_PATH,
     standardized_path: Path = STANDARDIZED_PATH,
     output_dir: Path = REPORTS,
@@ -503,6 +575,7 @@ def build_report(
         raw_limit=raw_limit,
         start_month=start_month,
         end_month=end_month,
+        period_basis=period_basis,
         song_path=song_path,
         standardized_path=standardized_path,
     )
@@ -535,6 +608,7 @@ def main():
         raw_limit=args.raw_limit,
         start_month=args.start_month,
         end_month=args.end_month,
+        period_basis=args.period_basis,
     )
 
     print("\nReporte generado:")
