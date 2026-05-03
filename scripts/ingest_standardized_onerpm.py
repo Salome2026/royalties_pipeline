@@ -6,6 +6,7 @@ from pathlib import Path
 import polars as pl
 
 from lib.fx import get_monthly_fx, normalize_currency
+from lib.statement_period import from_onerpm_filename
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -55,10 +56,7 @@ def sha256_file(file_path: Path) -> str:
 
 
 def extract_statement_period(file_name: str) -> str:
-    base = Path(file_name).stem
-    if len(base) >= 7 and base[4] == "-" and base[7] == "-":
-        return base[:7]
-    return "unknown"
+    return from_onerpm_filename(file_name).period
 
 
 def clean_column_names(df: pl.DataFrame) -> pl.DataFrame:
@@ -413,7 +411,8 @@ def standardize_masters(
     file_hash: str,
     df_shares_for_flags: pl.DataFrame | None = None,
 ) -> pl.DataFrame:
-    statement_period = extract_statement_period(file_path.name)
+    statement_info = from_onerpm_filename(file_path.name)
+    statement_period = statement_info.period
     ingested_at = datetime.now().isoformat(timespec="seconds")
 
     df = clean_column_names(df)
@@ -442,6 +441,8 @@ def standardize_masters(
         pl.lit(str(file_path)).alias("statement_file_path"),
         pl.lit(file_hash).alias("statement_file_hash"),
         pl.lit(statement_period).alias("statement_period"),
+        pl.lit(statement_info.source).alias("statement_period_source"),
+        pl.lit(statement_info.note).alias("statement_period_note"),
         pl.lit(ingested_at).alias("ingested_at"),
     ])
 
@@ -459,7 +460,8 @@ def standardize_masters(
 
 
 def standardize_shares(df: pl.DataFrame, file_path: Path, account: str, file_hash: str) -> pl.DataFrame:
-    statement_period = extract_statement_period(file_path.name)
+    statement_info = from_onerpm_filename(file_path.name)
+    statement_period = statement_info.period
     ingested_at = datetime.now().isoformat(timespec="seconds")
 
     df = clean_column_names(df)
@@ -492,6 +494,8 @@ def standardize_shares(df: pl.DataFrame, file_path: Path, account: str, file_has
         pl.lit(str(file_path)).alias("statement_file_path"),
         pl.lit(file_hash).alias("statement_file_hash"),
         pl.lit(statement_period).alias("statement_period"),
+        pl.lit(statement_info.source).alias("statement_period_source"),
+        pl.lit(statement_info.note).alias("statement_period_note"),
         pl.lit(ingested_at).alias("ingested_at"),
         pl.lit(False).alias("has_share_in_out"),
         pl.lit(0).cast(pl.Int64).alias("share_in_count"),

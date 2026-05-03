@@ -1,9 +1,14 @@
 import hashlib
-import re
+import sys
 from datetime import datetime
 from pathlib import Path
 
 import polars as pl
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+sys.path.append(str(SCRIPT_DIR))
+
+from lib.statement_period import from_dashgo_filename
 
 
 BASE_DIR = Path(r"C:\royalties_pipeline")
@@ -30,16 +35,7 @@ def sha256_file(file_path: Path) -> str:
 
 
 def extract_statement_period(file_name: str) -> str:
-    name = Path(file_name).stem
-    match = re.search(r"-(\d{2})-(\d{2})$", name)
-
-    if not match:
-        return "unknown"
-
-    month = match.group(1)
-    year = match.group(2)
-
-    return f"20{year}-{month}"
+    return from_dashgo_filename(file_name).period
 
 
 def read_dashgo_csv(file_path: Path) -> pl.DataFrame:
@@ -114,7 +110,8 @@ def standardize_dashgo(df: pl.DataFrame, file_path: Path) -> pl.DataFrame:
         raise ValueError(f"Faltan columnas requeridas: {missing}")
 
     file_hash = sha256_file(file_path)
-    statement_period = extract_statement_period(file_path.name)
+    statement_info = from_dashgo_filename(file_path.name)
+    statement_period = statement_info.period
     ingested_at = datetime.now().isoformat(timespec="seconds")
 
     payable = decimal_expr("Payable", cols)
@@ -213,6 +210,8 @@ def standardize_dashgo(df: pl.DataFrame, file_path: Path) -> pl.DataFrame:
         pl.lit(SOURCE).alias("source"),
         pl.lit(ACCOUNT).alias("account"),
         pl.lit(statement_period).alias("statement_period"),
+        pl.lit(statement_info.source).alias("statement_period_source"),
+        pl.lit(statement_info.note).alias("statement_period_note"),
         pl.lit("regular").alias("statement_type"),
 
         pl.lit(file_path.name).alias("statement_file_name"),

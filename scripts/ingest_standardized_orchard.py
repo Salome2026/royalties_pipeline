@@ -6,6 +6,8 @@ from pathlib import Path
 import pandas as pd
 import polars as pl
 
+from lib.statement_period import from_column, legacy_manual
+
 
 BASE_DIR = Path(r"C:\royalties_pipeline")
 
@@ -146,6 +148,10 @@ def standardize_orchard(df: pl.DataFrame, file_path: Path) -> pl.DataFrame:
 
     file_hash = sha256_file(file_path)
     ingested_at = datetime.now().isoformat(timespec="seconds")
+    statement_period_source, statement_period_note = from_column(
+        "STATEMENT PERIOD",
+        "Orchard modern files also include the period in filename, but the column is the authoritative source.",
+    )
     amount = decimal_expr("NET SHARE ACCOUNT CURRENCY")
 
     return df.with_columns([
@@ -189,6 +195,8 @@ def standardize_orchard(df: pl.DataFrame, file_path: Path) -> pl.DataFrame:
 
         pl.lit(SOURCE).alias("source"),
         pl.lit(ORCHARD_STATEMENT_TYPE).alias("statement_type"),
+        pl.lit(statement_period_source).alias("statement_period_source"),
+        pl.lit(statement_period_note).alias("statement_period_note"),
         pl.lit(file_path.name).alias("statement_file_name"),
         pl.lit(str(file_path)).alias("statement_file_path"),
         pl.lit(file_hash).alias("statement_file_hash"),
@@ -221,6 +229,9 @@ def standardize_altafonte_legacy(file_path: Path) -> pl.DataFrame:
 
     file_hash = sha256_file(file_path)
     ingested_at = datetime.now().isoformat(timespec="seconds")
+    statement_period_source, statement_period_note = legacy_manual(
+        "Altafonte legacy has no per-row statement file period; period is inferred from legacy month columns."
+    )
     records = []
 
     for _, row in df.iterrows():
@@ -253,6 +264,8 @@ def standardize_altafonte_legacy(file_path: Path) -> pl.DataFrame:
                 "label": None,
                 "source": SOURCE,
                 "statement_type": ALTAFONTE_STATEMENT_TYPE,
+                "statement_period_source": statement_period_source,
+                "statement_period_note": statement_period_note,
                 "statement_file_name": file_path.name,
                 "statement_file_path": str(file_path),
                 "statement_file_hash": file_hash,

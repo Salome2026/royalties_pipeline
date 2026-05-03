@@ -14,6 +14,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.append(str(SCRIPT_DIR))
 
 from lib.fx import get_monthly_fx
+from lib.statement_period import from_fuga_filename, fuga_correction
 
 
 # =========================
@@ -51,33 +52,7 @@ def sha256_file(file_path: Path) -> str:
 
 
 def extract_statement_period(file_name: str) -> str:
-    name = file_name.lower()
-
-    months = {
-        "january": "01",
-        "february": "02",
-        "march": "03",
-        "april": "04",
-        "may": "05",
-        "june": "06",
-        "july": "07",
-        "august": "08",
-        "september": "09",
-        "october": "10",
-        "november": "11",
-        "december": "12",
-    }
-
-    for month_name, month_num in months.items():
-        if month_name in name:
-            pos = name.find(month_name)
-            after_month = name[pos + len(month_name):]
-            year = after_month[:4]
-
-            if year.isdigit():
-                return f"{year}-{month_num}"
-
-    return "unknown"
+    return from_fuga_filename(file_name).period
 
 
 def read_fuga_csv(file_path: Path) -> pl.DataFrame:
@@ -144,6 +119,8 @@ def standardize_fuga_file(
     file_path: Path,
     statement_type: str,
     statement_period: str,
+    statement_period_source: str,
+    statement_period_note: str,
 ) -> pl.DataFrame:
 
     if df.height == 0:
@@ -276,6 +253,8 @@ def standardize_fuga_file(
         pl.lit(ACCOUNT).alias("account"),
         pl.lit(statement_type).alias("statement_type"),
         pl.lit(statement_period).alias("statement_period"),
+        pl.lit(statement_period_source).alias("statement_period_source"),
+        pl.lit(statement_period_note).alias("statement_period_note"),
 
         pl.lit(file_path.name).alias("statement_file_name"),
         pl.lit(str(file_path)).alias("statement_file_path"),
@@ -331,13 +310,15 @@ def main():
                 print("  - Archivo sin filas. Se omite.")
                 continue
 
-            statement_period = extract_statement_period(file_path.name)
+            statement_info = from_fuga_filename(file_path.name)
 
             df_std = standardize_fuga_file(
                 df=df,
                 file_path=file_path,
                 statement_type="regular",
-                statement_period=statement_period,
+                statement_period=statement_info.period,
+                statement_period_source=statement_info.source,
+                statement_period_note=statement_info.note,
             )
 
             if df_std.height == 0:
@@ -369,11 +350,15 @@ def main():
                 print("  - Archivo correction sin filas. Se omite.")
                 continue
 
+            statement_info = fuga_correction(CORRECTION_STATEMENT_PERIOD)
+
             df_std = standardize_fuga_file(
                 df=df,
                 file_path=file_path,
                 statement_type="correction",
-                statement_period=CORRECTION_STATEMENT_PERIOD,
+                statement_period=statement_info.period,
+                statement_period_source=statement_info.source,
+                statement_period_note=statement_info.note,
             )
 
             if df_std.height == 0:

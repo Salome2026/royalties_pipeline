@@ -6,6 +6,8 @@ from pathlib import Path
 
 import polars as pl
 
+from lib.statement_period import from_column
+
 
 BASE = Path(r"C:\royalties_pipeline")
 
@@ -73,6 +75,10 @@ def standardize_detail_file(df: pl.DataFrame, file_path: Path, statement_type: s
     statement_period, _ = parse_file_info(file_path)
     file_hash = sha256_file(file_path)
     ingested_at = datetime.now().isoformat(timespec="seconds")
+    statement_period_source, statement_period_note = from_column(
+        "Reporting Period",
+        "SoundOn filename also includes YYYY_MM and is used as a file-level cross-check.",
+    )
 
     amount = decimal_expr("Final Royalty")
     units = decimal_expr("Units of Sold")
@@ -136,6 +142,8 @@ def standardize_detail_file(df: pl.DataFrame, file_path: Path, statement_type: s
         pl.lit(include_in_statement_view).alias("include_in_statement_view"),
         pl.lit(possible_internal_transfer).alias("possible_internal_transfer"),
         pl.lit(file_path.name).alias("statement_file_name"),
+        pl.lit(statement_period_source).alias("statement_period_source"),
+        pl.lit(statement_period_note).alias("statement_period_note"),
         pl.lit(str(file_path)).alias("statement_file_path"),
         pl.lit(file_hash).alias("statement_file_hash"),
         pl.lit(ingested_at).alias("ingested_at"),
@@ -146,6 +154,10 @@ def standardize_summary_file(df: pl.DataFrame, file_path: Path, statement_type: 
     statement_period, _ = parse_file_info(file_path)
     file_hash = sha256_file(file_path)
     ingested_at = datetime.now().isoformat(timespec="seconds")
+    statement_period_source, statement_period_note = from_column(
+        "Reporting Period",
+        "SoundOn summary is not loaded into the principal standardized mart; kept for audit paths only.",
+    )
 
     return df.with_columns([
         decimal_expr("Final Royalty").alias("amount_usd"),
@@ -182,6 +194,8 @@ def standardize_summary_file(df: pl.DataFrame, file_path: Path, statement_type: 
         pl.lit(False).alias("include_in_statement_view"),
         pl.lit(False).alias("possible_internal_transfer"),
         pl.lit(file_path.name).alias("statement_file_name"),
+        pl.lit(statement_period_source).alias("statement_period_source"),
+        pl.lit(statement_period_note).alias("statement_period_note"),
         pl.lit(str(file_path)).alias("statement_file_path"),
         pl.lit(file_hash).alias("statement_file_hash"),
         pl.lit(ingested_at).alias("ingested_at"),

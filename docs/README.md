@@ -11,6 +11,7 @@
 ## Marts y reportes
 
 - [Marts and reports](marts_and_reports_notes.md)
+- [Statement period policy](statement_period_policy.md)
 
 ## Arquitectura general
 
