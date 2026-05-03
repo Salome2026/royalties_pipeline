@@ -371,7 +371,10 @@ export default function Home() {
     return (
       <div className="login">
         <section className="panel">
-          <h1>VPO Corp</h1>
+          <div className="login-brand">
+            <span className="brand-vpo">VPO</span>
+            <span className="brand-corp">Corp</span>
+          </div>
           <p>Validando sesion...</p>
         </section>
       </div>
@@ -382,7 +385,11 @@ export default function Home() {
     return (
       <div className="login">
         <form className="panel" onSubmit={login}>
-          <h1>VPO Corp</h1>
+          <div className="login-brand">
+            <span className="brand-vpo">VPO</span>
+            <span className="brand-corp">Corp</span>
+          </div>
+          <p className="login-copy">Sistema privado de reportes de regalias digitales.</p>
           {message && <div className={`message ${message.type === "error" ? "error" : ""}`}>{message.text}</div>}
           <label htmlFor="password">Contrasena</label>
           <input id="password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required />
@@ -395,7 +402,10 @@ export default function Home() {
   return (
     <div className="shell">
       <header className="topbar">
-        <div className="brand">VPO Corp</div>
+        <div className="brand" aria-label="VPO Corp">
+          <span className="brand-vpo">VPO</span>
+          <span className="brand-corp">Corp</span>
+        </div>
         <div className="top-actions">
           {view !== "menu" && <button type="button" onClick={() => openView("menu")}>Menu</button>}
           <button type="button" onClick={logout}>Salir</button>
@@ -406,20 +416,39 @@ export default function Home() {
         {message && <div className={`message ${message.type === "error" ? "error" : ""}`}>{message.text}</div>}
 
         {view === "menu" && (
-          <div className="menu-grid">
-            <button type="button" className="menu-card" onClick={() => openView("statement")}>
-              <strong>Reporte por statement</strong>
-              <span>Totales por artista, statement y distribuidora.</span>
-            </button>
-            <button type="button" className="menu-card" onClick={() => openView("royalties")}>
-              <strong>Reporte de regalias</strong>
-              <span>Busqueda por palabra clave, periodo, Excel o Google Sheets.</span>
-            </button>
-            <button type="button" className="menu-card" onClick={() => openView("participation")}>
-              <strong>Participacion en distribuidoras</strong>
-              <span>Torta simple por fuente, guardada desde marts publicados.</span>
-            </button>
-          </div>
+          <>
+            <section className="home-hero">
+              <div>
+                <div className="hero-brand">
+                  <span className="brand-vpo">VPO</span>
+                  <span className="brand-corp">Corp</span>
+                </div>
+                <p>Royalty intelligence para reportes, statements y participacion digital.</p>
+              </div>
+              <div className="hero-stats">
+                <span>Marts publicados</span>
+                <strong>Live</strong>
+              </div>
+            </section>
+
+            <div className="menu-grid">
+              <button type="button" className="menu-card" onClick={() => openView("statement")}>
+                <span className="card-index">01</span>
+                <strong>Reporte por statement</strong>
+                <span>Totales por artista, statement y distribuidora.</span>
+              </button>
+              <button type="button" className="menu-card" onClick={() => openView("royalties")}>
+                <span className="card-index">02</span>
+                <strong>Reporte de regalias</strong>
+                <span>Busqueda por palabra clave, periodo, Excel o Google Sheets.</span>
+              </button>
+              <button type="button" className="menu-card" onClick={() => openView("participation")}>
+                <span className="card-index">03</span>
+                <strong>Participacion en distribuidoras</strong>
+                <span>Torta simple por fuente, guardada desde marts publicados.</span>
+              </button>
+            </div>
+          </>
         )}
 
         {view === "statement" && (
