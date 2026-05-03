@@ -28,10 +28,11 @@ Usar los mismos valores que Render:
 - `VPO_API_CACHE_DIR=/tmp/vpo-corp/gcs_marts`
 - `VPO_API_REPORTS_DIR=/tmp/vpo-corp/reports`
 - `VPO_API_KEY`
-- `GCS_SERVICE_ACCOUNT_JSON`
 - `GOOGLE_SHEETS_SHARE_EMAIL`
 - `GOOGLE_DRIVE_FOLDER_ID`
 - `GOOGLE_OAUTH_TOKEN_JSON`
+
+Para leer Google Cloud Storage en Cloud Run, preferimos usar el service account adjunto al servicio. Ese service account necesita permiso sobre el bucket, por ejemplo `Storage Object Viewer`.
 
 ## Deploy inicial desde la raiz del repo
 
@@ -50,6 +51,13 @@ gcloud run deploy vpo-corp-api `
 ```
 
 Despues cargar las variables secretas desde la consola de Cloud Run o con `gcloud run services update`.
+
+Variables secretas a cargar:
+
+- `VPO_API_KEY`
+- `GOOGLE_OAUTH_TOKEN_JSON`
+- `GOOGLE_SHEETS_SHARE_EMAIL`
+- `GOOGLE_DRIVE_FOLDER_ID`
 
 ## Verificacion
 

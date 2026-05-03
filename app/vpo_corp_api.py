@@ -121,10 +121,7 @@ def gcs_client() -> storage.Client:
 
         return storage.Client.from_service_account_json(str(credentials_path))
 
-    raise HTTPException(
-        status_code=500,
-        detail="Configure GCS_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS.",
-    )
+    return storage.Client()
 
 
 def google_credentials(scopes: list[str]):
