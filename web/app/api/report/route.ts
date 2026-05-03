@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 const SESSION_COOKIE = "vpo_web_session";
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   const cookieStore = await cookies();

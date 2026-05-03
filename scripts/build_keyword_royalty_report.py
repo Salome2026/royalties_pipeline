@@ -361,7 +361,7 @@ def build_report_tables(
     if period_column == "statement_period":
         raw_filter = build_filter(standardized_cols, SEARCH_COLUMNS_STANDARDIZED, keywords, mode)
 
-        song = (
+        song_lf = (
             add_period_filter(
                 add_match_text(pl.scan_parquet(standardized_path), standardized_cols, SEARCH_COLUMNS_STANDARDIZED),
                 standardized_cols,
@@ -396,8 +396,166 @@ def build_report_tables(
                 else pl.col("content_type"),
                 pl.col(period_column).cast(pl.Utf8).alias("period_month"),
             ])
-            .collect()
         )
+
+        metrics_lf = song_lf.select([
+            pl.len().alias("song_level_rows"),
+            pl.sum("amount_usd").alias("song_level_amount_usd"),
+        ])
+
+        source_summary_lf = (
+            song_lf
+            .group_by(["source", "account"])
+            .agg([
+                pl.sum("amount_usd").alias("amount_usd"),
+                pl.sum("units").alias("units"),
+                pl.len().alias("rows"),
+            ])
+            .sort("amount_usd", descending=True)
+        )
+
+        monthly_summary_lf = (
+            song_lf
+            .group_by(["period_month"])
+            .agg([
+                pl.sum("amount_usd").alias("amount_usd"),
+                pl.sum("units").alias("units"),
+                pl.len().alias("rows"),
+            ])
+            .sort("period_month")
+        )
+
+        track_summary_lf = (
+            song_lf
+            .group_by([
+                "source",
+                "account",
+                "asset_isrc",
+                "track_statement_style",
+                "asset_title_statement",
+                "artist_statement_style",
+                "asset_artist_statement",
+                "content_type",
+            ])
+            .agg([
+                pl.sum("amount_usd").alias("amount_usd"),
+                pl.sum("units").alias("units"),
+                pl.min("period_month").alias("first_month"),
+                pl.max("period_month").alias("last_month"),
+                pl.len().alias("rows"),
+            ])
+            .sort("amount_usd", descending=True)
+        )
+
+        song_matches_lf = (
+            song_lf
+            .sort("amount_usd", descending=True)
+            .limit(raw_limit)
+        )
+
+        raw_sample_lf = (
+            add_period_filter(
+                add_match_text(pl.scan_parquet(standardized_path), standardized_cols, SEARCH_COLUMNS_STANDARDIZED),
+                standardized_cols,
+                start_month,
+                end_month,
+                period_column,
+            )
+            .filter(raw_filter)
+            .select([
+                col for col in [
+                    "source",
+                    "account",
+                    "statement_period",
+                    "transaction_month",
+                    "artist_statement_style",
+                    "track_statement_style",
+                    "asset_isrc",
+                    "amount_usd",
+                    "net_amount",
+                    "units",
+                    "store_name",
+                    "territory",
+                    "statement_file_name",
+                    "match_text",
+                ]
+                if col in standardized_cols or col == "match_text"
+            ])
+            .limit(raw_limit)
+        )
+
+        metrics = metrics_lf.collect()
+        song_rows = int(metrics["song_level_rows"][0])
+        song_amount_usd = float(metrics["song_level_amount_usd"][0] or 0)
+
+        if song_rows == 0:
+            print("No hubo matches en standardized_raw_all_sources.")
+            return {
+                "instructions": display_dataframe(instructions_dataframe()),
+                "overview": display_dataframe(pd.DataFrame([{
+                    "keywords": ", ".join(keywords),
+                    "mode": mode,
+                    "period_basis": period_label,
+                    "start_month": start_month or "",
+                    "end_month": end_month or "",
+                    "song_level_rows": 0,
+                    "song_level_amount_usd": 0,
+                    "raw_sample_rows": 0,
+                    "generated_at": datetime.now().isoformat(timespec="seconds"),
+                }])),
+                "sin_resultados": display_dataframe(pd.DataFrame([{
+                    "resultado": "Sin coincidencias para los parametros ingresados."
+                }])),
+            }
+
+        source_summary = source_summary_lf.collect()
+        monthly_summary = monthly_summary_lf.collect()
+        track_summary = track_summary_lf.collect()
+        song_matches = song_matches_lf.collect()
+        raw_sample = raw_sample_lf.collect()
+
+        tables = {
+            "instructions": display_dataframe(instructions_dataframe()),
+            "overview": display_dataframe(pd.DataFrame([{
+                "keywords": ", ".join(keywords),
+                "mode": mode,
+                "period_basis": period_label,
+                "start_month": start_month or "",
+                "end_month": end_month or "",
+                "song_level_rows": song_rows,
+                "song_level_amount_usd": song_amount_usd,
+                "raw_sample_rows": raw_sample.height if raw_sample.height > 0 else 0,
+                "generated_at": datetime.now().isoformat(timespec="seconds"),
+            }])),
+            "source_summary": display_dataframe(source_summary.to_pandas()),
+            "monthly_summary": display_dataframe(monthly_summary.to_pandas()),
+            "track_summary": display_dataframe(track_summary.to_pandas()),
+            "song_matches": display_dataframe(safe_select(
+                song_matches,
+                [
+                    "source",
+                    "account",
+                    "statement_period",
+                    "transaction_month",
+                    "asset_isrc",
+                    "track_statement_style",
+                    "asset_title_statement",
+                    "artist_statement_style",
+                    "asset_artist_statement",
+                    "content_type",
+                    "amount_usd",
+                    "units",
+                    "source_sheet",
+                    "revenue_basis",
+                    "match_text",
+                ],
+            ).to_pandas()),
+        }
+
+        if raw_sample.height > 0:
+            tables["raw_matches_sample"] = display_dataframe(raw_sample.to_pandas())
+
+        return tables
     else:
         song = (
             add_period_filter(
