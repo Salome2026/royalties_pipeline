@@ -78,6 +78,11 @@ class RefreshRequest(BaseModel):
     refresh_cache: bool = False
 
 
+class StatementReportRequest(BaseModel):
+    refresh_cache: bool = False
+    min_artist_total_usd: float = Field(default=0.0, ge=0.0, le=1_000_000.0)
+
+
 ParticipationPreset = Literal["last_month", "last_3_months", "last_year", "all_history", "custom"]
 
 
@@ -601,7 +606,7 @@ def keyword_report(
 
 @app.post("/reports/statement")
 def statement_report(
-    request: RefreshRequest,
+    request: StatementReportRequest,
     x_vpo_api_key: str | None = Header(default=None),
 ) -> FileResponse:
     require_api_key(x_vpo_api_key)
@@ -612,6 +617,7 @@ def statement_report(
     output_path = build_statement_report_from_summary(
         summary_path=marts[STATEMENT_SUMMARY_FILE],
         output_path=output_path,
+        min_artist_total_usd=request.min_artist_total_usd,
     )
 
     return FileResponse(

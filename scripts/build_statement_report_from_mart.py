@@ -147,9 +147,9 @@ def scope_key(source, account) -> str:
     return f"{source}_{account}"
 
 
-def add_config_sheet(writer, scopes: list[tuple[str, str]]) -> dict[str, int]:
+def add_config_sheet(writer, scopes: list[tuple[str, str]], min_artist_total_usd: float = 0.0) -> dict[str, int]:
     ws = writer.book.create_sheet("Config", 0)
-    headers = ["Distribuidora/Cuenta", "Incluir en TOTAL"]
+    headers = ["Distribuidora/Cuenta", "Incluir en TOTAL", "Umbral aplicado USD"]
     ws.append(headers)
 
     scope_rows = {}
@@ -157,6 +157,7 @@ def add_config_sheet(writer, scopes: list[tuple[str, str]]) -> dict[str, int]:
         key = scope_key(source, account)
         ws.cell(row=row_idx, column=1).value = key
         ws.cell(row=row_idx, column=2).value = "NO" if key == "onerpm_gusty_dj" else "SI"
+        ws.cell(row=row_idx, column=3).value = float(min_artist_total_usd)
         scope_rows[key] = row_idx
 
     for cell in ws[1]:
@@ -167,6 +168,8 @@ def add_config_sheet(writer, scopes: list[tuple[str, str]]) -> dict[str, int]:
     for row in range(2, len(scopes) + 2):
         ws.cell(row=row, column=1).fill = CONFIG_FILL
         ws.cell(row=row, column=2).alignment = CENTER_ALIGN
+        ws.cell(row=row, column=3).alignment = CENTER_ALIGN
+        ws.cell(row=row, column=3).number_format = '#,##0.00'
 
     validation = DataValidation(type="list", formula1='"SI,NO"', allow_blank=False)
     ws.add_data_validation(validation)
@@ -174,6 +177,7 @@ def add_config_sheet(writer, scopes: list[tuple[str, str]]) -> dict[str, int]:
 
     ws.column_dimensions["A"].width = 32
     ws.column_dimensions["B"].width = 18
+    ws.column_dimensions["C"].width = 18
     ws.freeze_panes = "A2"
     return scope_rows
 
@@ -362,9 +366,35 @@ def aggregate_statement_summary(summary_path: Path) -> tuple[pd.DataFrame, pd.Da
     return totals, fuga_eur
 
 
-def write_statement_report(df: pd.DataFrame, fuga_eur_df: pd.DataFrame, output_path: Path) -> Path:
+def filter_by_scope_artist_threshold(df: pd.DataFrame, min_artist_total_usd: float) -> pd.DataFrame:
+    if min_artist_total_usd <= 0 or df.empty:
+        return df
+
+    scope_totals = (
+        df
+        .groupby(["source", "account", "artist"], dropna=False, as_index=False)["total"]
+        .sum()
+    )
+    keep = scope_totals.loc[
+        scope_totals["total"].abs() >= min_artist_total_usd,
+        ["source", "account", "artist"],
+    ]
+
+    return df.merge(keep, on=["source", "account", "artist"], how="inner")
+
+
+def write_statement_report(
+    df: pd.DataFrame,
+    fuga_eur_df: pd.DataFrame,
+    output_path: Path,
+    min_artist_total_usd: float = 0.0,
+) -> Path:
     if df.empty:
         raise ValueError("No hay datos para generar el reporte por statement.")
+
+    df = filter_by_scope_artist_threshold(df, min_artist_total_usd)
+    if df.empty:
+        raise ValueError("No hay datos para generar el reporte por statement con el umbral seleccionado.")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -375,7 +405,7 @@ def write_statement_report(df: pd.DataFrame, fuga_eur_df: pd.DataFrame, output_p
                 for source, account in df[["source", "account"]].drop_duplicates().itertuples(index=False, name=None)
             }
         )
-        add_config_sheet(writer, scopes)
+        add_config_sheet(writer, scopes, min_artist_total_usd)
         config_rows = len(scopes) + 1
 
         total_source = df.copy()
@@ -469,23 +499,25 @@ def write_statement_report(df: pd.DataFrame, fuga_eur_df: pd.DataFrame, output_p
 def build_statement_report_from_mart(
     standardized_path: Path = STANDARDIZED_ALL_PATH,
     output_path: Path | None = None,
+    min_artist_total_usd: float = 0.0,
 ) -> Path:
     if output_path is None:
         output_path = REPORTS_DIR / "reporte_ingresos_digitales_por_mes_de_statement_marts.xlsx"
 
     df, fuga_eur_df = aggregate_statement_data(standardized_path)
-    return write_statement_report(df, fuga_eur_df, output_path)
+    return write_statement_report(df, fuga_eur_df, output_path, min_artist_total_usd)
 
 
 def build_statement_report_from_summary(
     summary_path: Path = STATEMENT_SUMMARY_PATH,
     output_path: Path | None = None,
+    min_artist_total_usd: float = 0.0,
 ) -> Path:
     if output_path is None:
         output_path = REPORTS_DIR / "reporte_ingresos_digitales_por_mes_de_statement_marts.xlsx"
 
     df, fuga_eur_df = aggregate_statement_summary(summary_path)
-    return write_statement_report(df, fuga_eur_df, output_path)
+    return write_statement_report(df, fuga_eur_df, output_path, min_artist_total_usd)
 
 
 def main():

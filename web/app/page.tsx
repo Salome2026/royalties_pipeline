@@ -100,6 +100,7 @@ export default function Home() {
   const [periodBasis, setPeriodBasis] = useState("transaction_month");
   const [mode, setMode] = useState("any");
   const [rawLimit, setRawLimit] = useState("5000");
+  const [statementMinTotal, setStatementMinTotal] = useState("0");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [statementLoading, setStatementLoading] = useState(false);
@@ -268,7 +269,10 @@ export default function Home() {
     const response = await fetch("/api/statement", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_cache: false }),
+      body: JSON.stringify({
+        refresh_cache: false,
+        min_artist_total_usd: Number(statementMinTotal) || 0,
+      }),
     });
 
     if (!response.ok) {
@@ -455,6 +459,16 @@ export default function Home() {
           <section className="panel">
             <h1>Reporte por statement</h1>
             <p>Genera el reporte historico por statement usando los marts nuevos publicados.</p>
+            <label htmlFor="statement_min_total">No mostrar artistas menores a USD</label>
+            <input
+              id="statement_min_total"
+              type="number"
+              min="0"
+              step="1"
+              value={statementMinTotal}
+              onChange={(event) => setStatementMinTotal(event.target.value)}
+            />
+            <p className="field-help">Se aplica por artista dentro de cada distribuidora/cuenta.</p>
             <button type="button" disabled={statementLoading} onClick={generateStatementReport}>
               {statementLoading ? "Generando..." : "Descargar reporte por statement"}
             </button>
