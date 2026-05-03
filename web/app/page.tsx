@@ -37,6 +37,19 @@ type ParticipationCache = {
 
 const PIE_COLORS = ["#17324d", "#0f766e", "#b54708", "#6941c6", "#b42318", "#475467", "#2e90fa"];
 const PARTICIPATION_CACHE_KEY = "vpo_participation_last_result";
+const MONTH_NAMES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+const MONTH_OPTIONS = Array.from({ length: 11 }, (_, yearIndex) => 2020 + yearIndex)
+  .flatMap((year) => MONTH_NAMES.map((month, monthIndex) => {
+    const value = `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
+    return { value, label: `${month} ${year}` };
+  }));
+
+type MonthSelectProps = {
+  id: string;
+  value: string;
+  min?: string | null;
+  onChange: (value: string) => void;
+};
 
 function filenameFromDisposition(disposition: string | null, fallback: string) {
   if (!disposition) return fallback;
@@ -61,6 +74,19 @@ function money(value: number) {
 
 function pct(value: number) {
   return `${value.toFixed(1)}%`;
+}
+
+function MonthSelect({ id, value, min, onChange }: MonthSelectProps) {
+  const options = MONTH_OPTIONS.filter((option) => !min || option.value >= min);
+
+  return (
+    <select id={id} value={value} onChange={(event) => onChange(event.target.value)}>
+      <option value="">Sin limite</option>
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>{option.label}</option>
+      ))}
+    </select>
+  );
 }
 
 export default function Home() {
@@ -417,11 +443,11 @@ export default function Home() {
               <div className="row">
                 <div>
                   <label htmlFor="start_month">Desde</label>
-                  <input id="start_month" type="month" value={startMonth} onChange={(event) => setStartMonth(event.target.value)} />
+                  <MonthSelect id="start_month" value={startMonth} onChange={setStartMonth} />
                 </div>
                 <div>
                   <label htmlFor="end_month">Hasta</label>
-                  <input id="end_month" type="month" value={endMonth} onChange={(event) => setEndMonth(event.target.value)} />
+                  <MonthSelect id="end_month" value={endMonth} onChange={setEndMonth} />
                 </div>
               </div>
 
@@ -504,22 +530,20 @@ export default function Home() {
                 <>
                   <div>
                     <label htmlFor="participation_start">Desde</label>
-                    <input
+                    <MonthSelect
                       id="participation_start"
-                      type="month"
                       value={participationStartMonth}
                       min={participation?.available_start_month || undefined}
-                      onChange={(event) => setParticipationStartMonth(event.target.value)}
+                      onChange={setParticipationStartMonth}
                     />
                   </div>
                   <div>
                     <label htmlFor="participation_end">Hasta</label>
-                    <input
+                    <MonthSelect
                       id="participation_end"
-                      type="month"
                       value={participationEndMonth}
                       min={participation?.available_start_month || undefined}
-                      onChange={(event) => setParticipationEndMonth(event.target.value)}
+                      onChange={setParticipationEndMonth}
                     />
                   </div>
                 </>
