@@ -1,13 +1,21 @@
 :root {
-  --bg: #f5f7fb;
-  --ink: #172033;
-  --muted: #667085;
-  --line: #d7deea;
+  --bg: #f3f5f8;
+  --bg-soft: #eef4f3;
+  --ink: #141a27;
+  --muted: #637083;
+  --line: #d8dee8;
+  --line-strong: #c0cad8;
   --panel: #ffffff;
-  --brand: #17324d;
+  --panel-soft: #f8fafc;
+  --brand: #1f3350;
+  --brand-2: #2f5d62;
   --accent: #0f766e;
+  --accent-dark: #0b5f59;
+  --gold: #b7791f;
   --danger: #b42318;
   --ok: #067647;
+  --shadow: 0 18px 42px rgba(20, 26, 39, .08);
+  --shadow-soft: 0 10px 24px rgba(20, 26, 39, .06);
 }
 
 * {
@@ -17,9 +25,11 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: var(--bg);
+  background:
+    linear-gradient(180deg, rgba(31, 51, 80, .08) 0, rgba(31, 51, 80, 0) 280px),
+    var(--bg);
   color: var(--ink);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, Helvetica, sans-serif;
 }
 
 button,
@@ -31,30 +41,55 @@ select {
 .shell {
   min-height: 100vh;
   display: grid;
-  grid-template-rows: 64px 1fr;
+  grid-template-rows: 68px 1fr;
 }
 
 .topbar {
-  background: var(--brand);
-  color: #fff;
+  background: rgba(255, 255, 255, .92);
+  color: var(--ink);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 28px;
+  padding: 0 30px;
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(14px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .brand {
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: 0;
+  color: var(--brand);
+}
+
+.brand::before {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 10px;
+  border-radius: 3px;
+  background: var(--accent);
+  box-shadow: 14px 0 0 var(--gold), 28px 0 0 var(--brand);
 }
 
 .topbar button {
   width: auto;
   margin: 0;
-  background: transparent;
-  border: 1px solid rgba(255, 255, 255, .45);
   min-height: 36px;
-  padding: 8px 12px;
+  padding: 8px 13px;
+  color: var(--brand);
+  background: #fff;
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+
+.topbar button:hover {
+  border-color: var(--brand-2);
+  background: var(--panel-soft);
 }
 
 .top-actions {
@@ -65,7 +100,7 @@ select {
 
 main {
   width: min(1180px, calc(100vw - 40px));
-  margin: 28px auto 48px;
+  margin: 30px auto 52px;
 }
 
 .menu-grid {
@@ -76,10 +111,11 @@ main {
 
 .menu-card {
   width: 100%;
-  min-height: 170px;
+  min-height: 190px;
   margin: 0;
   padding: 22px;
   border: 1px solid var(--line);
+  border-radius: 8px;
   background: var(--panel);
   color: var(--ink);
   text-align: left;
@@ -88,27 +124,48 @@ main {
   align-items: flex-start;
   justify-content: space-between;
   gap: 18px;
-  box-shadow: 0 12px 28px rgba(23, 32, 51, .06);
+  box-shadow: var(--shadow-soft);
+  position: relative;
+  overflow: hidden;
+}
+
+.menu-card::before {
+  content: "";
+  width: 44px;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--accent);
+}
+
+.menu-card:nth-child(2)::before {
+  background: var(--gold);
+}
+
+.menu-card:nth-child(3)::before {
+  background: var(--brand-2);
 }
 
 .menu-card:hover {
-  border-color: var(--accent);
+  border-color: var(--line-strong);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow);
 }
 
 .menu-card strong {
-  font-size: 20px;
+  font-size: 21px;
   line-height: 1.2;
+  letter-spacing: 0;
 }
 
 .menu-card span {
   color: var(--muted);
-  line-height: 1.4;
-  font-weight: 400;
+  line-height: 1.45;
+  font-weight: 500;
 }
 
 .grid {
   display: grid;
-  grid-template-columns: 380px 1fr;
+  grid-template-columns: minmax(340px, 410px) 1fr;
   gap: 24px;
   align-items: start;
 }
@@ -117,17 +174,19 @@ main {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 22px;
+  padding: 24px;
+  box-shadow: var(--shadow-soft);
 }
 
 h1,
 h2 {
   margin: 0 0 18px;
-  line-height: 1.2;
+  line-height: 1.18;
+  letter-spacing: 0;
 }
 
 h1 {
-  font-size: 24px;
+  font-size: 25px;
 }
 
 h2 {
@@ -142,8 +201,10 @@ p {
 
 label {
   display: block;
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: .02em;
+  color: #3a4658;
   margin: 16px 0 7px;
 }
 
@@ -151,10 +212,24 @@ input,
 select {
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 7px;
   padding: 11px 12px;
   font-size: 15px;
+  color: var(--ink);
   background: #fff;
+  outline: none;
+  transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+}
+
+input:hover,
+select:hover {
+  border-color: var(--line-strong);
+}
+
+input:focus,
+select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, .14);
 }
 
 .row {
@@ -166,10 +241,10 @@ select {
 button,
 .button {
   border: 0;
-  border-radius: 6px;
-  padding: 12px 14px;
+  border-radius: 7px;
+  padding: 12px 15px;
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 800;
   cursor: pointer;
   background: var(--accent);
   color: #fff;
@@ -178,6 +253,8 @@ button,
   align-items: center;
   justify-content: center;
   min-height: 44px;
+  box-shadow: 0 10px 20px rgba(15, 118, 110, .18);
+  transition: transform .15s ease, background .15s ease, box-shadow .15s ease;
 }
 
 button {
@@ -185,18 +262,26 @@ button {
   margin-top: 20px;
 }
 
+button:hover,
+.button:hover {
+  background: var(--accent-dark);
+  transform: translateY(-1px);
+}
+
 button:disabled {
   cursor: wait;
   opacity: .65;
+  transform: none;
 }
 
 .message {
-  border-radius: 6px;
-  padding: 12px 14px;
+  border-radius: 8px;
+  padding: 13px 15px;
   margin-bottom: 18px;
   background: #ecfdf3;
   border: 1px solid #abefc6;
   color: var(--ok);
+  font-weight: 700;
 }
 
 .message.error {
@@ -214,9 +299,9 @@ button:disabled {
 
 .meta div {
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 8px;
   padding: 12px;
-  background: #fbfcfe;
+  background: var(--panel-soft);
 }
 
 .meta strong {
@@ -234,13 +319,23 @@ button:disabled {
 }
 
 .login .panel {
-  width: min(420px, 100%);
+  width: min(430px, 100%);
+  box-shadow: var(--shadow);
+}
+
+.login h1 {
+  color: var(--brand);
 }
 
 .filename {
   word-break: break-word;
   color: var(--ink);
-  font-weight: 700;
+  font-weight: 800;
+  background: var(--panel-soft);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 10px 12px;
+  margin-top: 16px;
 }
 
 .section-heading {
@@ -266,7 +361,7 @@ button:disabled {
   padding: 14px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fbfcfe;
+  background: var(--panel-soft);
 }
 
 .period-controls label {
@@ -286,6 +381,10 @@ button:disabled {
   align-items: center;
   margin-bottom: 22px;
   color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: var(--panel-soft);
 }
 
 .period-meta strong {
@@ -304,12 +403,12 @@ button:disabled {
   aspect-ratio: 1;
   border-radius: 50%;
   border: 1px solid var(--line);
-  box-shadow: inset 0 0 0 16px #fff, 0 12px 28px rgba(23, 32, 51, .08);
+  box-shadow: inset 0 0 0 17px #fff, 0 16px 34px rgba(20, 26, 39, .1);
 }
 
 .legend {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .legend-row {
@@ -317,8 +416,10 @@ button:disabled {
   grid-template-columns: 16px minmax(110px, 1fr) 70px 110px;
   gap: 10px;
   align-items: center;
-  border-bottom: 1px solid var(--line);
-  padding: 10px 0;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 10px 12px;
+  background: #fff;
 }
 
 .legend-row strong {
@@ -354,7 +455,7 @@ button:disabled {
   }
 
   .menu-card {
-    min-height: 136px;
+    min-height: 148px;
   }
 
   .section-heading {
