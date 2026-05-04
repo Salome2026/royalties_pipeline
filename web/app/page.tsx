@@ -211,7 +211,7 @@ export default function Home() {
     if (!validatePeriod()) return;
     setLoading(true);
 
-    const response = await fetch("/api/report", {
+    const response = await fetch("/api/report-link", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(buildPayload("excel")),
@@ -224,11 +224,12 @@ export default function Home() {
       return;
     }
 
-    const blob = await response.blob();
-    const filename = filenameFromDisposition(response.headers.get("content-disposition"), "vpo_corp_report.xlsx");
-    downloadBlob(blob, filename);
-    setLastFile(filename);
-    setMessage({ type: "ok", text: "Reporte generado correctamente." });
+    const data = await response.json();
+    if (data.url) {
+      window.location.href = data.url;
+    }
+    setLastFile("Descarga directa iniciada");
+    setMessage({ type: "ok", text: "Reporte solicitado. La descarga se abre directo desde Cloud Run." });
     setLoading(false);
   }
 

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import sys
 from calendar import monthrange
 from datetime import date
 from datetime import datetime
+from time import time
 from pathlib import Path
 from typing import Literal
 
@@ -103,6 +106,68 @@ def require_api_key(x_vpo_api_key: str | None) -> None:
 
     if x_vpo_api_key != VPO_API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key.")
+
+
+def report_signature_payload(
+    keywords: str,
+    start_month: str,
+    end_month: str,
+    period_basis: str,
+    mode: str,
+    raw_limit: int,
+    refresh_cache: bool,
+    expires: int,
+) -> str:
+    return "\n".join([
+        keywords,
+        start_month,
+        end_month,
+        period_basis,
+        mode,
+        str(raw_limit),
+        "1" if refresh_cache else "0",
+        str(expires),
+    ])
+
+
+def sign_report_payload(payload: str) -> str:
+    if not VPO_API_KEY or VPO_API_KEY == "change-me":
+        raise HTTPException(status_code=500, detail="VPO_API_KEY is not configured.")
+
+    return hmac.new(
+        VPO_API_KEY.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def require_valid_report_signature(
+    keywords: str,
+    start_month: str,
+    end_month: str,
+    period_basis: str,
+    mode: str,
+    raw_limit: int,
+    refresh_cache: bool,
+    expires: int,
+    sig: str,
+) -> None:
+    if expires < int(time()):
+        raise HTTPException(status_code=401, detail="Download link expired.")
+
+    expected = sign_report_payload(report_signature_payload(
+        keywords=keywords,
+        start_month=start_month,
+        end_month=end_month,
+        period_basis=period_basis,
+        mode=mode,
+        raw_limit=raw_limit,
+        refresh_cache=refresh_cache,
+        expires=expires,
+    ))
+
+    if not hmac.compare_digest(expected, sig):
+        raise HTTPException(status_code=401, detail="Invalid download signature.")
 
 
 def gcs_client() -> storage.Client:
@@ -589,6 +654,58 @@ def keyword_report(
         start_month=request.start_month,
         end_month=request.end_month,
         period_basis=request.period_basis,
+        song_path=marts[SONG_FILE],
+        standardized_path=marts[STANDARDIZED_FILE],
+        output_dir=VPO_API_REPORTS_DIR,
+    )
+
+    return FileResponse(
+        path=output_path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=output_path.name,
+    )
+
+
+@app.get("/reports/keyword-download")
+def keyword_report_download(
+    keywords: str,
+    expires: int,
+    sig: str,
+    start_month: str = "",
+    end_month: str = "",
+    period_basis: Literal["transaction_month", "statement_period"] = "transaction_month",
+    mode: Literal["any", "all"] = "any",
+    raw_limit: int = 5000,
+    refresh_cache: bool = False,
+) -> FileResponse:
+    require_valid_report_signature(
+        keywords=keywords,
+        start_month=start_month,
+        end_month=end_month,
+        period_basis=period_basis,
+        mode=mode,
+        raw_limit=raw_limit,
+        refresh_cache=refresh_cache,
+        expires=expires,
+        sig=sig,
+    )
+
+    if start_month and end_month and start_month > end_month:
+        raise HTTPException(status_code=400, detail="start_month cannot be greater than end_month.")
+
+    normalized_keywords = normalize_keywords([keywords])
+    if not normalized_keywords:
+        raise HTTPException(status_code=400, detail="At least one keyword is required.")
+
+    marts = ensure_marts(refresh_cache=refresh_cache, filenames=[SONG_FILE, STANDARDIZED_FILE])
+
+    output_path = build_report(
+        keywords=normalized_keywords,
+        mode=mode,
+        raw_limit=raw_limit,
+        start_month=start_month or None,
+        end_month=end_month or None,
+        period_basis=period_basis,
         song_path=marts[SONG_FILE],
         standardized_path=marts[STANDARDIZED_FILE],
         output_dir=VPO_API_REPORTS_DIR,
