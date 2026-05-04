@@ -361,7 +361,92 @@ def build_report_tables(
     if period_column == "statement_period":
         raw_filter = build_filter(standardized_cols, SEARCH_COLUMNS_STANDARDIZED, keywords, mode)
 
-        song_lf = (
+        statement_base_lf = (
+            add_period_filter(
+                pl.scan_parquet(standardized_path),
+                standardized_cols,
+                start_month,
+                end_month,
+                period_column,
+            )
+            .filter(raw_filter)
+            .select([
+                col for col in [
+                    "source",
+                    "account",
+                    "statement_period",
+                    "transaction_month",
+                    "asset_isrc",
+                    "track_statement_style",
+                    "asset_title_statement",
+                    "artist_statement_style",
+                    "asset_artist_statement",
+                    "content_type",
+                    "amount_usd",
+                    "units",
+                    "source_sheet",
+                    "revenue_basis",
+                ]
+                if col in standardized_cols
+            ])
+            .with_columns([
+                pl.lit(None).cast(pl.Utf8).alias("content_type")
+                if "content_type" not in standardized_cols
+                else pl.col("content_type"),
+                pl.col(period_column).cast(pl.Utf8).alias("period_month"),
+            ])
+        )
+
+        metrics_lf = statement_base_lf.select([
+            pl.len().alias("song_level_rows"),
+            pl.sum("amount_usd").alias("song_level_amount_usd"),
+        ])
+
+        source_summary_lf = (
+            statement_base_lf
+            .group_by(["source", "account"])
+            .agg([
+                pl.sum("amount_usd").alias("amount_usd"),
+                pl.sum("units").alias("units"),
+                pl.len().alias("rows"),
+            ])
+            .sort("amount_usd", descending=True)
+        )
+
+        monthly_summary_lf = (
+            statement_base_lf
+            .group_by(["period_month"])
+            .agg([
+                pl.sum("amount_usd").alias("amount_usd"),
+                pl.sum("units").alias("units"),
+                pl.len().alias("rows"),
+            ])
+            .sort("period_month")
+        )
+
+        track_summary_lf = (
+            statement_base_lf
+            .group_by([
+                "source",
+                "account",
+                "asset_isrc",
+                "track_statement_style",
+                "asset_title_statement",
+                "artist_statement_style",
+                "asset_artist_statement",
+                "content_type",
+            ])
+            .agg([
+                pl.sum("amount_usd").alias("amount_usd"),
+                pl.sum("units").alias("units"),
+                pl.min("period_month").alias("first_month"),
+                pl.max("period_month").alias("last_month"),
+                pl.len().alias("rows"),
+            ])
+            .sort("amount_usd", descending=True)
+        )
+
+        song_matches_lf = (
             add_period_filter(
                 add_match_text(pl.scan_parquet(standardized_path), standardized_cols, SEARCH_COLUMNS_STANDARDIZED),
                 standardized_cols,
@@ -396,59 +481,6 @@ def build_report_tables(
                 else pl.col("content_type"),
                 pl.col(period_column).cast(pl.Utf8).alias("period_month"),
             ])
-        )
-
-        metrics_lf = song_lf.select([
-            pl.len().alias("song_level_rows"),
-            pl.sum("amount_usd").alias("song_level_amount_usd"),
-        ])
-
-        source_summary_lf = (
-            song_lf
-            .group_by(["source", "account"])
-            .agg([
-                pl.sum("amount_usd").alias("amount_usd"),
-                pl.sum("units").alias("units"),
-                pl.len().alias("rows"),
-            ])
-            .sort("amount_usd", descending=True)
-        )
-
-        monthly_summary_lf = (
-            song_lf
-            .group_by(["period_month"])
-            .agg([
-                pl.sum("amount_usd").alias("amount_usd"),
-                pl.sum("units").alias("units"),
-                pl.len().alias("rows"),
-            ])
-            .sort("period_month")
-        )
-
-        track_summary_lf = (
-            song_lf
-            .group_by([
-                "source",
-                "account",
-                "asset_isrc",
-                "track_statement_style",
-                "asset_title_statement",
-                "artist_statement_style",
-                "asset_artist_statement",
-                "content_type",
-            ])
-            .agg([
-                pl.sum("amount_usd").alias("amount_usd"),
-                pl.sum("units").alias("units"),
-                pl.min("period_month").alias("first_month"),
-                pl.max("period_month").alias("last_month"),
-                pl.len().alias("rows"),
-            ])
-            .sort("amount_usd", descending=True)
-        )
-
-        song_matches_lf = (
-            song_lf
             .sort("amount_usd", descending=True)
             .limit(raw_limit)
         )
