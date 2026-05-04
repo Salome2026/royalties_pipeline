@@ -93,6 +93,8 @@ DISPLAY_HEADERS = {
     "content_type": "Tipo de contenido",
     "store": "Store",
     "store_raw": "Store original",
+    "usage_type": "Tipo",
+    "usage_raw": "Tipo original",
     "first_month": "Desde",
     "last_month": "Hasta",
     "source_sheet": "Hoja origen",
@@ -324,6 +326,76 @@ def normalize_report_store(lf: pl.LazyFrame, columns: set[str]) -> pl.LazyFrame:
     ])
 
 
+def usage_raw_expr(columns: set[str]) -> pl.Expr:
+    candidates = []
+    for col in [
+        "Sale Type",
+        "sale_type",
+        "Sales Type",
+        "Use Type",
+        "use_type",
+        "Product Type",
+        "product_type",
+        "ROYALTY TYPE",
+        "Royalty Type",
+        "royalty_type",
+        "TRANSACTION TYPE",
+        "TRANSACTION SUBTYPE",
+        "SERVICE DETAIL",
+        "service_detail",
+        "source_sheet",
+    ]:
+        if col in columns:
+            candidates.append(pl.col(col).cast(pl.Utf8, strict=False).str.strip_chars())
+
+    if not candidates:
+        return pl.lit(None).cast(pl.Utf8)
+
+    return pl.coalesce(candidates)
+
+
+def normalize_usage_expr(raw_usage: pl.Expr, raw_store: pl.Expr) -> pl.Expr:
+    value = pl.concat_str([
+        raw_usage.fill_null(""),
+        raw_store.fill_null(""),
+    ], separator=" | ").str.to_lowercase()
+
+    return (
+        pl.when(value.str.contains("short", literal=True))
+        .then(pl.lit("short_video"))
+        .when(value.str.contains("download", literal=True))
+        .then(pl.lit("download"))
+        .when(
+            value.str.contains("ugc", literal=True)
+            | value.str.contains("content id", literal=True)
+            | value.str.contains("channel income", literal=True)
+        )
+        .then(pl.lit("video_ugc"))
+        .when(
+            value.str.contains("video", literal=True)
+            | value.str.contains("youtube", literal=True)
+            | value.str.contains("vevo", literal=True)
+        )
+        .then(pl.lit("video_stream"))
+        .when(value.str.contains("stream", literal=True))
+        .then(pl.lit("audio_stream"))
+        .when(value.str.contains("tiktok", literal=True))
+        .then(pl.lit("short_video"))
+        .when(raw_usage.is_null() | (raw_usage == ""))
+        .then(pl.lit("unknown"))
+        .otherwise(value.str.replace_all(r"[^a-z0-9]+", "_").str.strip_chars("_"))
+    )
+
+
+def normalize_report_usage(lf: pl.LazyFrame, columns: set[str]) -> pl.LazyFrame:
+    raw_usage = usage_raw_expr(columns)
+    raw_store = store_raw_expr(columns)
+    return lf.with_columns([
+        raw_usage.alias("usage_raw"),
+        normalize_usage_expr(raw_usage, raw_store).alias("usage_type"),
+    ])
+
+
 def display_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
     return dataframe.rename(columns={col: DISPLAY_HEADERS.get(col, col) for col in dataframe.columns})
 
@@ -422,6 +494,10 @@ def instructions_dataframe() -> pd.DataFrame:
             "contenido": "Totales agrupados por store normalizado y store original de cada distribuidora.",
         },
         {
+            "hoja": "usage_summary",
+            "contenido": "Totales agrupados por tipo normalizado y tipo original de uso/venta.",
+        },
+        {
             "hoja": "track_summary",
             "contenido": "Totales por tema/asset, ISRC, artista, tipo de contenido y periodo encontrado.",
         },
@@ -471,14 +547,17 @@ def build_report_tables(
         raw_filter = build_filter(standardized_cols, SEARCH_COLUMNS_STANDARDIZED, keywords, mode)
 
         statement_base_lf = (
-            normalize_report_store(
-                normalize_report_units(
-                    add_period_filter(
-                        pl.scan_parquet(standardized_path),
+            normalize_report_usage(
+                normalize_report_store(
+                    normalize_report_units(
+                        add_period_filter(
+                            pl.scan_parquet(standardized_path),
+                            standardized_cols,
+                            start_month,
+                            end_month,
+                            period_column,
+                        ),
                         standardized_cols,
-                        start_month,
-                        end_month,
-                        period_column,
                     ),
                     standardized_cols,
                 ),
@@ -499,12 +578,14 @@ def build_report_tables(
                     "content_type",
                     "store",
                     "store_raw",
+                    "usage_type",
+                    "usage_raw",
                     "amount_usd",
                     "units",
                     "source_sheet",
                     "revenue_basis",
                 ]
-                if col in standardized_cols or col in {"store", "store_raw"}
+                if col in standardized_cols or col in {"store", "store_raw", "usage_type", "usage_raw"}
             ])
             .with_columns([
                 pl.lit(None).cast(pl.Utf8).alias("content_type")
@@ -553,6 +634,17 @@ def build_report_tables(
             .sort("amount_usd", descending=True)
         )
 
+        usage_summary_lf = (
+            statement_base_lf
+            .group_by(["source", "account", "usage_type", "usage_raw"])
+            .agg([
+                pl.sum("amount_usd").alias("amount_usd"),
+                pl.sum("units").alias("units"),
+                pl.len().alias("rows"),
+            ])
+            .sort("amount_usd", descending=True)
+        )
+
         track_summary_lf = (
             statement_base_lf
             .group_by([
@@ -565,6 +657,7 @@ def build_report_tables(
                 "asset_artist_statement",
                 "content_type",
                 "store",
+                "usage_type",
             ])
             .agg([
                 pl.sum("amount_usd").alias("amount_usd"),
@@ -577,14 +670,17 @@ def build_report_tables(
         )
 
         song_matches_lf = (
-            normalize_report_store(
-                normalize_report_units(
-                    add_period_filter(
-                        add_match_text(pl.scan_parquet(standardized_path), standardized_cols, SEARCH_COLUMNS_STANDARDIZED),
+            normalize_report_usage(
+                normalize_report_store(
+                    normalize_report_units(
+                        add_period_filter(
+                            add_match_text(pl.scan_parquet(standardized_path), standardized_cols, SEARCH_COLUMNS_STANDARDIZED),
+                            standardized_cols,
+                            start_month,
+                            end_month,
+                            period_column,
+                        ),
                         standardized_cols,
-                        start_month,
-                        end_month,
-                        period_column,
                     ),
                     standardized_cols,
                 ),
@@ -605,13 +701,15 @@ def build_report_tables(
                     "content_type",
                     "store",
                     "store_raw",
+                    "usage_type",
+                    "usage_raw",
                     "amount_usd",
                     "units",
                     "source_sheet",
                     "revenue_basis",
                     "match_text",
                 ]
-                if col in standardized_cols or col in {"match_text", "store", "store_raw"}
+                if col in standardized_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw"}
             ])
             .with_columns([
                 pl.lit(None).cast(pl.Utf8).alias("content_type")
@@ -624,14 +722,17 @@ def build_report_tables(
         )
 
         raw_sample_lf = (
-            normalize_report_store(
-                normalize_report_units(
-                    add_period_filter(
-                        add_match_text(pl.scan_parquet(standardized_path), standardized_cols, SEARCH_COLUMNS_STANDARDIZED),
+            normalize_report_usage(
+                normalize_report_store(
+                    normalize_report_units(
+                        add_period_filter(
+                            add_match_text(pl.scan_parquet(standardized_path), standardized_cols, SEARCH_COLUMNS_STANDARDIZED),
+                            standardized_cols,
+                            start_month,
+                            end_month,
+                            period_column,
+                        ),
                         standardized_cols,
-                        start_month,
-                        end_month,
-                        period_column,
                     ),
                     standardized_cols,
                 ),
@@ -649,6 +750,8 @@ def build_report_tables(
                     "asset_isrc",
                     "store",
                     "store_raw",
+                    "usage_type",
+                    "usage_raw",
                     "amount_usd",
                     "net_amount",
                     "units",
@@ -657,7 +760,7 @@ def build_report_tables(
                     "statement_file_name",
                     "match_text",
                 ]
-                if col in standardized_cols or col in {"match_text", "store", "store_raw"}
+                if col in standardized_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw"}
             ])
             .limit(raw_limit)
         )
@@ -691,6 +794,7 @@ def build_report_tables(
         source_summary = source_summary_lf.collect()
         monthly_summary = monthly_summary_lf.collect()
         store_summary = store_summary_lf.collect()
+        usage_summary = usage_summary_lf.collect()
         track_summary = track_summary_lf.collect()
         song_matches = song_matches_lf.collect()
         raw_sample = raw_sample_lf.collect()
@@ -712,6 +816,7 @@ def build_report_tables(
             "source_summary": display_dataframe(source_summary.to_pandas()),
             "monthly_summary": display_dataframe(monthly_summary.to_pandas()),
             "store_summary": display_dataframe(store_summary.to_pandas()),
+            "usage_summary": display_dataframe(usage_summary.to_pandas()),
             "track_summary": display_dataframe(track_summary.to_pandas()),
             "song_matches": display_dataframe(safe_select(
                 song_matches,
@@ -728,6 +833,8 @@ def build_report_tables(
                     "content_type",
                     "store",
                     "store_raw",
+                    "usage_type",
+                    "usage_raw",
                     "amount_usd",
                     "units",
                     "source_sheet",
@@ -825,19 +932,23 @@ def build_report_tables(
 
     raw_sample = pl.DataFrame()
     store_summary = pl.DataFrame()
+    usage_summary = pl.DataFrame()
     if standardized_path.exists():
         raw_cols = standardized_cols
         raw_filter = build_filter(raw_cols, SEARCH_COLUMNS_STANDARDIZED, keywords, mode)
 
         raw_matches_lf = (
-            normalize_report_store(
-                normalize_report_units(
-                    add_period_filter(
-                        add_match_text(pl.scan_parquet(standardized_path), raw_cols, SEARCH_COLUMNS_STANDARDIZED),
+            normalize_report_usage(
+                normalize_report_store(
+                    normalize_report_units(
+                        add_period_filter(
+                            add_match_text(pl.scan_parquet(standardized_path), raw_cols, SEARCH_COLUMNS_STANDARDIZED),
+                            raw_cols,
+                            start_month,
+                            end_month,
+                            period_column,
+                        ),
                         raw_cols,
-                        start_month,
-                        end_month,
-                        period_column,
                     ),
                     raw_cols,
                 ),
@@ -849,6 +960,18 @@ def build_report_tables(
         store_summary = (
             raw_matches_lf
             .group_by(["source", "account", "store", "store_raw"])
+            .agg([
+                pl.sum("amount_usd").alias("amount_usd"),
+                pl.sum("units").alias("units"),
+                pl.len().alias("rows"),
+            ])
+            .sort("amount_usd", descending=True)
+            .collect()
+        )
+
+        usage_summary = (
+            raw_matches_lf
+            .group_by(["source", "account", "usage_type", "usage_raw"])
             .agg([
                 pl.sum("amount_usd").alias("amount_usd"),
                 pl.sum("units").alias("units"),
@@ -871,6 +994,8 @@ def build_report_tables(
                     "asset_isrc",
                     "store",
                     "store_raw",
+                    "usage_type",
+                    "usage_raw",
                     "amount_usd",
                     "net_amount",
                     "units",
@@ -879,7 +1004,7 @@ def build_report_tables(
                     "statement_file_name",
                     "match_text",
                 ]
-                if col in raw_cols or col in {"match_text", "store", "store_raw"}
+                if col in raw_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw"}
             ])
             .limit(raw_limit)
             .collect()
@@ -906,6 +1031,7 @@ def build_report_tables(
         "source_summary": display_dataframe(source_summary.to_pandas()),
         "monthly_summary": display_dataframe(monthly_summary.to_pandas()),
         "store_summary": display_dataframe(store_summary.to_pandas()),
+        "usage_summary": display_dataframe(usage_summary.to_pandas()),
         "track_summary": display_dataframe(track_summary.to_pandas()),
         "song_matches": display_dataframe(safe_select(
             song_matches,
