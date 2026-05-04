@@ -91,10 +91,8 @@ DISPLAY_HEADERS = {
     "artist_statement_style": "Artista",
     "asset_artist_statement": "Asset artist",
     "content_type": "Tipo de contenido",
-    "store": "Store",
     "store_raw": "Store original",
     "usage_type": "Tipo",
-    "usage_raw": "Tipo original",
     "first_month": "Desde",
     "last_month": "Hasta",
     "source_sheet": "Hoja origen",
@@ -491,11 +489,7 @@ def instructions_dataframe() -> pd.DataFrame:
         },
         {
             "hoja": "store_summary",
-            "contenido": "Totales agrupados por store normalizado y store original de cada distribuidora.",
-        },
-        {
-            "hoja": "usage_summary",
-            "contenido": "Totales agrupados por tipo normalizado y tipo original de uso/venta.",
+            "contenido": "Totales agrupados por store original y tipo normalizado.",
         },
         {
             "hoja": "track_summary",
@@ -576,10 +570,8 @@ def build_report_tables(
                     "artist_statement_style",
                     "asset_artist_statement",
                     "content_type",
-                    "store",
                     "store_raw",
                     "usage_type",
-                    "usage_raw",
                     "amount_usd",
                     "units",
                     "source_sheet",
@@ -625,18 +617,7 @@ def build_report_tables(
 
         store_summary_lf = (
             statement_base_lf
-            .group_by(["source", "account", "store", "store_raw"])
-            .agg([
-                pl.sum("amount_usd").alias("amount_usd"),
-                pl.sum("units").alias("units"),
-                pl.len().alias("rows"),
-            ])
-            .sort("amount_usd", descending=True)
-        )
-
-        usage_summary_lf = (
-            statement_base_lf
-            .group_by(["source", "account", "usage_type", "usage_raw"])
+            .group_by(["source", "account", "store_raw", "usage_type"])
             .agg([
                 pl.sum("amount_usd").alias("amount_usd"),
                 pl.sum("units").alias("units"),
@@ -656,7 +637,7 @@ def build_report_tables(
                 "artist_statement_style",
                 "asset_artist_statement",
                 "content_type",
-                "store",
+                "store_raw",
                 "usage_type",
             ])
             .agg([
@@ -748,14 +729,11 @@ def build_report_tables(
                     "artist_statement_style",
                     "track_statement_style",
                     "asset_isrc",
-                    "store",
                     "store_raw",
                     "usage_type",
-                    "usage_raw",
                     "amount_usd",
                     "net_amount",
                     "units",
-                    "store_name",
                     "territory",
                     "statement_file_name",
                     "match_text",
@@ -794,7 +772,6 @@ def build_report_tables(
         source_summary = source_summary_lf.collect()
         monthly_summary = monthly_summary_lf.collect()
         store_summary = store_summary_lf.collect()
-        usage_summary = usage_summary_lf.collect()
         track_summary = track_summary_lf.collect()
         song_matches = song_matches_lf.collect()
         raw_sample = raw_sample_lf.collect()
@@ -816,7 +793,6 @@ def build_report_tables(
             "source_summary": display_dataframe(source_summary.to_pandas()),
             "monthly_summary": display_dataframe(monthly_summary.to_pandas()),
             "store_summary": display_dataframe(store_summary.to_pandas()),
-            "usage_summary": display_dataframe(usage_summary.to_pandas()),
             "track_summary": display_dataframe(track_summary.to_pandas()),
             "song_matches": display_dataframe(safe_select(
                 song_matches,
@@ -831,10 +807,8 @@ def build_report_tables(
                     "artist_statement_style",
                     "asset_artist_statement",
                     "content_type",
-                    "store",
                     "store_raw",
                     "usage_type",
-                    "usage_raw",
                     "amount_usd",
                     "units",
                     "source_sheet",
@@ -932,7 +906,6 @@ def build_report_tables(
 
     raw_sample = pl.DataFrame()
     store_summary = pl.DataFrame()
-    usage_summary = pl.DataFrame()
     if standardized_path.exists():
         raw_cols = standardized_cols
         raw_filter = build_filter(raw_cols, SEARCH_COLUMNS_STANDARDIZED, keywords, mode)
@@ -959,19 +932,7 @@ def build_report_tables(
 
         store_summary = (
             raw_matches_lf
-            .group_by(["source", "account", "store", "store_raw"])
-            .agg([
-                pl.sum("amount_usd").alias("amount_usd"),
-                pl.sum("units").alias("units"),
-                pl.len().alias("rows"),
-            ])
-            .sort("amount_usd", descending=True)
-            .collect()
-        )
-
-        usage_summary = (
-            raw_matches_lf
-            .group_by(["source", "account", "usage_type", "usage_raw"])
+            .group_by(["source", "account", "store_raw", "usage_type"])
             .agg([
                 pl.sum("amount_usd").alias("amount_usd"),
                 pl.sum("units").alias("units"),
@@ -992,14 +953,11 @@ def build_report_tables(
                     "artist_statement_style",
                     "track_statement_style",
                     "asset_isrc",
-                    "store",
                     "store_raw",
                     "usage_type",
-                    "usage_raw",
                     "amount_usd",
                     "net_amount",
                     "units",
-                    "store_name",
                     "territory",
                     "statement_file_name",
                     "match_text",
@@ -1031,7 +989,6 @@ def build_report_tables(
         "source_summary": display_dataframe(source_summary.to_pandas()),
         "monthly_summary": display_dataframe(monthly_summary.to_pandas()),
         "store_summary": display_dataframe(store_summary.to_pandas()),
-        "usage_summary": display_dataframe(usage_summary.to_pandas()),
         "track_summary": display_dataframe(track_summary.to_pandas()),
         "song_matches": display_dataframe(safe_select(
             song_matches,
