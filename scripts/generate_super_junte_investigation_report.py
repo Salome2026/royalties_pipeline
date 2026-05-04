@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 import sys
 
@@ -299,6 +300,40 @@ def main() -> Path:
     append_frame(ws_month_store, month_store, ["Statement", "Fuente", "Cuenta", "Store original", "Tipo", "Grupo", "Ingresos USD", "Unidades", "Filas"])
     set_widths(ws_month_store, [12, 12, 18, 28, 16, 10, 14, 16, 10])
 
+    transaction_store = (
+        cutoff_data
+        .group_by(["transaction_month", "source", "account", "store_raw", "usage_type", "media_group"])
+        .agg([
+            amount_expr().sum().alias("Ingresos USD"),
+            units_expr().sum().alias("Unidades"),
+            pl.len().alias("Filas"),
+            pl.min("statement_period").alias("Primer statement"),
+            pl.max("statement_period").alias("Ultimo statement"),
+        ])
+        .sort(["transaction_month", "Unidades"], descending=[False, True])
+        .collect()
+        .to_pandas()
+    )
+    ws_transaction_store = wb.create_sheet("transaction_store")
+    append_frame(
+        ws_transaction_store,
+        transaction_store,
+        [
+            "Mes consumo",
+            "Fuente",
+            "Cuenta",
+            "Store original",
+            "Tipo",
+            "Grupo",
+            "Ingresos USD",
+            "Unidades",
+            "Filas",
+            "Primer statement",
+            "Ultimo statement",
+        ],
+    )
+    set_widths(ws_transaction_store, [12, 12, 18, 28, 16, 10, 14, 16, 10, 16, 16])
+
     month_assets = (
         cutoff_data
         .filter((pl.col("media_group") == "video") & pl.col("is_youtube_store"))
@@ -313,8 +348,15 @@ def main() -> Path:
     set_widths(ws_month_assets, [12, 14, 38, 24, 16, 14, 16, 10])
 
     REPORTS.mkdir(parents=True, exist_ok=True)
-    wb.save(OUTPUT)
-    return OUTPUT
+    try:
+        wb.save(OUTPUT)
+        return OUTPUT
+    except PermissionError:
+        fallback = OUTPUT.with_name(
+            f"{OUTPUT.stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{OUTPUT.suffix}"
+        )
+        wb.save(fallback)
+        return fallback
 
 
 if __name__ == "__main__":
