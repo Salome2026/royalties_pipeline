@@ -739,7 +739,7 @@ def statement_report(
     x_vpo_api_key: str | None = Header(default=None),
 ) -> FileResponse:
     require_api_key(x_vpo_api_key)
-    marts = ensure_marts(refresh_cache=request.refresh_cache, filenames=[STATEMENT_SUMMARY_FILE])
+    marts = ensure_marts(refresh_cache=request.refresh_cache, filenames=[STATEMENT_SUMMARY_FILE, STANDARDIZED_FILE])
     VPO_API_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     output_path = VPO_API_REPORTS_DIR / f"reporte_ingresos_por_statement_marts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
@@ -747,6 +747,7 @@ def statement_report(
         summary_path=marts[STATEMENT_SUMMARY_FILE],
         output_path=output_path,
         min_artist_total_usd=request.min_artist_total_usd,
+        standardized_path=marts[STANDARDIZED_FILE],
     )
 
     return FileResponse(

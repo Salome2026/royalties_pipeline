@@ -16,6 +16,10 @@ STANDARDIZED_ALL_PATH = MARTS_DIR / "standardized_raw_all_sources.parquet"
 STATEMENT_SUMMARY_PATH = MARTS_DIR / "statement_summary_all_sources.parquet"
 
 FUGA_STATEMENT_FACTOR = 0.977832
+GUSTY_VARIANT_SOURCE = "onerpm"
+GUSTY_VARIANT_BASE_ACCOUNT = "gusty_dj"
+GUSTY_VARIANT_ACCOUNT = "gusty_dj_post_motorcito"
+GUSTY_VARIANT_TITLE = "ONErpm Gusty DJ - post Motorcito"
 
 HEADER_FILL = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
 HEADER_FONT = Font(color="FFFFFF", bold=True)
@@ -274,6 +278,167 @@ def hide_initial_zero_total_rows(ws, pivot_total: pd.DataFrame, total_source: pd
             ws.row_dimensions[row_idx].hidden = True
 
 
+def clean_text_expr(expr: pl.Expr) -> pl.Expr:
+    return expr.cast(pl.Utf8, strict=False).str.strip_chars()
+
+
+def first_available_text(schema: dict[str, pl.DataType], columns: list[str]) -> pl.Expr:
+    candidates = [
+        clean_text_expr(pl.col(col))
+        for col in columns
+        if has_col(schema, col)
+    ]
+    if not candidates:
+        return pl.lit(None).cast(pl.Utf8)
+
+    return pl.coalesce(candidates)
+
+
+def non_empty(expr: pl.Expr) -> pl.Expr:
+    return expr.is_not_null() & (expr != "")
+
+
+def gusty_track_key_expr(schema: dict[str, pl.DataType]) -> pl.Expr:
+    isrc = first_available_text(schema, ["asset_isrc", "ISRC"])
+    track_id = first_available_text(schema, ["label_track_id", "Label Track ID", "Track ID"])
+    title = first_available_text(
+        schema,
+        ["track_statement_style", "Track Title", "TRACK", "Album Title", "album_statement_style", "Title"],
+    )
+    artist = first_available_text(
+        schema,
+        ["artist_statement_style", "track_artist_statement", "Track Artists", "Artist Name"],
+    )
+
+    return (
+        pl.when(non_empty(isrc))
+        .then(pl.concat_str([pl.lit("isrc:"), isrc.str.to_uppercase()]))
+        .when(non_empty(track_id))
+        .then(pl.concat_str([pl.lit("track_id:"), track_id.str.to_lowercase()]))
+        .when(non_empty(title))
+        .then(pl.concat_str([
+            pl.lit("title_artist:"),
+            title.str.to_lowercase(),
+            pl.lit("|"),
+            artist.fill_null("").str.to_lowercase(),
+        ]))
+        .otherwise(pl.lit(None).cast(pl.Utf8))
+    )
+
+
+def gusty_motorcito_match_expr(schema: dict[str, pl.DataType]) -> pl.Expr:
+    columns = [
+        "track_statement_style",
+        "Track Title",
+        "TRACK",
+        "Album Title",
+        "album_statement_style",
+        "Title",
+    ]
+    candidates = [
+        clean_text_expr(pl.col(col)).str.to_lowercase().str.contains("motorcito", literal=True)
+        for col in columns
+        if has_col(schema, col)
+    ]
+    if not candidates:
+        return pl.lit(False)
+
+    return pl.any_horizontal(candidates)
+
+
+def build_gusty_post_motorcito_totals(standardized_path: Path | None) -> pd.DataFrame:
+    if standardized_path is None or not standardized_path.exists():
+        return pd.DataFrame(columns=["source", "account", "artist", "statement_period", "total", "has_share_in_out"])
+
+    lf = pl.scan_parquet(standardized_path)
+    schema = lf.collect_schema()
+
+    has_share_expr = (
+        pl.col("has_share_in_out").cast(pl.Boolean, strict=False)
+        if has_col(schema, "has_share_in_out")
+        else pl.lit(False)
+    )
+
+    base = (
+        lf
+        .filter(
+            (pl.col("source") == GUSTY_VARIANT_SOURCE)
+            & (pl.col("account") == GUSTY_VARIANT_BASE_ACCOUNT)
+        )
+        .with_columns([
+            col_or_null(schema, "statement_period").alias("_statement_period"),
+            col_or_null(schema, "transaction_month").alias("_transaction_month"),
+            col_or_null(schema, "artist_statement_style").alias("_artist_raw"),
+            amount_expr(schema).alias("_amount"),
+            has_share_expr.alias("_has_share_in_out"),
+            gusty_track_key_expr(schema).alias("_track_key"),
+            gusty_motorcito_match_expr(schema).alias("_is_motorcito"),
+        ])
+        .filter(
+            pl.col("_statement_period").is_not_null()
+            & (pl.col("_statement_period").str.strip_chars() != "")
+        )
+    )
+
+    motorcito_periods = (
+        base
+        .filter(pl.col("_is_motorcito"))
+        .select([
+            pl.min("_statement_period").alias("first_statement_period"),
+        ])
+        .collect()
+    )
+    if motorcito_periods.is_empty():
+        return pd.DataFrame(columns=["source", "account", "artist", "statement_period", "total", "has_share_in_out"])
+
+    first_statement_period = motorcito_periods["first_statement_period"][0]
+    cutoff_month = first_statement_period
+    if not cutoff_month:
+        return pd.DataFrame(columns=["source", "account", "artist", "statement_period", "total", "has_share_in_out"])
+
+    old_track_keys = (
+        base
+        .filter(pl.col("_track_key").is_not_null())
+        .group_by("_track_key")
+        .agg(pl.min("_statement_period").alias("_first_statement_period"))
+        .filter(pl.col("_first_statement_period") < cutoff_month)
+        .select("_track_key")
+        .collect()
+        .get_column("_track_key")
+        .to_list()
+    )
+
+    return (
+        base
+        .filter(
+            pl.col("_track_key").is_null()
+            | (~pl.col("_track_key").is_in(old_track_keys))
+        )
+        .with_columns(
+            pl.when(
+                pl.col("_artist_raw").is_null()
+                | (pl.col("_artist_raw").str.strip_chars() == "")
+            )
+            .then(pl.lit("SIN ARTISTA"))
+            .otherwise(pl.col("_artist_raw").str.strip_chars())
+            .alias("artist")
+        )
+        .group_by(["artist", "_statement_period"])
+        .agg([
+            pl.sum("_amount").round(2).alias("total"),
+            pl.max("_has_share_in_out").cast(pl.Int64).alias("has_share_in_out"),
+        ])
+        .with_columns([
+            pl.lit(GUSTY_VARIANT_SOURCE).alias("source"),
+            pl.lit(GUSTY_VARIANT_ACCOUNT).alias("account"),
+        ])
+        .rename({"_statement_period": "statement_period"})
+        .select(["source", "account", "artist", "statement_period", "total", "has_share_in_out"])
+        .collect()
+        .to_pandas()
+    )
+
+
 def aggregate_statement_data(standardized_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     if not standardized_path.exists():
         raise FileNotFoundError(f"No existe mart standardized: {standardized_path}")
@@ -410,9 +575,14 @@ def write_statement_report(
     fuga_eur_df: pd.DataFrame,
     output_path: Path,
     min_artist_total_usd: float = 0.0,
+    standardized_path: Path | None = STANDARDIZED_ALL_PATH,
 ) -> Path:
     if df.empty:
         raise ValueError("No hay datos para generar el reporte por statement.")
+
+    gusty_variant = build_gusty_post_motorcito_totals(standardized_path)
+    if not gusty_variant.empty:
+        df = pd.concat([df, gusty_variant], ignore_index=True)
 
     df = filter_by_scope_artist_threshold(df, min_artist_total_usd)
     if df.empty:
@@ -512,7 +682,8 @@ def write_statement_report(
             pivot = pd.concat([pivot] + rows_to_add)
             sheet_name = f"{source}_{account}"[:31]
             pivot.to_excel(writer, sheet_name=sheet_name, startrow=1)
-            format_sheet(writer.sheets[sheet_name], pivot, f"{str(source).upper()} - {account}", share_flags)
+            company_name = GUSTY_VARIANT_TITLE if account == GUSTY_VARIANT_ACCOUNT else f"{str(source).upper()} - {account}"
+            format_sheet(writer.sheets[sheet_name], pivot, company_name, share_flags)
 
         enable_formula_recalculation(writer.book)
 
@@ -528,19 +699,20 @@ def build_statement_report_from_mart(
         output_path = REPORTS_DIR / "reporte_ingresos_digitales_por_mes_de_statement_marts.xlsx"
 
     df, fuga_eur_df = aggregate_statement_data(standardized_path)
-    return write_statement_report(df, fuga_eur_df, output_path, min_artist_total_usd)
+    return write_statement_report(df, fuga_eur_df, output_path, min_artist_total_usd, standardized_path)
 
 
 def build_statement_report_from_summary(
     summary_path: Path = STATEMENT_SUMMARY_PATH,
     output_path: Path | None = None,
     min_artist_total_usd: float = 0.0,
+    standardized_path: Path | None = STANDARDIZED_ALL_PATH,
 ) -> Path:
     if output_path is None:
         output_path = REPORTS_DIR / "reporte_ingresos_digitales_por_mes_de_statement_marts.xlsx"
 
     df, fuga_eur_df = aggregate_statement_summary(summary_path)
-    return write_statement_report(df, fuga_eur_df, output_path, min_artist_total_usd)
+    return write_statement_report(df, fuga_eur_df, output_path, min_artist_total_usd, standardized_path)
 
 
 def main():
