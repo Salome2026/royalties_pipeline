@@ -55,6 +55,7 @@ GOOGLE_APPLICATION_CREDENTIALS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"
 GCS_SERVICE_ACCOUNT_JSON = os.environ.get("GCS_SERVICE_ACCOUNT_JSON", "")
 GOOGLE_OAUTH_TOKEN_JSON = os.environ.get("GOOGLE_OAUTH_TOKEN_JSON", "")
 VPO_API_KEY = os.environ.get("VPO_API_KEY", "change-me")
+VPO_LOCAL_MARTS_DIR = Path(os.environ.get("VPO_LOCAL_MARTS_DIR", "")).expanduser()
 VPO_API_CACHE_DIR = Path(os.environ.get("VPO_API_CACHE_DIR", BASE / "cache" / "gcs_marts"))
 VPO_API_REPORTS_DIR = Path(os.environ.get("VPO_API_REPORTS_DIR", BASE / "reports" / "api"))
 GOOGLE_SHEETS_SHARE_EMAIL = os.environ.get("GOOGLE_SHEETS_SHARE_EMAIL", "").strip()
@@ -230,6 +231,18 @@ def object_name(filename: str) -> str:
 
 
 def ensure_marts(refresh_cache: bool = False, filenames: list[str] | None = None) -> dict[str, Path]:
+    requested_files = filenames or REQUIRED_MART_FILES
+
+    if str(VPO_LOCAL_MARTS_DIR) and VPO_LOCAL_MARTS_DIR.exists() and not refresh_cache:
+        paths = {filename: VPO_LOCAL_MARTS_DIR / filename for filename in requested_files}
+        missing = [str(path) for path in paths.values() if not path.exists()]
+        if missing:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Local mart files not found: {', '.join(missing)}",
+            )
+        return paths
+
     if not GCS_BUCKET:
         raise HTTPException(status_code=500, detail="GCS_BUCKET is not configured.")
 
@@ -239,7 +252,7 @@ def ensure_marts(refresh_cache: bool = False, filenames: list[str] | None = None
 
     paths: dict[str, Path] = {}
 
-    for filename in filenames or REQUIRED_MART_FILES:
+    for filename in requested_files:
         local_path = VPO_API_CACHE_DIR / filename
         paths[filename] = local_path
 
@@ -625,6 +638,8 @@ def health() -> dict[str, str]:
         "status": "ok",
         "bucket": GCS_BUCKET,
         "prefix": GCS_PREFIX,
+        "marts_mode": "local" if str(VPO_LOCAL_MARTS_DIR) and VPO_LOCAL_MARTS_DIR.exists() else "gcs",
+        "local_marts_dir": str(VPO_LOCAL_MARTS_DIR) if str(VPO_LOCAL_MARTS_DIR) else "",
         "sheets_auth_mode": sheets_auth_mode,
         "drive_folder_configured": "yes" if GOOGLE_DRIVE_FOLDER_ID else "no",
         "share_email_configured": "yes" if GOOGLE_SHEETS_SHARE_EMAIL else "no",
