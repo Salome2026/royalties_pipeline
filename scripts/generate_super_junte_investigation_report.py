@@ -154,6 +154,12 @@ def main() -> Path:
     all_vy_totals = aggregate_totals(
         all_data.filter((pl.col("media_group") == "video") & pl.col("is_youtube_store"))
     )
+    zero_unit_revenue_totals = aggregate_totals(
+        video_youtube.filter(
+            (units_expr().fill_null(0) == 0)
+            & (amount_expr().fill_null(0) > 0)
+        )
+    )
 
     summary_rows = [
         ["Todos hasta 2025-03", cutoff_totals["Ingresos USD"], cutoff_totals["Unidades"], cutoff_totals["Filas"], ""],
@@ -165,6 +171,10 @@ def main() -> Path:
     for row in summary_rows:
         ws.append(row)
     style_header(ws, 8)
+    ws["A12"] = "Video YouTube con ingresos y unidades 0"
+    ws["B12"] = zero_unit_revenue_totals["Ingresos USD"]
+    ws["C12"] = zero_unit_revenue_totals["Filas"]
+    ws["D12"] = "Revisar hoja zero_unit_revenue"
 
     monthly = (
         cutoff_data
@@ -239,6 +249,7 @@ def main() -> Path:
         ws.cell(row, 2).number_format = '#,##0.00'
         ws.cell(row, 3).number_format = '#,##0'
         ws.cell(row, 5).number_format = '#,##0'
+    ws["B12"].number_format = '#,##0.00'
 
     set_widths(ws, [16, 16, 20, 16, 20, 16, 20, 14, 18, 18, 22, 2])
     ws.freeze_panes = "A15"
@@ -333,6 +344,48 @@ def main() -> Path:
         ],
     )
     set_widths(ws_transaction_store, [12, 12, 18, 28, 16, 10, 14, 16, 10, 16, 16])
+
+    zero_unit_revenue = (
+        video_youtube
+        .filter((units_expr().fill_null(0) == 0) & (amount_expr().fill_null(0) > 0))
+        .group_by([
+            "statement_period",
+            "transaction_month",
+            "source",
+            "account",
+            "store_raw",
+            "usage_type",
+            "report_isrc",
+            "report_title",
+        ])
+        .agg([
+            amount_expr().sum().alias("Ingresos USD"),
+            pl.len().alias("Filas"),
+            pl.min("statement_file_name").alias("Archivo ejemplo"),
+        ])
+        .sort(["statement_period", "transaction_month", "Ingresos USD"], descending=[False, False, True])
+        .collect()
+        .to_pandas()
+    )
+    ws_zero_units = wb.create_sheet("zero_unit_revenue")
+    append_frame(
+        ws_zero_units,
+        zero_unit_revenue,
+        [
+            "Statement",
+            "Mes consumo",
+            "Fuente",
+            "Cuenta",
+            "Store original",
+            "Tipo",
+            "ISRC",
+            "Titulo",
+            "Ingresos USD",
+            "Filas",
+            "Archivo ejemplo",
+        ],
+    )
+    set_widths(ws_zero_units, [12, 12, 12, 18, 28, 16, 14, 36, 14, 10, 34])
 
     month_assets = (
         cutoff_data
