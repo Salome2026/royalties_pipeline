@@ -252,6 +252,28 @@ def apply_total_config_formulas(ws, pivot_total, total_data_last_row: int) -> No
         ws.cell(row=total_row, column=col).value = f"=SUM({letter}3:{letter}{total_row - 1})"
 
 
+def hide_initial_zero_total_rows(ws, pivot_total: pd.DataFrame, total_source: pd.DataFrame, scopes: list[tuple[str, str]]) -> None:
+    default_included_scopes = {
+        scope_key(source, account)
+        for source, account in scopes
+        if scope_key(source, account) != "onerpm_gusty_dj"
+    }
+
+    included_totals = (
+        total_source.loc[total_source["_scope_key"].isin(default_included_scopes)]
+        .groupby("artist", dropna=False)["total"]
+        .sum()
+    )
+
+    for row_idx, artist_name in enumerate(pivot_total.index, start=3):
+        if str(artist_name).upper().startswith("TOTAL"):
+            continue
+
+        total = float(included_totals.get(artist_name, 0.0))
+        if round(abs(total), 2) == 0:
+            ws.row_dimensions[row_idx].hidden = True
+
+
 def aggregate_statement_data(standardized_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     if not standardized_path.exists():
         raise FileNotFoundError(f"No existe mart standardized: {standardized_path}")
@@ -432,6 +454,7 @@ def write_statement_report(
             pivot_total.to_excel(writer, sheet_name="TOTAL", startrow=1)
             format_sheet(writer.sheets["TOTAL"], pivot_total, "SALDO TOTAL ARTISTAS")
             apply_total_config_formulas(writer.sheets["TOTAL"], pivot_total, total_data_last_row)
+            hide_initial_zero_total_rows(writer.sheets["TOTAL"], pivot_total, total_source, scopes)
 
         for (source, account), group in df.groupby(["source", "account"], dropna=False):
             pivot = group.pivot_table(
