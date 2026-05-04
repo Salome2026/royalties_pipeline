@@ -70,6 +70,7 @@ DISPLAY_HEADERS = {
     "end_month": "Hasta",
     "song_level_rows": "Filas resultado",
     "song_level_amount_usd": "Ingresos USD",
+    "song_level_units": "Unidades",
     "raw_sample_rows": "Filas raw",
     "generated_at": "Generado el",
     "source": "Fuente",
@@ -219,6 +220,32 @@ def safe_select(df: pl.DataFrame, columns: list[str]) -> pl.DataFrame:
     return df.select(existing)
 
 
+def report_units_expr(columns: set[str]) -> pl.Expr:
+    candidates = []
+    for col in [
+        "units",
+        "streams",
+        "asset_quantity_num",
+        "Asset Quantity",
+        "product_quantity_num",
+        "Product Quantity",
+        "Quantity",
+        "QUANTITY",
+        "Units of Sold",
+    ]:
+        if col in columns:
+            candidates.append(pl.col(col).cast(pl.Float64, strict=False))
+
+    if not candidates:
+        return pl.lit(None).cast(pl.Float64)
+
+    return pl.coalesce(candidates)
+
+
+def normalize_report_units(lf: pl.LazyFrame, columns: set[str]) -> pl.LazyFrame:
+    return lf.with_columns(report_units_expr(columns).alias("units"))
+
+
 def display_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
     return dataframe.rename(columns={col: DISPLAY_HEADERS.get(col, col) for col in dataframe.columns})
 
@@ -362,12 +389,15 @@ def build_report_tables(
         raw_filter = build_filter(standardized_cols, SEARCH_COLUMNS_STANDARDIZED, keywords, mode)
 
         statement_base_lf = (
-            add_period_filter(
-                pl.scan_parquet(standardized_path),
+            normalize_report_units(
+                add_period_filter(
+                    pl.scan_parquet(standardized_path),
+                    standardized_cols,
+                    start_month,
+                    end_month,
+                    period_column,
+                ),
                 standardized_cols,
-                start_month,
-                end_month,
-                period_column,
             )
             .filter(raw_filter)
             .select([
@@ -400,6 +430,7 @@ def build_report_tables(
         metrics_lf = statement_base_lf.select([
             pl.len().alias("song_level_rows"),
             pl.sum("amount_usd").alias("song_level_amount_usd"),
+            pl.sum("units").alias("song_level_units"),
         ])
 
         source_summary_lf = (
@@ -447,12 +478,15 @@ def build_report_tables(
         )
 
         song_matches_lf = (
-            add_period_filter(
-                add_match_text(pl.scan_parquet(standardized_path), standardized_cols, SEARCH_COLUMNS_STANDARDIZED),
+            normalize_report_units(
+                add_period_filter(
+                    add_match_text(pl.scan_parquet(standardized_path), standardized_cols, SEARCH_COLUMNS_STANDARDIZED),
+                    standardized_cols,
+                    start_month,
+                    end_month,
+                    period_column,
+                ),
                 standardized_cols,
-                start_month,
-                end_month,
-                period_column,
             )
             .filter(raw_filter)
             .select([
@@ -486,12 +520,15 @@ def build_report_tables(
         )
 
         raw_sample_lf = (
-            add_period_filter(
-                add_match_text(pl.scan_parquet(standardized_path), standardized_cols, SEARCH_COLUMNS_STANDARDIZED),
+            normalize_report_units(
+                add_period_filter(
+                    add_match_text(pl.scan_parquet(standardized_path), standardized_cols, SEARCH_COLUMNS_STANDARDIZED),
+                    standardized_cols,
+                    start_month,
+                    end_month,
+                    period_column,
+                ),
                 standardized_cols,
-                start_month,
-                end_month,
-                period_column,
             )
             .filter(raw_filter)
             .select([
@@ -519,6 +556,7 @@ def build_report_tables(
         metrics = metrics_lf.collect()
         song_rows = int(metrics["song_level_rows"][0])
         song_amount_usd = float(metrics["song_level_amount_usd"][0] or 0)
+        song_units = float(metrics["song_level_units"][0] or 0)
 
         if song_rows == 0:
             print("No hubo matches en standardized_raw_all_sources.")
@@ -532,6 +570,7 @@ def build_report_tables(
                     "end_month": end_month or "",
                     "song_level_rows": 0,
                     "song_level_amount_usd": 0,
+                    "song_level_units": 0,
                     "raw_sample_rows": 0,
                     "generated_at": datetime.now().isoformat(timespec="seconds"),
                 }])),
@@ -556,6 +595,7 @@ def build_report_tables(
                 "end_month": end_month or "",
                 "song_level_rows": song_rows,
                 "song_level_amount_usd": song_amount_usd,
+                "song_level_units": song_units,
                 "raw_sample_rows": raw_sample.height if raw_sample.height > 0 else 0,
                 "generated_at": datetime.now().isoformat(timespec="seconds"),
             }])),
@@ -590,12 +630,15 @@ def build_report_tables(
         return tables
     else:
         song = (
-            add_period_filter(
-                add_match_text(pl.scan_parquet(song_path), song_cols, SEARCH_COLUMNS_SONG),
+            normalize_report_units(
+                add_period_filter(
+                    add_match_text(pl.scan_parquet(song_path), song_cols, SEARCH_COLUMNS_SONG),
+                    song_cols,
+                    start_month,
+                    end_month,
+                    period_column,
+                ),
                 song_cols,
-                start_month,
-                end_month,
-                period_column,
             )
             .filter(song_filter)
             .with_columns(pl.col(period_column).cast(pl.Utf8).alias("period_month"))
@@ -614,6 +657,7 @@ def build_report_tables(
                 "end_month": end_month or "",
                 "song_level_rows": 0,
                 "song_level_amount_usd": 0,
+                "song_level_units": 0,
                 "raw_sample_rows": 0,
                 "generated_at": datetime.now().isoformat(timespec="seconds"),
             }])),
@@ -672,12 +716,15 @@ def build_report_tables(
         raw_filter = build_filter(raw_cols, SEARCH_COLUMNS_STANDARDIZED, keywords, mode)
 
         raw_sample = (
-            add_period_filter(
-                add_match_text(pl.scan_parquet(standardized_path), raw_cols, SEARCH_COLUMNS_STANDARDIZED),
+            normalize_report_units(
+                add_period_filter(
+                    add_match_text(pl.scan_parquet(standardized_path), raw_cols, SEARCH_COLUMNS_STANDARDIZED),
+                    raw_cols,
+                    start_month,
+                    end_month,
+                    period_column,
+                ),
                 raw_cols,
-                start_month,
-                end_month,
-                period_column,
             )
             .filter(raw_filter)
             .select([
@@ -717,6 +764,7 @@ def build_report_tables(
             "end_month": end_month or "",
             "song_level_rows": song.height,
             "song_level_amount_usd": song["amount_usd"].sum(),
+            "song_level_units": song["units"].sum(),
             "raw_sample_rows": raw_sample.height if raw_sample.height > 0 else 0,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
         }])),
