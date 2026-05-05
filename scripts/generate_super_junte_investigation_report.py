@@ -86,6 +86,8 @@ def load_super_junte():
         .with_columns([
             pl.when(pl.col("usage_type").is_in(["video_stream", "video_ugc", "short_video"]))
             .then(pl.lit("video"))
+            .when(pl.col("usage_type").is_in(["youtube_master_stream", "youtube_premium_stream"]))
+            .then(pl.lit("youtube_master"))
             .when(pl.col("usage_type").is_in(["audio_stream", "download"]))
             .then(pl.lit("audio"))
             .otherwise(pl.lit("otros"))

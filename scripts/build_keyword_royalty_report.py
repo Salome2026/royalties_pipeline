@@ -352,17 +352,33 @@ def usage_raw_expr(columns: set[str]) -> pl.Expr:
     return pl.coalesce(candidates)
 
 
-def normalize_usage_expr(raw_usage: pl.Expr, raw_store: pl.Expr) -> pl.Expr:
+def normalize_usage_expr(raw_usage: pl.Expr, raw_store: pl.Expr, source_sheet: pl.Expr) -> pl.Expr:
     value = pl.concat_str([
         raw_usage.fill_null(""),
         raw_store.fill_null(""),
+        source_sheet.fill_null(""),
     ], separator=" | ").str.to_lowercase()
+    store_value = raw_store.fill_null("").str.to_lowercase()
+    usage_value = raw_usage.fill_null("").str.to_lowercase()
+    sheet_value = source_sheet.fill_null("").str.to_lowercase()
 
     return (
         pl.when(value.str.contains("short", literal=True))
         .then(pl.lit("short_video"))
         .when(value.str.contains("download", literal=True))
         .then(pl.lit("download"))
+        .when(
+            store_value.str.contains("youtube premium", literal=True)
+            & usage_value.str.contains("stream", literal=True)
+            & sheet_value.is_in(["masters", "shares in & out"])
+        )
+        .then(pl.lit("youtube_premium_stream"))
+        .when(
+            store_value.str.contains("youtube", literal=True)
+            & usage_value.str.contains("stream", literal=True)
+            & sheet_value.is_in(["masters", "shares in & out"])
+        )
+        .then(pl.lit("youtube_master_stream"))
         .when(
             value.str.contains("ugc", literal=True)
             | value.str.contains("content id", literal=True)
@@ -388,9 +404,14 @@ def normalize_usage_expr(raw_usage: pl.Expr, raw_store: pl.Expr) -> pl.Expr:
 def normalize_report_usage(lf: pl.LazyFrame, columns: set[str]) -> pl.LazyFrame:
     raw_usage = usage_raw_expr(columns)
     raw_store = store_raw_expr(columns)
+    source_sheet = (
+        pl.col("source_sheet").cast(pl.Utf8, strict=False).str.strip_chars()
+        if "source_sheet" in columns
+        else pl.lit(None).cast(pl.Utf8)
+    )
     return lf.with_columns([
         raw_usage.alias("usage_raw"),
-        normalize_usage_expr(raw_usage, raw_store).alias("usage_type"),
+        normalize_usage_expr(raw_usage, raw_store, source_sheet).alias("usage_type"),
     ])
 
 
