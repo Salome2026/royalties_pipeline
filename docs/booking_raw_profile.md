@@ -38,6 +38,17 @@ Segun la logica real de la planilla, `Presentaciones` se arma automaticamente a 
 - `Presentaciones` sirve como validacion y control contra la planilla historica.
 - Los reportes al owner sirven como salida historica de referencia, no como verdad transaccional.
 
+## Decision Sobre Duplicados
+
+`booking_google_sample.xlsx` se conserva en raw, pero no se usa en la capa `standardized_booking_movements`.
+
+Motivo:
+
+- Las filas y totales de `booking_google_sample.xlsx` coinciden con `PM Lautaro.xlsx`.
+- Si ambos entran en standardized, esa parte del booking se duplica.
+- La capa standardized toma como fuente productiva los archivos `PM*.xlsx`.
+- El sample queda disponible para auditoria o comparacion historica.
+
 ## Datasets Operativos
 
 ### Ingresos
