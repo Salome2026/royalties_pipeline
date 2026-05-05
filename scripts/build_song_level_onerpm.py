@@ -33,11 +33,14 @@ def main():
             optional_col("ISRC"),
             optional_col("ID"),
             optional_col("Parent ID"),
+            optional_col("Video ID"),
+            optional_col("Channel ID"),
         ]).alias("asset_isrc"),
 
         pl.coalesce([
             optional_col("Track Title"),
             optional_col("Title"),
+            optional_col("Video Title"),
             optional_col("Album Title"),
         ]).alias("track_statement_style"),
 
@@ -74,7 +77,9 @@ def main():
     )
 
     song_level = song_level.with_columns([
-        pl.when(pl.col("source_sheet") == "Shares In & Out")
+        pl.when(pl.col("source_sheet") == "Youtube Channels")
+        .then(pl.lit("youtube_channel"))
+        .when(pl.col("source_sheet") == "Shares In & Out")
         .then(pl.lit("share_transfer"))
         .when(pl.col("asset_isrc").is_null() | (pl.col("asset_isrc").str.strip_chars() == ""))
         .then(pl.lit("unidentified"))

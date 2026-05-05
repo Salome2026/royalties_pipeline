@@ -18,21 +18,25 @@ TEMP_DIR = BASE / "staging" / "standardized_raw_parts" / "onerpm"
 SOURCE = "onerpm"
 SHEET_MASTERS = "Masters"
 SHEET_SHARES = "Shares In & Out"
+SHEET_YOUTUBE_CHANNELS = "Youtube Channels"
 
 
 ACCOUNTS = {
     "henry_remix": {
         "load_masters": True,
+        "load_youtube_channels": True,
         "load_shares_as_rows": False,
         "use_shares_as_flags": False,
     },
     "gusty_dj": {
         "load_masters": True,
+        "load_youtube_channels": True,
         "load_shares_as_rows": False,
         "use_shares_as_flags": True,
     },
     "mawzrecords": {
         "load_masters": True,
+        "load_youtube_channels": True,
         "load_shares_as_rows": True,
         "use_shares_as_flags": False,
     },
@@ -376,14 +380,17 @@ def add_share_flags_to_masters(df_masters: pl.DataFrame, df_shares: pl.DataFrame
 def add_view_flags(df: pl.DataFrame, account: str, source_sheet: str) -> pl.DataFrame:
     is_master = source_sheet == SHEET_MASTERS
     is_share = source_sheet == SHEET_SHARES
+    is_youtube_channel = source_sheet == SHEET_YOUTUBE_CHANNELS
 
     include_in_statement_view = account in ["henry_remix", "mawzrecords"]
     include_in_cash_view = account in ["henry_remix", "mawzrecords"]
-    include_in_catalog_view = is_master
+    include_in_catalog_view = is_master or is_youtube_channel
     possible_internal_transfer = account == "mawzrecords" and is_share
 
     if account == "gusty_dj":
-        revenue_basis = "master_earning_external_account"
+        revenue_basis = "youtube_channel_earning_external_account" if is_youtube_channel else "master_earning_external_account"
+    elif is_youtube_channel:
+        revenue_basis = "youtube_channel_earning"
     elif is_share:
         revenue_basis = "share_transfer"
     else:
@@ -508,6 +515,57 @@ def standardize_shares(df: pl.DataFrame, file_path: Path, account: str, file_has
     return finalize_amounts(df)
 
 
+def standardize_youtube_channels(df: pl.DataFrame, file_path: Path, account: str, file_hash: str) -> pl.DataFrame:
+    statement_info = from_onerpm_filename(file_path.name)
+    statement_period = statement_info.period
+    ingested_at = datetime.now().isoformat(timespec="seconds")
+
+    df = clean_column_names(df)
+    df = normalize_numeric_columns(df)
+    df = detect_transaction_month(df)
+
+    if "Net" not in df.columns:
+        raise ValueError("La hoja Youtube Channels no tiene columna Net.")
+
+    df = df.rename({"Net": "net_amount"})
+
+    if "Channel Name" in df.columns:
+        channel_name = pl.col("Channel Name").cast(pl.Utf8).str.strip_chars()
+    else:
+        channel_name = pl.lit(None).cast(pl.Utf8)
+
+    if "Video Title" in df.columns:
+        video_title = pl.col("Video Title").cast(pl.Utf8).str.strip_chars()
+    else:
+        video_title = pl.lit(None).cast(pl.Utf8)
+
+    df = df.with_columns(
+        pl.coalesce([channel_name, video_title]).alias("artist_statement_style")
+    )
+    df = add_usd_conversion(df, statement_period)
+
+    df = df.with_columns([
+        pl.lit(SOURCE).alias("source"),
+        pl.lit(account).alias("account"),
+        pl.lit(SHEET_YOUTUBE_CHANNELS).alias("source_sheet"),
+        pl.lit(file_path.name).alias("statement_file_name"),
+        pl.lit(str(file_path)).alias("statement_file_path"),
+        pl.lit(file_hash).alias("statement_file_hash"),
+        pl.lit(statement_period).alias("statement_period"),
+        pl.lit(statement_info.source).alias("statement_period_source"),
+        pl.lit(statement_info.note).alias("statement_period_note"),
+        pl.lit(ingested_at).alias("ingested_at"),
+        pl.lit(False).alias("has_share_in_out"),
+        pl.lit(0).cast(pl.Int64).alias("share_in_count"),
+        pl.lit(0).cast(pl.Int64).alias("share_out_count"),
+        pl.lit(0).cast(pl.Int64).alias("share_total_count"),
+        pl.lit("").alias("share_note"),
+    ])
+
+    df = add_view_flags(df, account, SHEET_YOUTUBE_CHANNELS)
+    return finalize_amounts(df)
+
+
 def read_excel_sheet(file_path: Path, sheet_name: str) -> pl.DataFrame:
     return pl.read_excel(file_path, sheet_name=sheet_name)
 
@@ -556,6 +614,23 @@ def process_account(account: str, config: dict) -> list[Path]:
                 print(f"    Masters OK: {df_masters.height}")
             except Exception as e:
                 print(f"    Masters ERROR: {e}")
+
+        if config["load_youtube_channels"]:
+            try:
+                df_youtube_channels = read_excel_sheet(file_path, SHEET_YOUTUBE_CHANNELS)
+                if df_youtube_channels.height > 0:
+                    df_youtube_channels = standardize_youtube_channels(
+                        df_youtube_channels,
+                        file_path,
+                        account,
+                        file_hash,
+                    )
+                    frames.append(df_youtube_channels)
+                    print(f"    Youtube Channels OK: {df_youtube_channels.height}")
+                else:
+                    print("    Youtube Channels vacio")
+            except Exception as e:
+                print(f"    Youtube Channels ERROR: {e}")
 
         if config["load_shares_as_rows"]:
             try:
