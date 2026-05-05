@@ -76,27 +76,48 @@ def main() -> None:
     ).with_columns(
         pl.col("concept").str.to_lowercase().str.strip_chars().alias("concept_key"),
     ).with_columns([
-        pl.when(pl.col("movement_type") == "income")
+        pl.col("movement_date").is_null().alias("is_non_accountable"),
+        pl.when((pl.col("movement_type") == "income") & pl.col("movement_date").is_null())
+        .then(pl.col("amount_ars"))
+        .otherwise(0)
+        .alias("cachet_informado_no_contabilizado"),
+        pl.when((pl.col("movement_type") == "income") & pl.col("movement_date").is_not_null())
         .then(pl.col("amount_ars"))
         .otherwise(0)
         .alias("cachet_show"),
-        pl.when((pl.col("movement_type") == "expense") & (pl.col("concept_key") != "cachet"))
+        pl.when(
+            (pl.col("movement_type") == "expense")
+            & (pl.col("concept_key") != "cachet")
+            & pl.col("movement_date").is_not_null()
+        )
         .then(pl.col("amount_ars"))
         .otherwise(0)
         .alias("gastos_show"),
-        pl.when((pl.col("movement_type") == "expense") & (pl.col("concept_key") == "cachet"))
+        pl.when(
+            (pl.col("movement_type") == "expense")
+            & (pl.col("concept_key") == "cachet")
+            & pl.col("movement_date").is_not_null()
+        )
         .then(pl.col("amount_ars"))
         .otherwise(0)
         .alias("artist_take_from_expenses"),
-        pl.when(pl.col("movement_type") == "income")
+        pl.when((pl.col("movement_type") == "income") & pl.col("movement_date").is_not_null())
         .then(pl.col("amount_usd"))
         .otherwise(0)
         .alias("cachet_show_usd"),
-        pl.when((pl.col("movement_type") == "expense") & (pl.col("concept_key") != "cachet"))
+        pl.when(
+            (pl.col("movement_type") == "expense")
+            & (pl.col("concept_key") != "cachet")
+            & pl.col("movement_date").is_not_null()
+        )
         .then(pl.col("amount_usd"))
         .otherwise(0)
         .alias("gastos_show_usd"),
-        pl.when((pl.col("movement_type") == "expense") & (pl.col("concept_key") == "cachet"))
+        pl.when(
+            (pl.col("movement_type") == "expense")
+            & (pl.col("concept_key") == "cachet")
+            & pl.col("movement_date").is_not_null()
+        )
         .then(pl.col("amount_usd"))
         .otherwise(0)
         .alias("artist_take_usd_from_expenses"),
@@ -113,6 +134,8 @@ def main() -> None:
             "event_detail",
         ])
         .agg([
+            pl.max("is_non_accountable").alias("is_non_accountable"),
+            pl.sum("cachet_informado_no_contabilizado").alias("cachet_informado_no_contabilizado"),
             pl.sum("cachet_show").alias("cachet_show"),
             pl.sum("gastos_show").alias("gastos"),
             pl.sum("artist_take_from_expenses").alias("se_lleva_artista_movimientos"),
@@ -178,15 +201,27 @@ def main() -> None:
         ])
         .with_columns([
             (1 - pl.col("porcentaje_artista")).alias("porcentaje_productora"),
-            pl.coalesce([
-                pl.col("artist_share_ars_presentaciones"),
-                pl.col("se_lleva_artista_movimientos"),
-            ]).alias("se_lleva_artista"),
-            pl.coalesce([
-                pl.col("productora_share_ars_presentaciones"),
-                pl.col("neto_show") - pl.col("se_lleva_artista_movimientos"),
-            ]).alias("se_lleva_indyana"),
-            pl.when(pl.col("porcentaje_artista").is_null())
+            pl.when(pl.col("is_non_accountable"))
+            .then(0)
+            .otherwise(
+                pl.coalesce([
+                    pl.col("artist_share_ars_presentaciones"),
+                    pl.col("se_lleva_artista_movimientos"),
+                ])
+            )
+            .alias("se_lleva_artista"),
+            pl.when(pl.col("is_non_accountable"))
+            .then(0)
+            .otherwise(
+                pl.coalesce([
+                    pl.col("productora_share_ars_presentaciones"),
+                    pl.col("neto_show") - pl.col("se_lleva_artista_movimientos"),
+                ])
+            )
+            .alias("se_lleva_indyana"),
+            pl.when(pl.col("is_non_accountable"))
+            .then(pl.lit("no_contabiliza_sin_fecha"))
+            .when(pl.col("porcentaje_artista").is_null())
             .then(pl.lit("sin_porcentaje_presentaciones"))
             .when(pl.col("cachet_show") == 0)
             .then(pl.lit("cachet_cero"))
@@ -201,6 +236,7 @@ def main() -> None:
             pl.col("artist_statement").alias("artista"),
             pl.col("movement_date").alias("fecha"),
             pl.col("event_detail").alias("venue_evento"),
+            pl.col("cachet_informado_no_contabilizado"),
             pl.col("cachet_show"),
             pl.col("gastos"),
             pl.col("neto_show"),

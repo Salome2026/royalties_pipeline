@@ -19,6 +19,7 @@ DETAIL_COLUMNS = [
     ("artista", "Artista"),
     ("fecha", "Fecha"),
     ("venue_evento", "Venue / Evento"),
+    ("cachet_informado_no_contabilizado", "Cachet informado no contabilizado"),
     ("cachet_show", "Cachet show"),
     ("gastos", "Gastos"),
     ("neto_show", "Neto show"),
@@ -72,6 +73,7 @@ def write_summary_sheet(wb: Workbook, df: pl.DataFrame) -> None:
     ws["A2"].font = Font(color="666666")
 
     total_cachet = df["cachet_show"].sum()
+    total_cachet_informado = df["cachet_informado_no_contabilizado"].sum()
     total_gastos = df["gastos"].sum()
     total_neto = df["neto_show"].sum()
     total_artista = df["se_lleva_artista"].sum()
@@ -79,6 +81,7 @@ def write_summary_sheet(wb: Workbook, df: pl.DataFrame) -> None:
 
     kpis = [
         ("Shows", df.height),
+        ("Cachet informado no contabilizado", total_cachet_informado),
         ("Cachet total", total_cachet),
         ("Gastos total", total_gastos),
         ("Neto total", total_neto),
@@ -101,6 +104,7 @@ def write_summary_sheet(wb: Workbook, df: pl.DataFrame) -> None:
         .agg([
             pl.len().alias("shows"),
             pl.sum("cachet_show").alias("cachet_show"),
+            pl.sum("cachet_informado_no_contabilizado").alias("cachet_informado_no_contabilizado"),
             pl.sum("gastos").alias("gastos"),
             pl.sum("neto_show").alias("neto_show"),
             pl.sum("se_lleva_artista").alias("se_lleva_artista"),
@@ -110,7 +114,16 @@ def write_summary_sheet(wb: Workbook, df: pl.DataFrame) -> None:
     )
 
     start_row = 11
-    headers = ["Artista", "Shows", "Cachet show", "Gastos", "Neto show", "Se lleva artista", "Se lleva Indyana"]
+    headers = [
+        "Artista",
+        "Shows",
+        "Cachet informado no contabilizado",
+        "Cachet show",
+        "Gastos",
+        "Neto show",
+        "Se lleva artista",
+        "Se lleva Indyana",
+    ]
     ws.cell(row=start_row, column=1, value="Totales por artista")
     ws.cell(row=start_row, column=1).font = Font(size=13, bold=True, color="1F4E78")
     ws.append(headers)
@@ -120,6 +133,7 @@ def write_summary_sheet(wb: Workbook, df: pl.DataFrame) -> None:
         ws.append([
             row["artista"],
             row["shows"],
+            row["cachet_informado_no_contabilizado"],
             row["cachet_show"],
             row["gastos"],
             row["neto_show"],
@@ -128,10 +142,10 @@ def write_summary_sheet(wb: Workbook, df: pl.DataFrame) -> None:
         ])
 
     for row_idx in range(start_row + 2, ws.max_row + 1):
-        for col_idx in [3, 4, 5, 6, 7]:
+        for col_idx in [3, 4, 5, 6, 7, 8]:
             ws.cell(row=row_idx, column=col_idx).number_format = '$ #,##0'
 
-    table_ref = f"A{start_row + 1}:G{ws.max_row}"
+    table_ref = f"A{start_row + 1}:H{ws.max_row}"
     table = Table(displayName="TotalesPorArtista", ref=table_ref)
     table.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
     ws.add_table(table)
@@ -154,10 +168,10 @@ def write_detail_sheet(wb: Workbook, df: pl.DataFrame) -> None:
     for row_idx in range(2, ws.max_row + 1):
         ws.cell(row=row_idx, column=2).number_format = "yyyy-mm-dd"
 
-        for col_idx in [4, 5, 6, 9, 10, 11, 12, 13]:
+        for col_idx in [4, 5, 6, 7, 10, 11, 12, 13, 14]:
             ws.cell(row=row_idx, column=col_idx).number_format = '$ #,##0'
 
-        for col_idx in [7, 8]:
+        for col_idx in [8, 9]:
             ws.cell(row=row_idx, column=col_idx).number_format = "0%"
 
     table_ref = f"A1:{get_column_letter(len(headers))}{ws.max_row}"
