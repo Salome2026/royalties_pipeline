@@ -24,8 +24,11 @@ DETAIL_COLUMNS = [
     ("neto_show", "Neto show"),
     ("porcentaje_artista", "% artista"),
     ("porcentaje_productora", "% productora"),
+    ("se_lleva_artista", "Se lleva artista"),
+    ("se_lleva_indyana", "Se lleva Indyana"),
     ("importe_artista_planilla", "Importe artista planilla"),
     ("importe_productora_planilla", "Importe productora planilla"),
+    ("se_lleva_artista_movimientos", "Artista segun movimientos"),
     ("lineas_ingreso", "Lineas ingreso"),
     ("lineas_gasto", "Lineas gasto"),
     ("control", "Control"),
@@ -71,12 +74,16 @@ def write_summary_sheet(wb: Workbook, df: pl.DataFrame) -> None:
     total_cachet = df["cachet_show"].sum()
     total_gastos = df["gastos"].sum()
     total_neto = df["neto_show"].sum()
+    total_artista = df["se_lleva_artista"].sum()
+    total_indyana = df["se_lleva_indyana"].sum()
 
     kpis = [
         ("Shows", df.height),
         ("Cachet total", total_cachet),
         ("Gastos total", total_gastos),
         ("Neto total", total_neto),
+        ("Se lleva artista", total_artista),
+        ("Se lleva Indyana", total_indyana),
     ]
 
     ws.append([])
@@ -86,9 +93,8 @@ def write_summary_sheet(wb: Workbook, df: pl.DataFrame) -> None:
     for label, value in kpis:
         ws.append([label, value])
 
-    for row in range(6, 8):
+    for row in range(6, 10):
         ws.cell(row=row, column=2).number_format = '$ #,##0'
-    ws.cell(row=8, column=2).number_format = '$ #,##0'
 
     summary = (
         df.group_by("artista")
@@ -97,12 +103,14 @@ def write_summary_sheet(wb: Workbook, df: pl.DataFrame) -> None:
             pl.sum("cachet_show").alias("cachet_show"),
             pl.sum("gastos").alias("gastos"),
             pl.sum("neto_show").alias("neto_show"),
+            pl.sum("se_lleva_artista").alias("se_lleva_artista"),
+            pl.sum("se_lleva_indyana").alias("se_lleva_indyana"),
         ])
-        .sort("neto_show", descending=True)
+        .sort("se_lleva_indyana", descending=True)
     )
 
     start_row = 11
-    headers = ["Artista", "Shows", "Cachet show", "Gastos", "Neto show"]
+    headers = ["Artista", "Shows", "Cachet show", "Gastos", "Neto show", "Se lleva artista", "Se lleva Indyana"]
     ws.cell(row=start_row, column=1, value="Totales por artista")
     ws.cell(row=start_row, column=1).font = Font(size=13, bold=True, color="1F4E78")
     ws.append(headers)
@@ -115,13 +123,15 @@ def write_summary_sheet(wb: Workbook, df: pl.DataFrame) -> None:
             row["cachet_show"],
             row["gastos"],
             row["neto_show"],
+            row["se_lleva_artista"],
+            row["se_lleva_indyana"],
         ])
 
     for row_idx in range(start_row + 2, ws.max_row + 1):
-        for col_idx in [3, 4, 5]:
+        for col_idx in [3, 4, 5, 6, 7]:
             ws.cell(row=row_idx, column=col_idx).number_format = '$ #,##0'
 
-    table_ref = f"A{start_row + 1}:E{ws.max_row}"
+    table_ref = f"A{start_row + 1}:G{ws.max_row}"
     table = Table(displayName="TotalesPorArtista", ref=table_ref)
     table.tableStyleInfo = TableStyleInfo(name="TableStyleMedium2", showRowStripes=True)
     ws.add_table(table)
@@ -144,7 +154,7 @@ def write_detail_sheet(wb: Workbook, df: pl.DataFrame) -> None:
     for row_idx in range(2, ws.max_row + 1):
         ws.cell(row=row_idx, column=2).number_format = "yyyy-mm-dd"
 
-        for col_idx in [4, 5, 6, 9, 10]:
+        for col_idx in [4, 5, 6, 9, 10, 11, 12, 13]:
             ws.cell(row=row_idx, column=col_idx).number_format = '$ #,##0'
 
         for col_idx in [7, 8]:
@@ -170,10 +180,17 @@ def main() -> None:
     write_detail_sheet(wb, df)
 
     OUTPUT_XLSX.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(OUTPUT_XLSX)
+    try:
+        wb.save(OUTPUT_XLSX)
+        output_path = OUTPUT_XLSX
+    except PermissionError:
+        output_path = OUTPUT_XLSX.with_name(
+            f"{OUTPUT_XLSX.stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{OUTPUT_XLSX.suffix}"
+        )
+        wb.save(output_path)
 
     print("Rows:", df.height)
-    print("Output:", OUTPUT_XLSX)
+    print("Output:", output_path)
 
 
 if __name__ == "__main__":

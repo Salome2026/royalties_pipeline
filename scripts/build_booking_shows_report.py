@@ -73,23 +73,33 @@ def main() -> None:
     show_movements = movements.filter(
         (pl.col("business_area") == "booking")
         & (pl.col("movement_subcategory").str.to_lowercase() == "show")
+    ).with_columns(
+        pl.col("concept").str.to_lowercase().str.strip_chars().alias("concept_key"),
     ).with_columns([
         pl.when(pl.col("movement_type") == "income")
         .then(pl.col("amount_ars"))
         .otherwise(0)
         .alias("cachet_show"),
-        pl.when(pl.col("movement_type") == "expense")
+        pl.when((pl.col("movement_type") == "expense") & (pl.col("concept_key") != "cachet"))
         .then(pl.col("amount_ars"))
         .otherwise(0)
         .alias("gastos_show"),
+        pl.when((pl.col("movement_type") == "expense") & (pl.col("concept_key") == "cachet"))
+        .then(pl.col("amount_ars"))
+        .otherwise(0)
+        .alias("artist_take_from_expenses"),
         pl.when(pl.col("movement_type") == "income")
         .then(pl.col("amount_usd"))
         .otherwise(0)
         .alias("cachet_show_usd"),
-        pl.when(pl.col("movement_type") == "expense")
+        pl.when((pl.col("movement_type") == "expense") & (pl.col("concept_key") != "cachet"))
         .then(pl.col("amount_usd"))
         .otherwise(0)
         .alias("gastos_show_usd"),
+        pl.when((pl.col("movement_type") == "expense") & (pl.col("concept_key") == "cachet"))
+        .then(pl.col("amount_usd"))
+        .otherwise(0)
+        .alias("artist_take_usd_from_expenses"),
         (pl.col("movement_type") == "income").cast(pl.UInt32).alias("lineas_ingreso"),
         (pl.col("movement_type") == "expense").cast(pl.UInt32).alias("lineas_gasto"),
     ])
@@ -105,8 +115,10 @@ def main() -> None:
         .agg([
             pl.sum("cachet_show").alias("cachet_show"),
             pl.sum("gastos_show").alias("gastos"),
+            pl.sum("artist_take_from_expenses").alias("se_lleva_artista_movimientos"),
             pl.sum("cachet_show_usd").alias("cachet_show_usd"),
             pl.sum("gastos_show_usd").alias("gastos_usd"),
+            pl.sum("artist_take_usd_from_expenses").alias("se_lleva_artista_usd_movimientos"),
             pl.sum("lineas_ingreso").alias("lineas_ingreso"),
             pl.sum("lineas_gasto").alias("lineas_gasto"),
             pl.len().alias("lineas_total"),
@@ -166,6 +178,14 @@ def main() -> None:
         ])
         .with_columns([
             (1 - pl.col("porcentaje_artista")).alias("porcentaje_productora"),
+            pl.coalesce([
+                pl.col("artist_share_ars_presentaciones"),
+                pl.col("se_lleva_artista_movimientos"),
+            ]).alias("se_lleva_artista"),
+            pl.coalesce([
+                pl.col("productora_share_ars_presentaciones"),
+                pl.col("neto_show") - pl.col("se_lleva_artista_movimientos"),
+            ]).alias("se_lleva_indyana"),
             pl.when(pl.col("porcentaje_artista").is_null())
             .then(pl.lit("sin_porcentaje_presentaciones"))
             .when(pl.col("cachet_show") == 0)
@@ -186,8 +206,11 @@ def main() -> None:
             pl.col("neto_show"),
             pl.col("porcentaje_artista"),
             pl.col("porcentaje_productora"),
+            pl.col("se_lleva_artista"),
+            pl.col("se_lleva_indyana"),
             pl.col("artist_share_ars_presentaciones").alias("importe_artista_planilla"),
             pl.col("productora_share_ars_presentaciones").alias("importe_productora_planilla"),
+            pl.col("se_lleva_artista_movimientos"),
             pl.col("cachet_show_usd"),
             pl.col("gastos_usd"),
             pl.col("neto_show_usd"),
