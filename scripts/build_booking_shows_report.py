@@ -65,6 +65,77 @@ def normalize_text_expr(name: str) -> pl.Expr:
     return pl.col(name).cast(pl.Utf8).str.strip_chars().str.to_lowercase()
 
 
+def pm_david_presentaciones_rows() -> pl.DataFrame:
+    return (
+        pl.read_parquet(PRESENTACIONES_PATH)
+        .filter(pl.col("source_file_name") == "PM David Carbone (1).xlsx")
+        .select([
+            pl.col("Todos").cast(pl.Utf8).str.strip_chars().alias("artista"),
+            pl.col("Todos.1").map_elements(parse_date, return_dtype=pl.Utf8).str.to_date().alias("fecha"),
+            pl.col("Evento").cast(pl.Utf8).str.strip_chars().alias("venue_evento"),
+            pl.col("Cachet $").map_elements(parse_number, return_dtype=pl.Float64).alias("cachet_show"),
+            pl.col("Neto $").map_elements(parse_number, return_dtype=pl.Float64).alias("neto_planilla"),
+            pl.col("Todos %").map_elements(parse_number, return_dtype=pl.Float64).alias("porcentaje_artista_raw"),
+            pl.col("Todos $").map_elements(parse_number, return_dtype=pl.Float64).alias("se_lleva_artista"),
+            pl.col("Indyana $").map_elements(parse_number, return_dtype=pl.Float64).alias("se_lleva_indyana"),
+            pl.col("Cachet u$").map_elements(parse_number, return_dtype=pl.Float64).alias("cachet_show_usd"),
+            pl.col("Neto U$").map_elements(parse_number, return_dtype=pl.Float64).alias("neto_show_usd"),
+            pl.col("source_file_name").alias("archivo_origen"),
+        ])
+        .filter(
+            pl.col("artista").is_not_null()
+            & pl.col("fecha").is_not_null()
+            & pl.col("venue_evento").is_not_null()
+            & pl.col("cachet_show").is_not_null()
+            & (pl.col("cachet_show") > 0)
+        )
+        .with_columns([
+            pl.lit(0).cast(pl.Float64).alias("cachet_informado_no_contabilizado"),
+            (pl.col("cachet_show") - pl.col("neto_planilla").fill_null(pl.col("cachet_show"))).alias("gastos"),
+            pl.col("neto_planilla").fill_null(pl.col("cachet_show")).alias("neto_show"),
+            pl.when(pl.col("porcentaje_artista_raw").is_not_null() & (pl.col("porcentaje_artista_raw") > 1))
+            .then(pl.col("porcentaje_artista_raw") / 100)
+            .otherwise(pl.col("porcentaje_artista_raw"))
+            .alias("porcentaje_artista"),
+            pl.lit(0).cast(pl.Float64).alias("gastos_usd"),
+            pl.lit(1).cast(pl.Int64).alias("lineas_ingreso"),
+            pl.lit(0).cast(pl.Int64).alias("lineas_gasto"),
+            pl.lit(1).cast(pl.Int64).alias("lineas_total"),
+            pl.lit("pm_david_presentaciones").alias("control"),
+        ])
+        .with_columns([
+            (1 - pl.col("porcentaje_artista")).alias("porcentaje_productora"),
+            pl.col("se_lleva_artista").alias("importe_artista_planilla"),
+            pl.col("se_lleva_indyana").alias("importe_productora_planilla"),
+            pl.col("se_lleva_artista").alias("se_lleva_artista_movimientos"),
+        ])
+        .select([
+            "artista",
+            "fecha",
+            "venue_evento",
+            "cachet_informado_no_contabilizado",
+            "cachet_show",
+            "gastos",
+            "neto_show",
+            "porcentaje_artista",
+            "porcentaje_productora",
+            "se_lleva_artista",
+            "se_lleva_indyana",
+            "importe_artista_planilla",
+            "importe_productora_planilla",
+            "se_lleva_artista_movimientos",
+            "cachet_show_usd",
+            "gastos_usd",
+            "neto_show_usd",
+            "lineas_ingreso",
+            "lineas_gasto",
+            "lineas_total",
+            "control",
+            "archivo_origen",
+        ])
+    )
+
+
 def main() -> None:
     print("Building booking shows report base...")
 
@@ -258,6 +329,13 @@ def main() -> None:
         ])
         .sort(["artista", "fecha", "venue_evento", "archivo_origen"])
     )
+
+    report = pl.concat([report, pm_david_presentaciones_rows()], how="diagonal_relaxed").sort([
+        "artista",
+        "fecha",
+        "venue_evento",
+        "archivo_origen",
+    ])
 
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     report.write_csv(OUTPUT_CSV)
