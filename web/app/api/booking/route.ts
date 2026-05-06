@@ -61,3 +61,26 @@ export async function POST(request: NextRequest) {
   if (!response.ok) return apiError(response);
   return NextResponse.json(await response.json());
 }
+
+export async function PUT(request: NextRequest) {
+  const config = await apiConfig();
+  if ("error" in config) return config.error;
+
+  const id = request.nextUrl.searchParams.get("id");
+  if (!id) {
+    return NextResponse.json({ error: "Falta id del show." }, { status: 400 });
+  }
+
+  const body = await request.json();
+  const response = await fetch(`${config.apiUrl}/booking/shows/${id}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "X-VPO-API-Key": config.apiKey,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) return apiError(response);
+  return NextResponse.json(await response.json());
+}

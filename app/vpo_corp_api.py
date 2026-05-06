@@ -530,6 +530,196 @@ def attach_booking_adjustments(conn: sqlite3.Connection, shows: list[dict]) -> l
     return shows
 
 
+def prepare_booking_show_payload(request: BookingQuickShowRequest) -> dict:
+    show_date = validate_iso_date(request.show_date)
+    artist = require_known_booking_artist(request.artist)
+    venue = request.venue.strip()
+    city = (request.city or "").strip() or None
+    tour_manager = (request.tour_manager or "").strip() or None
+    seller = (request.seller or "").strip() or None
+    notes = (request.notes or "").strip() or None
+    receipt_refs = clean_receipt_refs(request.receipt_refs)
+
+    prepared_expenses = []
+    for expense in request.show_expenses:
+        category = expense.category.strip() or "general"
+        concept = (expense.concept or "").strip() or category
+        if expense.amount <= 0:
+            continue
+
+        prepared_expenses.append({
+            "concept": concept,
+            "category": category,
+            "amount": expense.amount,
+            "notes": (expense.notes or "").strip() or None,
+        })
+
+    expenses_amount = sum(expense["amount"] for expense in prepared_expenses)
+    if not prepared_expenses:
+        expenses_amount = request.expenses_amount
+
+    producer_percent = request.producer_percent
+    if producer_percent is None:
+        producer_percent = max(0.0, 100.0 - request.artist_percent)
+
+    if round(request.artist_percent + producer_percent, 4) > 100.0:
+        raise HTTPException(status_code=400, detail="artist_percent + producer_percent cannot exceed 100.")
+
+    prepared_adjustments = []
+    for adjustment in request.artist_adjustments:
+        concept = adjustment.concept.strip()
+        if not concept or adjustment.amount <= 0:
+            continue
+
+        adjustment_producer_percent = adjustment.producer_percent
+        if adjustment_producer_percent is None:
+            adjustment_producer_percent = max(0.0, 100.0 - adjustment.artist_percent)
+
+        if round(adjustment.artist_percent + adjustment_producer_percent, 4) > 100.0:
+            raise HTTPException(status_code=400, detail="Adjustment artist_percent + producer_percent cannot exceed 100.")
+
+        artist_amount = adjustment.amount * adjustment.artist_percent / 100
+        producer_amount = adjustment.amount * adjustment_producer_percent / 100
+        if adjustment.applied_amount > artist_amount:
+            raise HTTPException(status_code=400, detail="Adjustment applied_amount cannot exceed artist recoverable amount.")
+
+        prepared_adjustments.append({
+            "concept": concept,
+            "adjustment_type": adjustment.adjustment_type,
+            "area": adjustment.area,
+            "impact": adjustment.impact,
+            "recoverable": adjustment.recoverable,
+            "amount": adjustment.amount,
+            "applied_amount": adjustment.applied_amount,
+            "artist_percent": adjustment.artist_percent,
+            "producer_percent": adjustment_producer_percent,
+            "artist_amount": artist_amount,
+            "producer_amount": producer_amount,
+            "notes": (adjustment.notes or "").strip() or None,
+        })
+
+    net_amount = request.cachet_amount - expenses_amount
+    artist_share = net_amount * request.artist_percent / 100
+    producer_share = net_amount * producer_percent / 100
+    balance_artist = artist_share - request.artist_paid_amount
+    balance_producer = producer_share - request.producer_received_amount
+
+    return {
+        "show_date": show_date,
+        "artist": artist,
+        "venue": venue,
+        "city": city,
+        "tour_manager": tour_manager,
+        "seller": seller,
+        "notes": notes,
+        "receipt_refs": receipt_refs,
+        "expenses": prepared_expenses,
+        "adjustments": prepared_adjustments,
+        "expenses_amount": expenses_amount,
+        "producer_percent": producer_percent,
+        "net_amount": net_amount,
+        "artist_share": artist_share,
+        "producer_share": producer_share,
+        "balance_artist": balance_artist,
+        "balance_producer": balance_producer,
+    }
+
+
+def replace_booking_show_children(
+    conn: sqlite3.Connection,
+    show_id: int,
+    request: BookingQuickShowRequest,
+    payload: dict,
+    now: str,
+) -> None:
+    conn.execute("DELETE FROM booking_movements WHERE show_id = ?", (show_id,))
+    conn.execute("DELETE FROM booking_show_expenses WHERE show_id = ?", (show_id,))
+    conn.execute("DELETE FROM booking_artist_adjustments WHERE show_id = ?", (show_id,))
+
+    movement_rows = [
+        ("income", "cachet", request.cachet_amount),
+        ("expense", "artist_payment", request.artist_paid_amount),
+        ("income", "producer_settlement", request.producer_received_amount),
+    ]
+    for expense in payload["expenses"]:
+        movement_rows.append(("expense", f"show_expense:{expense['category']}", expense["amount"]))
+
+    if not payload["expenses"]:
+        movement_rows.append(("expense", "show_expenses", payload["expenses_amount"]))
+
+    for movement_type, category, amount in movement_rows:
+        if amount <= 0:
+            continue
+        conn.execute(
+            """
+            INSERT INTO booking_movements (
+                show_id, movement_type, category, amount, currency, fx_rate, notes, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (show_id, movement_type, category, amount, request.currency, request.fx_rate, None, now),
+        )
+
+    for expense in payload["expenses"]:
+        conn.execute(
+            """
+            INSERT INTO booking_show_expenses (
+                show_id, concept, category, amount, currency, fx_rate, notes, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                show_id,
+                expense["concept"],
+                expense["category"],
+                expense["amount"],
+                request.currency,
+                request.fx_rate,
+                expense["notes"],
+                now,
+            ),
+        )
+
+    for adjustment in payload["adjustments"]:
+        conn.execute(
+            """
+            INSERT INTO booking_artist_adjustments (
+                show_id, concept, adjustment_type, area, impact, recoverable,
+                amount, applied_amount, currency, fx_rate, artist_percent, producer_percent,
+                artist_amount, producer_amount, notes, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                show_id,
+                adjustment["concept"],
+                adjustment["adjustment_type"],
+                adjustment["area"],
+                adjustment["impact"],
+                1 if adjustment["recoverable"] else 0,
+                adjustment["amount"],
+                adjustment["applied_amount"],
+                request.currency,
+                request.fx_rate,
+                adjustment["artist_percent"],
+                adjustment["producer_percent"],
+                adjustment["artist_amount"],
+                adjustment["producer_amount"],
+                adjustment["notes"],
+                now,
+            ),
+        )
+
+
+def fetch_booking_show_item(conn: sqlite3.Connection, show_id: int) -> dict:
+    row = conn.execute("SELECT * FROM booking_shows WHERE id = ?", (show_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Booking show not found.")
+
+    item = attach_booking_expenses(conn, [row_to_booking_show(row)])
+    return attach_booking_adjustments(conn, item)[0]
+
+
 def clean_booking_artist(value: object) -> str | None:
     if value is None:
         return None
@@ -1243,78 +1433,7 @@ def create_booking_show(
     require_api_key(x_vpo_api_key)
     init_booking_db()
 
-    show_date = validate_iso_date(request.show_date)
-    artist = require_known_booking_artist(request.artist)
-    venue = request.venue.strip()
-    city = (request.city or "").strip() or None
-    tour_manager = (request.tour_manager or "").strip() or None
-    seller = (request.seller or "").strip() or None
-    notes = (request.notes or "").strip() or None
-    receipt_refs = clean_receipt_refs(request.receipt_refs)
-
-    prepared_expenses = []
-    for expense in request.show_expenses:
-        category = expense.category.strip() or "general"
-        concept = (expense.concept or "").strip() or category
-        if expense.amount <= 0:
-            continue
-
-        prepared_expenses.append({
-            "concept": concept,
-            "category": category,
-            "amount": expense.amount,
-            "notes": (expense.notes or "").strip() or None,
-        })
-
-    expenses_amount = sum(expense["amount"] for expense in prepared_expenses)
-    if not prepared_expenses:
-        expenses_amount = request.expenses_amount
-
-    producer_percent = request.producer_percent
-    if producer_percent is None:
-        producer_percent = max(0.0, 100.0 - request.artist_percent)
-
-    if round(request.artist_percent + producer_percent, 4) > 100.0:
-        raise HTTPException(status_code=400, detail="artist_percent + producer_percent cannot exceed 100.")
-
-    prepared_adjustments = []
-    for adjustment in request.artist_adjustments:
-        concept = adjustment.concept.strip()
-        if not concept or adjustment.amount <= 0:
-            continue
-
-        adjustment_producer_percent = adjustment.producer_percent
-        if adjustment_producer_percent is None:
-            adjustment_producer_percent = max(0.0, 100.0 - adjustment.artist_percent)
-
-        if round(adjustment.artist_percent + adjustment_producer_percent, 4) > 100.0:
-            raise HTTPException(status_code=400, detail="Adjustment artist_percent + producer_percent cannot exceed 100.")
-
-        artist_amount = adjustment.amount * adjustment.artist_percent / 100
-        producer_amount = adjustment.amount * adjustment_producer_percent / 100
-        if adjustment.applied_amount > artist_amount:
-            raise HTTPException(status_code=400, detail="Adjustment applied_amount cannot exceed artist recoverable amount.")
-
-        prepared_adjustments.append({
-            "concept": concept,
-            "adjustment_type": adjustment.adjustment_type,
-            "area": adjustment.area,
-            "impact": adjustment.impact,
-            "recoverable": adjustment.recoverable,
-            "amount": adjustment.amount,
-            "applied_amount": adjustment.applied_amount,
-            "artist_percent": adjustment.artist_percent,
-            "producer_percent": adjustment_producer_percent,
-            "artist_amount": artist_amount,
-            "producer_amount": producer_amount,
-            "notes": (adjustment.notes or "").strip() or None,
-        })
-
-    net_amount = request.cachet_amount - expenses_amount
-    artist_share = net_amount * request.artist_percent / 100
-    producer_share = net_amount * producer_percent / 100
-    balance_artist = artist_share - request.artist_paid_amount
-    balance_producer = producer_share - request.producer_received_amount
+    payload = prepare_booking_show_payload(request)
     now = datetime.now().isoformat(timespec="seconds")
 
     with booking_connect() as conn:
@@ -1330,111 +1449,116 @@ def create_booking_show(
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                artist,
-                show_date,
-                venue,
-                city,
-                tour_manager,
-                seller,
+                payload["artist"],
+                payload["show_date"],
+                payload["venue"],
+                payload["city"],
+                payload["tour_manager"],
+                payload["seller"],
                 request.status,
                 request.currency,
                 request.fx_rate,
                 request.cachet_amount,
-                expenses_amount,
-                net_amount,
+                payload["expenses_amount"],
+                payload["net_amount"],
                 request.artist_percent,
-                producer_percent,
-                artist_share,
-                producer_share,
+                payload["producer_percent"],
+                payload["artist_share"],
+                payload["producer_share"],
                 request.artist_paid_amount,
                 request.producer_received_amount,
-                balance_artist,
-                balance_producer,
-                json.dumps(receipt_refs, ensure_ascii=False),
-                notes,
+                payload["balance_artist"],
+                payload["balance_producer"],
+                json.dumps(payload["receipt_refs"], ensure_ascii=False),
+                payload["notes"],
                 now,
                 now,
             ),
         )
         show_id = int(cursor.lastrowid)
+        replace_booking_show_children(conn, show_id, request, payload, now)
+        item = fetch_booking_show_item(conn, show_id)
 
-        movement_rows = [
-            ("income", "cachet", request.cachet_amount),
-            ("expense", "artist_payment", request.artist_paid_amount),
-            ("income", "producer_settlement", request.producer_received_amount),
-        ]
-        for expense in prepared_expenses:
-            movement_rows.append(("expense", f"show_expense:{expense['category']}", expense["amount"]))
+    return {
+        "item": item,
+        "db_path": str(VPO_BOOKING_DB_PATH),
+    }
 
-        if not prepared_expenses:
-            movement_rows.append(("expense", "show_expenses", expenses_amount))
 
-        for movement_type, category, amount in movement_rows:
-            if amount <= 0:
-                continue
-            conn.execute(
-                """
-                INSERT INTO booking_movements (
-                    show_id, movement_type, category, amount, currency, fx_rate, notes, created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (show_id, movement_type, category, amount, request.currency, request.fx_rate, None, now),
-            )
+@app.put("/booking/shows/{show_id}")
+def update_booking_show(
+    show_id: int,
+    request: BookingQuickShowRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
 
-        for expense in prepared_expenses:
-            conn.execute(
-                """
-                INSERT INTO booking_show_expenses (
-                    show_id, concept, category, amount, currency, fx_rate, notes, created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    show_id,
-                    expense["concept"],
-                    expense["category"],
-                    expense["amount"],
-                    request.currency,
-                    request.fx_rate,
-                    expense["notes"],
-                    now,
-                ),
-            )
+    payload = prepare_booking_show_payload(request)
+    now = datetime.now().isoformat(timespec="seconds")
 
-        for adjustment in prepared_adjustments:
-            conn.execute(
-                """
-                INSERT INTO booking_artist_adjustments (
-                    show_id, concept, adjustment_type, area, impact, recoverable,
-                    amount, applied_amount, currency, fx_rate, artist_percent, producer_percent,
-                    artist_amount, producer_amount, notes, created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    show_id,
-                    adjustment["concept"],
-                    adjustment["adjustment_type"],
-                    adjustment["area"],
-                    adjustment["impact"],
-                    1 if adjustment["recoverable"] else 0,
-                    adjustment["amount"],
-                    adjustment["applied_amount"],
-                    request.currency,
-                    request.fx_rate,
-                    adjustment["artist_percent"],
-                    adjustment["producer_percent"],
-                    adjustment["artist_amount"],
-                    adjustment["producer_amount"],
-                    adjustment["notes"],
-                    now,
-                ),
-            )
+    with booking_connect() as conn:
+        existing = conn.execute("SELECT id FROM booking_shows WHERE id = ?", (show_id,)).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Booking show not found.")
 
-        row = conn.execute("SELECT * FROM booking_shows WHERE id = ?", (show_id,)).fetchone()
-        item = attach_booking_expenses(conn, [row_to_booking_show(row)])
-        item = attach_booking_adjustments(conn, item)[0]
+        conn.execute(
+            """
+            UPDATE booking_shows
+            SET artist = ?,
+                show_date = ?,
+                venue = ?,
+                city = ?,
+                tour_manager = ?,
+                seller = ?,
+                status = ?,
+                currency = ?,
+                fx_rate = ?,
+                cachet_amount = ?,
+                expenses_amount = ?,
+                net_amount = ?,
+                artist_percent = ?,
+                producer_percent = ?,
+                artist_share_amount = ?,
+                producer_share_amount = ?,
+                artist_paid_amount = ?,
+                producer_received_amount = ?,
+                balance_artist_amount = ?,
+                balance_producer_amount = ?,
+                receipt_refs_json = ?,
+                notes = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                payload["artist"],
+                payload["show_date"],
+                payload["venue"],
+                payload["city"],
+                payload["tour_manager"],
+                payload["seller"],
+                request.status,
+                request.currency,
+                request.fx_rate,
+                request.cachet_amount,
+                payload["expenses_amount"],
+                payload["net_amount"],
+                request.artist_percent,
+                payload["producer_percent"],
+                payload["artist_share"],
+                payload["producer_share"],
+                request.artist_paid_amount,
+                request.producer_received_amount,
+                payload["balance_artist"],
+                payload["balance_producer"],
+                json.dumps(payload["receipt_refs"], ensure_ascii=False),
+                payload["notes"],
+                now,
+                show_id,
+            ),
+        )
+        replace_booking_show_children(conn, show_id, request, payload, now)
+        item = fetch_booking_show_item(conn, show_id)
 
     return {
         "item": item,

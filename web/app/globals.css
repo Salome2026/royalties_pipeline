@@ -784,6 +784,18 @@ button:disabled {
   margin-top: 10px;
 }
 
+.booking-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.booking-actions button {
+  min-height: 34px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
 @media (max-width: 820px) {
   .topbar {
     padding: 0 18px;

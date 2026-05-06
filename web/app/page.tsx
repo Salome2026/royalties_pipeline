@@ -70,8 +70,10 @@ type BookingShow = {
   venue: string;
   city: string | null;
   tour_manager: string | null;
+  seller: string | null;
   status: string;
   currency: "ARS" | "USD";
+  fx_rate: number | null;
   cachet_amount: number;
   expenses_amount: number;
   net_amount: number;
@@ -184,6 +186,10 @@ function localAmount(value: number, currency: string) {
   return ars(value);
 }
 
+function amountToInput(value: number | null | undefined) {
+  return value && value !== 0 ? String(value) : "";
+}
+
 function newBookingExpense(category = "general"): BookingExpenseForm {
   return {
     uid: `${Date.now()}-${Math.random()}`,
@@ -249,6 +255,7 @@ export default function Home() {
   const [bookingLoading, setBookingLoading] = useState(false);
   const [bookingItems, setBookingItems] = useState<BookingShow[]>([]);
   const [bookingArtists, setBookingArtists] = useState<string[]>([]);
+  const [bookingEditingId, setBookingEditingId] = useState<number | null>(null);
   const [bookingForm, setBookingForm] = useState<BookingForm>({
     artist: "",
     showDate: new Date().toISOString().slice(0, 10),
@@ -653,6 +660,74 @@ export default function Home() {
     setBookingArtists(data.items || []);
   }
 
+  function resetBookingForm() {
+    setBookingEditingId(null);
+    setBookingForm((current) => ({
+      ...current,
+      artist: "",
+      showDate: new Date().toISOString().slice(0, 10),
+      venue: "",
+      city: "",
+      tourManager: "",
+      seller: "",
+      status: "realizado",
+      currency: "ARS",
+      fxRate: "",
+      cachetAmount: "",
+      showExpenses: [],
+      artistPaidAmount: "",
+      producerReceivedAmount: "",
+      artistPercent: "70",
+      producerPercent: "30",
+      artistAdjustments: [],
+      receiptRefs: "",
+      notes: "",
+    }));
+  }
+
+  function editBookingShow(item: BookingShow) {
+    setBookingEditingId(item.id);
+    setBookingForm({
+      artist: item.artist,
+      showDate: item.show_date,
+      venue: item.venue,
+      city: item.city || "",
+      tourManager: item.tour_manager || "",
+      seller: item.seller || "",
+      status: item.status,
+      currency: item.currency,
+      fxRate: amountToInput(item.fx_rate),
+      cachetAmount: amountToInput(item.cachet_amount),
+      showExpenses: item.show_expenses.map((expense) => ({
+        uid: `expense-${expense.id}-${Date.now()}`,
+        concept: expense.concept || "",
+        category: expense.category || "general",
+        amount: amountToInput(expense.amount),
+        notes: expense.notes || "",
+      })),
+      artistPaidAmount: amountToInput(item.artist_paid_amount),
+      producerReceivedAmount: amountToInput(item.producer_received_amount),
+      artistPercent: String(item.artist_percent),
+      producerPercent: String(item.producer_percent),
+      artistAdjustments: item.artist_adjustments.map((adjustment) => ({
+        uid: `adjustment-${adjustment.id}-${Date.now()}`,
+        concept: adjustment.concept || "",
+        amount: amountToInput(adjustment.amount),
+        appliedAmount: amountToInput(adjustment.applied_amount),
+        adjustmentType: adjustment.adjustment_type,
+        area: adjustment.area,
+        impact: adjustment.impact,
+        recoverable: adjustment.recoverable,
+        artistPercent: String(adjustment.artist_percent),
+        producerPercent: String(adjustment.producer_percent),
+        notes: adjustment.notes || "",
+      })),
+      receiptRefs: item.receipt_refs.join("\n"),
+      notes: item.notes || "",
+    });
+    setMessage({ type: "ok", text: `Editando show #${item.id}. Guardar actualiza la carga existente.` });
+  }
+
   async function submitBooking(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage(null);
@@ -663,8 +738,8 @@ export default function Home() {
       .map((item) => item.trim())
       .filter(Boolean);
 
-    const response = await fetch("/api/booking", {
-      method: "POST",
+    const response = await fetch(bookingEditingId ? `/api/booking?id=${bookingEditingId}` : "/api/booking", {
+      method: bookingEditingId ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         artist: bookingForm.artist,
@@ -716,21 +791,14 @@ export default function Home() {
     }
 
     const data = await response.json();
-    setBookingItems((current) => [data.item, ...current].slice(0, 30));
-    setBookingForm((current) => ({
-      ...current,
-      artist: "",
-      venue: "",
-      city: "",
-      cachetAmount: "",
-      showExpenses: [],
-      artistPaidAmount: "",
-      producerReceivedAmount: "",
-      artistAdjustments: [],
-      receiptRefs: "",
-      notes: "",
-    }));
-    setMessage({ type: "ok", text: "Show cargado correctamente." });
+    setBookingItems((current) => {
+      if (bookingEditingId) {
+        return current.map((item) => (item.id === data.item.id ? data.item : item));
+      }
+      return [data.item, ...current].slice(0, 30);
+    });
+    resetBookingForm();
+    setMessage({ type: "ok", text: bookingEditingId ? "Show actualizado correctamente." : "Show cargado correctamente." });
     setBookingLoading(false);
   }
 
@@ -1005,8 +1073,15 @@ export default function Home() {
         {view === "booking" && (
           <div className="grid booking-grid">
             <form className="panel" onSubmit={submitBooking}>
-              <h1>Booking / carga rapida</h1>
-              <p>Alta directa de show y rendicion inicial, sin agenda previa.</p>
+              <div className="section-heading compact">
+                <div>
+                  <h1>{bookingEditingId ? `Editando show #${bookingEditingId}` : "Booking / carga rapida"}</h1>
+                  <p>{bookingEditingId ? "Guardar reemplaza los datos de esta carga." : "Alta directa de show y rendicion inicial, sin agenda previa."}</p>
+                </div>
+                {bookingEditingId && (
+                  <button type="button" onClick={resetBookingForm}>Cancelar edicion</button>
+                )}
+              </div>
 
               <div className="row">
                 <div>
@@ -1304,7 +1379,9 @@ export default function Home() {
               <label htmlFor="booking_notes">Notas</label>
               <textarea id="booking_notes" value={bookingForm.notes} onChange={(event) => updateBookingField("notes", event.target.value)} />
 
-              <button type="submit" disabled={bookingLoading || bookingArtists.length === 0}>{bookingLoading ? "Guardando..." : "Guardar show"}</button>
+              <button type="submit" disabled={bookingLoading || bookingArtists.length === 0}>
+                {bookingLoading ? "Guardando..." : bookingEditingId ? "Actualizar show" : "Guardar show"}
+              </button>
             </form>
 
             <section className="panel">
@@ -1335,6 +1412,9 @@ export default function Home() {
                       {item.show_expenses.length > 0 && <span>{item.show_expenses.length} gasto(s)</span>}
                       {item.receipt_refs.length > 0 && <span>{item.receipt_refs.length} comprobante(s)</span>}
                       {item.artist_adjustments.length > 0 && <span>{item.artist_adjustments.length} ajuste(s)</span>}
+                    </div>
+                    <div className="booking-actions">
+                      <button type="button" onClick={() => editBookingShow(item)}>Editar</button>
                     </div>
                   </article>
                 ))}
