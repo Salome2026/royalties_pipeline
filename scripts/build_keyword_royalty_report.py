@@ -618,6 +618,10 @@ def instructions_dataframe() -> pd.DataFrame:
             "contenido": "Totales agrupados por store original y tipo normalizado.",
         },
         {
+            "hoja": "territory_summary",
+            "contenido": "Ranking por territorio/pais reportado, con ingresos, unidades y filas.",
+        },
+        {
             "hoja": "track_summary",
             "contenido": "Totales por tema/asset, ISRC, artista, tipo de contenido y periodo encontrado.",
         },
@@ -708,6 +712,7 @@ def build_report_tables(
                     "usage_type",
                     "amount_usd",
                     "units",
+                    "territory",
                     "source_sheet",
                     "revenue_basis",
                 ]
@@ -752,6 +757,26 @@ def build_report_tables(
         store_summary_lf = (
             statement_base_lf
             .group_by(["source", "account", "store_raw", "usage_type"])
+            .agg([
+                pl.sum("amount_usd").alias("amount_usd"),
+                pl.sum("units").alias("units"),
+                pl.len().alias("rows"),
+            ])
+            .sort("amount_usd", descending=True)
+        )
+
+        territory_summary_lf = (
+            statement_base_lf
+            .with_columns(
+                pl.when(
+                    pl.col("territory").cast(pl.Utf8, strict=False).str.strip_chars().is_null()
+                    | (pl.col("territory").cast(pl.Utf8, strict=False).str.strip_chars() == "")
+                )
+                .then(pl.lit("Sin territorio"))
+                .otherwise(pl.col("territory").cast(pl.Utf8, strict=False).str.strip_chars())
+                .alias("territory")
+            )
+            .group_by(["territory"])
             .agg([
                 pl.sum("amount_usd").alias("amount_usd"),
                 pl.sum("units").alias("units"),
@@ -924,6 +949,7 @@ def build_report_tables(
         source_summary = source_summary_lf.collect()
         monthly_summary = monthly_summary_lf.collect()
         store_summary = store_summary_lf.collect()
+        territory_summary = territory_summary_lf.collect()
         track_summary = track_summary_lf.collect()
         song_matches = song_matches_lf.collect()
         raw_sample = raw_sample_lf.collect()
@@ -946,6 +972,7 @@ def build_report_tables(
             "source_summary": display_dataframe(source_summary.to_pandas()),
             "monthly_summary": display_dataframe(monthly_summary.to_pandas()),
             "store_summary": display_dataframe(store_summary.to_pandas()),
+            "territory_summary": display_dataframe(territory_summary.to_pandas()),
             "track_summary": display_dataframe(track_summary.to_pandas()),
             "song_matches": display_dataframe(safe_select(
                 song_matches,
@@ -1069,6 +1096,7 @@ def build_report_tables(
 
     raw_sample = pl.DataFrame()
     store_summary = pl.DataFrame()
+    territory_summary = pl.DataFrame()
     if standardized_path.exists():
         raw_cols = standardized_cols
         raw_filter = build_filter(raw_cols, SEARCH_COLUMNS_STANDARDIZED, keywords, mode)
@@ -1100,6 +1128,27 @@ def build_report_tables(
         store_summary = (
             raw_matches_lf
             .group_by(["source", "account", "store_raw", "usage_type"])
+            .agg([
+                pl.sum("amount_usd").alias("amount_usd"),
+                pl.sum("units").alias("units"),
+                pl.len().alias("rows"),
+            ])
+            .sort("amount_usd", descending=True)
+            .collect()
+        )
+
+        territory_summary = (
+            raw_matches_lf
+            .with_columns(
+                pl.when(
+                    pl.col("territory").cast(pl.Utf8, strict=False).str.strip_chars().is_null()
+                    | (pl.col("territory").cast(pl.Utf8, strict=False).str.strip_chars() == "")
+                )
+                .then(pl.lit("Sin territorio"))
+                .otherwise(pl.col("territory").cast(pl.Utf8, strict=False).str.strip_chars())
+                .alias("territory")
+            )
+            .group_by(["territory"])
             .agg([
                 pl.sum("amount_usd").alias("amount_usd"),
                 pl.sum("units").alias("units"),
@@ -1161,6 +1210,7 @@ def build_report_tables(
         "source_summary": display_dataframe(source_summary.to_pandas()),
         "monthly_summary": display_dataframe(monthly_summary.to_pandas()),
         "store_summary": display_dataframe(store_summary.to_pandas()),
+        "territory_summary": display_dataframe(territory_summary.to_pandas()),
         "track_summary": display_dataframe(track_summary.to_pandas()),
         "song_matches": display_dataframe(safe_select(
             song_matches,
