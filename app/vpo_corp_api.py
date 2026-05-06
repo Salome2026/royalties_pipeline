@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import os
+import sqlite3
 import sys
 from calendar import monthrange
 from datetime import date
@@ -58,6 +59,7 @@ VPO_API_KEY = os.environ.get("VPO_API_KEY", "change-me")
 VPO_LOCAL_MARTS_DIR = Path(os.environ.get("VPO_LOCAL_MARTS_DIR", "")).expanduser()
 VPO_API_CACHE_DIR = Path(os.environ.get("VPO_API_CACHE_DIR", BASE / "cache" / "gcs_marts"))
 VPO_API_REPORTS_DIR = Path(os.environ.get("VPO_API_REPORTS_DIR", BASE / "reports" / "api"))
+VPO_BOOKING_DB_PATH = Path(os.environ.get("VPO_BOOKING_DB_PATH", BASE / "warehouse" / "booking" / "live" / "booking_live.sqlite"))
 GOOGLE_SHEETS_SHARE_EMAIL = os.environ.get("GOOGLE_SHEETS_SHARE_EMAIL", "").strip()
 GOOGLE_DRIVE_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
 
@@ -85,6 +87,26 @@ class RefreshRequest(BaseModel):
 class StatementReportRequest(BaseModel):
     refresh_cache: bool = False
     min_artist_total_usd: float = Field(default=0.0, ge=0.0, le=1_000_000.0)
+
+
+class BookingQuickShowRequest(BaseModel):
+    artist: str = Field(..., min_length=1, max_length=160)
+    show_date: str = Field(..., min_length=10, max_length=10)
+    venue: str = Field(..., min_length=1, max_length=180)
+    city: str | None = Field(default=None, max_length=120)
+    tour_manager: str | None = Field(default=None, max_length=120)
+    seller: str | None = Field(default=None, max_length=120)
+    status: Literal["pendiente", "realizado", "rendido", "aprobado", "cancelado", "no_cobrado"] = "realizado"
+    currency: Literal["ARS", "USD"] = "ARS"
+    fx_rate: float | None = Field(default=None, gt=0)
+    cachet_amount: float = Field(default=0.0, ge=0.0)
+    expenses_amount: float = Field(default=0.0, ge=0.0)
+    artist_paid_amount: float = Field(default=0.0, ge=0.0)
+    producer_received_amount: float = Field(default=0.0, ge=0.0)
+    artist_percent: float = Field(default=70.0, ge=0.0, le=100.0)
+    producer_percent: float | None = Field(default=None, ge=0.0, le=100.0)
+    receipt_refs: list[str] = Field(default_factory=list, max_length=30)
+    notes: str | None = Field(default=None, max_length=2000)
 
 
 ParticipationPreset = Literal["last_month", "last_3_months", "last_year", "all_history", "custom"]
@@ -295,6 +317,81 @@ def last_business_day(month: str) -> str:
     while current.weekday() >= 5:
         current = current.replace(day=current.day - 1)
     return current.isoformat()
+
+
+def booking_connect() -> sqlite3.Connection:
+    VPO_BOOKING_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(VPO_BOOKING_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    return conn
+
+
+def init_booking_db() -> None:
+    with booking_connect() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS booking_shows (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                artist TEXT NOT NULL,
+                show_date TEXT NOT NULL,
+                venue TEXT NOT NULL,
+                city TEXT,
+                tour_manager TEXT,
+                seller TEXT,
+                status TEXT NOT NULL,
+                currency TEXT NOT NULL,
+                fx_rate REAL,
+                cachet_amount REAL NOT NULL DEFAULT 0,
+                expenses_amount REAL NOT NULL DEFAULT 0,
+                net_amount REAL NOT NULL DEFAULT 0,
+                artist_percent REAL NOT NULL DEFAULT 0,
+                producer_percent REAL NOT NULL DEFAULT 0,
+                artist_share_amount REAL NOT NULL DEFAULT 0,
+                producer_share_amount REAL NOT NULL DEFAULT 0,
+                artist_paid_amount REAL NOT NULL DEFAULT 0,
+                producer_received_amount REAL NOT NULL DEFAULT 0,
+                balance_artist_amount REAL NOT NULL DEFAULT 0,
+                balance_producer_amount REAL NOT NULL DEFAULT 0,
+                receipt_refs_json TEXT NOT NULL DEFAULT '[]',
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS booking_movements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                show_id INTEGER NOT NULL REFERENCES booking_shows(id) ON DELETE CASCADE,
+                movement_type TEXT NOT NULL,
+                category TEXT NOT NULL,
+                amount REAL NOT NULL DEFAULT 0,
+                currency TEXT NOT NULL,
+                fx_rate REAL,
+                notes TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+
+
+def validate_iso_date(value: str) -> str:
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="show_date must be YYYY-MM-DD.") from exc
+
+
+def clean_receipt_refs(values: list[str]) -> list[str]:
+    return [value.strip() for value in values if value and value.strip()]
+
+
+def row_to_booking_show(row: sqlite3.Row) -> dict:
+    data = dict(row)
+    data["receipt_refs"] = json.loads(data.pop("receipt_refs_json") or "[]")
+    return data
 
 
 def dataframe_values(dataframe) -> list[list[object]]:
@@ -893,4 +990,129 @@ def distributor_participation(
         "available_end_month": available_end,
         "total_amount_usd": total,
         "items": items,
+    }
+
+
+@app.get("/booking/shows")
+def booking_shows(
+    limit: int = 50,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+    safe_limit = min(max(limit, 1), 200)
+
+    with booking_connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM booking_shows
+            ORDER BY show_date DESC, id DESC
+            LIMIT ?
+            """,
+            (safe_limit,),
+        ).fetchall()
+
+    return {
+        "db_path": str(VPO_BOOKING_DB_PATH),
+        "items": [row_to_booking_show(row) for row in rows],
+    }
+
+
+@app.post("/booking/shows")
+def create_booking_show(
+    request: BookingQuickShowRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+
+    show_date = validate_iso_date(request.show_date)
+    artist = request.artist.strip()
+    venue = request.venue.strip()
+    city = (request.city or "").strip() or None
+    tour_manager = (request.tour_manager or "").strip() or None
+    seller = (request.seller or "").strip() or None
+    notes = (request.notes or "").strip() or None
+    receipt_refs = clean_receipt_refs(request.receipt_refs)
+
+    producer_percent = request.producer_percent
+    if producer_percent is None:
+        producer_percent = max(0.0, 100.0 - request.artist_percent)
+
+    if round(request.artist_percent + producer_percent, 4) > 100.0:
+        raise HTTPException(status_code=400, detail="artist_percent + producer_percent cannot exceed 100.")
+
+    net_amount = request.cachet_amount - request.expenses_amount
+    artist_share = net_amount * request.artist_percent / 100
+    producer_share = net_amount * producer_percent / 100
+    balance_artist = artist_share - request.artist_paid_amount
+    balance_producer = producer_share - request.producer_received_amount
+    now = datetime.now().isoformat(timespec="seconds")
+
+    with booking_connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO booking_shows (
+                artist, show_date, venue, city, tour_manager, seller, status,
+                currency, fx_rate, cachet_amount, expenses_amount, net_amount,
+                artist_percent, producer_percent, artist_share_amount, producer_share_amount,
+                artist_paid_amount, producer_received_amount, balance_artist_amount,
+                balance_producer_amount, receipt_refs_json, notes, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                artist,
+                show_date,
+                venue,
+                city,
+                tour_manager,
+                seller,
+                request.status,
+                request.currency,
+                request.fx_rate,
+                request.cachet_amount,
+                request.expenses_amount,
+                net_amount,
+                request.artist_percent,
+                producer_percent,
+                artist_share,
+                producer_share,
+                request.artist_paid_amount,
+                request.producer_received_amount,
+                balance_artist,
+                balance_producer,
+                json.dumps(receipt_refs, ensure_ascii=False),
+                notes,
+                now,
+                now,
+            ),
+        )
+        show_id = int(cursor.lastrowid)
+
+        movement_rows = [
+            ("income", "cachet", request.cachet_amount),
+            ("expense", "show_expenses", request.expenses_amount),
+            ("expense", "artist_payment", request.artist_paid_amount),
+            ("income", "producer_settlement", request.producer_received_amount),
+        ]
+        for movement_type, category, amount in movement_rows:
+            if amount <= 0:
+                continue
+            conn.execute(
+                """
+                INSERT INTO booking_movements (
+                    show_id, movement_type, category, amount, currency, fx_rate, notes, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (show_id, movement_type, category, amount, request.currency, request.fx_rate, None, now),
+            )
+
+        row = conn.execute("SELECT * FROM booking_shows WHERE id = ?", (show_id,)).fetchone()
+
+    return {
+        "item": row_to_booking_show(row),
+        "db_path": str(VPO_BOOKING_DB_PATH),
     }

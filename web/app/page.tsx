@@ -7,7 +7,7 @@ type Message = {
   text: string;
 };
 
-type View = "menu" | "statement" | "royalties" | "participation";
+type View = "menu" | "statement" | "royalties" | "participation" | "booking";
 
 type ParticipationItem = {
   source: string;
@@ -33,6 +33,50 @@ type ParticipationCache = {
   preset: string;
   startMonth: string;
   endMonth: string;
+};
+
+type BookingShow = {
+  id: number;
+  artist: string;
+  show_date: string;
+  venue: string;
+  city: string | null;
+  tour_manager: string | null;
+  status: string;
+  currency: "ARS" | "USD";
+  cachet_amount: number;
+  expenses_amount: number;
+  net_amount: number;
+  artist_percent: number;
+  producer_percent: number;
+  artist_share_amount: number;
+  producer_share_amount: number;
+  artist_paid_amount: number;
+  producer_received_amount: number;
+  balance_artist_amount: number;
+  balance_producer_amount: number;
+  receipt_refs: string[];
+  notes: string | null;
+};
+
+type BookingForm = {
+  artist: string;
+  showDate: string;
+  venue: string;
+  city: string;
+  tourManager: string;
+  seller: string;
+  status: string;
+  currency: "ARS" | "USD";
+  fxRate: string;
+  cachetAmount: string;
+  expensesAmount: string;
+  artistPaidAmount: string;
+  producerReceivedAmount: string;
+  artistPercent: string;
+  producerPercent: string;
+  receiptRefs: string;
+  notes: string;
 };
 
 const PIE_COLORS = ["#17324d", "#0f766e", "#b54708", "#6941c6", "#b42318", "#475467", "#2e90fa"];
@@ -76,6 +120,17 @@ function pct(value: number) {
   return `${value.toFixed(1)}%`;
 }
 
+function ars(value: number) {
+  return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
+}
+
+function localAmount(value: number, currency: string) {
+  if (currency === "USD") {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+  }
+  return ars(value);
+}
+
 function MonthSelect({ id, value, min, onChange }: MonthSelectProps) {
   const options = MONTH_OPTIONS.filter((option) => !min || option.value >= min);
 
@@ -112,6 +167,27 @@ export default function Home() {
   const [participationPreset, setParticipationPreset] = useState("last_year");
   const [participationStartMonth, setParticipationStartMonth] = useState("");
   const [participationEndMonth, setParticipationEndMonth] = useState("");
+  const [bookingLoading, setBookingLoading] = useState(false);
+  const [bookingItems, setBookingItems] = useState<BookingShow[]>([]);
+  const [bookingForm, setBookingForm] = useState<BookingForm>({
+    artist: "",
+    showDate: new Date().toISOString().slice(0, 10),
+    venue: "",
+    city: "",
+    tourManager: "",
+    seller: "",
+    status: "realizado",
+    currency: "ARS",
+    fxRate: "",
+    cachetAmount: "",
+    expensesAmount: "",
+    artistPaidAmount: "",
+    producerReceivedAmount: "",
+    artistPercent: "70",
+    producerPercent: "30",
+    receiptRefs: "",
+    notes: "",
+  });
 
   useEffect(() => {
     fetch("/api/session")
@@ -135,6 +211,12 @@ export default function Home() {
       loadParticipation(false);
     }
   }, [authenticated, view, participation]);
+
+  useEffect(() => {
+    if (authenticated && view === "booking") {
+      loadBookingShows();
+    }
+  }, [authenticated, view]);
 
   const pieStyle = useMemo(() => {
     if (!participation?.items.length) return { background: "#e4e7ec" };
@@ -360,6 +442,82 @@ export default function Home() {
     setParticipationLoading(false);
   }
 
+  function updateBookingField<K extends keyof BookingForm>(key: K, value: BookingForm[K]) {
+    setBookingForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function parseMoneyInput(value: string) {
+    const cleaned = value.replace(/\./g, "").replace(",", ".").trim();
+    const parsed = Number(cleaned);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  async function loadBookingShows() {
+    const response = await fetch("/api/booking", { cache: "no-store" });
+    if (!response.ok) return;
+    const data = await response.json();
+    setBookingItems(data.items || []);
+  }
+
+  async function submitBooking(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage(null);
+    setBookingLoading(true);
+
+    const receiptRefs = bookingForm.receiptRefs
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    const response = await fetch("/api/booking", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        artist: bookingForm.artist,
+        show_date: bookingForm.showDate,
+        venue: bookingForm.venue,
+        city: bookingForm.city || null,
+        tour_manager: bookingForm.tourManager || null,
+        seller: bookingForm.seller || null,
+        status: bookingForm.status,
+        currency: bookingForm.currency,
+        fx_rate: bookingForm.fxRate ? parseMoneyInput(bookingForm.fxRate) : null,
+        cachet_amount: parseMoneyInput(bookingForm.cachetAmount),
+        expenses_amount: parseMoneyInput(bookingForm.expensesAmount),
+        artist_paid_amount: parseMoneyInput(bookingForm.artistPaidAmount),
+        producer_received_amount: parseMoneyInput(bookingForm.producerReceivedAmount),
+        artist_percent: parseMoneyInput(bookingForm.artistPercent),
+        producer_percent: bookingForm.producerPercent ? parseMoneyInput(bookingForm.producerPercent) : null,
+        receipt_refs: receiptRefs,
+        notes: bookingForm.notes || null,
+      }),
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({ error: "No se pudo guardar el show." }));
+      setMessage({ type: "error", text: data.error || "No se pudo guardar el show." });
+      setBookingLoading(false);
+      return;
+    }
+
+    const data = await response.json();
+    setBookingItems((current) => [data.item, ...current].slice(0, 30));
+    setBookingForm((current) => ({
+      ...current,
+      artist: "",
+      venue: "",
+      city: "",
+      cachetAmount: "",
+      expensesAmount: "",
+      artistPaidAmount: "",
+      producerReceivedAmount: "",
+      receiptRefs: "",
+      notes: "",
+    }));
+    setMessage({ type: "ok", text: "Show cargado correctamente." });
+    setBookingLoading(false);
+  }
+
   function submitRoyalties(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     generateExcel();
@@ -451,6 +609,11 @@ export default function Home() {
                 <span className="card-index">03</span>
                 <strong>Participacion en distribuidoras</strong>
                 <span>Torta simple por fuente, guardada desde marts publicados.</span>
+              </button>
+              <button type="button" className="menu-card" onClick={() => openView("booking")}>
+                <span className="card-index">04</span>
+                <strong>Booking / carga rapida</strong>
+                <span>Carga directa de shows, gastos, pagos y comprobantes.</span>
               </button>
             </div>
           </>
@@ -621,6 +784,139 @@ export default function Home() {
               </div>
             </div>
           </section>
+        )}
+
+        {view === "booking" && (
+          <div className="grid booking-grid">
+            <form className="panel" onSubmit={submitBooking}>
+              <h1>Booking / carga rapida</h1>
+              <p>Alta directa de show y rendicion inicial, sin agenda previa.</p>
+
+              <div className="row">
+                <div>
+                  <label htmlFor="booking_artist">Artista</label>
+                  <input id="booking_artist" value={bookingForm.artist} onChange={(event) => updateBookingField("artist", event.target.value)} placeholder="Virrshi, Simo, Dormun" required />
+                </div>
+                <div>
+                  <label htmlFor="booking_date">Fecha</label>
+                  <input id="booking_date" type="date" value={bookingForm.showDate} onChange={(event) => updateBookingField("showDate", event.target.value)} required />
+                </div>
+              </div>
+
+              <div className="row">
+                <div>
+                  <label htmlFor="booking_venue">Venue / evento</label>
+                  <input id="booking_venue" value={bookingForm.venue} onChange={(event) => updateBookingField("venue", event.target.value)} required />
+                </div>
+                <div>
+                  <label htmlFor="booking_city">Ciudad</label>
+                  <input id="booking_city" value={bookingForm.city} onChange={(event) => updateBookingField("city", event.target.value)} />
+                </div>
+              </div>
+
+              <div className="row">
+                <div>
+                  <label htmlFor="booking_tm">Tour manager</label>
+                  <input id="booking_tm" value={bookingForm.tourManager} onChange={(event) => updateBookingField("tourManager", event.target.value)} />
+                </div>
+                <div>
+                  <label htmlFor="booking_status">Estado</label>
+                  <select id="booking_status" value={bookingForm.status} onChange={(event) => updateBookingField("status", event.target.value)}>
+                    <option value="realizado">Realizado</option>
+                    <option value="pendiente">Pendiente</option>
+                    <option value="rendido">Rendido</option>
+                    <option value="aprobado">Aprobado</option>
+                    <option value="no_cobrado">No cobrado</option>
+                    <option value="cancelado">Cancelado</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="row three">
+                <div>
+                  <label htmlFor="booking_currency">Moneda</label>
+                  <select id="booking_currency" value={bookingForm.currency} onChange={(event) => updateBookingField("currency", event.target.value as "ARS" | "USD")}>
+                    <option value="ARS">ARS</option>
+                    <option value="USD">USD</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="booking_fx">Tipo de cambio</label>
+                  <input id="booking_fx" inputMode="decimal" value={bookingForm.fxRate} onChange={(event) => updateBookingField("fxRate", event.target.value)} placeholder="opcional" />
+                </div>
+                <div>
+                  <label htmlFor="booking_cachet">Cachet</label>
+                  <input id="booking_cachet" inputMode="decimal" value={bookingForm.cachetAmount} onChange={(event) => updateBookingField("cachetAmount", event.target.value)} placeholder="1000000" />
+                </div>
+              </div>
+
+              <div className="row">
+                <div>
+                  <label htmlFor="booking_expenses">Gastos del show</label>
+                  <input id="booking_expenses" inputMode="decimal" value={bookingForm.expensesAmount} onChange={(event) => updateBookingField("expensesAmount", event.target.value)} />
+                </div>
+                <div>
+                  <label htmlFor="booking_artist_paid">Pagado al artista</label>
+                  <input id="booking_artist_paid" inputMode="decimal" value={bookingForm.artistPaidAmount} onChange={(event) => updateBookingField("artistPaidAmount", event.target.value)} />
+                </div>
+              </div>
+
+              <div className="row three">
+                <div>
+                  <label htmlFor="booking_artist_pct">% artista</label>
+                  <input id="booking_artist_pct" inputMode="decimal" value={bookingForm.artistPercent} onChange={(event) => updateBookingField("artistPercent", event.target.value)} />
+                </div>
+                <div>
+                  <label htmlFor="booking_producer_pct">% productora</label>
+                  <input id="booking_producer_pct" inputMode="decimal" value={bookingForm.producerPercent} onChange={(event) => updateBookingField("producerPercent", event.target.value)} />
+                </div>
+                <div>
+                  <label htmlFor="booking_producer_received">Rendido a productora</label>
+                  <input id="booking_producer_received" inputMode="decimal" value={bookingForm.producerReceivedAmount} onChange={(event) => updateBookingField("producerReceivedAmount", event.target.value)} />
+                </div>
+              </div>
+
+              <label htmlFor="booking_receipts">Comprobantes / links / rutas</label>
+              <textarea id="booking_receipts" value={bookingForm.receiptRefs} onChange={(event) => updateBookingField("receiptRefs", event.target.value)} placeholder="Uno por linea: C:\\comprobantes\\show.pdf o link de Drive/WhatsApp" />
+
+              <label htmlFor="booking_notes">Notas</label>
+              <textarea id="booking_notes" value={bookingForm.notes} onChange={(event) => updateBookingField("notes", event.target.value)} />
+
+              <button type="submit" disabled={bookingLoading}>{bookingLoading ? "Guardando..." : "Guardar show"}</button>
+            </form>
+
+            <section className="panel">
+              <div className="section-heading">
+                <div>
+                  <h2>Ultimas cargas</h2>
+                  <p>Control rapido de shows cargados localmente.</p>
+                </div>
+                <button type="button" onClick={loadBookingShows} disabled={bookingLoading}>Actualizar</button>
+              </div>
+
+              <div className="booking-list">
+                {bookingItems.length === 0 && <p className="field-help">Todavia no hay shows cargados en esta base local.</p>}
+                {bookingItems.map((item) => (
+                  <article className="booking-item" key={item.id}>
+                    <div>
+                      <strong>{item.artist}</strong>
+                      <span>{item.show_date} · {item.venue}{item.city ? ` · ${item.city}` : ""}</span>
+                    </div>
+                    <div className="booking-metrics">
+                      <span>Cachet {localAmount(item.cachet_amount, item.currency)}</span>
+                      <span>Neto {localAmount(item.net_amount, item.currency)}</span>
+                      <span>Artista {localAmount(item.artist_share_amount, item.currency)}</span>
+                      <span>VPO {localAmount(item.producer_share_amount, item.currency)}</span>
+                    </div>
+                    <div className="booking-status">
+                      <span>{item.status}</span>
+                      {item.receipt_refs.length > 0 && <span>{item.receipt_refs.length} comprobante(s)</span>}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          </div>
         )}
       </main>
     </div>
