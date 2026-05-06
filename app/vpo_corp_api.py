@@ -104,6 +104,13 @@ class BookingArtistAdjustmentRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=1000)
 
 
+class BookingShowExpenseRequest(BaseModel):
+    concept: str = Field(..., min_length=1, max_length=180)
+    category: str = Field(default="general", min_length=1, max_length=80)
+    amount: float = Field(default=0.0, ge=0.0)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
 class BookingQuickShowRequest(BaseModel):
     artist: str = Field(..., min_length=1, max_length=160)
     show_date: str = Field(..., min_length=10, max_length=10)
@@ -116,6 +123,7 @@ class BookingQuickShowRequest(BaseModel):
     fx_rate: float | None = Field(default=None, gt=0)
     cachet_amount: float = Field(default=0.0, ge=0.0)
     expenses_amount: float = Field(default=0.0, ge=0.0)
+    show_expenses: list[BookingShowExpenseRequest] = Field(default_factory=list, max_length=50)
     artist_paid_amount: float = Field(default=0.0, ge=0.0)
     producer_received_amount: float = Field(default=0.0, ge=0.0)
     artist_percent: float = Field(default=70.0, ge=0.0, le=100.0)
@@ -393,6 +401,21 @@ def init_booking_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS booking_show_expenses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                show_id INTEGER NOT NULL REFERENCES booking_shows(id) ON DELETE CASCADE,
+                concept TEXT NOT NULL,
+                category TEXT NOT NULL,
+                amount REAL NOT NULL DEFAULT 0,
+                currency TEXT NOT NULL,
+                fx_rate REAL,
+                notes TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS booking_artist_adjustments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 show_id INTEGER NOT NULL REFERENCES booking_shows(id) ON DELETE CASCADE,
@@ -440,14 +463,45 @@ def clean_receipt_refs(values: list[str]) -> list[str]:
 def row_to_booking_show(row: sqlite3.Row) -> dict:
     data = dict(row)
     data["receipt_refs"] = json.loads(data.pop("receipt_refs_json") or "[]")
+    data["show_expenses"] = []
     data["artist_adjustments"] = []
     return data
+
+
+def row_to_booking_expense(row: sqlite3.Row) -> dict:
+    return dict(row)
 
 
 def row_to_booking_adjustment(row: sqlite3.Row) -> dict:
     data = dict(row)
     data["recoverable"] = bool(data["recoverable"])
     return data
+
+
+def attach_booking_expenses(conn: sqlite3.Connection, shows: list[dict]) -> list[dict]:
+    if not shows:
+        return shows
+
+    show_ids = [show["id"] for show in shows]
+    placeholders = ",".join("?" for _ in show_ids)
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM booking_show_expenses
+        WHERE show_id IN ({placeholders})
+        ORDER BY id
+        """,
+        show_ids,
+    ).fetchall()
+
+    by_show: dict[int, list[dict]] = {show_id: [] for show_id in show_ids}
+    for row in rows:
+        expense = row_to_booking_expense(row)
+        by_show.setdefault(expense["show_id"], []).append(expense)
+
+    for show in shows:
+        show["show_expenses"] = by_show.get(show["id"], [])
+    return shows
 
 
 def attach_booking_adjustments(conn: sqlite3.Connection, shows: list[dict]) -> list[dict]:
@@ -1161,7 +1215,9 @@ def booking_shows(
             """,
             (safe_limit,),
         ).fetchall()
-        items = attach_booking_adjustments(conn, [row_to_booking_show(row) for row in rows])
+        items = [row_to_booking_show(row) for row in rows]
+        items = attach_booking_expenses(conn, items)
+        items = attach_booking_adjustments(conn, items)
 
     return {
         "db_path": str(VPO_BOOKING_DB_PATH),
@@ -1195,6 +1251,24 @@ def create_booking_show(
     seller = (request.seller or "").strip() or None
     notes = (request.notes or "").strip() or None
     receipt_refs = clean_receipt_refs(request.receipt_refs)
+
+    prepared_expenses = []
+    for expense in request.show_expenses:
+        concept = expense.concept.strip()
+        category = expense.category.strip() or "general"
+        if not concept or expense.amount <= 0:
+            continue
+
+        prepared_expenses.append({
+            "concept": concept,
+            "category": category,
+            "amount": expense.amount,
+            "notes": (expense.notes or "").strip() or None,
+        })
+
+    expenses_amount = sum(expense["amount"] for expense in prepared_expenses)
+    if not prepared_expenses:
+        expenses_amount = request.expenses_amount
 
     producer_percent = request.producer_percent
     if producer_percent is None:
@@ -1236,7 +1310,7 @@ def create_booking_show(
             "notes": (adjustment.notes or "").strip() or None,
         })
 
-    net_amount = request.cachet_amount - request.expenses_amount
+    net_amount = request.cachet_amount - expenses_amount
     artist_share = net_amount * request.artist_percent / 100
     producer_share = net_amount * producer_percent / 100
     balance_artist = artist_share - request.artist_paid_amount
@@ -1266,7 +1340,7 @@ def create_booking_show(
                 request.currency,
                 request.fx_rate,
                 request.cachet_amount,
-                request.expenses_amount,
+                expenses_amount,
                 net_amount,
                 request.artist_percent,
                 producer_percent,
@@ -1286,10 +1360,15 @@ def create_booking_show(
 
         movement_rows = [
             ("income", "cachet", request.cachet_amount),
-            ("expense", "show_expenses", request.expenses_amount),
             ("expense", "artist_payment", request.artist_paid_amount),
             ("income", "producer_settlement", request.producer_received_amount),
         ]
+        for expense in prepared_expenses:
+            movement_rows.append(("expense", f"show_expense:{expense['category']}", expense["amount"]))
+
+        if not prepared_expenses:
+            movement_rows.append(("expense", "show_expenses", expenses_amount))
+
         for movement_type, category, amount in movement_rows:
             if amount <= 0:
                 continue
@@ -1301,6 +1380,26 @@ def create_booking_show(
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (show_id, movement_type, category, amount, request.currency, request.fx_rate, None, now),
+            )
+
+        for expense in prepared_expenses:
+            conn.execute(
+                """
+                INSERT INTO booking_show_expenses (
+                    show_id, concept, category, amount, currency, fx_rate, notes, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    show_id,
+                    expense["concept"],
+                    expense["category"],
+                    expense["amount"],
+                    request.currency,
+                    request.fx_rate,
+                    expense["notes"],
+                    now,
+                ),
             )
 
         for adjustment in prepared_adjustments:
@@ -1334,7 +1433,8 @@ def create_booking_show(
             )
 
         row = conn.execute("SELECT * FROM booking_shows WHERE id = ?", (show_id,)).fetchone()
-        item = attach_booking_adjustments(conn, [row_to_booking_show(row)])[0]
+        item = attach_booking_expenses(conn, [row_to_booking_show(row)])
+        item = attach_booking_adjustments(conn, item)[0]
 
     return {
         "item": item,

@@ -53,6 +53,16 @@ type BookingAdjustment = {
   notes: string | null;
 };
 
+type BookingExpense = {
+  id: number;
+  show_id: number;
+  concept: string;
+  category: string;
+  amount: number;
+  currency: "ARS" | "USD";
+  notes: string | null;
+};
+
 type BookingShow = {
   id: number;
   artist: string;
@@ -73,9 +83,18 @@ type BookingShow = {
   producer_received_amount: number;
   balance_artist_amount: number;
   balance_producer_amount: number;
+  show_expenses: BookingExpense[];
   artist_adjustments: BookingAdjustment[];
   receipt_refs: string[];
   notes: string | null;
+};
+
+type BookingExpenseForm = {
+  uid: string;
+  concept: string;
+  category: string;
+  amount: string;
+  notes: string;
 };
 
 type BookingAdjustmentForm = {
@@ -103,7 +122,7 @@ type BookingForm = {
   currency: "ARS" | "USD";
   fxRate: string;
   cachetAmount: string;
-  expensesAmount: string;
+  showExpenses: BookingExpenseForm[];
   artistPaidAmount: string;
   producerReceivedAmount: string;
   artistPercent: string;
@@ -163,6 +182,16 @@ function localAmount(value: number, currency: string) {
     return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
   }
   return ars(value);
+}
+
+function newBookingExpense(category = "general"): BookingExpenseForm {
+  return {
+    uid: `${Date.now()}-${Math.random()}`,
+    concept: "",
+    category,
+    amount: "",
+    notes: "",
+  };
 }
 
 function newBookingAdjustment(): BookingAdjustmentForm {
@@ -231,7 +260,7 @@ export default function Home() {
     currency: "ARS",
     fxRate: "",
     cachetAmount: "",
-    expensesAmount: "",
+    showExpenses: [],
     artistPaidAmount: "",
     producerReceivedAmount: "",
     artistPercent: "70",
@@ -285,9 +314,15 @@ export default function Home() {
     return { background: `conic-gradient(${parts.join(", ")})` };
   }, [participation]);
 
+  const bookingExpenseTotal = useMemo(() => {
+    return bookingForm.showExpenses.reduce((total, expense) => (
+      total + parseMoneyInput(expense.amount)
+    ), 0);
+  }, [bookingForm.showExpenses]);
+
   const bookingSuggestion = useMemo(() => {
     const cachet = parseMoneyInput(bookingForm.cachetAmount);
-    const expenses = parseMoneyInput(bookingForm.expensesAmount);
+    const expenses = bookingExpenseTotal;
     const artistPercent = parseMoneyInput(bookingForm.artistPercent);
     const producerPercent = bookingForm.producerPercent
       ? parseMoneyInput(bookingForm.producerPercent)
@@ -301,7 +336,7 @@ export default function Home() {
     };
   }, [
     bookingForm.cachetAmount,
-    bookingForm.expensesAmount,
+    bookingExpenseTotal,
     bookingForm.artistPercent,
     bookingForm.producerPercent,
   ]);
@@ -544,6 +579,33 @@ export default function Home() {
     setBookingForm((current) => ({ ...current, [key]: value }));
   }
 
+  function addBookingExpense(category = "general") {
+    setBookingForm((current) => ({
+      ...current,
+      showExpenses: [...current.showExpenses, newBookingExpense(category)],
+    }));
+  }
+
+  function removeBookingExpense(uid: string) {
+    setBookingForm((current) => ({
+      ...current,
+      showExpenses: current.showExpenses.filter((expense) => expense.uid !== uid),
+    }));
+  }
+
+  function updateBookingExpenseField<K extends keyof BookingExpenseForm>(
+    uid: string,
+    key: K,
+    value: BookingExpenseForm[K],
+  ) {
+    setBookingForm((current) => ({
+      ...current,
+      showExpenses: current.showExpenses.map((expense) => (
+        expense.uid === uid ? { ...expense, [key]: value } : expense
+      )),
+    }));
+  }
+
   function addBookingAdjustment() {
     setBookingForm((current) => ({
       ...current,
@@ -615,7 +677,14 @@ export default function Home() {
         currency: bookingForm.currency,
         fx_rate: bookingForm.fxRate ? parseMoneyInput(bookingForm.fxRate) : null,
         cachet_amount: parseMoneyInput(bookingForm.cachetAmount),
-        expenses_amount: parseMoneyInput(bookingForm.expensesAmount),
+        show_expenses: bookingForm.showExpenses
+          .map((expense) => ({
+            concept: expense.concept.trim(),
+            category: expense.category.trim() || "general",
+            amount: parseMoneyInput(expense.amount),
+            notes: expense.notes || null,
+          }))
+          .filter((expense) => expense.concept && expense.amount > 0),
         artist_paid_amount: parseMoneyInput(bookingForm.artistPaidAmount),
         producer_received_amount: parseMoneyInput(bookingForm.producerReceivedAmount),
         artist_percent: parseMoneyInput(bookingForm.artistPercent),
@@ -654,7 +723,7 @@ export default function Home() {
       venue: "",
       city: "",
       cachetAmount: "",
-      expensesAmount: "",
+      showExpenses: [],
       artistPaidAmount: "",
       producerReceivedAmount: "",
       artistAdjustments: [],
@@ -1003,14 +1072,70 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="row">
-                <div>
-                  <label htmlFor="booking_expenses">Gastos del show</label>
-                  <input id="booking_expenses" inputMode="decimal" value={bookingForm.expensesAmount} onChange={(event) => updateBookingField("expensesAmount", event.target.value)} />
+              <div className="show-expenses">
+                <div className="section-heading compact">
+                  <div>
+                    <h2>Gastos del show</h2>
+                    <p>Carga por concepto para caja y analisis futuro.</p>
+                  </div>
+                  <button type="button" onClick={() => addBookingExpense()}>Agregar gasto</button>
                 </div>
+
+                {bookingForm.showExpenses.length === 0 && (
+                  <p className="field-help">Sin gastos cargados. Si preferis un gasto unico, agregalo como categoria general.</p>
+                )}
+
+                {bookingForm.showExpenses.length > 0 && (
+                  <div className="adjustment-summary">
+                    <span>Total gastos {localAmount(bookingExpenseTotal, bookingForm.currency)}</span>
+                  </div>
+                )}
+
+                {bookingForm.showExpenses.map((expense, index) => (
+                  <div className="expense-card" key={expense.uid}>
+                    <div className="adjustment-card-title">
+                      <strong>Gasto {index + 1}</strong>
+                      <button type="button" onClick={() => removeBookingExpense(expense.uid)}>Quitar</button>
+                    </div>
+
+                    <div className="row three">
+                      <div>
+                        <label htmlFor={`expense_category_${expense.uid}`}>Categoria</label>
+                        <select id={`expense_category_${expense.uid}`} value={expense.category} onChange={(event) => updateBookingExpenseField(expense.uid, "category", event.target.value)}>
+                          <option value="general">General</option>
+                          <option value="tour_manager">Tour manager</option>
+                          <option value="viaticos">Viaticos</option>
+                          <option value="traslado">Traslado</option>
+                          <option value="hotel">Hotel</option>
+                          <option value="comida">Comida</option>
+                          <option value="produccion">Produccion</option>
+                          <option value="varios">Varios</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label htmlFor={`expense_concept_${expense.uid}`}>Concepto</label>
+                        <input id={`expense_concept_${expense.uid}`} value={expense.concept} onChange={(event) => updateBookingExpenseField(expense.uid, "concept", event.target.value)} placeholder="Tour manager, viaticos, varios" />
+                      </div>
+                      <div>
+                        <label htmlFor={`expense_amount_${expense.uid}`}>Importe</label>
+                        <input id={`expense_amount_${expense.uid}`} inputMode="decimal" value={expense.amount} onChange={(event) => updateBookingExpenseField(expense.uid, "amount", event.target.value)} />
+                      </div>
+                    </div>
+
+                    <label htmlFor={`expense_notes_${expense.uid}`}>Nota del gasto</label>
+                    <textarea id={`expense_notes_${expense.uid}`} value={expense.notes} onChange={(event) => updateBookingExpenseField(expense.uid, "notes", event.target.value)} />
+                  </div>
+                ))}
+              </div>
+
+              <div className="row">
                 <div>
                   <label htmlFor="booking_artist_paid">Pagado al artista</label>
                   <input id="booking_artist_paid" inputMode="decimal" value={bookingForm.artistPaidAmount} onChange={(event) => updateBookingField("artistPaidAmount", event.target.value)} />
+                </div>
+                <div>
+                  <label>Total gastos del show</label>
+                  <div className="readonly-metric">{localAmount(bookingExpenseTotal, bookingForm.currency)}</div>
                 </div>
               </div>
 
@@ -1206,6 +1331,7 @@ export default function Home() {
                     </div>
                     <div className="booking-status">
                       <span>{item.status}</span>
+                      {item.show_expenses.length > 0 && <span>{item.show_expenses.length} gasto(s)</span>}
                       {item.receipt_refs.length > 0 && <span>{item.receipt_refs.length} comprobante(s)</span>}
                       {item.artist_adjustments.length > 0 && <span>{item.artist_adjustments.length} ajuste(s)</span>}
                     </div>

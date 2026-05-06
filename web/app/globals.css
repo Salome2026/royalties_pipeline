@@ -643,6 +643,7 @@ button:disabled {
   font-size: 13px;
 }
 
+.show-expenses,
 .artist-adjustments {
   display: grid;
   gap: 12px;
@@ -661,6 +662,7 @@ button:disabled {
   width: auto;
 }
 
+.expense-card,
 .adjustment-card {
   display: grid;
   gap: 12px;
