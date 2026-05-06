@@ -73,6 +73,7 @@ DISPLAY_HEADERS = {
     "period_basis": "Criterio periodo",
     "start_month": "Desde",
     "end_month": "Hasta",
+    "excluded_isrcs": "ISRC excluidos",
     "song_level_rows": "Filas resultado",
     "song_level_amount_usd": "Ingresos USD",
     "song_level_units": "Unidades",
@@ -151,6 +152,12 @@ def parse_args():
         default="transaction_month",
         help="transaction_month = performance; statement_period = liquidacion.",
     )
+    parser.add_argument(
+        "--exclude-isrc",
+        action="append",
+        default=[],
+        help="ISRC a excluir del reporte. Se puede repetir o pasar separados por coma/semicolon.",
+    )
     return parser.parse_args()
 
 
@@ -171,6 +178,44 @@ def prompt_keywords() -> list[str]:
 
 def existing_columns(path: Path) -> set[str]:
     return set(pl.scan_parquet(path).collect_schema().names())
+
+
+def normalize_isrcs(raw_isrcs: list[str] | None) -> list[str]:
+    if not raw_isrcs:
+        return []
+
+    isrcs = []
+    for item in raw_isrcs:
+        parts = [part.strip().upper() for part in re.split(r"[;,\s]+", item) if part.strip()]
+        isrcs.extend(parts)
+
+    return sorted(set(isrcs))
+
+
+def exclude_isrc_expr(columns: set[str], excluded_isrcs: list[str]) -> pl.Expr:
+    if not excluded_isrcs:
+        return pl.lit(True)
+
+    exprs = []
+    for col in ["asset_isrc", "ISRC"]:
+        if col in columns:
+            exprs.append(
+                pl.col(col)
+                .cast(pl.Utf8)
+                .str.strip_chars()
+                .str.to_uppercase()
+                .is_in(excluded_isrcs)
+                .fill_null(False)
+            )
+
+    if not exprs:
+        return pl.lit(True)
+
+    excluded = exprs[0]
+    for expr in exprs[1:]:
+        excluded = excluded | expr
+
+    return ~excluded
 
 
 def contains_expr(columns: set[str], search_columns: list[str], keyword: str) -> pl.Expr:
@@ -552,9 +597,11 @@ def build_report_tables(
     period_basis: str = "transaction_month",
     song_path: Path = SONG_PATH,
     standardized_path: Path = STANDARDIZED_PATH,
+    exclude_isrcs: list[str] | None = None,
 ) -> dict[str, pd.DataFrame]:
     period_column = "statement_period" if period_basis == "statement_period" else "transaction_month"
     period_label = PERIOD_BASIS_LABELS.get(period_column, period_column)
+    excluded_isrcs = normalize_isrcs(exclude_isrcs)
 
     song_cols = existing_columns(song_path)
     song_filter = build_filter(song_cols, SEARCH_COLUMNS_SONG, keywords, mode)
@@ -581,6 +628,7 @@ def build_report_tables(
                 standardized_cols,
             )
             .filter(raw_filter)
+            .filter(exclude_isrc_expr(standardized_cols, excluded_isrcs))
             .select([
                 col for col in [
                     "source",
@@ -691,6 +739,7 @@ def build_report_tables(
                 standardized_cols,
             )
             .filter(raw_filter)
+            .filter(exclude_isrc_expr(standardized_cols, excluded_isrcs))
             .select([
                 col for col in [
                     "source",
@@ -744,6 +793,7 @@ def build_report_tables(
                 standardized_cols,
             )
             .filter(raw_filter)
+            .filter(exclude_isrc_expr(standardized_cols, excluded_isrcs))
             .select([
                 col for col in [
                     "source",
@@ -784,6 +834,7 @@ def build_report_tables(
                     "period_basis": period_label,
                     "start_month": start_month or "",
                     "end_month": end_month or "",
+                    "excluded_isrcs": ", ".join(excluded_isrcs),
                     "song_level_rows": 0,
                     "song_level_amount_usd": 0,
                     "song_level_units": 0,
@@ -810,6 +861,7 @@ def build_report_tables(
                 "period_basis": period_label,
                 "start_month": start_month or "",
                 "end_month": end_month or "",
+                "excluded_isrcs": ", ".join(excluded_isrcs),
                 "song_level_rows": song_rows,
                 "song_level_amount_usd": song_amount_usd,
                 "song_level_units": song_units,
@@ -862,6 +914,7 @@ def build_report_tables(
                 song_cols,
             )
             .filter(song_filter)
+            .filter(exclude_isrc_expr(song_cols, excluded_isrcs))
             .with_columns(pl.col(period_column).cast(pl.Utf8).alias("period_month"))
             .collect()
         )
@@ -876,6 +929,7 @@ def build_report_tables(
                 "period_basis": period_label,
                 "start_month": start_month or "",
                 "end_month": end_month or "",
+                "excluded_isrcs": ", ".join(excluded_isrcs),
                 "song_level_rows": 0,
                 "song_level_amount_usd": 0,
                 "song_level_units": 0,
@@ -955,6 +1009,7 @@ def build_report_tables(
                 raw_cols,
             )
             .filter(raw_filter)
+            .filter(exclude_isrc_expr(raw_cols, excluded_isrcs))
         )
 
         store_summary = (
@@ -1009,6 +1064,7 @@ def build_report_tables(
             "period_basis": period_label,
             "start_month": start_month or "",
             "end_month": end_month or "",
+            "excluded_isrcs": ", ".join(excluded_isrcs),
             "song_level_rows": song.height,
             "song_level_amount_usd": song["amount_usd"].sum(),
             "song_level_units": song["units"].sum(),
@@ -1057,6 +1113,7 @@ def build_report(
     song_path: Path = SONG_PATH,
     standardized_path: Path = STANDARDIZED_PATH,
     output_dir: Path = REPORTS,
+    exclude_isrcs: list[str] | None = None,
 ) -> Path:
     output_path = report_output_path(keywords, start_month, end_month, output_dir)
     tables = build_report_tables(
@@ -1068,6 +1125,7 @@ def build_report(
         period_basis=period_basis,
         song_path=song_path,
         standardized_path=standardized_path,
+        exclude_isrcs=exclude_isrcs,
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1099,6 +1157,7 @@ def main():
         start_month=args.start_month,
         end_month=args.end_month,
         period_basis=args.period_basis,
+        exclude_isrcs=args.exclude_isrc,
     )
 
     print("\nReporte generado:")
