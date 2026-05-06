@@ -91,6 +91,18 @@ class StatementReportRequest(BaseModel):
     min_artist_total_usd: float = Field(default=0.0, ge=0.0, le=1_000_000.0)
 
 
+class BookingArtistAdjustmentRequest(BaseModel):
+    concept: str = Field(..., min_length=1, max_length=180)
+    amount: float = Field(default=0.0, ge=0.0)
+    adjustment_type: Literal["recupero", "adelanto", "inversion", "descuento_especial", "otro"] = "recupero"
+    area: Literal["booking", "label", "general"] = "booking"
+    impact: Literal["pago_artista", "ingreso_productora", "solo_cuenta_corriente"] = "pago_artista"
+    recoverable: bool = True
+    artist_percent: float = Field(default=70.0, ge=0.0, le=100.0)
+    producer_percent: float | None = Field(default=None, ge=0.0, le=100.0)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
 class BookingQuickShowRequest(BaseModel):
     artist: str = Field(..., min_length=1, max_length=160)
     show_date: str = Field(..., min_length=10, max_length=10)
@@ -107,6 +119,7 @@ class BookingQuickShowRequest(BaseModel):
     producer_received_amount: float = Field(default=0.0, ge=0.0)
     artist_percent: float = Field(default=70.0, ge=0.0, le=100.0)
     producer_percent: float | None = Field(default=None, ge=0.0, le=100.0)
+    artist_adjustments: list[BookingArtistAdjustmentRequest] = Field(default_factory=list, max_length=20)
     receipt_refs: list[str] = Field(default_factory=list, max_length=30)
     notes: str | None = Field(default=None, max_length=2000)
 
@@ -377,6 +390,28 @@ def init_booking_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS booking_artist_adjustments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                show_id INTEGER NOT NULL REFERENCES booking_shows(id) ON DELETE CASCADE,
+                concept TEXT NOT NULL,
+                adjustment_type TEXT NOT NULL,
+                area TEXT NOT NULL,
+                impact TEXT NOT NULL,
+                recoverable INTEGER NOT NULL DEFAULT 1,
+                amount REAL NOT NULL DEFAULT 0,
+                currency TEXT NOT NULL,
+                fx_rate REAL,
+                artist_percent REAL NOT NULL DEFAULT 0,
+                producer_percent REAL NOT NULL DEFAULT 0,
+                artist_amount REAL NOT NULL DEFAULT 0,
+                producer_amount REAL NOT NULL DEFAULT 0,
+                notes TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
 
 
 def validate_iso_date(value: str) -> str:
@@ -393,7 +428,40 @@ def clean_receipt_refs(values: list[str]) -> list[str]:
 def row_to_booking_show(row: sqlite3.Row) -> dict:
     data = dict(row)
     data["receipt_refs"] = json.loads(data.pop("receipt_refs_json") or "[]")
+    data["artist_adjustments"] = []
     return data
+
+
+def row_to_booking_adjustment(row: sqlite3.Row) -> dict:
+    data = dict(row)
+    data["recoverable"] = bool(data["recoverable"])
+    return data
+
+
+def attach_booking_adjustments(conn: sqlite3.Connection, shows: list[dict]) -> list[dict]:
+    if not shows:
+        return shows
+
+    show_ids = [show["id"] for show in shows]
+    placeholders = ",".join("?" for _ in show_ids)
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM booking_artist_adjustments
+        WHERE show_id IN ({placeholders})
+        ORDER BY id
+        """,
+        show_ids,
+    ).fetchall()
+
+    by_show: dict[int, list[dict]] = {show_id: [] for show_id in show_ids}
+    for row in rows:
+        adjustment = row_to_booking_adjustment(row)
+        by_show.setdefault(adjustment["show_id"], []).append(adjustment)
+
+    for show in shows:
+        show["artist_adjustments"] = by_show.get(show["id"], [])
+    return shows
 
 
 def clean_booking_artist(value: object) -> str | None:
@@ -1081,10 +1149,11 @@ def booking_shows(
             """,
             (safe_limit,),
         ).fetchall()
+        items = attach_booking_adjustments(conn, [row_to_booking_show(row) for row in rows])
 
     return {
         "db_path": str(VPO_BOOKING_DB_PATH),
-        "items": [row_to_booking_show(row) for row in rows],
+        "items": items,
     }
 
 
@@ -1121,6 +1190,33 @@ def create_booking_show(
 
     if round(request.artist_percent + producer_percent, 4) > 100.0:
         raise HTTPException(status_code=400, detail="artist_percent + producer_percent cannot exceed 100.")
+
+    prepared_adjustments = []
+    for adjustment in request.artist_adjustments:
+        concept = adjustment.concept.strip()
+        if not concept or adjustment.amount <= 0:
+            continue
+
+        adjustment_producer_percent = adjustment.producer_percent
+        if adjustment_producer_percent is None:
+            adjustment_producer_percent = max(0.0, 100.0 - adjustment.artist_percent)
+
+        if round(adjustment.artist_percent + adjustment_producer_percent, 4) > 100.0:
+            raise HTTPException(status_code=400, detail="Adjustment artist_percent + producer_percent cannot exceed 100.")
+
+        prepared_adjustments.append({
+            "concept": concept,
+            "adjustment_type": adjustment.adjustment_type,
+            "area": adjustment.area,
+            "impact": adjustment.impact,
+            "recoverable": adjustment.recoverable,
+            "amount": adjustment.amount,
+            "artist_percent": adjustment.artist_percent,
+            "producer_percent": adjustment_producer_percent,
+            "artist_amount": adjustment.amount * adjustment.artist_percent / 100,
+            "producer_amount": adjustment.amount * adjustment_producer_percent / 100,
+            "notes": (adjustment.notes or "").strip() or None,
+        })
 
     net_amount = request.cachet_amount - request.expenses_amount
     artist_share = net_amount * request.artist_percent / 100
@@ -1189,9 +1285,39 @@ def create_booking_show(
                 (show_id, movement_type, category, amount, request.currency, request.fx_rate, None, now),
             )
 
+        for adjustment in prepared_adjustments:
+            conn.execute(
+                """
+                INSERT INTO booking_artist_adjustments (
+                    show_id, concept, adjustment_type, area, impact, recoverable,
+                    amount, currency, fx_rate, artist_percent, producer_percent,
+                    artist_amount, producer_amount, notes, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    show_id,
+                    adjustment["concept"],
+                    adjustment["adjustment_type"],
+                    adjustment["area"],
+                    adjustment["impact"],
+                    1 if adjustment["recoverable"] else 0,
+                    adjustment["amount"],
+                    request.currency,
+                    request.fx_rate,
+                    adjustment["artist_percent"],
+                    adjustment["producer_percent"],
+                    adjustment["artist_amount"],
+                    adjustment["producer_amount"],
+                    adjustment["notes"],
+                    now,
+                ),
+            )
+
         row = conn.execute("SELECT * FROM booking_shows WHERE id = ?", (show_id,)).fetchone()
+        item = attach_booking_adjustments(conn, [row_to_booking_show(row)])[0]
 
     return {
-        "item": row_to_booking_show(row),
+        "item": item,
         "db_path": str(VPO_BOOKING_DB_PATH),
     }

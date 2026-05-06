@@ -35,6 +35,23 @@ type ParticipationCache = {
   endMonth: string;
 };
 
+type BookingAdjustment = {
+  id: number;
+  show_id: number;
+  concept: string;
+  adjustment_type: string;
+  area: string;
+  impact: string;
+  recoverable: boolean;
+  amount: number;
+  currency: "ARS" | "USD";
+  artist_percent: number;
+  producer_percent: number;
+  artist_amount: number;
+  producer_amount: number;
+  notes: string | null;
+};
+
 type BookingShow = {
   id: number;
   artist: string;
@@ -55,8 +72,22 @@ type BookingShow = {
   producer_received_amount: number;
   balance_artist_amount: number;
   balance_producer_amount: number;
+  artist_adjustments: BookingAdjustment[];
   receipt_refs: string[];
   notes: string | null;
+};
+
+type BookingAdjustmentForm = {
+  uid: string;
+  concept: string;
+  amount: string;
+  adjustmentType: string;
+  area: string;
+  impact: string;
+  recoverable: boolean;
+  artistPercent: string;
+  producerPercent: string;
+  notes: string;
 };
 
 type BookingForm = {
@@ -75,6 +106,7 @@ type BookingForm = {
   producerReceivedAmount: string;
   artistPercent: string;
   producerPercent: string;
+  artistAdjustments: BookingAdjustmentForm[];
   receiptRefs: string;
   notes: string;
 };
@@ -129,6 +161,21 @@ function localAmount(value: number, currency: string) {
     return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
   }
   return ars(value);
+}
+
+function newBookingAdjustment(): BookingAdjustmentForm {
+  return {
+    uid: `${Date.now()}-${Math.random()}`,
+    concept: "",
+    amount: "",
+    adjustmentType: "recupero",
+    area: "booking",
+    impact: "pago_artista",
+    recoverable: true,
+    artistPercent: "70",
+    producerPercent: "30",
+    notes: "",
+  };
 }
 
 function MonthSelect({ id, value, min, onChange }: MonthSelectProps) {
@@ -186,6 +233,7 @@ export default function Home() {
     producerReceivedAmount: "",
     artistPercent: "70",
     producerPercent: "30",
+    artistAdjustments: [],
     receiptRefs: "",
     notes: "",
   });
@@ -254,6 +302,21 @@ export default function Home() {
     bookingForm.artistPercent,
     bookingForm.producerPercent,
   ]);
+
+  const bookingAdjustmentSuggestion = useMemo(() => {
+    return bookingForm.artistAdjustments.reduce((totals, adjustment) => {
+      const amount = parseMoneyInput(adjustment.amount);
+      const artistPercent = parseMoneyInput(adjustment.artistPercent);
+      const producerPercent = adjustment.producerPercent
+        ? parseMoneyInput(adjustment.producerPercent)
+        : Math.max(0, 100 - artistPercent);
+
+      totals.amount += amount;
+      totals.artistAmount += amount * artistPercent / 100;
+      totals.producerAmount += amount * producerPercent / 100;
+      return totals;
+    }, { amount: 0, artistAmount: 0, producerAmount: 0 });
+  }, [bookingForm.artistAdjustments]);
 
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -469,6 +532,33 @@ export default function Home() {
     setBookingForm((current) => ({ ...current, [key]: value }));
   }
 
+  function addBookingAdjustment() {
+    setBookingForm((current) => ({
+      ...current,
+      artistAdjustments: [...current.artistAdjustments, newBookingAdjustment()],
+    }));
+  }
+
+  function removeBookingAdjustment(uid: string) {
+    setBookingForm((current) => ({
+      ...current,
+      artistAdjustments: current.artistAdjustments.filter((adjustment) => adjustment.uid !== uid),
+    }));
+  }
+
+  function updateBookingAdjustmentField<K extends keyof BookingAdjustmentForm>(
+    uid: string,
+    key: K,
+    value: BookingAdjustmentForm[K],
+  ) {
+    setBookingForm((current) => ({
+      ...current,
+      artistAdjustments: current.artistAdjustments.map((adjustment) => (
+        adjustment.uid === uid ? { ...adjustment, [key]: value } : adjustment
+      )),
+    }));
+  }
+
   function parseMoneyInput(value: string) {
     const cleaned = value.replace(/\./g, "").replace(",", ".").trim();
     const parsed = Number(cleaned);
@@ -518,6 +608,19 @@ export default function Home() {
         producer_received_amount: parseMoneyInput(bookingForm.producerReceivedAmount),
         artist_percent: parseMoneyInput(bookingForm.artistPercent),
         producer_percent: bookingForm.producerPercent ? parseMoneyInput(bookingForm.producerPercent) : null,
+        artist_adjustments: bookingForm.artistAdjustments
+          .map((adjustment) => ({
+            concept: adjustment.concept.trim(),
+            amount: parseMoneyInput(adjustment.amount),
+            adjustment_type: adjustment.adjustmentType,
+            area: adjustment.area,
+            impact: adjustment.impact,
+            recoverable: adjustment.recoverable,
+            artist_percent: parseMoneyInput(adjustment.artistPercent),
+            producer_percent: adjustment.producerPercent ? parseMoneyInput(adjustment.producerPercent) : null,
+            notes: adjustment.notes || null,
+          }))
+          .filter((adjustment) => adjustment.concept && adjustment.amount > 0),
         receipt_refs: receiptRefs,
         notes: bookingForm.notes || null,
       }),
@@ -541,6 +644,7 @@ export default function Home() {
       expensesAmount: "",
       artistPaidAmount: "",
       producerReceivedAmount: "",
+      artistAdjustments: [],
       receiptRefs: "",
       notes: "",
     }));
@@ -928,6 +1032,110 @@ export default function Home() {
                 <p>Estos importes son solo referencia; el pago y la rendicion se cargan manualmente.</p>
               </div>
 
+              <div className="artist-adjustments">
+                <div className="section-heading compact">
+                  <div>
+                    <h2>Ajustes del artista</h2>
+                    <p>Recuperos, inversiones o descuentos vinculados al artista.</p>
+                  </div>
+                  <button type="button" onClick={addBookingAdjustment}>Agregar ajuste</button>
+                </div>
+
+                {bookingForm.artistAdjustments.length > 0 && (
+                  <div className="adjustment-summary">
+                    <span>Total ajustes {localAmount(bookingAdjustmentSuggestion.amount, bookingForm.currency)}</span>
+                    <span>Artista {localAmount(bookingAdjustmentSuggestion.artistAmount, bookingForm.currency)}</span>
+                    <span>Indyana {localAmount(bookingAdjustmentSuggestion.producerAmount, bookingForm.currency)}</span>
+                  </div>
+                )}
+
+                {bookingForm.artistAdjustments.length === 0 && (
+                  <p className="field-help">Sin ajustes cargados para este show.</p>
+                )}
+
+                {bookingForm.artistAdjustments.map((adjustment, index) => {
+                  const adjustmentAmount = parseMoneyInput(adjustment.amount);
+                  const adjustmentArtistPercent = parseMoneyInput(adjustment.artistPercent);
+                  const adjustmentProducerPercent = adjustment.producerPercent
+                    ? parseMoneyInput(adjustment.producerPercent)
+                    : Math.max(0, 100 - adjustmentArtistPercent);
+                  const adjustmentArtistAmount = adjustmentAmount * adjustmentArtistPercent / 100;
+                  const adjustmentProducerAmount = adjustmentAmount * adjustmentProducerPercent / 100;
+
+                  return (
+                    <div className="adjustment-card" key={adjustment.uid}>
+                      <div className="adjustment-card-title">
+                        <strong>Ajuste {index + 1}</strong>
+                        <button type="button" onClick={() => removeBookingAdjustment(adjustment.uid)}>Quitar</button>
+                      </div>
+
+                      <div className="row">
+                        <div>
+                          <label htmlFor={`adjustment_concept_${adjustment.uid}`}>Concepto</label>
+                          <input id={`adjustment_concept_${adjustment.uid}`} value={adjustment.concept} onChange={(event) => updateBookingAdjustmentField(adjustment.uid, "concept", event.target.value)} placeholder="DJ set, adelanto, produccion" />
+                        </div>
+                        <div>
+                          <label htmlFor={`adjustment_amount_${adjustment.uid}`}>Importe</label>
+                          <input id={`adjustment_amount_${adjustment.uid}`} inputMode="decimal" value={adjustment.amount} onChange={(event) => updateBookingAdjustmentField(adjustment.uid, "amount", event.target.value)} />
+                        </div>
+                      </div>
+
+                      <div className="row three">
+                        <div>
+                          <label htmlFor={`adjustment_type_${adjustment.uid}`}>Tipo</label>
+                          <select id={`adjustment_type_${adjustment.uid}`} value={adjustment.adjustmentType} onChange={(event) => updateBookingAdjustmentField(adjustment.uid, "adjustmentType", event.target.value)}>
+                            <option value="recupero">Recupero</option>
+                            <option value="adelanto">Adelanto</option>
+                            <option value="inversion">Inversion</option>
+                            <option value="descuento_especial">Descuento especial</option>
+                            <option value="otro">Otro</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label htmlFor={`adjustment_area_${adjustment.uid}`}>Area</label>
+                          <select id={`adjustment_area_${adjustment.uid}`} value={adjustment.area} onChange={(event) => updateBookingAdjustmentField(adjustment.uid, "area", event.target.value)}>
+                            <option value="booking">Booking</option>
+                            <option value="label">Label</option>
+                            <option value="general">General</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label htmlFor={`adjustment_impact_${adjustment.uid}`}>Impacta en</label>
+                          <select id={`adjustment_impact_${adjustment.uid}`} value={adjustment.impact} onChange={(event) => updateBookingAdjustmentField(adjustment.uid, "impact", event.target.value)}>
+                            <option value="pago_artista">Pago artista</option>
+                            <option value="ingreso_productora">Ingreso productora</option>
+                            <option value="solo_cuenta_corriente">Solo cuenta corriente</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="row three">
+                        <div>
+                          <label htmlFor={`adjustment_artist_pct_${adjustment.uid}`}>% artista</label>
+                          <input id={`adjustment_artist_pct_${adjustment.uid}`} inputMode="decimal" value={adjustment.artistPercent} onChange={(event) => updateBookingAdjustmentField(adjustment.uid, "artistPercent", event.target.value)} />
+                        </div>
+                        <div>
+                          <label htmlFor={`adjustment_producer_pct_${adjustment.uid}`}>% Indyana</label>
+                          <input id={`adjustment_producer_pct_${adjustment.uid}`} inputMode="decimal" value={adjustment.producerPercent} onChange={(event) => updateBookingAdjustmentField(adjustment.uid, "producerPercent", event.target.value)} />
+                        </div>
+                        <label className="checkbox-field">
+                          <input type="checkbox" checked={adjustment.recoverable} onChange={(event) => updateBookingAdjustmentField(adjustment.uid, "recoverable", event.target.checked)} />
+                          Recuperable
+                        </label>
+                      </div>
+
+                      <div className="adjustment-summary">
+                        <span>Artista {localAmount(adjustmentArtistAmount, bookingForm.currency)}</span>
+                        <span>Indyana {localAmount(adjustmentProducerAmount, bookingForm.currency)}</span>
+                      </div>
+
+                      <label htmlFor={`adjustment_notes_${adjustment.uid}`}>Nota del ajuste</label>
+                      <textarea id={`adjustment_notes_${adjustment.uid}`} value={adjustment.notes} onChange={(event) => updateBookingAdjustmentField(adjustment.uid, "notes", event.target.value)} />
+                    </div>
+                  );
+                })}
+              </div>
+
               <label htmlFor="booking_receipts">Comprobantes / links / rutas</label>
               <textarea id="booking_receipts" value={bookingForm.receiptRefs} onChange={(event) => updateBookingField("receiptRefs", event.target.value)} placeholder="Uno por linea: C:\\comprobantes\\show.pdf o link de Drive/WhatsApp" />
 
@@ -963,6 +1171,7 @@ export default function Home() {
                     <div className="booking-status">
                       <span>{item.status}</span>
                       {item.receipt_refs.length > 0 && <span>{item.receipt_refs.length} comprobante(s)</span>}
+                      {item.artist_adjustments.length > 0 && <span>{item.artist_adjustments.length} ajuste(s)</span>}
                     </div>
                   </article>
                 ))}
