@@ -169,6 +169,7 @@ export default function Home() {
   const [participationEndMonth, setParticipationEndMonth] = useState("");
   const [bookingLoading, setBookingLoading] = useState(false);
   const [bookingItems, setBookingItems] = useState<BookingShow[]>([]);
+  const [bookingArtists, setBookingArtists] = useState<string[]>([]);
   const [bookingForm, setBookingForm] = useState<BookingForm>({
     artist: "",
     showDate: new Date().toISOString().slice(0, 10),
@@ -214,6 +215,7 @@ export default function Home() {
 
   useEffect(() => {
     if (authenticated && view === "booking") {
+      loadBookingArtists();
       loadBookingShows();
     }
   }, [authenticated, view]);
@@ -457,6 +459,13 @@ export default function Home() {
     if (!response.ok) return;
     const data = await response.json();
     setBookingItems(data.items || []);
+  }
+
+  async function loadBookingArtists() {
+    const response = await fetch("/api/booking/artists", { cache: "no-store" });
+    if (!response.ok) return;
+    const data = await response.json();
+    setBookingArtists(data.items || []);
   }
 
   async function submitBooking(event: FormEvent<HTMLFormElement>) {
@@ -795,7 +804,13 @@ export default function Home() {
               <div className="row">
                 <div>
                   <label htmlFor="booking_artist">Artista</label>
-                  <input id="booking_artist" value={bookingForm.artist} onChange={(event) => updateBookingField("artist", event.target.value)} placeholder="Virrshi, Simo, Dormun" required />
+                  <select id="booking_artist" value={bookingForm.artist} onChange={(event) => updateBookingField("artist", event.target.value)} required>
+                    <option value="">Elegir artista</option>
+                    {bookingArtists.map((artist) => (
+                      <option key={artist} value={artist}>{artist}</option>
+                    ))}
+                  </select>
+                  {bookingArtists.length === 0 && <p className="field-help">No hay artistas disponibles para cargar.</p>}
                 </div>
                 <div>
                   <label htmlFor="booking_date">Fecha</label>
@@ -882,7 +897,7 @@ export default function Home() {
               <label htmlFor="booking_notes">Notas</label>
               <textarea id="booking_notes" value={bookingForm.notes} onChange={(event) => updateBookingField("notes", event.target.value)} />
 
-              <button type="submit" disabled={bookingLoading}>{bookingLoading ? "Guardando..." : "Guardar show"}</button>
+              <button type="submit" disabled={bookingLoading || bookingArtists.length === 0}>{bookingLoading ? "Guardando..." : "Guardar show"}</button>
             </form>
 
             <section className="panel">

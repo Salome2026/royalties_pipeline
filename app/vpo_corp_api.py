@@ -60,6 +60,8 @@ VPO_LOCAL_MARTS_DIR = Path(os.environ.get("VPO_LOCAL_MARTS_DIR", "")).expanduser
 VPO_API_CACHE_DIR = Path(os.environ.get("VPO_API_CACHE_DIR", BASE / "cache" / "gcs_marts"))
 VPO_API_REPORTS_DIR = Path(os.environ.get("VPO_API_REPORTS_DIR", BASE / "reports" / "api"))
 VPO_BOOKING_DB_PATH = Path(os.environ.get("VPO_BOOKING_DB_PATH", BASE / "warehouse" / "booking" / "live" / "booking_live.sqlite"))
+BOOKING_RAW_DIR = BASE / "warehouse" / "booking" / "raw"
+BOOKING_STANDARDIZED_PATH = BASE / "warehouse" / "booking" / "standardized" / "standardized_booking_movements.parquet"
 GOOGLE_SHEETS_SHARE_EMAIL = os.environ.get("GOOGLE_SHEETS_SHARE_EMAIL", "").strip()
 GOOGLE_DRIVE_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
 
@@ -392,6 +394,73 @@ def row_to_booking_show(row: sqlite3.Row) -> dict:
     data = dict(row)
     data["receipt_refs"] = json.loads(data.pop("receipt_refs_json") or "[]")
     return data
+
+
+def clean_booking_artist(value: object) -> str | None:
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    if not text:
+        return None
+
+    lowered = text.lower()
+    if lowered in {"nan", "none", "null", "todos", "total", "artista", "nombre"}:
+        return None
+
+    return text
+
+
+def booking_artist_options() -> list[str]:
+    artists: dict[str, str] = {}
+
+    for path in [
+        BOOKING_RAW_DIR / "booking_raw_artists.parquet",
+        BOOKING_RAW_DIR / "booking_raw_pm_artists.parquet",
+    ]:
+        if not path.exists():
+            continue
+
+        df = pl.read_parquet(path)
+        if "Nombre" not in df.columns:
+            continue
+
+        for value in df.get_column("Nombre").to_list():
+            cleaned = clean_booking_artist(value)
+            if cleaned:
+                artists.setdefault(cleaned.casefold(), cleaned)
+
+    if BOOKING_STANDARDIZED_PATH.exists():
+        df = pl.read_parquet(BOOKING_STANDARDIZED_PATH)
+        if "artist_statement" in df.columns:
+            for value in df.get_column("artist_statement").drop_nulls().unique().to_list():
+                cleaned = clean_booking_artist(value)
+                if cleaned:
+                    artists.setdefault(cleaned.casefold(), cleaned)
+
+    if VPO_BOOKING_DB_PATH.exists():
+        init_booking_db()
+        with booking_connect() as conn:
+            rows = conn.execute("SELECT DISTINCT artist FROM booking_shows").fetchall()
+        for row in rows:
+            cleaned = clean_booking_artist(row["artist"])
+            if cleaned:
+                artists.setdefault(cleaned.casefold(), cleaned)
+
+    return sorted(artists.values(), key=lambda value: value.casefold())
+
+
+def require_known_booking_artist(artist: str) -> str:
+    cleaned = clean_booking_artist(artist)
+    if not cleaned:
+        raise HTTPException(status_code=400, detail="artist is required.")
+
+    artists = {value.casefold(): value for value in booking_artist_options()}
+    canonical = artists.get(cleaned.casefold())
+    if canonical is None:
+        raise HTTPException(status_code=400, detail="Artist must be selected from the booking artist list.")
+
+    return canonical
 
 
 def dataframe_values(dataframe) -> list[list[object]]:
@@ -1019,6 +1088,16 @@ def booking_shows(
     }
 
 
+@app.get("/booking/artists")
+def booking_artists(
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    return {
+        "items": booking_artist_options(),
+    }
+
+
 @app.post("/booking/shows")
 def create_booking_show(
     request: BookingQuickShowRequest,
@@ -1028,7 +1107,7 @@ def create_booking_show(
     init_booking_db()
 
     show_date = validate_iso_date(request.show_date)
-    artist = request.artist.strip()
+    artist = require_known_booking_artist(request.artist)
     venue = request.venue.strip()
     city = (request.city or "").strip() or None
     tour_manager = (request.tour_manager or "").strip() or None
