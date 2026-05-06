@@ -105,7 +105,7 @@ class BookingArtistAdjustmentRequest(BaseModel):
 
 
 class BookingShowExpenseRequest(BaseModel):
-    concept: str = Field(..., min_length=1, max_length=180)
+    concept: str | None = Field(default=None, max_length=180)
     category: str = Field(default="general", min_length=1, max_length=80)
     amount: float = Field(default=0.0, ge=0.0)
     notes: str | None = Field(default=None, max_length=1000)
@@ -1254,9 +1254,9 @@ def create_booking_show(
 
     prepared_expenses = []
     for expense in request.show_expenses:
-        concept = expense.concept.strip()
         category = expense.category.strip() or "general"
-        if not concept or expense.amount <= 0:
+        concept = (expense.concept or "").strip() or category
+        if expense.amount <= 0:
             continue
 
         prepared_expenses.append({

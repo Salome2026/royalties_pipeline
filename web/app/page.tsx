@@ -679,12 +679,12 @@ export default function Home() {
         cachet_amount: parseMoneyInput(bookingForm.cachetAmount),
         show_expenses: bookingForm.showExpenses
           .map((expense) => ({
-            concept: expense.concept.trim(),
             category: expense.category.trim() || "general",
+            concept: expense.concept.trim() || expense.category.trim() || "general",
             amount: parseMoneyInput(expense.amount),
             notes: expense.notes || null,
           }))
-          .filter((expense) => expense.concept && expense.amount > 0),
+          .filter((expense) => expense.amount > 0),
         artist_paid_amount: parseMoneyInput(bookingForm.artistPaidAmount),
         producer_received_amount: parseMoneyInput(bookingForm.producerReceivedAmount),
         artist_percent: parseMoneyInput(bookingForm.artistPercent),
@@ -1115,6 +1115,7 @@ export default function Home() {
                       <div>
                         <label htmlFor={`expense_concept_${expense.uid}`}>Concepto</label>
                         <input id={`expense_concept_${expense.uid}`} value={expense.concept} onChange={(event) => updateBookingExpenseField(expense.uid, "concept", event.target.value)} placeholder="Tour manager, viaticos, varios" />
+                        <p className="field-help">Opcional: si lo dejas vacio se guarda con la categoria.</p>
                       </div>
                       <div>
                         <label htmlFor={`expense_amount_${expense.uid}`}>Importe</label>
