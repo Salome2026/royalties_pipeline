@@ -602,7 +602,7 @@ button:disabled {
 
 .booking-suggestion {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 10px;
   margin: 14px 0 18px;
   padding: 12px;
@@ -702,6 +702,17 @@ button:disabled {
   padding: 8px 10px;
   color: var(--ink);
   font-size: 13px;
+  font-weight: 800;
+}
+
+.readonly-metric {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  padding: 10px 12px;
+  color: var(--ink);
+  font-size: 14px;
   font-weight: 800;
 }
 

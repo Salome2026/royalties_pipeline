@@ -44,6 +44,7 @@ type BookingAdjustment = {
   impact: string;
   recoverable: boolean;
   amount: number;
+  applied_amount: number;
   currency: "ARS" | "USD";
   artist_percent: number;
   producer_percent: number;
@@ -81,6 +82,7 @@ type BookingAdjustmentForm = {
   uid: string;
   concept: string;
   amount: string;
+  appliedAmount: string;
   adjustmentType: string;
   area: string;
   impact: string;
@@ -168,6 +170,7 @@ function newBookingAdjustment(): BookingAdjustmentForm {
     uid: `${Date.now()}-${Math.random()}`,
     concept: "",
     amount: "",
+    appliedAmount: "",
     adjustmentType: "recupero",
     area: "booking",
     impact: "pago_artista",
@@ -306,17 +309,26 @@ export default function Home() {
   const bookingAdjustmentSuggestion = useMemo(() => {
     return bookingForm.artistAdjustments.reduce((totals, adjustment) => {
       const amount = parseMoneyInput(adjustment.amount);
+      const appliedAmount = parseMoneyInput(adjustment.appliedAmount);
       const artistPercent = parseMoneyInput(adjustment.artistPercent);
       const producerPercent = adjustment.producerPercent
         ? parseMoneyInput(adjustment.producerPercent)
         : Math.max(0, 100 - artistPercent);
 
       totals.amount += amount;
+      totals.appliedAmount += appliedAmount;
       totals.artistAmount += amount * artistPercent / 100;
       totals.producerAmount += amount * producerPercent / 100;
       return totals;
-    }, { amount: 0, artistAmount: 0, producerAmount: 0 });
+    }, { amount: 0, appliedAmount: 0, artistAmount: 0, producerAmount: 0 });
   }, [bookingForm.artistAdjustments]);
+
+  const bookingFinalSuggestion = useMemo(() => {
+    return {
+      artistPayable: bookingSuggestion.artistShare - bookingAdjustmentSuggestion.appliedAmount,
+      producerCash: bookingSuggestion.producerShare + bookingAdjustmentSuggestion.appliedAmount,
+    };
+  }, [bookingSuggestion, bookingAdjustmentSuggestion]);
 
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -612,6 +624,7 @@ export default function Home() {
           .map((adjustment) => ({
             concept: adjustment.concept.trim(),
             amount: parseMoneyInput(adjustment.amount),
+            applied_amount: parseMoneyInput(adjustment.appliedAmount),
             adjustment_type: adjustment.adjustmentType,
             area: adjustment.area,
             impact: adjustment.impact,
@@ -1029,7 +1042,15 @@ export default function Home() {
                   <span>Ingreso sugerido productora</span>
                   <strong>{localAmount(bookingSuggestion.producerShare, bookingForm.currency)}</strong>
                 </div>
-                <p>Estos importes son solo referencia; el pago y la rendicion se cargan manualmente.</p>
+                <div>
+                  <span>Pago final sugerido artista</span>
+                  <strong>{localAmount(bookingFinalSuggestion.artistPayable, bookingForm.currency)}</strong>
+                </div>
+                <div>
+                  <span>Caja sugerida Indyana</span>
+                  <strong>{localAmount(bookingFinalSuggestion.producerCash, bookingForm.currency)}</strong>
+                </div>
+                <p>Primero se calcula el split del show. Los recuperos aplicados se descuentan despues del pago del artista y se suman como caja/rendicion de Indyana.</p>
               </div>
 
               <div className="artist-adjustments">
@@ -1044,6 +1065,7 @@ export default function Home() {
                 {bookingForm.artistAdjustments.length > 0 && (
                   <div className="adjustment-summary">
                     <span>Total ajustes {localAmount(bookingAdjustmentSuggestion.amount, bookingForm.currency)}</span>
+                    <span>Recupero aplicado {localAmount(bookingAdjustmentSuggestion.appliedAmount, bookingForm.currency)}</span>
                     <span>Artista {localAmount(bookingAdjustmentSuggestion.artistAmount, bookingForm.currency)}</span>
                     <span>Indyana {localAmount(bookingAdjustmentSuggestion.producerAmount, bookingForm.currency)}</span>
                   </div>
@@ -1055,6 +1077,7 @@ export default function Home() {
 
                 {bookingForm.artistAdjustments.map((adjustment, index) => {
                   const adjustmentAmount = parseMoneyInput(adjustment.amount);
+                  const adjustmentAppliedAmount = parseMoneyInput(adjustment.appliedAmount);
                   const adjustmentArtistPercent = parseMoneyInput(adjustment.artistPercent);
                   const adjustmentProducerPercent = adjustment.producerPercent
                     ? parseMoneyInput(adjustment.producerPercent)
@@ -1077,6 +1100,18 @@ export default function Home() {
                         <div>
                           <label htmlFor={`adjustment_amount_${adjustment.uid}`}>Importe</label>
                           <input id={`adjustment_amount_${adjustment.uid}`} inputMode="decimal" value={adjustment.amount} onChange={(event) => updateBookingAdjustmentField(adjustment.uid, "amount", event.target.value)} />
+                        </div>
+                      </div>
+
+                      <div className="row">
+                        <div>
+                          <label htmlFor={`adjustment_applied_${adjustment.uid}`}>Recupero aplicado en este show</label>
+                          <input id={`adjustment_applied_${adjustment.uid}`} inputMode="decimal" value={adjustment.appliedAmount} onChange={(event) => updateBookingAdjustmentField(adjustment.uid, "appliedAmount", event.target.value)} placeholder="100000" />
+                          <p className="field-help">Se descuenta despues del split: baja el pago al artista y sube la caja rendida a Indyana.</p>
+                        </div>
+                        <div>
+                          <label>Saldo recuperable estimado</label>
+                          <div className="readonly-metric">{localAmount(Math.max(0, adjustmentArtistAmount - adjustmentAppliedAmount), bookingForm.currency)}</div>
                         </div>
                       </div>
 
@@ -1125,8 +1160,9 @@ export default function Home() {
                       </div>
 
                       <div className="adjustment-summary">
-                        <span>Artista {localAmount(adjustmentArtistAmount, bookingForm.currency)}</span>
-                        <span>Indyana {localAmount(adjustmentProducerAmount, bookingForm.currency)}</span>
+                        <span>Costo artista {localAmount(adjustmentArtistAmount, bookingForm.currency)}</span>
+                        <span>Costo Indyana {localAmount(adjustmentProducerAmount, bookingForm.currency)}</span>
+                        <span>Aplicado ahora {localAmount(adjustmentAppliedAmount, bookingForm.currency)}</span>
                       </div>
 
                       <label htmlFor={`adjustment_notes_${adjustment.uid}`}>Nota del ajuste</label>

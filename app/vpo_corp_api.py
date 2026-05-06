@@ -94,6 +94,7 @@ class StatementReportRequest(BaseModel):
 class BookingArtistAdjustmentRequest(BaseModel):
     concept: str = Field(..., min_length=1, max_length=180)
     amount: float = Field(default=0.0, ge=0.0)
+    applied_amount: float = Field(default=0.0, ge=0.0)
     adjustment_type: Literal["recupero", "adelanto", "inversion", "descuento_especial", "otro"] = "recupero"
     area: Literal["booking", "label", "general"] = "booking"
     impact: Literal["pago_artista", "ingreso_productora", "solo_cuenta_corriente"] = "pago_artista"
@@ -401,6 +402,7 @@ def init_booking_db() -> None:
                 impact TEXT NOT NULL,
                 recoverable INTEGER NOT NULL DEFAULT 1,
                 amount REAL NOT NULL DEFAULT 0,
+                applied_amount REAL NOT NULL DEFAULT 0,
                 currency TEXT NOT NULL,
                 fx_rate REAL,
                 artist_percent REAL NOT NULL DEFAULT 0,
@@ -412,6 +414,16 @@ def init_booking_db() -> None:
             )
             """
         )
+        ensure_sqlite_column(conn, "booking_artist_adjustments", "applied_amount", "REAL NOT NULL DEFAULT 0")
+
+
+def ensure_sqlite_column(conn: sqlite3.Connection, table_name: str, column_name: str, definition: str) -> None:
+    columns = {
+        row["name"]
+        for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    if column_name not in columns:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
 
 def validate_iso_date(value: str) -> str:
@@ -1204,6 +1216,11 @@ def create_booking_show(
         if round(adjustment.artist_percent + adjustment_producer_percent, 4) > 100.0:
             raise HTTPException(status_code=400, detail="Adjustment artist_percent + producer_percent cannot exceed 100.")
 
+        artist_amount = adjustment.amount * adjustment.artist_percent / 100
+        producer_amount = adjustment.amount * adjustment_producer_percent / 100
+        if adjustment.applied_amount > artist_amount:
+            raise HTTPException(status_code=400, detail="Adjustment applied_amount cannot exceed artist recoverable amount.")
+
         prepared_adjustments.append({
             "concept": concept,
             "adjustment_type": adjustment.adjustment_type,
@@ -1211,10 +1228,11 @@ def create_booking_show(
             "impact": adjustment.impact,
             "recoverable": adjustment.recoverable,
             "amount": adjustment.amount,
+            "applied_amount": adjustment.applied_amount,
             "artist_percent": adjustment.artist_percent,
             "producer_percent": adjustment_producer_percent,
-            "artist_amount": adjustment.amount * adjustment.artist_percent / 100,
-            "producer_amount": adjustment.amount * adjustment_producer_percent / 100,
+            "artist_amount": artist_amount,
+            "producer_amount": producer_amount,
             "notes": (adjustment.notes or "").strip() or None,
         })
 
@@ -1290,10 +1308,10 @@ def create_booking_show(
                 """
                 INSERT INTO booking_artist_adjustments (
                     show_id, concept, adjustment_type, area, impact, recoverable,
-                    amount, currency, fx_rate, artist_percent, producer_percent,
+                    amount, applied_amount, currency, fx_rate, artist_percent, producer_percent,
                     artist_amount, producer_amount, notes, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     show_id,
@@ -1303,6 +1321,7 @@ def create_booking_show(
                     adjustment["impact"],
                     1 if adjustment["recoverable"] else 0,
                     adjustment["amount"],
+                    adjustment["applied_amount"],
                     request.currency,
                     request.fx_rate,
                     adjustment["artist_percent"],
