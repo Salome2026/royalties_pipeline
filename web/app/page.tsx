@@ -234,6 +234,27 @@ export default function Home() {
     return { background: `conic-gradient(${parts.join(", ")})` };
   }, [participation]);
 
+  const bookingSuggestion = useMemo(() => {
+    const cachet = parseMoneyInput(bookingForm.cachetAmount);
+    const expenses = parseMoneyInput(bookingForm.expensesAmount);
+    const artistPercent = parseMoneyInput(bookingForm.artistPercent);
+    const producerPercent = bookingForm.producerPercent
+      ? parseMoneyInput(bookingForm.producerPercent)
+      : Math.max(0, 100 - artistPercent);
+    const net = cachet - expenses;
+
+    return {
+      net,
+      artistShare: net * artistPercent / 100,
+      producerShare: net * producerPercent / 100,
+    };
+  }, [
+    bookingForm.cachetAmount,
+    bookingForm.expensesAmount,
+    bookingForm.artistPercent,
+    bookingForm.producerPercent,
+  ]);
+
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage(null);
@@ -889,6 +910,22 @@ export default function Home() {
                   <label htmlFor="booking_producer_received">Rendido a productora</label>
                   <input id="booking_producer_received" inputMode="decimal" value={bookingForm.producerReceivedAmount} onChange={(event) => updateBookingField("producerReceivedAmount", event.target.value)} />
                 </div>
+              </div>
+
+              <div className="booking-suggestion">
+                <div>
+                  <span>Neto sugerido</span>
+                  <strong>{localAmount(bookingSuggestion.net, bookingForm.currency)}</strong>
+                </div>
+                <div>
+                  <span>Pago sugerido artista</span>
+                  <strong>{localAmount(bookingSuggestion.artistShare, bookingForm.currency)}</strong>
+                </div>
+                <div>
+                  <span>Ingreso sugerido productora</span>
+                  <strong>{localAmount(bookingSuggestion.producerShare, bookingForm.currency)}</strong>
+                </div>
+                <p>Estos importes son solo referencia; el pago y la rendicion se cargan manualmente.</p>
               </div>
 
               <label htmlFor="booking_receipts">Comprobantes / links / rutas</label>

@@ -600,6 +600,49 @@ button:disabled {
   gap: 12px;
 }
 
+.booking-suggestion {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 14px 0 18px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(15, 118, 110, .08), rgba(46, 144, 250, .08));
+}
+
+.booking-suggestion div {
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid rgba(16, 32, 51, .1);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .78);
+}
+
+.booking-suggestion span,
+.booking-suggestion strong {
+  display: block;
+}
+
+.booking-suggestion span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.booking-suggestion strong {
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: 16px;
+}
+
+.booking-suggestion p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .booking-item {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -690,7 +733,8 @@ button:disabled {
   .row.three,
   .meta,
   .menu-grid,
-  .pie-layout {
+  .pie-layout,
+  .booking-suggestion {
     grid-template-columns: 1fr;
   }
 
