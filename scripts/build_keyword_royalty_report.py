@@ -60,6 +60,31 @@ SEARCH_COLUMNS_STANDARDIZED = [
 ]
 
 
+CODE_CANDIDATES = [
+    ("asset_isrc", "ISRC"),
+    ("ISRC", "ISRC"),
+    ("Asset ISRC", "ISRC"),
+    ("track_id", "Track ID"),
+    ("Track ID", "Track ID"),
+    ("Label Track ID", "Label Track ID"),
+    ("label_track_id", "Label Track ID"),
+    ("Asset Reference", "Asset Reference"),
+    ("asset_reference", "Asset Reference"),
+    ("FUGA Asset ID", "FUGA Asset ID"),
+    ("Video ID", "Video ID"),
+    ("VideoId", "Video ID"),
+    ("video_id", "Video ID"),
+    ("YOUTUBE VIDEO ID", "Video ID"),
+    ("Product Reference", "Product Reference"),
+    ("product_reference", "Product Reference"),
+    ("DSP Unit ID", "DSP Unit ID"),
+    ("DSP Container ID", "DSP Container ID"),
+    ("ID", "ID"),
+    ("Sale ID", "Sale ID"),
+    ("sale_id", "Sale ID"),
+]
+
+
 HEADER_FILL = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
 HEADER_FONT = Font(color="FFFFFF", bold=True)
 TOTAL_FILL = PatternFill(start_color="BDD7EE", end_color="BDD7EE", fill_type="solid")
@@ -86,6 +111,8 @@ DISPLAY_HEADERS = {
     "amount_usd": "Ingresos USD",
     "units": "Unidades",
     "rows": "Filas",
+    "report_code": "Codigo",
+    "report_code_source": "Tipo codigo",
     "asset_isrc": "ISRC",
     "track_statement_style": "Tema",
     "asset_title_statement": "Asset title",
@@ -272,6 +299,37 @@ def add_match_text(lf: pl.LazyFrame, columns: set[str], search_columns: list[str
 def safe_select(df: pl.DataFrame, columns: list[str]) -> pl.DataFrame:
     existing = [col for col in columns if col in df.columns]
     return df.select(existing)
+
+
+def non_empty_code_expr(col_name: str) -> pl.Expr:
+    value = pl.col(col_name).cast(pl.Utf8, strict=False).str.strip_chars()
+    return pl.when(value.is_not_null() & (value != "")).then(value).otherwise(None)
+
+
+def report_code_expr(columns: set[str]) -> pl.Expr:
+    candidates = [non_empty_code_expr(col) for col, _label in CODE_CANDIDATES if col in columns]
+
+    if not candidates:
+        return pl.lit(None).cast(pl.Utf8)
+
+    return pl.coalesce(candidates)
+
+
+def report_code_source_expr(columns: set[str]) -> pl.Expr:
+    expr = pl.lit(None).cast(pl.Utf8)
+
+    for col, label in reversed([(col, label) for col, label in CODE_CANDIDATES if col in columns]):
+        value = pl.col(col).cast(pl.Utf8, strict=False).str.strip_chars()
+        expr = pl.when(value.is_not_null() & (value != "")).then(pl.lit(label)).otherwise(expr)
+
+    return expr
+
+
+def add_report_code(lf: pl.LazyFrame, columns: set[str]) -> pl.LazyFrame:
+    return lf.with_columns([
+        report_code_expr(columns).alias("report_code"),
+        report_code_source_expr(columns).alias("report_code_source"),
+    ])
 
 
 def report_units_expr(columns: set[str]) -> pl.Expr:
@@ -611,15 +669,18 @@ def build_report_tables(
         raw_filter = build_filter(standardized_cols, SEARCH_COLUMNS_STANDARDIZED, keywords, mode)
 
         statement_base_lf = (
-            normalize_report_usage(
-                normalize_report_store(
-                    normalize_report_units(
-                        add_period_filter(
-                            pl.scan_parquet(standardized_path),
+            add_report_code(
+                normalize_report_usage(
+                    normalize_report_store(
+                        normalize_report_units(
+                            add_period_filter(
+                                pl.scan_parquet(standardized_path),
+                                standardized_cols,
+                                start_month,
+                                end_month,
+                                period_column,
+                            ),
                             standardized_cols,
-                            start_month,
-                            end_month,
-                            period_column,
                         ),
                         standardized_cols,
                     ),
@@ -635,6 +696,8 @@ def build_report_tables(
                     "account",
                     "statement_period",
                     "transaction_month",
+                    "report_code",
+                    "report_code_source",
                     "asset_isrc",
                     "track_statement_style",
                     "asset_title_statement",
@@ -648,7 +711,7 @@ def build_report_tables(
                     "source_sheet",
                     "revenue_basis",
                 ]
-                if col in standardized_cols or col in {"store", "store_raw", "usage_type", "usage_raw"}
+                if col in standardized_cols or col in {"store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source"}
             ])
             .with_columns([
                 pl.lit(None).cast(pl.Utf8).alias("content_type")
@@ -703,6 +766,8 @@ def build_report_tables(
                 "source",
                 "account",
                 "asset_isrc",
+                "report_code",
+                "report_code_source",
                 "track_statement_style",
                 "asset_title_statement",
                 "artist_statement_style",
@@ -722,15 +787,18 @@ def build_report_tables(
         )
 
         song_matches_lf = (
-            normalize_report_usage(
-                normalize_report_store(
-                    normalize_report_units(
-                        add_period_filter(
-                            add_match_text(pl.scan_parquet(standardized_path), standardized_cols, SEARCH_COLUMNS_STANDARDIZED),
+            add_report_code(
+                normalize_report_usage(
+                    normalize_report_store(
+                        normalize_report_units(
+                            add_period_filter(
+                                add_match_text(pl.scan_parquet(standardized_path), standardized_cols, SEARCH_COLUMNS_STANDARDIZED),
+                                standardized_cols,
+                                start_month,
+                                end_month,
+                                period_column,
+                            ),
                             standardized_cols,
-                            start_month,
-                            end_month,
-                            period_column,
                         ),
                         standardized_cols,
                     ),
@@ -746,6 +814,8 @@ def build_report_tables(
                     "account",
                     "statement_period",
                     "transaction_month",
+                    "report_code",
+                    "report_code_source",
                     "asset_isrc",
                     "track_statement_style",
                     "asset_title_statement",
@@ -763,7 +833,7 @@ def build_report_tables(
                     "revenue_basis",
                     "match_text",
                 ]
-                if col in standardized_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw"}
+                if col in standardized_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source"}
             ])
             .with_columns([
                 pl.lit(None).cast(pl.Utf8).alias("content_type")
@@ -776,15 +846,18 @@ def build_report_tables(
         )
 
         raw_sample_lf = (
-            normalize_report_usage(
-                normalize_report_store(
-                    normalize_report_units(
-                        add_period_filter(
-                            add_match_text(pl.scan_parquet(standardized_path), standardized_cols, SEARCH_COLUMNS_STANDARDIZED),
+            add_report_code(
+                normalize_report_usage(
+                    normalize_report_store(
+                        normalize_report_units(
+                            add_period_filter(
+                                add_match_text(pl.scan_parquet(standardized_path), standardized_cols, SEARCH_COLUMNS_STANDARDIZED),
+                                standardized_cols,
+                                start_month,
+                                end_month,
+                                period_column,
+                            ),
                             standardized_cols,
-                            start_month,
-                            end_month,
-                            period_column,
                         ),
                         standardized_cols,
                     ),
@@ -802,6 +875,8 @@ def build_report_tables(
                     "transaction_month",
                     "artist_statement_style",
                     "track_statement_style",
+                    "report_code",
+                    "report_code_source",
                     "asset_isrc",
                     "store_raw",
                     "usage_type",
@@ -814,7 +889,7 @@ def build_report_tables(
                     "statement_file_name",
                     "match_text",
                 ]
-                if col in standardized_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw"}
+                if col in standardized_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source"}
             ])
             .limit(raw_limit)
         )
@@ -879,6 +954,8 @@ def build_report_tables(
                     "account",
                     "statement_period",
                     "transaction_month",
+                    "report_code",
+                    "report_code_source",
                     "asset_isrc",
                     "track_statement_style",
                     "asset_title_statement",
@@ -903,13 +980,16 @@ def build_report_tables(
         return tables
     else:
         song = (
-            normalize_report_units(
-                add_period_filter(
-                    add_match_text(pl.scan_parquet(song_path), song_cols, SEARCH_COLUMNS_SONG),
+            add_report_code(
+                normalize_report_units(
+                    add_period_filter(
+                        add_match_text(pl.scan_parquet(song_path), song_cols, SEARCH_COLUMNS_SONG),
+                        song_cols,
+                        start_month,
+                        end_month,
+                        period_column,
+                    ),
                     song_cols,
-                    start_month,
-                    end_month,
-                    period_column,
                 ),
                 song_cols,
             )
@@ -969,6 +1049,8 @@ def build_report_tables(
             "source",
             "account",
             "asset_isrc",
+            "report_code",
+            "report_code_source",
             "track_statement_style",
             "asset_title_statement",
             "artist_statement_style",
@@ -992,15 +1074,18 @@ def build_report_tables(
         raw_filter = build_filter(raw_cols, SEARCH_COLUMNS_STANDARDIZED, keywords, mode)
 
         raw_matches_lf = (
-            normalize_report_usage(
-                normalize_report_store(
-                    normalize_report_units(
-                        add_period_filter(
-                            add_match_text(pl.scan_parquet(standardized_path), raw_cols, SEARCH_COLUMNS_STANDARDIZED),
+            add_report_code(
+                normalize_report_usage(
+                    normalize_report_store(
+                        normalize_report_units(
+                            add_period_filter(
+                                add_match_text(pl.scan_parquet(standardized_path), raw_cols, SEARCH_COLUMNS_STANDARDIZED),
+                                raw_cols,
+                                start_month,
+                                end_month,
+                                period_column,
+                            ),
                             raw_cols,
-                            start_month,
-                            end_month,
-                            period_column,
                         ),
                         raw_cols,
                     ),
@@ -1034,6 +1119,8 @@ def build_report_tables(
                     "transaction_month",
                     "artist_statement_style",
                     "track_statement_style",
+                    "report_code",
+                    "report_code_source",
                     "asset_isrc",
                     "store_raw",
                     "usage_type",
@@ -1046,7 +1133,7 @@ def build_report_tables(
                     "statement_file_name",
                     "match_text",
                 ]
-                if col in raw_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw"}
+                if col in raw_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source"}
             ])
             .limit(raw_limit)
             .collect()
@@ -1082,6 +1169,8 @@ def build_report_tables(
                 "account",
                 "statement_period",
                 "transaction_month",
+                "report_code",
+                "report_code_source",
                 "asset_isrc",
                 "track_statement_style",
                 "asset_title_statement",
