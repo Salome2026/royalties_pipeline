@@ -21,6 +21,7 @@ OUTPUT_DIR = BASE / "reports" / "booking"
 MONEY_COLUMNS = {
     "cachet_show",
     "gastos",
+    "gastos_directos_show",
     "neto_show",
     "se_lleva_artista",
     "se_lleva_indyana",
@@ -115,9 +116,9 @@ def load_historical(keyword: str) -> pl.DataFrame:
     return df.filter(pl.col("artista").cast(pl.Utf8).str.to_lowercase().str.contains(keyword))
 
 
-def load_live(keyword: str) -> tuple[list[dict], list[dict], list[dict]]:
+def load_live(keyword: str) -> tuple[list[dict], list[dict], list[dict], list[dict]]:
     if not LIVE_DB.exists():
-        return [], [], []
+        return [], [], [], []
 
     conn = sqlite3.connect(LIVE_DB)
     conn.row_factory = sqlite3.Row
@@ -134,7 +135,7 @@ def load_live(keyword: str) -> tuple[list[dict], list[dict], list[dict]]:
 
     show_ids = [row["id"] for row in show_rows]
     if not show_ids:
-        return [], [], []
+        return [], [], [], []
 
     placeholders = ",".join("?" for _ in show_ids)
     expenses = [dict(row) for row in conn.execute(
@@ -150,6 +151,15 @@ def load_live(keyword: str) -> tuple[list[dict], list[dict], list[dict]]:
         f"""
         SELECT *
         FROM booking_artist_adjustments
+        WHERE show_id IN ({placeholders})
+        ORDER BY show_id, id
+        """,
+        show_ids,
+    ).fetchall()]
+    movements = [dict(row) for row in conn.execute(
+        f"""
+        SELECT *
+        FROM booking_movements
         WHERE show_id IN ({placeholders})
         ORDER BY show_id, id
         """,
@@ -175,7 +185,7 @@ def load_live(keyword: str) -> tuple[list[dict], list[dict], list[dict]]:
             float(adjustment["artist_amount"] or 0) - float(adjustment["applied_amount"] or 0),
         )
 
-    return show_rows, expenses, adjustments
+    return show_rows, expenses, adjustments, movements
 
 
 def build_summary_rows(historical: pl.DataFrame, live_shows: list[dict], live_adjustments: list[dict]) -> list[dict]:
@@ -208,7 +218,7 @@ def build_summary_rows(historical: pl.DataFrame, live_shows: list[dict], live_ad
         {"Indicador": "Indyana historico modelado", "Valor": hist["indyana"]},
         {"Indicador": "Shows live", "Valor": live["shows"]},
         {"Indicador": "Cachet live", "Valor": live["cachet"]},
-        {"Indicador": "Gastos live", "Valor": live["gastos"]},
+        {"Indicador": "Gastos directos live", "Valor": live["gastos"]},
         {"Indicador": "Neto live", "Valor": live["neto"]},
         {"Indicador": "Artista live generado", "Valor": live["artista"]},
         {"Indicador": "Indyana live generado", "Valor": live["indyana"]},
@@ -225,7 +235,7 @@ def main() -> None:
     output = OUTPUT_DIR / f"booking_artist_cash_report_virsshy_{generated_at}.xlsx"
 
     historical = load_historical(keyword)
-    live_shows, live_expenses, live_adjustments = load_live(keyword)
+    live_shows, live_expenses, live_adjustments, live_movements = load_live(keyword)
 
     hist_rows = historical.select([
         "artista",
@@ -275,7 +285,7 @@ def main() -> None:
         "venue": row["venue"],
         "tour_manager": row["tour_manager"],
         "cachet_show": row["cachet_amount"],
-        "gastos": row["expenses_amount"],
+        "gastos_directos_show": row["expenses_amount"],
         "neto_show": row["net_amount"],
         "porcentaje_artista": row["artist_percent"] / 100,
         "porcentaje_productora": row["producer_percent"] / 100,
@@ -290,6 +300,17 @@ def main() -> None:
         "notes": row["notes"],
     } for row in live_shows]
 
+    live_movements_rows = [{
+        "show_id": row["show_id"],
+        "movement_type": row["movement_type"],
+        "category": row["category"],
+        "amount": row["amount"],
+        "currency": row["currency"],
+        "fx_rate": row["fx_rate"],
+        "notes": row["notes"],
+        "created_at": row["created_at"],
+    } for row in live_movements]
+
     wb = Workbook()
     wb.remove(wb.active)
 
@@ -299,9 +320,10 @@ def main() -> None:
     summary["A1"].font = Font(size=18, bold=True, color="1F4E78")
     summary["A2"] = f"Generado: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
     summary["A3"] = "Historico = planillas anteriores modeladas. Live = shows cargados en el sistema nuevo."
+    summary["A4"] = "Gastos directos del show bajan el neto. Pagos al artista y rendiciones a Indyana son movimientos de caja, no gastos."
     summary.append([])
     summary.append(["Indicador", "Valor"])
-    style_header(summary, 5, 2)
+    style_header(summary, 6, 2)
     for row in build_summary_rows(historical, live_shows, live_adjustments):
         summary.append([row["Indicador"], row["Valor"]])
     for row_idx in range(6, summary.max_row + 1):
@@ -313,7 +335,8 @@ def main() -> None:
     write_sheet(wb, "Shows live", live_rows, "ShowsLiveVirsshy")
     write_sheet(wb, "Caja artista", caja_artista, "CajaArtistaVirsshy")
     write_sheet(wb, "Caja Indyana", caja_indyana, "CajaIndyanaVirsshy")
-    write_sheet(wb, "Gastos live", live_expenses, "GastosLiveVirsshy")
+    write_sheet(wb, "Gastos directos live", live_expenses, "GastosDirectosLiveVirsshy")
+    write_sheet(wb, "Movimientos caja live", live_movements_rows, "MovimientosCajaLiveVirsshy")
     write_sheet(wb, "Ajustes live", live_adjustments, "AjustesLiveVirsshy")
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
