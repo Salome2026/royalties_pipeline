@@ -111,6 +111,13 @@ class BookingShowExpenseRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=1000)
 
 
+class BookingPreSplitAdjustmentRequest(BaseModel):
+    concept: str = Field(..., min_length=1, max_length=180)
+    destination: Literal["artist", "producer"] = "producer"
+    amount: float = Field(default=0.0, ge=0.0)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
 class BookingQuickShowRequest(BaseModel):
     artist: str = Field(..., min_length=1, max_length=160)
     show_date: str = Field(..., min_length=10, max_length=10)
@@ -124,6 +131,7 @@ class BookingQuickShowRequest(BaseModel):
     cachet_amount: float = Field(default=0.0, ge=0.0)
     expenses_amount: float = Field(default=0.0, ge=0.0)
     show_expenses: list[BookingShowExpenseRequest] = Field(default_factory=list, max_length=50)
+    pre_split_adjustments: list[BookingPreSplitAdjustmentRequest] = Field(default_factory=list, max_length=30)
     artist_paid_amount: float = Field(default=0.0, ge=0.0)
     producer_received_amount: float = Field(default=0.0, ge=0.0)
     artist_percent: float = Field(default=70.0, ge=0.0, le=100.0)
@@ -369,10 +377,14 @@ def init_booking_db() -> None:
                 cachet_amount REAL NOT NULL DEFAULT 0,
                 expenses_amount REAL NOT NULL DEFAULT 0,
                 net_amount REAL NOT NULL DEFAULT 0,
+                pre_split_adjustments_amount REAL NOT NULL DEFAULT 0,
+                split_base_amount REAL NOT NULL DEFAULT 0,
                 artist_percent REAL NOT NULL DEFAULT 0,
                 producer_percent REAL NOT NULL DEFAULT 0,
                 artist_share_amount REAL NOT NULL DEFAULT 0,
                 producer_share_amount REAL NOT NULL DEFAULT 0,
+                artist_cash_target_amount REAL NOT NULL DEFAULT 0,
+                producer_cash_target_amount REAL NOT NULL DEFAULT 0,
                 artist_paid_amount REAL NOT NULL DEFAULT 0,
                 producer_received_amount REAL NOT NULL DEFAULT 0,
                 balance_artist_amount REAL NOT NULL DEFAULT 0,
@@ -416,6 +428,21 @@ def init_booking_db() -> None:
         )
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS booking_pre_split_adjustments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                show_id INTEGER NOT NULL REFERENCES booking_shows(id) ON DELETE CASCADE,
+                concept TEXT NOT NULL,
+                destination TEXT NOT NULL,
+                amount REAL NOT NULL DEFAULT 0,
+                currency TEXT NOT NULL,
+                fx_rate REAL,
+                notes TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS booking_artist_adjustments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 show_id INTEGER NOT NULL REFERENCES booking_shows(id) ON DELETE CASCADE,
@@ -437,6 +464,10 @@ def init_booking_db() -> None:
             )
             """
         )
+        ensure_sqlite_column(conn, "booking_shows", "pre_split_adjustments_amount", "REAL NOT NULL DEFAULT 0")
+        ensure_sqlite_column(conn, "booking_shows", "split_base_amount", "REAL NOT NULL DEFAULT 0")
+        ensure_sqlite_column(conn, "booking_shows", "artist_cash_target_amount", "REAL NOT NULL DEFAULT 0")
+        ensure_sqlite_column(conn, "booking_shows", "producer_cash_target_amount", "REAL NOT NULL DEFAULT 0")
         ensure_sqlite_column(conn, "booking_artist_adjustments", "applied_amount", "REAL NOT NULL DEFAULT 0")
 
 
@@ -464,11 +495,16 @@ def row_to_booking_show(row: sqlite3.Row) -> dict:
     data = dict(row)
     data["receipt_refs"] = json.loads(data.pop("receipt_refs_json") or "[]")
     data["show_expenses"] = []
+    data["pre_split_adjustments"] = []
     data["artist_adjustments"] = []
     return data
 
 
 def row_to_booking_expense(row: sqlite3.Row) -> dict:
+    return dict(row)
+
+
+def row_to_booking_pre_split_adjustment(row: sqlite3.Row) -> dict:
     return dict(row)
 
 
@@ -501,6 +537,32 @@ def attach_booking_expenses(conn: sqlite3.Connection, shows: list[dict]) -> list
 
     for show in shows:
         show["show_expenses"] = by_show.get(show["id"], [])
+    return shows
+
+
+def attach_booking_pre_split_adjustments(conn: sqlite3.Connection, shows: list[dict]) -> list[dict]:
+    if not shows:
+        return shows
+
+    show_ids = [show["id"] for show in shows]
+    placeholders = ",".join("?" for _ in show_ids)
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM booking_pre_split_adjustments
+        WHERE show_id IN ({placeholders})
+        ORDER BY id
+        """,
+        show_ids,
+    ).fetchall()
+
+    by_show: dict[int, list[dict]] = {show_id: [] for show_id in show_ids}
+    for row in rows:
+        adjustment = row_to_booking_pre_split_adjustment(row)
+        by_show.setdefault(adjustment["show_id"], []).append(adjustment)
+
+    for show in shows:
+        show["pre_split_adjustments"] = by_show.get(show["id"], [])
     return shows
 
 
@@ -558,6 +620,19 @@ def prepare_booking_show_payload(request: BookingQuickShowRequest) -> dict:
     if not prepared_expenses:
         expenses_amount = request.expenses_amount
 
+    prepared_pre_split_adjustments = []
+    for adjustment in request.pre_split_adjustments:
+        concept = adjustment.concept.strip()
+        if not concept or adjustment.amount <= 0:
+            continue
+
+        prepared_pre_split_adjustments.append({
+            "concept": concept,
+            "destination": adjustment.destination,
+            "amount": adjustment.amount,
+            "notes": (adjustment.notes or "").strip() or None,
+        })
+
     producer_percent = request.producer_percent
     if producer_percent is None:
         producer_percent = max(0.0, 100.0 - request.artist_percent)
@@ -599,10 +674,28 @@ def prepare_booking_show_payload(request: BookingQuickShowRequest) -> dict:
         })
 
     net_amount = request.cachet_amount - expenses_amount
-    artist_share = net_amount * request.artist_percent / 100
-    producer_share = net_amount * producer_percent / 100
-    balance_artist = artist_share - request.artist_paid_amount
-    balance_producer = producer_share - request.producer_received_amount
+    pre_split_adjustments_amount = sum(adjustment["amount"] for adjustment in prepared_pre_split_adjustments)
+    pre_split_artist_amount = sum(
+        adjustment["amount"]
+        for adjustment in prepared_pre_split_adjustments
+        if adjustment["destination"] == "artist"
+    )
+    pre_split_producer_amount = sum(
+        adjustment["amount"]
+        for adjustment in prepared_pre_split_adjustments
+        if adjustment["destination"] == "producer"
+    )
+    split_base_amount = net_amount - pre_split_adjustments_amount
+    if split_base_amount < 0:
+        raise HTTPException(status_code=400, detail="Pre-split adjustments cannot exceed show net amount.")
+
+    artist_share = split_base_amount * request.artist_percent / 100
+    producer_share = split_base_amount * producer_percent / 100
+    post_split_applied_amount = sum(adjustment["applied_amount"] for adjustment in prepared_adjustments)
+    artist_cash_target = artist_share + pre_split_artist_amount - post_split_applied_amount
+    producer_cash_target = producer_share + pre_split_producer_amount + post_split_applied_amount
+    balance_artist = artist_cash_target - request.artist_paid_amount
+    balance_producer = producer_cash_target - request.producer_received_amount
 
     return {
         "show_date": show_date,
@@ -614,12 +707,17 @@ def prepare_booking_show_payload(request: BookingQuickShowRequest) -> dict:
         "notes": notes,
         "receipt_refs": receipt_refs,
         "expenses": prepared_expenses,
+        "pre_split_adjustments": prepared_pre_split_adjustments,
         "adjustments": prepared_adjustments,
         "expenses_amount": expenses_amount,
+        "pre_split_adjustments_amount": pre_split_adjustments_amount,
         "producer_percent": producer_percent,
         "net_amount": net_amount,
+        "split_base_amount": split_base_amount,
         "artist_share": artist_share,
         "producer_share": producer_share,
+        "artist_cash_target": artist_cash_target,
+        "producer_cash_target": producer_cash_target,
         "balance_artist": balance_artist,
         "balance_producer": balance_producer,
     }
@@ -634,6 +732,7 @@ def replace_booking_show_children(
 ) -> None:
     conn.execute("DELETE FROM booking_movements WHERE show_id = ?", (show_id,))
     conn.execute("DELETE FROM booking_show_expenses WHERE show_id = ?", (show_id,))
+    conn.execute("DELETE FROM booking_pre_split_adjustments WHERE show_id = ?", (show_id,))
     conn.execute("DELETE FROM booking_artist_adjustments WHERE show_id = ?", (show_id,))
 
     movement_rows = [
@@ -680,6 +779,26 @@ def replace_booking_show_children(
             ),
         )
 
+    for adjustment in payload["pre_split_adjustments"]:
+        conn.execute(
+            """
+            INSERT INTO booking_pre_split_adjustments (
+                show_id, concept, destination, amount, currency, fx_rate, notes, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                show_id,
+                adjustment["concept"],
+                adjustment["destination"],
+                adjustment["amount"],
+                request.currency,
+                request.fx_rate,
+                adjustment["notes"],
+                now,
+            ),
+        )
+
     for adjustment in payload["adjustments"]:
         conn.execute(
             """
@@ -717,6 +836,7 @@ def fetch_booking_show_item(conn: sqlite3.Connection, show_id: int) -> dict:
         raise HTTPException(status_code=404, detail="Booking show not found.")
 
     item = attach_booking_expenses(conn, [row_to_booking_show(row)])
+    item = attach_booking_pre_split_adjustments(conn, item)
     return attach_booking_adjustments(conn, item)[0]
 
 
@@ -1407,6 +1527,7 @@ def booking_shows(
         ).fetchall()
         items = [row_to_booking_show(row) for row in rows]
         items = attach_booking_expenses(conn, items)
+        items = attach_booking_pre_split_adjustments(conn, items)
         items = attach_booking_adjustments(conn, items)
 
     return {
@@ -1442,11 +1563,13 @@ def create_booking_show(
             INSERT INTO booking_shows (
                 artist, show_date, venue, city, tour_manager, seller, status,
                 currency, fx_rate, cachet_amount, expenses_amount, net_amount,
+                pre_split_adjustments_amount, split_base_amount,
                 artist_percent, producer_percent, artist_share_amount, producer_share_amount,
+                artist_cash_target_amount, producer_cash_target_amount,
                 artist_paid_amount, producer_received_amount, balance_artist_amount,
                 balance_producer_amount, receipt_refs_json, notes, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 payload["artist"],
@@ -1461,10 +1584,14 @@ def create_booking_show(
                 request.cachet_amount,
                 payload["expenses_amount"],
                 payload["net_amount"],
+                payload["pre_split_adjustments_amount"],
+                payload["split_base_amount"],
                 request.artist_percent,
                 payload["producer_percent"],
                 payload["artist_share"],
                 payload["producer_share"],
+                payload["artist_cash_target"],
+                payload["producer_cash_target"],
                 request.artist_paid_amount,
                 request.producer_received_amount,
                 payload["balance_artist"],
@@ -1517,10 +1644,14 @@ def update_booking_show(
                 cachet_amount = ?,
                 expenses_amount = ?,
                 net_amount = ?,
+                pre_split_adjustments_amount = ?,
+                split_base_amount = ?,
                 artist_percent = ?,
                 producer_percent = ?,
                 artist_share_amount = ?,
                 producer_share_amount = ?,
+                artist_cash_target_amount = ?,
+                producer_cash_target_amount = ?,
                 artist_paid_amount = ?,
                 producer_received_amount = ?,
                 balance_artist_amount = ?,
@@ -1543,10 +1674,14 @@ def update_booking_show(
                 request.cachet_amount,
                 payload["expenses_amount"],
                 payload["net_amount"],
+                payload["pre_split_adjustments_amount"],
+                payload["split_base_amount"],
                 request.artist_percent,
                 payload["producer_percent"],
                 payload["artist_share"],
                 payload["producer_share"],
+                payload["artist_cash_target"],
+                payload["producer_cash_target"],
                 request.artist_paid_amount,
                 request.producer_received_amount,
                 payload["balance_artist"],

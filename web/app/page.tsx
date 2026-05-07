@@ -63,6 +63,16 @@ type BookingExpense = {
   notes: string | null;
 };
 
+type BookingPreSplitAdjustment = {
+  id: number;
+  show_id: number;
+  concept: string;
+  destination: "artist" | "producer";
+  amount: number;
+  currency: "ARS" | "USD";
+  notes: string | null;
+};
+
 type BookingShow = {
   id: number;
   artist: string;
@@ -77,15 +87,20 @@ type BookingShow = {
   cachet_amount: number;
   expenses_amount: number;
   net_amount: number;
+  pre_split_adjustments_amount: number;
+  split_base_amount: number;
   artist_percent: number;
   producer_percent: number;
   artist_share_amount: number;
   producer_share_amount: number;
+  artist_cash_target_amount: number;
+  producer_cash_target_amount: number;
   artist_paid_amount: number;
   producer_received_amount: number;
   balance_artist_amount: number;
   balance_producer_amount: number;
   show_expenses: BookingExpense[];
+  pre_split_adjustments: BookingPreSplitAdjustment[];
   artist_adjustments: BookingAdjustment[];
   receipt_refs: string[];
   notes: string | null;
@@ -113,6 +128,14 @@ type BookingAdjustmentForm = {
   notes: string;
 };
 
+type BookingPreSplitAdjustmentForm = {
+  uid: string;
+  concept: string;
+  destination: "artist" | "producer";
+  amount: string;
+  notes: string;
+};
+
 type BookingForm = {
   artist: string;
   showDate: string;
@@ -125,6 +148,7 @@ type BookingForm = {
   fxRate: string;
   cachetAmount: string;
   showExpenses: BookingExpenseForm[];
+  preSplitAdjustments: BookingPreSplitAdjustmentForm[];
   artistPaidAmount: string;
   producerReceivedAmount: string;
   artistPercent: string;
@@ -216,6 +240,16 @@ function newBookingAdjustment(): BookingAdjustmentForm {
   };
 }
 
+function newBookingPreSplitAdjustment(destination: "artist" | "producer" = "producer"): BookingPreSplitAdjustmentForm {
+  return {
+    uid: `${Date.now()}-${Math.random()}`,
+    concept: "",
+    destination,
+    amount: "",
+    notes: "",
+  };
+}
+
 function MonthSelect({ id, value, min, onChange }: MonthSelectProps) {
   const options = MONTH_OPTIONS.filter((option) => !min || option.value >= min);
 
@@ -268,6 +302,7 @@ export default function Home() {
     fxRate: "",
     cachetAmount: "",
     showExpenses: [],
+    preSplitAdjustments: [],
     artistPaidAmount: "",
     producerReceivedAmount: "",
     artistPercent: "70",
@@ -327,6 +362,19 @@ export default function Home() {
     ), 0);
   }, [bookingForm.showExpenses]);
 
+  const bookingPreSplitSummary = useMemo(() => {
+    return bookingForm.preSplitAdjustments.reduce((totals, adjustment) => {
+      const amount = parseMoneyInput(adjustment.amount);
+      totals.total += amount;
+      if (adjustment.destination === "artist") {
+        totals.artist += amount;
+      } else {
+        totals.producer += amount;
+      }
+      return totals;
+    }, { total: 0, artist: 0, producer: 0 });
+  }, [bookingForm.preSplitAdjustments]);
+
   const bookingSuggestion = useMemo(() => {
     const cachet = parseMoneyInput(bookingForm.cachetAmount);
     const expenses = bookingExpenseTotal;
@@ -335,15 +383,18 @@ export default function Home() {
       ? parseMoneyInput(bookingForm.producerPercent)
       : Math.max(0, 100 - artistPercent);
     const net = cachet - expenses;
+    const splitBase = net - bookingPreSplitSummary.total;
 
     return {
       net,
-      artistShare: net * artistPercent / 100,
-      producerShare: net * producerPercent / 100,
+      splitBase,
+      artistShare: splitBase * artistPercent / 100,
+      producerShare: splitBase * producerPercent / 100,
     };
   }, [
     bookingForm.cachetAmount,
     bookingExpenseTotal,
+    bookingPreSplitSummary.total,
     bookingForm.artistPercent,
     bookingForm.producerPercent,
   ]);
@@ -367,10 +418,10 @@ export default function Home() {
 
   const bookingFinalSuggestion = useMemo(() => {
     return {
-      artistPayable: bookingSuggestion.artistShare - bookingAdjustmentSuggestion.appliedAmount,
-      producerCash: bookingSuggestion.producerShare + bookingAdjustmentSuggestion.appliedAmount,
+      artistPayable: bookingSuggestion.artistShare + bookingPreSplitSummary.artist - bookingAdjustmentSuggestion.appliedAmount,
+      producerCash: bookingSuggestion.producerShare + bookingPreSplitSummary.producer + bookingAdjustmentSuggestion.appliedAmount,
     };
-  }, [bookingSuggestion, bookingAdjustmentSuggestion]);
+  }, [bookingSuggestion, bookingPreSplitSummary, bookingAdjustmentSuggestion]);
 
   async function login(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -627,6 +678,33 @@ export default function Home() {
     }));
   }
 
+  function addBookingPreSplitAdjustment(destination: "artist" | "producer" = "producer") {
+    setBookingForm((current) => ({
+      ...current,
+      preSplitAdjustments: [...current.preSplitAdjustments, newBookingPreSplitAdjustment(destination)],
+    }));
+  }
+
+  function removeBookingPreSplitAdjustment(uid: string) {
+    setBookingForm((current) => ({
+      ...current,
+      preSplitAdjustments: current.preSplitAdjustments.filter((adjustment) => adjustment.uid !== uid),
+    }));
+  }
+
+  function updateBookingPreSplitAdjustmentField<K extends keyof BookingPreSplitAdjustmentForm>(
+    uid: string,
+    key: K,
+    value: BookingPreSplitAdjustmentForm[K],
+  ) {
+    setBookingForm((current) => ({
+      ...current,
+      preSplitAdjustments: current.preSplitAdjustments.map((adjustment) => (
+        adjustment.uid === uid ? { ...adjustment, [key]: value } : adjustment
+      )),
+    }));
+  }
+
   function updateBookingAdjustmentField<K extends keyof BookingAdjustmentForm>(
     uid: string,
     key: K,
@@ -675,6 +753,7 @@ export default function Home() {
       fxRate: "",
       cachetAmount: "",
       showExpenses: [],
+      preSplitAdjustments: [],
       artistPaidAmount: "",
       producerReceivedAmount: "",
       artistPercent: "70",
@@ -704,6 +783,13 @@ export default function Home() {
         category: expense.category || "general",
         amount: amountToInput(expense.amount),
         notes: expense.notes || "",
+      })),
+      preSplitAdjustments: item.pre_split_adjustments.map((adjustment) => ({
+        uid: `pre-split-${adjustment.id}-${Date.now()}`,
+        concept: adjustment.concept || "",
+        destination: adjustment.destination,
+        amount: amountToInput(adjustment.amount),
+        notes: adjustment.notes || "",
       })),
       artistPaidAmount: amountToInput(item.artist_paid_amount),
       producerReceivedAmount: amountToInput(item.producer_received_amount),
@@ -760,6 +846,14 @@ export default function Home() {
             notes: expense.notes || null,
           }))
           .filter((expense) => expense.amount > 0),
+        pre_split_adjustments: bookingForm.preSplitAdjustments
+          .map((adjustment) => ({
+            concept: adjustment.concept.trim(),
+            destination: adjustment.destination,
+            amount: parseMoneyInput(adjustment.amount),
+            notes: adjustment.notes || null,
+          }))
+          .filter((adjustment) => adjustment.concept && adjustment.amount > 0),
         artist_paid_amount: parseMoneyInput(bookingForm.artistPaidAmount),
         producer_received_amount: parseMoneyInput(bookingForm.producerReceivedAmount),
         artist_percent: parseMoneyInput(bookingForm.artistPercent),
@@ -1204,6 +1298,62 @@ export default function Home() {
                 ))}
               </div>
 
+              <div className="artist-adjustments">
+                <div className="section-heading compact">
+                  <div>
+                    <h2>Ajustes antes del split</h2>
+                    <p>Importes que salen del neto antes de calcular el 70/30 u otro acuerdo.</p>
+                  </div>
+                  <div className="button-row">
+                    <button type="button" onClick={() => addBookingPreSplitAdjustment("producer")}>A Indyana</button>
+                    <button type="button" onClick={() => addBookingPreSplitAdjustment("artist")}>Al artista</button>
+                  </div>
+                </div>
+
+                {bookingForm.preSplitAdjustments.length === 0 && (
+                  <p className="field-help">Sin ajustes antes del split. Usalo para recuperos o deudas pagadas desde la caja del show.</p>
+                )}
+
+                {bookingForm.preSplitAdjustments.length > 0 && (
+                  <div className="adjustment-summary">
+                    <span>Total ajustes {localAmount(bookingPreSplitSummary.total, bookingForm.currency)}</span>
+                    <span>A Indyana {localAmount(bookingPreSplitSummary.producer, bookingForm.currency)}</span>
+                    <span>Al artista {localAmount(bookingPreSplitSummary.artist, bookingForm.currency)}</span>
+                    <span>Base split {localAmount(bookingSuggestion.splitBase, bookingForm.currency)}</span>
+                  </div>
+                )}
+
+                {bookingForm.preSplitAdjustments.map((adjustment, index) => (
+                  <div className="adjustment-card" key={adjustment.uid}>
+                    <div className="adjustment-card-title">
+                      <strong>Ajuste antes del split {index + 1}</strong>
+                      <button type="button" onClick={() => removeBookingPreSplitAdjustment(adjustment.uid)}>Quitar</button>
+                    </div>
+
+                    <div className="row three">
+                      <div>
+                        <label htmlFor={`pre_split_concept_${adjustment.uid}`}>Concepto</label>
+                        <input id={`pre_split_concept_${adjustment.uid}`} value={adjustment.concept} onChange={(event) => updateBookingPreSplitAdjustmentField(adjustment.uid, "concept", event.target.value)} placeholder="Recupero DJ set, Uber adeudado" />
+                      </div>
+                      <div>
+                        <label htmlFor={`pre_split_destination_${adjustment.uid}`}>Destino</label>
+                        <select id={`pre_split_destination_${adjustment.uid}`} value={adjustment.destination} onChange={(event) => updateBookingPreSplitAdjustmentField(adjustment.uid, "destination", event.target.value as "artist" | "producer")}>
+                          <option value="producer">Indyana</option>
+                          <option value="artist">Artista</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label htmlFor={`pre_split_amount_${adjustment.uid}`}>Importe</label>
+                        <input id={`pre_split_amount_${adjustment.uid}`} inputMode="decimal" value={adjustment.amount} onChange={(event) => updateBookingPreSplitAdjustmentField(adjustment.uid, "amount", event.target.value)} />
+                      </div>
+                    </div>
+
+                    <label htmlFor={`pre_split_notes_${adjustment.uid}`}>Nota</label>
+                    <textarea id={`pre_split_notes_${adjustment.uid}`} value={adjustment.notes} onChange={(event) => updateBookingPreSplitAdjustmentField(adjustment.uid, "notes", event.target.value)} />
+                  </div>
+                ))}
+              </div>
+
               <div className="row">
                 <div>
                   <label htmlFor="booking_artist_paid">Pagado al artista</label>
@@ -1232,8 +1382,12 @@ export default function Home() {
 
               <div className="booking-suggestion">
                 <div>
-                  <span>Neto sugerido</span>
+                  <span>Neto despues de gastos</span>
                   <strong>{localAmount(bookingSuggestion.net, bookingForm.currency)}</strong>
+                </div>
+                <div>
+                  <span>Base para split</span>
+                  <strong>{localAmount(bookingSuggestion.splitBase, bookingForm.currency)}</strong>
                 </div>
                 <div>
                   <span>Pago sugerido artista</span>
@@ -1251,7 +1405,7 @@ export default function Home() {
                   <span>Caja sugerida Indyana</span>
                   <strong>{localAmount(bookingFinalSuggestion.producerCash, bookingForm.currency)}</strong>
                 </div>
-                <p>Primero se calcula el split del show. Los recuperos aplicados se descuentan despues del pago del artista y se suman como caja/rendicion de Indyana.</p>
+                <p>Primero se descuentan gastos y ajustes antes del split. Despues se calcula el acuerdo y, si hay recuperos posteriores, se aplican sobre el pago final.</p>
               </div>
 
               <div className="artist-adjustments">
@@ -1404,12 +1558,14 @@ export default function Home() {
                     <div className="booking-metrics">
                       <span>Cachet {localAmount(item.cachet_amount, item.currency)}</span>
                       <span>Neto {localAmount(item.net_amount, item.currency)}</span>
-                      <span>Artista {localAmount(item.artist_share_amount, item.currency)}</span>
-                      <span>VPO {localAmount(item.producer_share_amount, item.currency)}</span>
+                      <span>Base split {localAmount(item.split_base_amount || item.net_amount, item.currency)}</span>
+                      <span>Artista {localAmount(item.artist_cash_target_amount || item.artist_share_amount, item.currency)}</span>
+                      <span>VPO {localAmount(item.producer_cash_target_amount || item.producer_share_amount, item.currency)}</span>
                     </div>
                     <div className="booking-status">
                       <span>{item.status}</span>
                       {item.show_expenses.length > 0 && <span>{item.show_expenses.length} gasto(s)</span>}
+                      {item.pre_split_adjustments.length > 0 && <span>{item.pre_split_adjustments.length} ajuste(s) pre split</span>}
                       {item.receipt_refs.length > 0 && <span>{item.receipt_refs.length} comprobante(s)</span>}
                       {item.artist_adjustments.length > 0 && <span>{item.artist_adjustments.length} ajuste(s)</span>}
                     </div>
