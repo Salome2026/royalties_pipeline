@@ -58,7 +58,7 @@ def ensure_live_db() -> None:
 def backup_live_db() -> Path:
     ensure_live_db()
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
-    backup_path = BACKUP_DIR / f"booking_live_before_historical_import_{datetime.now().strftime('%Y%m%d_%H%M%S')}.sqlite"
+    backup_path = BACKUP_DIR / f"booking_live_before_historical_import_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.sqlite"
     shutil.copy2(LIVE_DB, backup_path)
     return backup_path
 
