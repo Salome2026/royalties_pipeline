@@ -138,7 +138,52 @@ def load_expense_details(keyword: str) -> dict[tuple[str, str, str, str], list[d
     return by_key
 
 
-def show_payload(row: dict, canonical_artist: str) -> dict:
+def load_show_fx_rates(keyword: str) -> dict[tuple[str, str, str, str], float]:
+    movements = pl.read_parquet(STANDARDIZED_PATH)
+    filtered = (
+        movements
+        .filter(
+            (pl.col("business_area") == "booking")
+            & (pl.col("movement_subcategory").str.to_lowercase() == "show")
+            & pl.col("artist_statement").cast(pl.Utf8).str.to_lowercase().str.contains(keyword)
+            & pl.col("movement_date").is_not_null()
+            & pl.col("fx_rate").is_not_null()
+            & (pl.col("fx_rate") > 0)
+        )
+        .select([
+            pl.col("source_file_name").cast(pl.Utf8),
+            pl.col("artist_statement").cast(pl.Utf8),
+            pl.col("movement_date").cast(pl.Utf8),
+            pl.col("event_detail").cast(pl.Utf8),
+            pl.col("movement_type").cast(pl.Utf8),
+            pl.col("fx_rate").cast(pl.Float64),
+        ])
+    )
+
+    grouped = (
+        filtered
+        .group_by(["source_file_name", "artist_statement", "movement_date", "event_detail"])
+        .agg([
+            pl.col("fx_rate").filter(pl.col("movement_type") == "income").first().alias("income_fx"),
+            pl.col("fx_rate").filter(pl.col("movement_type") == "expense").first().alias("expense_fx"),
+        ])
+        .with_columns(pl.coalesce(["income_fx", "expense_fx"]).alias("fx_rate"))
+    )
+
+    out: dict[tuple[str, str, str, str], float] = {}
+    for row in grouped.to_dicts():
+        key = (
+            normalize_text(row["source_file_name"]),
+            normalize_text(row["artist_statement"]),
+            str(row["movement_date"] or ""),
+            normalize_text(row["event_detail"]),
+        )
+        if row["fx_rate"]:
+            out[key] = float(row["fx_rate"])
+    return out
+
+
+def show_payload(row: dict, canonical_artist: str, fx_rate: float | None) -> dict:
     cachet = float(row["cachet_show"] or 0)
     expenses = float(row["gastos"] or 0)
     net = float(row["neto_show"] or 0)
@@ -158,7 +203,7 @@ def show_payload(row: dict, canonical_artist: str) -> dict:
         "venue": row["venue_evento"],
         "status": "no_cobrado" if row["control"] == "cachet_cero" else "realizado",
         "currency": "ARS",
-        "fx_rate": None,
+        "fx_rate": fx_rate,
         "cachet_amount": cachet,
         "expenses_amount": expenses,
         "net_amount": net,
@@ -189,8 +234,9 @@ def insert_show(
     canonical_artist: str,
     expense_details: list[dict],
     now: str,
+    fx_rate: float | None,
 ) -> int:
-    payload = show_payload(row, canonical_artist)
+    payload = show_payload(row, canonical_artist, fx_rate)
     cursor = conn.execute(
         """
         INSERT INTO booking_shows (
@@ -312,6 +358,7 @@ def insert_show(
 def import_artist(keyword: str, canonical_artist: str, dry_run: bool) -> dict:
     historical = load_historical(keyword)
     expense_lookup = load_expense_details(keyword)
+    fx_lookup = load_show_fx_rates(keyword)
 
     with sqlite3.connect(LIVE_DB) as conn:
         conn.row_factory = sqlite3.Row
@@ -331,6 +378,7 @@ def import_artist(keyword: str, canonical_artist: str, dry_run: bool) -> dict:
             "producer": sum(float(row["se_lleva_indyana"] or 0) for row in pending),
             "inserted": 0,
             "expense_rows": 0,
+            "with_fx": 0,
         }
 
         if dry_run:
@@ -345,12 +393,61 @@ def import_artist(keyword: str, canonical_artist: str, dry_run: bool) -> dict:
                 normalize_text(row["venue_evento"]),
             )
             expense_details = expense_lookup.get(expense_key, [])
-            insert_show(conn, row, canonical_artist, expense_details, now)
+            fx_rate = fx_lookup.get(expense_key)
+            insert_show(conn, row, canonical_artist, expense_details, now, fx_rate)
             totals["inserted"] += 1
             totals["expense_rows"] += len(expense_details)
+            if fx_rate:
+                totals["with_fx"] += 1
 
         conn.commit()
         return totals
+
+
+def update_existing_fx(keyword: str, canonical_artist: str) -> dict:
+    historical = load_historical(keyword)
+    fx_lookup = load_show_fx_rates(keyword)
+    by_show_key: dict[tuple[str, str], float] = {}
+
+    for row in historical.to_dicts():
+        source_key = (
+            normalize_text(row["archivo_origen"]),
+            normalize_text(row["artista"]),
+            str(row["fecha"] or ""),
+            normalize_text(row["venue_evento"]),
+        )
+        fx_rate = fx_lookup.get(source_key)
+        if fx_rate:
+            by_show_key[(str(row["fecha"] or ""), normalize_text(row["venue_evento"]))] = fx_rate
+
+    updated = 0
+    with sqlite3.connect(LIVE_DB) as conn:
+        conn.row_factory = sqlite3.Row
+        shows = conn.execute(
+            """
+            SELECT id, show_date, venue
+            FROM booking_shows
+            WHERE lower(artist) = lower(?)
+              AND notes LIKE 'Import historico booking.%'
+            """,
+            (canonical_artist,),
+        ).fetchall()
+
+        for show in shows:
+            fx_rate = by_show_key.get((str(show["show_date"] or ""), normalize_text(show["venue"])))
+            if not fx_rate:
+                continue
+
+            conn.execute("UPDATE booking_shows SET fx_rate = ? WHERE id = ?", (fx_rate, show["id"]))
+            conn.execute(
+                "UPDATE booking_movements SET fx_rate = ? WHERE show_id = ? AND fx_rate IS NULL",
+                (fx_rate, show["id"]),
+            )
+            updated += 1
+
+        conn.commit()
+
+    return {"updated_shows": updated, "fx_available": len(by_show_key)}
 
 
 def main() -> None:
@@ -359,6 +456,7 @@ def main() -> None:
     parser.add_argument("--artist", default="Virrshi Dj")
     parser.add_argument("--rebuild", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--update-fx-only", action="store_true")
     args = parser.parse_args()
 
     if args.rebuild:
@@ -367,6 +465,12 @@ def main() -> None:
     if args.dry_run:
         totals = import_artist(args.keyword, args.artist, dry_run=True)
         print(json.dumps(totals, ensure_ascii=False, indent=2))
+        return
+
+    if args.update_fx_only:
+        backup = backup_live_db()
+        totals = update_existing_fx(args.keyword, args.artist)
+        print(json.dumps({"backup": str(backup), **totals}, ensure_ascii=False, indent=2))
         return
 
     backup = backup_live_db()
