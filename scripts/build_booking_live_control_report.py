@@ -65,6 +65,8 @@ def add_usd_fields(row: dict, pairs: list[tuple[str, str]]) -> dict:
 
 
 def format_value(header: str, value: object) -> object:
+    if value is None or value == "":
+        return None
     if header in {"ID", "Show ID", "Filas"}:
         return int(value or 0)
     if header in {"% Artista", "% Indyana"}:
@@ -87,12 +89,14 @@ def write_sheet(
     money_headers: set[str],
     percent_headers: set[str] | None = None,
     integer_headers: set[str] | None = None,
+    per_column_formats: dict[str, str] | None = None,
 ) -> None:
     ws = wb.create_sheet(name)
     ws.sheet_view.showGridLines = False
     ws.freeze_panes = "A2"
     percent_headers = percent_headers or set()
     integer_headers = integer_headers or set()
+    per_column_formats = per_column_formats or {}
 
     ws.append(headers)
     for row in rows:
@@ -118,6 +122,8 @@ def write_sheet(
                 cell.number_format = PERCENT_FORMAT
             elif header in integer_headers:
                 cell.number_format = INTEGER_FORMAT
+            elif header in per_column_formats:
+                cell.number_format = per_column_formats[header]
 
             if isinstance(header, str) and header.startswith("Balance"):
                 cell.fill = OK_FILL if abs(round_money(cell.value)) < 0.01 else BAD_FILL
@@ -296,19 +302,31 @@ def build_report(artist: str, keyword: str) -> Path:
     total_producer_usd = sum(round_money(row.get("Rendido Indyana USD")) for row in show_rows)
 
     summary_rows = [
-        {"Indicador": "Artista", "Valor ARS": artist, "Valor USD": ""},
-        {"Indicador": "Generado", "Valor ARS": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Valor USD": ""},
-        {"Indicador": "Shows", "Valor ARS": len(show_rows), "Valor USD": ""},
-        {"Indicador": "Shows sin TC", "Valor ARS": sum(1 for row in show_rows if not row.get("TC")), "Valor USD": ""},
-        {"Indicador": "Cachet", "Valor ARS": total_cachet, "Valor USD": total_cachet_usd},
-        {"Indicador": "Gastos", "Valor ARS": total_gastos, "Valor USD": total_gastos_usd},
-        {"Indicador": "Artista", "Valor ARS": total_artist, "Valor USD": total_artist_usd},
-        {"Indicador": "Indyana", "Valor ARS": total_producer, "Valor USD": total_producer_usd},
-        {"Indicador": "Balance artista", "Valor ARS": sum(round_money(row.get("Balance artista ARS")) for row in show_rows), "Valor USD": sum(round_money(row.get("Balance artista USD")) for row in show_rows)},
-        {"Indicador": "Balance Indyana", "Valor ARS": sum(round_money(row.get("Balance Indyana ARS")) for row in show_rows), "Valor USD": sum(round_money(row.get("Balance Indyana USD")) for row in show_rows)},
-        {"Indicador": "Filas gastos", "Valor ARS": len(expense_rows), "Valor USD": ""},
-        {"Indicador": "Filas ajustes pre split", "Valor ARS": len(pre_split_rows), "Valor USD": ""},
-        {"Indicador": "Filas ajustes artista", "Valor ARS": len(adjustment_rows), "Valor USD": ""},
+        {"Indicador": "Artista", "Texto": artist, "Cantidad": None, "ARS": None, "USD": None},
+        {"Indicador": "Generado", "Texto": datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "Cantidad": None, "ARS": None, "USD": None},
+        {"Indicador": "Shows", "Texto": "", "Cantidad": len(show_rows), "ARS": None, "USD": None},
+        {"Indicador": "Shows sin TC", "Texto": "", "Cantidad": sum(1 for row in show_rows if not row.get("TC")), "ARS": None, "USD": None},
+        {"Indicador": "Cachet", "Texto": "", "Cantidad": None, "ARS": total_cachet, "USD": total_cachet_usd},
+        {"Indicador": "Gastos", "Texto": "", "Cantidad": None, "ARS": total_gastos, "USD": total_gastos_usd},
+        {"Indicador": "Artista", "Texto": "", "Cantidad": None, "ARS": total_artist, "USD": total_artist_usd},
+        {"Indicador": "Indyana", "Texto": "", "Cantidad": None, "ARS": total_producer, "USD": total_producer_usd},
+        {
+            "Indicador": "Balance artista",
+            "Texto": "",
+            "Cantidad": None,
+            "ARS": sum(round_money(row.get("Balance artista ARS")) for row in show_rows),
+            "USD": sum(round_money(row.get("Balance artista USD")) for row in show_rows),
+        },
+        {
+            "Indicador": "Balance Indyana",
+            "Texto": "",
+            "Cantidad": None,
+            "ARS": sum(round_money(row.get("Balance Indyana ARS")) for row in show_rows),
+            "USD": sum(round_money(row.get("Balance Indyana USD")) for row in show_rows),
+        },
+        {"Indicador": "Filas gastos", "Texto": "", "Cantidad": len(expense_rows), "ARS": None, "USD": None},
+        {"Indicador": "Filas ajustes pre split", "Texto": "", "Cantidad": len(pre_split_rows), "ARS": None, "USD": None},
+        {"Indicador": "Filas ajustes artista", "Texto": "", "Cantidad": len(adjustment_rows), "ARS": None, "USD": None},
     ]
 
     wb = Workbook()
@@ -318,11 +336,11 @@ def build_report(artist: str, keyword: str) -> Path:
         wb,
         "Resumen",
         summary_rows,
-        ["Indicador", "Valor ARS", "Valor USD"],
-        money_headers={"Valor ARS", "Valor USD"},
-        integer_headers={"Valor ARS"},
+        ["Indicador", "Texto", "Cantidad", "ARS", "USD"],
+        money_headers={"ARS", "USD"},
+        integer_headers={"Cantidad"},
     )
-    wb["Resumen"]["B4"].fill = WARN_FILL if wb["Resumen"]["B4"].value else OK_FILL
+    wb["Resumen"]["C5"].fill = WARN_FILL if wb["Resumen"]["C5"].value else OK_FILL
 
     show_headers = [
         "ID", "Fecha", "Artista", "Venue", "Estado", "TC",
@@ -339,9 +357,10 @@ def build_report(artist: str, keyword: str) -> Path:
         "Shows",
         show_rows,
         show_headers,
-        money_headers={header for header in show_headers if header.endswith("ARS") or header.endswith("USD") or header == "TC"},
+        money_headers={header for header in show_headers if header.endswith("ARS") or header.endswith("USD")},
         percent_headers={"% Artista", "% Indyana"},
         integer_headers={"ID"},
+        per_column_formats={"TC": "0.00"},
     )
 
     detail_headers = ["ID", "Show ID", "Fecha", "Venue", "Categoria", "Concepto", "Importe ARS", "Importe USD", "TC", "Notas"]
@@ -350,8 +369,9 @@ def build_report(artist: str, keyword: str) -> Path:
         "Gastos",
         expense_rows,
         detail_headers,
-        money_headers={"Importe ARS", "Importe USD", "TC"},
+        money_headers={"Importe ARS", "Importe USD"},
         integer_headers={"ID", "Show ID"},
+        per_column_formats={"TC": "0.00"},
     )
 
     pre_headers = ["ID", "Show ID", "Fecha", "Venue", "Destino", "Concepto", "Importe ARS", "Importe USD", "TC", "Notas"]
@@ -360,8 +380,9 @@ def build_report(artist: str, keyword: str) -> Path:
         "Ajustes pre split",
         pre_split_rows,
         pre_headers,
-        money_headers={"Importe ARS", "Importe USD", "TC"},
+        money_headers={"Importe ARS", "Importe USD"},
         integer_headers={"ID", "Show ID"},
+        per_column_formats={"TC": "0.00"},
     )
 
     adjustment_headers = [
@@ -374,9 +395,10 @@ def build_report(artist: str, keyword: str) -> Path:
         "Ajustes artista",
         adjustment_rows,
         adjustment_headers,
-        money_headers={header for header in adjustment_headers if header.endswith("ARS") or header.endswith("USD") or header == "TC"},
+        money_headers={header for header in adjustment_headers if header.endswith("ARS") or header.endswith("USD")},
         percent_headers={"% Artista", "% Indyana"},
         integer_headers={"ID", "Show ID"},
+        per_column_formats={"TC": "0.00"},
     )
 
     movement_headers = ["ID", "Show ID", "Fecha", "Venue", "Tipo", "Categoria", "Importe ARS", "Importe USD", "TC", "Notas"]
@@ -385,8 +407,9 @@ def build_report(artist: str, keyword: str) -> Path:
         "Movimientos caja",
         movement_rows,
         movement_headers,
-        money_headers={"Importe ARS", "Importe USD", "TC"},
+        money_headers={"Importe ARS", "Importe USD"},
         integer_headers={"ID", "Show ID"},
+        per_column_formats={"TC": "0.00"},
     )
 
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
