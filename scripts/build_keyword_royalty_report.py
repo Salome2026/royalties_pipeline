@@ -57,6 +57,19 @@ SEARCH_COLUMNS_STANDARDIZED = [
     "Store",
     "DSP",
     "territory",
+    "Territory",
+    "SALE COUNTRY",
+    "Region",
+    "Sales Region",
+]
+
+
+TERRITORY_CANDIDATES = [
+    "territory",
+    "Territory",
+    "SALE COUNTRY",
+    "Region",
+    "Sales Region",
 ]
 
 
@@ -111,6 +124,7 @@ DISPLAY_HEADERS = {
     "amount_usd": "Ingresos USD",
     "units": "Unidades",
     "rows": "Filas",
+    "report_territory": "Territorio",
     "report_code": "Codigo",
     "report_code_source": "Tipo codigo",
     "asset_isrc": "ISRC",
@@ -329,7 +343,34 @@ def add_report_code(lf: pl.LazyFrame, columns: set[str]) -> pl.LazyFrame:
     return lf.with_columns([
         report_code_expr(columns).alias("report_code"),
         report_code_source_expr(columns).alias("report_code_source"),
+        report_territory_expr(columns).alias("report_territory"),
     ])
+
+
+def report_territory_expr(columns: set[str]) -> pl.Expr:
+    candidates = []
+    for col in TERRITORY_CANDIDATES:
+        if col in columns:
+            value = pl.col(col).cast(pl.Utf8, strict=False).str.strip_chars()
+            candidates.append(pl.when(value.is_not_null() & (value != "")).then(value).otherwise(None))
+
+    if not candidates:
+        return pl.lit(None).cast(pl.Utf8)
+
+    return pl.coalesce(candidates)
+
+
+def add_report_territory(lf: pl.LazyFrame, columns: set[str]) -> pl.LazyFrame:
+    return lf.with_columns(report_territory_expr(columns).alias("report_territory"))
+
+
+def normalize_report_territory_expr() -> pl.Expr:
+    value = pl.col("report_territory").cast(pl.Utf8, strict=False).str.strip_chars()
+    return (
+        pl.when(value.is_null() | (value == ""))
+        .then(pl.lit("Sin territorio"))
+        .otherwise(value)
+    )
 
 
 def report_units_expr(columns: set[str]) -> pl.Expr:
@@ -703,6 +744,7 @@ def build_report_tables(
                     "report_code",
                     "report_code_source",
                     "asset_isrc",
+                    "report_territory",
                     "track_statement_style",
                     "asset_title_statement",
                     "artist_statement_style",
@@ -716,7 +758,7 @@ def build_report_tables(
                     "source_sheet",
                     "revenue_basis",
                 ]
-                if col in standardized_cols or col in {"store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source"}
+                if col in standardized_cols or col in {"store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory"}
             ])
             .with_columns([
                 pl.lit(None).cast(pl.Utf8).alias("content_type")
@@ -768,15 +810,9 @@ def build_report_tables(
         territory_summary_lf = (
             statement_base_lf
             .with_columns(
-                pl.when(
-                    pl.col("territory").cast(pl.Utf8, strict=False).str.strip_chars().is_null()
-                    | (pl.col("territory").cast(pl.Utf8, strict=False).str.strip_chars() == "")
-                )
-                .then(pl.lit("Sin territorio"))
-                .otherwise(pl.col("territory").cast(pl.Utf8, strict=False).str.strip_chars())
-                .alias("territory")
+                normalize_report_territory_expr().alias("report_territory")
             )
-            .group_by(["territory"])
+            .group_by(["report_territory"])
             .agg([
                 pl.sum("amount_usd").alias("amount_usd"),
                 pl.sum("units").alias("units"),
@@ -842,6 +878,7 @@ def build_report_tables(
                     "report_code",
                     "report_code_source",
                     "asset_isrc",
+                    "report_territory",
                     "track_statement_style",
                     "asset_title_statement",
                     "artist_statement_style",
@@ -858,7 +895,7 @@ def build_report_tables(
                     "revenue_basis",
                     "match_text",
                 ]
-                if col in standardized_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source"}
+                if col in standardized_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory"}
             ])
             .with_columns([
                 pl.lit(None).cast(pl.Utf8).alias("content_type")
@@ -903,6 +940,7 @@ def build_report_tables(
                     "report_code",
                     "report_code_source",
                     "asset_isrc",
+                    "report_territory",
                     "store_raw",
                     "usage_type",
                     "amount_usd",
@@ -914,7 +952,7 @@ def build_report_tables(
                     "statement_file_name",
                     "match_text",
                 ]
-                if col in standardized_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source"}
+                if col in standardized_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory"}
             ])
             .limit(raw_limit)
         )
@@ -984,6 +1022,7 @@ def build_report_tables(
                     "report_code",
                     "report_code_source",
                     "asset_isrc",
+                    "report_territory",
                     "track_statement_style",
                     "asset_title_statement",
                     "artist_statement_style",
@@ -1078,6 +1117,7 @@ def build_report_tables(
             "asset_isrc",
             "report_code",
             "report_code_source",
+            "report_territory",
             "track_statement_style",
             "asset_title_statement",
             "artist_statement_style",
@@ -1140,15 +1180,9 @@ def build_report_tables(
         territory_summary = (
             raw_matches_lf
             .with_columns(
-                pl.when(
-                    pl.col("territory").cast(pl.Utf8, strict=False).str.strip_chars().is_null()
-                    | (pl.col("territory").cast(pl.Utf8, strict=False).str.strip_chars() == "")
-                )
-                .then(pl.lit("Sin territorio"))
-                .otherwise(pl.col("territory").cast(pl.Utf8, strict=False).str.strip_chars())
-                .alias("territory")
+                normalize_report_territory_expr().alias("report_territory")
             )
-            .group_by(["territory"])
+            .group_by(["report_territory"])
             .agg([
                 pl.sum("amount_usd").alias("amount_usd"),
                 pl.sum("units").alias("units"),
@@ -1171,6 +1205,7 @@ def build_report_tables(
                     "report_code",
                     "report_code_source",
                     "asset_isrc",
+                    "report_territory",
                     "store_raw",
                     "usage_type",
                     "amount_usd",
@@ -1182,7 +1217,7 @@ def build_report_tables(
                     "statement_file_name",
                     "match_text",
                 ]
-                if col in raw_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source"}
+                if col in raw_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory"}
             ])
             .limit(raw_limit)
             .collect()
@@ -1222,6 +1257,7 @@ def build_report_tables(
                 "report_code",
                 "report_code_source",
                 "asset_isrc",
+                "report_territory",
                 "track_statement_style",
                 "asset_title_statement",
                 "artist_statement_style",
