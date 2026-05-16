@@ -1550,7 +1550,7 @@ def booking_shows(
 ) -> dict:
     require_api_key(x_vpo_api_key)
     init_booking_db()
-    safe_limit = min(max(limit, 1), 200)
+    safe_limit = min(max(limit, 1), 1000)
 
     with booking_connect() as conn:
         rows = conn.execute(
