@@ -1,8 +1,6 @@
 import { createHmac } from "crypto";
-import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
-
-const SESSION_COOKIE = "vpo_web_session";
+import { apiConfig } from "../_auth";
 
 function signaturePayload(params: {
   keywords: string;
@@ -27,17 +25,8 @@ function signaturePayload(params: {
 }
 
 export async function POST(request: NextRequest) {
-  const cookieStore = await cookies();
-  if (cookieStore.get(SESSION_COOKIE)?.value !== "ok") {
-    return NextResponse.json({ error: "No autorizado." }, { status: 401 });
-  }
-
-  const apiUrl = process.env.VPO_API_URL;
-  const apiKey = process.env.VPO_API_KEY;
-
-  if (!apiUrl || !apiKey) {
-    return NextResponse.json({ error: "VPO_API_URL o VPO_API_KEY no estan configurados." }, { status: 500 });
-  }
+  const config = await apiConfig();
+  if ("error" in config) return config.error;
 
   const body = await request.json();
   const keywords = Array.isArray(body.keywords)
@@ -55,7 +44,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Ingrese al menos una palabra clave." }, { status: 400 });
   }
 
-  const sig = createHmac("sha256", apiKey)
+  const sig = createHmac("sha256", config.apiKey)
     .update(signaturePayload({
       keywords,
       startMonth,
@@ -68,7 +57,7 @@ export async function POST(request: NextRequest) {
     }))
     .digest("hex");
 
-  const url = new URL(`${apiUrl.replace(/\/$/, "")}/reports/keyword-download`);
+  const url = new URL(`${config.apiUrl}/reports/keyword-download`);
   url.searchParams.set("keywords", keywords);
   url.searchParams.set("start_month", startMonth);
   url.searchParams.set("end_month", endMonth);

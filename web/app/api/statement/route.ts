@@ -1,30 +1,19 @@
-import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
-
-const SESSION_COOKIE = "vpo_web_session";
+import { apiConfig } from "../_auth";
 
 export const maxDuration = 60;
 
 export async function POST(request: NextRequest) {
-  const cookieStore = await cookies();
-  if (cookieStore.get(SESSION_COOKIE)?.value !== "ok") {
-    return NextResponse.json({ error: "No autorizado." }, { status: 401 });
-  }
-
-  const apiUrl = process.env.VPO_API_URL;
-  const apiKey = process.env.VPO_API_KEY;
-
-  if (!apiUrl || !apiKey) {
-    return NextResponse.json({ error: "VPO_API_URL o VPO_API_KEY no estan configurados." }, { status: 500 });
-  }
+  const config = await apiConfig();
+  if ("error" in config) return config.error;
 
   const body = await request.json().catch(() => ({ refresh_cache: false }));
 
-  const response = await fetch(`${apiUrl.replace(/\/$/, "")}/reports/statement`, {
+  const response = await fetch(`${config.apiUrl}/reports/statement`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-VPO-API-Key": apiKey,
+      "X-VPO-API-Key": config.apiKey,
     },
     body: JSON.stringify(body),
   });

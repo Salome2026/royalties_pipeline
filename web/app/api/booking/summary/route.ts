@@ -17,7 +17,7 @@ export async function GET() {
   const config = await apiConfig();
   if ("error" in config) return config.error;
 
-  const response = await fetch(`${config.apiUrl}/booking/artists`, {
+  const response = await fetch(`${config.apiUrl}/booking/summary`, {
     headers: { "X-VPO-API-Key": config.apiKey },
     cache: "no-store",
   });

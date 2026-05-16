@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { apiConfig } from "../../_auth";
 
 async function apiError(response: Response) {
@@ -17,9 +17,27 @@ export async function GET() {
   const config = await apiConfig();
   if ("error" in config) return config.error;
 
-  const response = await fetch(`${config.apiUrl}/booking/artists`, {
+  const response = await fetch(`${config.apiUrl}/caserio/events?limit=100`, {
     headers: { "X-VPO-API-Key": config.apiKey },
     cache: "no-store",
+  });
+
+  if (!response.ok) return apiError(response);
+  return NextResponse.json(await response.json());
+}
+
+export async function POST(request: NextRequest) {
+  const config = await apiConfig("editor");
+  if ("error" in config) return config.error;
+
+  const body = await request.json();
+  const response = await fetch(`${config.apiUrl}/caserio/events`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-VPO-API-Key": config.apiKey,
+    },
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) return apiError(response);

@@ -12,6 +12,19 @@
 
 - [Marts and reports](marts_and_reports_notes.md)
 - [Statement period policy](statement_period_policy.md)
+- [Web users admin](web_users_admin.md)
+
+## Booking
+
+- [Booking rules master](booking_rules_master.md)
+- [Booking validation matrix](booking_validation_matrix.md)
+- [Booking go-live workflow](booking_go_live_workflow.md)
+- [Booking system design](booking_system_design.md)
+- [Booking data model](booking_data_model.md)
+- [Booking raw profile](booking_raw_profile.md)
+- [Booking operational rules](booking_operational_rules.md)
+
+Antes de modificar la pantalla nueva de booking, backend de booking o guardado de shows, leer primero `booking_rules_master.md` y validar el cambio contra `booking_validation_matrix.md`.
 
 ## Arquitectura general
 

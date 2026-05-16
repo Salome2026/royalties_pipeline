@@ -1,27 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { apiConfig } from "../_auth";
-
-function stringifyApiError(value: unknown): string {
-  if (!value) return "Error desconocido.";
-  if (typeof value === "string") return value;
-  if (Array.isArray(value)) {
-    return value.map((item) => stringifyApiError(item)).join(" | ");
-  }
-  if (typeof value === "object") {
-    const item = value as { msg?: unknown; loc?: unknown; detail?: unknown; error?: unknown };
-    const msg = item.msg || item.detail || item.error;
-    const loc = Array.isArray(item.loc) ? item.loc.join(".") : "";
-    if (msg) return loc ? `${loc}: ${stringifyApiError(msg)}` : stringifyApiError(msg);
-    return JSON.stringify(value);
-  }
-  return String(value);
-}
+import { apiConfig } from "../../_auth";
 
 async function apiError(response: Response) {
   let detail = `Error API ${response.status}`;
   try {
     const payload = await response.json();
-    detail = stringifyApiError(payload.detail || payload.error || detail);
+    detail = payload.detail || payload.error || detail;
   } catch {
     const text = await response.text();
     detail = text || detail;
@@ -33,7 +17,7 @@ export async function GET() {
   const config = await apiConfig();
   if ("error" in config) return config.error;
 
-  const response = await fetch(`${config.apiUrl}/booking/shows?limit=1000`, {
+  const response = await fetch(`${config.apiUrl}/booking/artist-records?include_inactive=true`, {
     headers: { "X-VPO-API-Key": config.apiKey },
     cache: "no-store",
   });
@@ -47,7 +31,7 @@ export async function POST(request: NextRequest) {
   if ("error" in config) return config.error;
 
   const body = await request.json();
-  const response = await fetch(`${config.apiUrl}/booking/shows`, {
+  const response = await fetch(`${config.apiUrl}/booking/artist-records`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -66,17 +50,35 @@ export async function PUT(request: NextRequest) {
 
   const id = request.nextUrl.searchParams.get("id");
   if (!id) {
-    return NextResponse.json({ error: "Falta id del show." }, { status: 400 });
+    return NextResponse.json({ error: "Falta id del artista." }, { status: 400 });
   }
 
   const body = await request.json();
-  const response = await fetch(`${config.apiUrl}/booking/shows/${id}`, {
+  const response = await fetch(`${config.apiUrl}/booking/artist-records/${id}`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
       "X-VPO-API-Key": config.apiKey,
     },
     body: JSON.stringify(body),
+  });
+
+  if (!response.ok) return apiError(response);
+  return NextResponse.json(await response.json());
+}
+
+export async function DELETE(request: NextRequest) {
+  const config = await apiConfig("editor");
+  if ("error" in config) return config.error;
+
+  const id = request.nextUrl.searchParams.get("id");
+  if (!id) {
+    return NextResponse.json({ error: "Falta id del artista." }, { status: 400 });
+  }
+
+  const response = await fetch(`${config.apiUrl}/booking/artist-records/${id}`, {
+    method: "DELETE",
+    headers: { "X-VPO-API-Key": config.apiKey },
   });
 
   if (!response.ok) return apiError(response);

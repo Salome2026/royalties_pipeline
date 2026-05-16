@@ -1,7 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-
-const SESSION_COOKIE = "vpo_web_session";
+import { SESSION_COOKIE } from "../_auth";
 
 export async function POST() {
   const cookieStore = await cookies();
