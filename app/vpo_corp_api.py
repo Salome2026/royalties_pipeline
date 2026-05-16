@@ -61,6 +61,9 @@ VPO_LOCAL_MARTS_DIR = Path(VPO_LOCAL_MARTS_DIR_RAW).expanduser() if VPO_LOCAL_MA
 VPO_API_CACHE_DIR = Path(os.environ.get("VPO_API_CACHE_DIR", BASE / "cache" / "gcs_marts"))
 VPO_API_REPORTS_DIR = Path(os.environ.get("VPO_API_REPORTS_DIR", BASE / "reports" / "api"))
 VPO_BOOKING_DB_PATH = Path(os.environ.get("VPO_BOOKING_DB_PATH", BASE / "warehouse" / "booking" / "live" / "booking_live.sqlite"))
+VPO_BOOKING_GCS_OBJECT = os.environ.get("VPO_BOOKING_GCS_OBJECT", "").strip("/")
+VPO_BOOKING_READONLY_GCS = os.environ.get("VPO_BOOKING_READONLY_GCS", "").strip().lower() in {"1", "true", "yes", "on"}
+VPO_BOOKING_REFRESH_ON_REQUEST = os.environ.get("VPO_BOOKING_REFRESH_ON_REQUEST", "").strip().lower() in {"1", "true", "yes", "on"}
 BOOKING_RAW_DIR = BASE / "warehouse" / "booking" / "raw"
 BOOKING_STANDARDIZED_PATH = BASE / "warehouse" / "booking" / "standardized" / "standardized_booking_movements.parquet"
 GOOGLE_SHEETS_SHARE_EMAIL = os.environ.get("GOOGLE_SHEETS_SHARE_EMAIL", "").strip()
@@ -323,6 +326,35 @@ def ensure_marts(refresh_cache: bool = False, filenames: list[str] | None = None
     return paths
 
 
+def ensure_booking_db_from_gcs(refresh: bool = False) -> None:
+    if not VPO_BOOKING_READONLY_GCS:
+        return
+
+    if not VPO_BOOKING_GCS_OBJECT:
+        raise HTTPException(status_code=500, detail="VPO_BOOKING_GCS_OBJECT is not configured.")
+
+    if not GCS_BUCKET:
+        raise HTTPException(status_code=500, detail="GCS_BUCKET is not configured.")
+
+    if VPO_BOOKING_DB_PATH.exists() and not refresh:
+        return
+
+    VPO_BOOKING_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    client = gcs_client()
+    bucket = client.bucket(GCS_BUCKET)
+    blob = bucket.blob(VPO_BOOKING_GCS_OBJECT)
+
+    if not blob.exists(client):
+        raise HTTPException(
+            status_code=500,
+            detail=f"GCS booking DB not found: gs://{GCS_BUCKET}/{VPO_BOOKING_GCS_OBJECT}",
+        )
+
+    tmp_path = VPO_BOOKING_DB_PATH.with_suffix(".download")
+    blob.download_to_filename(str(tmp_path))
+    tmp_path.replace(VPO_BOOKING_DB_PATH)
+
+
 def shift_month(month: str, delta: int) -> str:
     year, month_number = (int(part) for part in month.split("-", 1))
     month_index = year * 12 + month_number - 1 + delta
@@ -353,6 +385,7 @@ def last_business_day(month: str) -> str:
 
 
 def booking_connect() -> sqlite3.Connection:
+    ensure_booking_db_from_gcs(refresh=VPO_BOOKING_REFRESH_ON_REQUEST)
     VPO_BOOKING_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(VPO_BOOKING_DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -1251,6 +1284,9 @@ def health() -> dict[str, str]:
         "prefix": GCS_PREFIX,
         "marts_mode": "local" if VPO_LOCAL_MARTS_DIR is not None and VPO_LOCAL_MARTS_DIR.exists() else "gcs",
         "local_marts_dir": str(VPO_LOCAL_MARTS_DIR) if VPO_LOCAL_MARTS_DIR is not None else "",
+        "booking_db_path": str(VPO_BOOKING_DB_PATH),
+        "booking_gcs_object": VPO_BOOKING_GCS_OBJECT or "",
+        "booking_readonly_gcs": "yes" if VPO_BOOKING_READONLY_GCS else "no",
         "sheets_auth_mode": sheets_auth_mode,
         "drive_folder_configured": "yes" if GOOGLE_DRIVE_FOLDER_ID else "no",
         "share_email_configured": "yes" if GOOGLE_SHEETS_SHARE_EMAIL else "no",

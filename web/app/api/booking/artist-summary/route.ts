@@ -115,7 +115,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const artist = url.searchParams.get("artist") || null;
 
-  const response = await fetch(`${config.apiUrl}/booking/shows?limit=200`, {
+  const response = await fetch(`${config.apiUrl}/booking/shows?limit=1000`, {
     headers: { "X-VPO-API-Key": config.apiKey },
     cache: "no-store",
   });
