@@ -871,7 +871,7 @@ export default function Home() {
   const [bookingArtistSummary, setBookingArtistSummary] = useState<BookingArtistSummary | null>(null);
   const [bookingArtistSummaryArtist, setBookingArtistSummaryArtist] = useState("");
   const [bookingArtistSummaryLoading, setBookingArtistSummaryLoading] = useState(false);
-  const [bookingArtistSummaryLatestOnly, setBookingArtistSummaryLatestOnly] = useState(false);
+  const [bookingArtistSummaryLatestOnly, setBookingArtistSummaryLatestOnly] = useState(true);
   const [artistRecords, setArtistRecords] = useState<BookingArtistRecord[]>([]);
   const [artistRecordSearch, setArtistRecordSearch] = useState("");
   const [artistRecordLoading, setArtistRecordLoading] = useState(false);
