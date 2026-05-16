@@ -13,6 +13,7 @@
 - [Marts and reports](marts_and_reports_notes.md)
 - [Statement period policy](statement_period_policy.md)
 - [Web users admin](web_users_admin.md)
+- [Cloud environment policy](cloud_environment_policy.md)
 
 ## Booking
 
