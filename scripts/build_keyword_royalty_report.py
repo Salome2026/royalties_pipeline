@@ -799,7 +799,26 @@ def build_report_tables(
                 pl.min("period_month").alias("first_month"),
                 pl.max("period_month").alias("last_month"),
             ])
-            .sort("amount_usd", descending=True)
+            .with_columns(
+                [
+                    pl.col("track_statement_style")
+                    .cast(pl.Utf8, strict=False)
+                    .fill_null("")
+                    .str.to_lowercase()
+                    .alias("_sort_tema"),
+                    (
+                        pl.col("track_statement_style")
+                        .cast(pl.Utf8, strict=False)
+                        .fill_null("")
+                        .str.strip_chars()
+                        == ""
+                    )
+                    .cast(pl.Int8)
+                    .alias("_sort_tema_empty"),
+                ]
+            )
+            .sort(["_sort_tema_empty", "_sort_tema", "track_statement_style", "artist_statement_style", "asset_isrc", "report_code"])
+            .drop(["_sort_tema_empty", "_sort_tema"])
         )
 
         raw_sample_lf = (
@@ -984,7 +1003,26 @@ def build_report_tables(
             pl.min("period_month").alias("first_month"),
             pl.max("period_month").alias("last_month"),
         ])
-        .sort("amount_usd", descending=True)
+        .with_columns(
+            [
+                pl.col("track_statement_style")
+                .cast(pl.Utf8, strict=False)
+                .fill_null("")
+                .str.to_lowercase()
+                .alias("_sort_tema"),
+                (
+                    pl.col("track_statement_style")
+                    .cast(pl.Utf8, strict=False)
+                    .fill_null("")
+                    .str.strip_chars()
+                    == ""
+                )
+                .cast(pl.Int8)
+                .alias("_sort_tema_empty"),
+            ]
+        )
+        .sort(["_sort_tema_empty", "_sort_tema", "track_statement_style", "artist_statement_style", "asset_isrc", "report_code"])
+        .drop(["_sort_tema_empty", "_sort_tema"])
     )
 
     raw_sample = pl.DataFrame()
