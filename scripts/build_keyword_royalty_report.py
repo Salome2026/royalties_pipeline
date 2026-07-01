@@ -645,31 +645,6 @@ def style_workbook(writer):
         prepare_sheet(ws)
 
 
-def instructions_dataframe() -> pd.DataFrame:
-    return pd.DataFrame([
-        {
-            "hoja": "overview",
-            "contenido": "Resumen de parametros usados, cantidad de filas encontradas, total USD y fecha de generacion.",
-        },
-        {
-            "hoja": "monthly_summary",
-            "contenido": "Totales agrupados por el criterio de periodo elegido.",
-        },
-        {
-            "hoja": "store_summary",
-            "contenido": "Totales agrupados por store original y tipo normalizado.",
-        },
-        {
-            "hoja": "territory_summary",
-            "contenido": "Totales por territorio/pais reportado, con ingresos y unidades.",
-        },
-        {
-            "hoja": "detalle",
-            "contenido": "Detalle usado para calcular los totales. Esta hoja puede estar limitada por raw_limit.",
-        },
-    ])
-
-
 def report_output_path(
     keywords: list[str],
     start_month: str | None,
@@ -865,7 +840,6 @@ def build_report_tables(
         if song_rows == 0:
             print("No hubo matches en standardized_raw_all_sources.")
             return {
-                "instructions": display_dataframe(instructions_dataframe()),
                 "overview": display_dataframe(pd.DataFrame([{
                     "keywords": ", ".join(keywords),
                     "mode": mode,
@@ -890,7 +864,6 @@ def build_report_tables(
         raw_sample = raw_sample_lf.collect()
 
         tables = {
-            "instructions": display_dataframe(instructions_dataframe()),
             "overview": display_dataframe(pd.DataFrame([{
                 "keywords": ", ".join(keywords),
                 "mode": mode,
@@ -938,7 +911,6 @@ def build_report_tables(
     if song.height == 0:
         print("No hubo matches en song_level_all_sources.")
         return {
-            "instructions": display_dataframe(instructions_dataframe()),
             "overview": display_dataframe(pd.DataFrame([{
                 "keywords": ", ".join(keywords),
                 "mode": mode,
@@ -1057,7 +1029,6 @@ def build_report_tables(
         )
 
     tables = {
-        "instructions": display_dataframe(instructions_dataframe()),
         "overview": display_dataframe(pd.DataFrame([{
             "keywords": ", ".join(keywords),
             "mode": mode,
