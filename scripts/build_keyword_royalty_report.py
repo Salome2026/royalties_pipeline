@@ -779,6 +779,29 @@ def build_report_tables(
             .sort("report_territory")
         )
 
+        track_summary_lf = (
+            statement_base_lf
+            .group_by([
+                "asset_isrc",
+                "report_code",
+                "report_code_source",
+                "track_statement_style",
+                "asset_title_statement",
+                "artist_statement_style",
+                "asset_artist_statement",
+                "content_type",
+                "store_raw",
+                "usage_type",
+            ])
+            .agg([
+                pl.sum("amount_usd").alias("amount_usd"),
+                pl.sum("units").alias("units"),
+                pl.min("period_month").alias("first_month"),
+                pl.max("period_month").alias("last_month"),
+            ])
+            .sort("amount_usd", descending=True)
+        )
+
         raw_sample_lf = (
             add_report_code(
                 normalize_report_usage(
@@ -840,7 +863,7 @@ def build_report_tables(
         if song_rows == 0:
             print("No hubo matches en standardized_raw_all_sources.")
             return {
-                "overview": display_dataframe(pd.DataFrame([{
+                "resumen general": display_dataframe(pd.DataFrame([{
                     "keywords": ", ".join(keywords),
                     "mode": mode,
                     "period_basis": period_label,
@@ -853,7 +876,7 @@ def build_report_tables(
                     "raw_sample_rows": 0,
                     "generated_at": datetime.now().isoformat(timespec="seconds"),
                 }])),
-                "sin_resultados": display_dataframe(pd.DataFrame([{
+                "sin resultados": display_dataframe(pd.DataFrame([{
                     "resultado": "Sin coincidencias para los parametros ingresados."
                 }])),
             }
@@ -861,10 +884,11 @@ def build_report_tables(
         monthly_summary = monthly_summary_lf.collect()
         store_summary = store_summary_lf.collect()
         territory_summary = territory_summary_lf.collect()
+        track_summary = track_summary_lf.collect()
         raw_sample = raw_sample_lf.collect()
 
         tables = {
-            "overview": display_dataframe(pd.DataFrame([{
+            "resumen general": display_dataframe(pd.DataFrame([{
                 "keywords": ", ".join(keywords),
                 "mode": mode,
                 "period_basis": period_label,
@@ -877,9 +901,10 @@ def build_report_tables(
                 "raw_sample_rows": raw_sample.height if raw_sample.height > 0 else 0,
                 "generated_at": datetime.now().isoformat(timespec="seconds"),
             }])),
-            "monthly_summary": display_dataframe(monthly_summary.to_pandas()),
-            "store_summary": display_dataframe(store_summary.to_pandas()),
-            "territory_summary": display_dataframe(territory_summary.to_pandas()),
+            "resumen mensual": display_dataframe(monthly_summary.to_pandas()),
+            "resumen por store": display_dataframe(store_summary.to_pandas()),
+            "resumen por territorio": display_dataframe(territory_summary.to_pandas()),
+            "resumen por tema": display_dataframe(track_summary.to_pandas()),
         }
 
         if raw_sample.height > 0:
@@ -911,7 +936,7 @@ def build_report_tables(
     if song.height == 0:
         print("No hubo matches en song_level_all_sources.")
         return {
-            "overview": display_dataframe(pd.DataFrame([{
+            "resumen general": display_dataframe(pd.DataFrame([{
                 "keywords": ", ".join(keywords),
                 "mode": mode,
                 "period_basis": period_label,
@@ -924,7 +949,7 @@ def build_report_tables(
                 "raw_sample_rows": 0,
                 "generated_at": datetime.now().isoformat(timespec="seconds"),
             }])),
-            "sin_resultados": display_dataframe(pd.DataFrame([{
+            "sin resultados": display_dataframe(pd.DataFrame([{
                 "resultado": "Sin coincidencias para los parametros ingresados."
             }])),
         }
@@ -938,6 +963,28 @@ def build_report_tables(
             pl.len().alias("rows"),
         ])
         .sort("period_month")
+    )
+
+    track_summary = (
+        song
+        .group_by([
+            "asset_isrc",
+            "report_code",
+            "report_code_source",
+            "report_territory",
+            "track_statement_style",
+            "asset_title_statement",
+            "artist_statement_style",
+            "asset_artist_statement",
+            "content_type",
+        ])
+        .agg([
+            pl.sum("amount_usd").alias("amount_usd"),
+            pl.sum("units").alias("units"),
+            pl.min("period_month").alias("first_month"),
+            pl.max("period_month").alias("last_month"),
+        ])
+        .sort("amount_usd", descending=True)
     )
 
     raw_sample = pl.DataFrame()
@@ -1029,7 +1076,7 @@ def build_report_tables(
         )
 
     tables = {
-        "overview": display_dataframe(pd.DataFrame([{
+        "resumen general": display_dataframe(pd.DataFrame([{
             "keywords": ", ".join(keywords),
             "mode": mode,
             "period_basis": period_label,
@@ -1042,9 +1089,10 @@ def build_report_tables(
             "raw_sample_rows": raw_sample.height if raw_sample.height > 0 else 0,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
         }])),
-        "monthly_summary": display_dataframe(monthly_summary.to_pandas()),
-        "store_summary": display_dataframe(store_summary.to_pandas()),
-        "territory_summary": display_dataframe(territory_summary.to_pandas()),
+        "resumen mensual": display_dataframe(monthly_summary.to_pandas()),
+        "resumen por store": display_dataframe(store_summary.to_pandas()),
+        "resumen por territorio": display_dataframe(territory_summary.to_pandas()),
+        "resumen por tema": display_dataframe(track_summary.to_pandas()),
     }
 
     if raw_sample.height > 0:
