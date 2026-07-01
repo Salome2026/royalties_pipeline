@@ -182,7 +182,7 @@ def parse_args():
         "--raw-limit",
         type=int,
         default=5000,
-        help="Maximo de filas en la hoja raw_matches_sample.",
+        help="Maximo de filas en la hoja detalle.",
     )
     parser.add_argument(
         "--start-month",
@@ -652,10 +652,6 @@ def instructions_dataframe() -> pd.DataFrame:
             "contenido": "Resumen de parametros usados, cantidad de filas encontradas, total USD y fecha de generacion.",
         },
         {
-            "hoja": "source_summary",
-            "contenido": "Totales agrupados por compania/source y account.",
-        },
-        {
             "hoja": "monthly_summary",
             "contenido": "Totales agrupados por el criterio de periodo elegido.",
         },
@@ -665,19 +661,11 @@ def instructions_dataframe() -> pd.DataFrame:
         },
         {
             "hoja": "territory_summary",
-            "contenido": "Ranking por territorio/pais reportado, con ingresos, unidades y filas.",
+            "contenido": "Totales por territorio/pais reportado, con ingresos y unidades.",
         },
         {
-            "hoja": "track_summary",
-            "contenido": "Totales por tema/asset, ISRC, artista, tipo de contenido y periodo encontrado.",
-        },
-        {
-            "hoja": "song_matches",
-            "contenido": "Detalle usado para calcular los totales. En criterio statement puede estar limitado por raw_limit para respetar el limite de Excel.",
-        },
-        {
-            "hoja": "raw_matches_sample",
-            "contenido": "Muestra de filas crudas normalizadas para auditoria. Esta hoja puede estar limitada por raw_limit.",
+            "hoja": "detalle",
+            "contenido": "Detalle usado para calcular los totales. Esta hoja puede estar limitada por raw_limit.",
         },
     ])
 
@@ -782,17 +770,6 @@ def build_report_tables(
             pl.sum("units").alias("song_level_units"),
         ])
 
-        source_summary_lf = (
-            statement_base_lf
-            .group_by(["source", "account"])
-            .agg([
-                pl.sum("amount_usd").alias("amount_usd"),
-                pl.sum("units").alias("units"),
-                pl.len().alias("rows"),
-            ])
-            .sort("amount_usd", descending=True)
-        )
-
         monthly_summary_lf = (
             statement_base_lf
             .group_by(["period_month"])
@@ -806,13 +783,12 @@ def build_report_tables(
 
         store_summary_lf = (
             statement_base_lf
-            .group_by(["source", "account", "store_raw", "usage_type"])
+            .group_by(["store_raw", "usage_type"])
             .agg([
                 pl.sum("amount_usd").alias("amount_usd"),
                 pl.sum("units").alias("units"),
-                pl.len().alias("rows"),
             ])
-            .sort("amount_usd", descending=True)
+            .sort(["store_raw", "usage_type"])
         )
 
         territory_summary_lf = (
@@ -824,98 +800,8 @@ def build_report_tables(
             .agg([
                 pl.sum("amount_usd").alias("amount_usd"),
                 pl.sum("units").alias("units"),
-                pl.len().alias("rows"),
             ])
-            .sort("amount_usd", descending=True)
-        )
-
-        track_summary_lf = (
-            statement_base_lf
-            .group_by([
-                "source",
-                "account",
-                "asset_isrc",
-                "report_code",
-                "report_code_source",
-                "track_statement_style",
-                "asset_title_statement",
-                "artist_statement_style",
-                "asset_artist_statement",
-                "content_type",
-                "store_raw",
-                "usage_type",
-            ])
-            .agg([
-                pl.sum("amount_usd").alias("amount_usd"),
-                pl.sum("units").alias("units"),
-                pl.min("period_month").alias("first_month"),
-                pl.max("period_month").alias("last_month"),
-                pl.len().alias("rows"),
-            ])
-            .sort("amount_usd", descending=True)
-        )
-
-        song_matches_lf = (
-            add_report_code(
-                normalize_report_usage(
-                    normalize_report_store(
-                        normalize_report_units(
-                            add_period_filter(
-                                add_match_text(pl.scan_parquet(standardized_path), standardized_cols, SEARCH_COLUMNS_STANDARDIZED),
-                                standardized_cols,
-                                start_month,
-                                end_month,
-                                period_column,
-                            ),
-                            standardized_cols,
-                        ),
-                        standardized_cols,
-                    ),
-                    standardized_cols,
-                ),
-                standardized_cols,
-            )
-            .pipe(lambda frame: filter_reportable_catalog(frame, standardized_cols))
-            .filter(raw_filter)
-            .filter(exclude_isrc_expr(standardized_cols, excluded_isrcs))
-            .select([
-                col for col in [
-                    "source",
-                    "account",
-                    "statement_period",
-                    "transaction_month",
-                    "report_code",
-                    "report_code_source",
-                    "asset_isrc",
-                    "report_territory",
-                    "track_statement_style",
-                    "asset_title_statement",
-                    "artist_statement_style",
-                    "asset_artist_statement",
-                    "content_type",
-                    "store",
-                    "store_raw",
-                    "usage_type",
-                    "usage_raw",
-                    "amount_usd",
-                    "units",
-                    "territory",
-                    "source_sheet",
-                    "revenue_basis",
-                    "match_text",
-                    "catalog_key",
-                    "catalog_business_status",
-                ]
-                if col in standardized_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory", "catalog_key", "catalog_business_status"}
-            ])
-            .with_columns([
-                pl.lit(None).cast(pl.Utf8).alias("content_type")
-                if "content_type" not in standardized_cols
-                else pl.col("content_type"),
-                pl.col(period_column).cast(pl.Utf8).alias("period_month"),
-            ])
-            .sort("amount_usd", descending=True)
-            .limit(raw_limit)
+            .sort("report_territory")
         )
 
         raw_sample_lf = (
@@ -943,8 +829,6 @@ def build_report_tables(
             .filter(exclude_isrc_expr(standardized_cols, excluded_isrcs))
             .select([
                 col for col in [
-                    "source",
-                    "account",
                     "statement_period",
                     "transaction_month",
                     "artist_statement_style",
@@ -965,6 +849,8 @@ def build_report_tables(
                     "match_text",
                     "catalog_key",
                     "catalog_business_status",
+                    "source",
+                    "account",
                 ]
                 if col in standardized_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory", "catalog_key", "catalog_business_status"}
             ])
@@ -998,12 +884,9 @@ def build_report_tables(
                 }])),
             }
 
-        source_summary = source_summary_lf.collect()
         monthly_summary = monthly_summary_lf.collect()
         store_summary = store_summary_lf.collect()
         territory_summary = territory_summary_lf.collect()
-        track_summary = track_summary_lf.collect()
-        song_matches = song_matches_lf.collect()
         raw_sample = raw_sample_lf.collect()
 
         tables = {
@@ -1021,41 +904,13 @@ def build_report_tables(
                 "raw_sample_rows": raw_sample.height if raw_sample.height > 0 else 0,
                 "generated_at": datetime.now().isoformat(timespec="seconds"),
             }])),
-            "source_summary": display_dataframe(source_summary.to_pandas()),
             "monthly_summary": display_dataframe(monthly_summary.to_pandas()),
             "store_summary": display_dataframe(store_summary.to_pandas()),
             "territory_summary": display_dataframe(territory_summary.to_pandas()),
-            "track_summary": display_dataframe(track_summary.to_pandas()),
-            "song_matches": display_dataframe(safe_select(
-                song_matches,
-                [
-                    "source",
-                    "account",
-                    "statement_period",
-                    "transaction_month",
-                    "report_code",
-                    "report_code_source",
-                    "asset_isrc",
-                    "report_territory",
-                    "track_statement_style",
-                    "asset_title_statement",
-                    "artist_statement_style",
-                    "asset_artist_statement",
-                    "content_type",
-                    "store_raw",
-                    "usage_type",
-                    "amount_usd",
-                    "units",
-                    "territory",
-                    "source_sheet",
-                    "revenue_basis",
-                    "match_text",
-                ],
-            ).to_pandas()),
         }
 
         if raw_sample.height > 0:
-            tables["raw_matches_sample"] = display_dataframe(raw_sample.to_pandas())
+            tables["detalle"] = display_dataframe(raw_sample.to_pandas())
 
         return tables
     else:
@@ -1102,17 +957,6 @@ def build_report_tables(
             }])),
         }
 
-    source_summary = (
-        song
-        .group_by(["source", "account"])
-        .agg([
-            pl.sum("amount_usd").alias("amount_usd"),
-            pl.sum("units").alias("units"),
-            pl.len().alias("rows"),
-        ])
-        .sort("amount_usd", descending=True)
-    )
-
     monthly_summary = (
         song
         .group_by(["period_month"])
@@ -1122,31 +966,6 @@ def build_report_tables(
             pl.len().alias("rows"),
         ])
         .sort("period_month")
-    )
-
-    track_summary = (
-        song
-        .group_by([
-            "source",
-            "account",
-            "asset_isrc",
-            "report_code",
-            "report_code_source",
-            "report_territory",
-            "track_statement_style",
-            "asset_title_statement",
-            "artist_statement_style",
-            "asset_artist_statement",
-            "content_type",
-        ])
-        .agg([
-            pl.sum("amount_usd").alias("amount_usd"),
-            pl.sum("units").alias("units"),
-            pl.min("period_month").alias("first_month"),
-            pl.max("period_month").alias("last_month"),
-            pl.len().alias("rows"),
-        ])
-        .sort("amount_usd", descending=True)
     )
 
     raw_sample = pl.DataFrame()
@@ -1183,13 +1002,12 @@ def build_report_tables(
 
         store_summary = (
             raw_matches_lf
-            .group_by(["source", "account", "store_raw", "usage_type"])
+            .group_by(["store_raw", "usage_type"])
             .agg([
                 pl.sum("amount_usd").alias("amount_usd"),
                 pl.sum("units").alias("units"),
-                pl.len().alias("rows"),
             ])
-            .sort("amount_usd", descending=True)
+            .sort(["store_raw", "usage_type"])
             .collect()
         )
 
@@ -1202,9 +1020,8 @@ def build_report_tables(
             .agg([
                 pl.sum("amount_usd").alias("amount_usd"),
                 pl.sum("units").alias("units"),
-                pl.len().alias("rows"),
             ])
-            .sort("amount_usd", descending=True)
+            .sort("report_territory")
             .collect()
         )
 
@@ -1212,8 +1029,6 @@ def build_report_tables(
             raw_matches_lf
             .select([
                 col for col in [
-                    "source",
-                    "account",
                     "statement_period",
                     "transaction_month",
                     "artist_statement_style",
@@ -1232,16 +1047,14 @@ def build_report_tables(
                     "territory",
                     "statement_file_name",
                     "match_text",
+                    "source",
+                    "account",
                 ]
                 if col in raw_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory"}
             ])
             .limit(raw_limit)
             .collect()
         )
-
-    song_matches = song.sort("amount_usd", descending=True)
-    if period_column == "statement_period":
-        song_matches = song_matches.head(raw_limit)
 
     tables = {
         "instructions": display_dataframe(instructions_dataframe()),
@@ -1258,38 +1071,13 @@ def build_report_tables(
             "raw_sample_rows": raw_sample.height if raw_sample.height > 0 else 0,
             "generated_at": datetime.now().isoformat(timespec="seconds"),
         }])),
-        "source_summary": display_dataframe(source_summary.to_pandas()),
         "monthly_summary": display_dataframe(monthly_summary.to_pandas()),
         "store_summary": display_dataframe(store_summary.to_pandas()),
         "territory_summary": display_dataframe(territory_summary.to_pandas()),
-        "track_summary": display_dataframe(track_summary.to_pandas()),
-        "song_matches": display_dataframe(safe_select(
-            song_matches,
-            [
-                "source",
-                "account",
-                "statement_period",
-                "transaction_month",
-                "report_code",
-                "report_code_source",
-                "asset_isrc",
-                "report_territory",
-                "track_statement_style",
-                "asset_title_statement",
-                "artist_statement_style",
-                "asset_artist_statement",
-                "content_type",
-                "amount_usd",
-                "units",
-                "source_sheet",
-                "revenue_basis",
-                "match_text",
-            ],
-        ).to_pandas()),
     }
 
     if raw_sample.height > 0:
-        tables["raw_matches_sample"] = display_dataframe(raw_sample.to_pandas())
+        tables["detalle"] = display_dataframe(raw_sample.to_pandas())
 
     return tables
 
