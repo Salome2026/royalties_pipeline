@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-05-23",
+  "mode": "seed_read_only",
+  "description": "Contractual cutoff dates. The business rule is a date. Track references are only evidence used to estimate or validate that date.",
+  "entries": [
+    {
+      "cutoff_id": "onerpm_gusty_dj_contract_start",
+      "source": "onerpm",
+      "account": "gusty_dj",
+      "business_entity": "Gusty DJ",
+      "contract_start_date": null,
+      "contract_start_month": "2023-04",
+      "date_status": "estimated",
+      "cutoff_basis": "transaction_month",
+      "evidence_type": "track_reference",
+      "evidence_terms": ["motorcito"],
+      "evidence_catalog_key": null,
+      "evidence_observed_source": "onerpm/gusty_dj",
+      "evidence_first_transaction_month": "2023-04",
+      "evidence_first_statement_period": "2023-06",
+      "old_content_policy": "exclude_even_if_generates_later",
+      "new_content_policy": "include_if_content_first_seen_on_or_after_contract_start",
+      "unknown_content_policy": "manual_review",
+      "confidence": "medium",
+      "notes": "Motorcito was used to infer the approximate contract start. If the real contract date is found, enter it as contract_start_date and keep Motorcito only as historical evidence."
+    },
+    {
+      "cutoff_id": "onerpm_la_nueva_sangre_contract_start",
+      "source": "onerpm",
+      "account": "la_nueva_sangre",
+      "business_entity": "La Nueva Sangre / DJ Plaga",
+      "contract_start_date": null,
+      "contract_start_month": "2023-06",
+      "date_status": "estimated",
+      "cutoff_basis": "release_date_preferred_transaction_month_fallback",
+      "evidence_type": "track_reference",
+      "evidence_terms": ["ni ahi", "ni aca", "ni alla", "ni aya"],
+      "evidence_catalog_key": null,
+      "evidence_observed_source": "onerpm/mawzrecords",
+      "evidence_first_transaction_month": "2023-06",
+      "evidence_first_statement_period": "2023-08",
+      "old_content_policy": "exclude_even_if_generates_later",
+      "new_content_policy": "include_if_release_date_or_content_first_seen_on_or_after_contract_start",
+      "unknown_content_policy": "manual_review",
+      "confidence": "medium",
+      "notes": "Ni Ahi, Ni Aca, Ni Alla was used as evidence to estimate the start. The final business rule should be the actual contract date and release dates by work."
+    }
+  ]
+}

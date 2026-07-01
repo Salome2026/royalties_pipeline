@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-05-23",
+  "mode": "seed_read_only",
+  "description": "Report template seed. These entries document current report behavior and do not drive production reports yet.",
+  "entries": [
+    {
+      "template_key": "statement_legacy",
+      "title": "Reporte por statement viejo",
+      "report_family": "statement",
+      "time_basis": "statement_period",
+      "uses_catalog_status": true,
+      "uses_account_policy": false,
+      "output_profile": "statement_excel_with_config_and_source_sheets",
+      "default_filters": {
+        "report_version": "legacy"
+      },
+      "rule_version": "legacy_current_script",
+      "enabled": true,
+      "notes": "Historical statement view. Keeps old comparison logic, including legacy handling of MAWZ and Gusty post-contract helper."
+    },
+    {
+      "template_key": "statement_new",
+      "title": "Reporte por statement nuevo",
+      "report_family": "statement",
+      "time_basis": "statement_period",
+      "uses_catalog_status": true,
+      "uses_account_policy": "future",
+      "output_profile": "statement_excel_with_config_and_source_sheets",
+      "default_filters": {
+        "report_version": "new"
+      },
+      "rule_version": "new_current_script",
+      "enabled": true,
+      "notes": "Current new statement report. ONErpm MAWZ uses Masters as generation, Gusty/La Nueva Sangre use contractual cutoff logic."
+    },
+    {
+      "template_key": "los_anormales",
+      "title": "Regalias Los Anormales",
+      "report_family": "title_list",
+      "time_basis": "statement_period",
+      "uses_catalog_status": true,
+      "uses_account_policy": false,
+      "output_profile": "custom_title_royalty_excel",
+      "default_filters": {
+        "start_statement_period": null,
+        "end_statement_period": "2026-03",
+        "excluded_sources": []
+      },
+      "rule_version": "custom_title_current_script",
+      "enabled": true,
+      "notes": "Custom editable title list report. Terms live in the API/script today and should later be persisted as template configuration."
+    },
+    {
+      "template_key": "gusty_fuga_contracts",
+      "title": "Gusty FUGA contratos nuevo & viejo",
+      "report_family": "contract",
+      "time_basis": "statement_period",
+      "uses_catalog_status": true,
+      "uses_account_policy": false,
+      "output_profile": "fuga_gusty_contract_excel",
+      "default_filters": {
+        "source": "fuga",
+        "account": "indyana_records",
+        "end_statement_period": "2026-03"
+      },
+      "rule_version": "fuga_gusty_contract_current_script",
+      "enabled": true,
+      "notes": "Special FUGA Gusty report. It classifies old/new contract using ONErpm contract evidence and manual matching logic."
+    }
+  ]
+}

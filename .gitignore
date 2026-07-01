@@ -30,7 +30,10 @@ client_secret*.json
 
 # Raw/private royalty data
 input_raw/
-warehouse/
+warehouse/*
+!warehouse/registry/
+warehouse/registry/*
+!warehouse/registry/*.json
 staging/
 reports/
 exports/
