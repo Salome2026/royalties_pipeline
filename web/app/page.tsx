@@ -11,12 +11,41 @@ type WebUser = {
   username: string;
   role: "viewer" | "editor" | "admin";
   canEdit: boolean;
+  mustChangePassword?: boolean;
 };
 
-type View = "menu" | "statement" | "royalties" | "participation" | "booking" | "booking-lab" | "booking-summary" | "booking-artist-summary" | "artists" | "caserio" | "composite-booking";
+type View = "menu" | "statement" | "royalties" | "custom-reports" | "participation" | "digital-income" | "source-monitor" | "catalog" | "distributor-config" | "booking" | "booking-lab" | "booking-summary" | "booking-artist-summary" | "artist-finance" | "finance-movements" | "artists" | "employees" | "caserio" | "composite-booking";
+
+const VIEW_MODULE_KEYS: Partial<Record<View, string>> = {
+  statement: "statement_reports",
+  royalties: "royalty_reports",
+  "custom-reports": "custom_reports",
+  participation: "participation",
+  "digital-income": "digital_income",
+  "source-monitor": "source_monitor",
+  "distributor-config": "distributor_config",
+  booking: "booking",
+  "booking-lab": "booking_lab",
+  "booking-summary": "booking_summary",
+  "booking-artist-summary": "booking_detail",
+  "artist-finance": "artist_finance",
+  "finance-movements": "finance_movements",
+  artists: "artists",
+  employees: "employees",
+  caserio: "caserio",
+  "composite-booking": "composite_booking",
+  catalog: "catalog",
+};
 
 type ParticipationItem = {
   source: string;
+  amount_usd: number;
+  percentage: number;
+};
+
+type ParticipationAccountItem = {
+  source: string;
+  account: string;
   amount_usd: number;
   percentage: number;
 };
@@ -32,13 +61,69 @@ type ParticipationData = {
   available_end_month: string | null;
   total_amount_usd: number;
   items: ParticipationItem[];
+  account_items: ParticipationAccountItem[];
 };
 
-type ParticipationCache = {
-  data: ParticipationData;
-  preset: string;
+const LOS_ANORMALES_DEFAULT_TERMS = [
+  "BAILE INOLVIDABLE RKT",
+  "LLAMÁNDOME RKT",
+  "MOVIMIENTO RKT",
+  "REGGAETON RKT",
+  "COQUETA",
+  "PAPASITO",
+  "la fiesta empezó",
+  "TU TA DEMASIADO LOCA RKT",
+  "PIDE LO QUE TÚ QUIERAS X TIKITIKI RKT",
+  "PASO SOLITA X RELACIÓN RKT",
+  "LA LLEVO PA EL ESPACIO RKT",
+  "INTRO TU JARDÍN CON ENANITOS RKT",
+  "INTRO AY VAMOS RKT",
+  "BESOS MOJADOS RKT",
+  "PIERDO LA CABEZA RKT",
+  "NO PARE RKT",
+  "MÉTELO SÁCALO RKT",
+].join("\n");
+
+const CUSTOM_REPORT_STATE_KEY = "vpo_custom_report_states_v1";
+
+type CustomReportTemplate = {
+  key: string;
+  title: string;
+  terms: string[];
+  description?: string;
+  enabled?: boolean;
+  requires_terms?: boolean;
+  supports_sources?: boolean;
+  supports_start_month?: boolean;
+  default_end_month?: string;
+  options?: CustomReportOption[];
+};
+
+type CustomReportOption = {
+  key: string;
+  label: string;
+  description?: string;
+  default?: boolean;
+};
+
+type CustomReportSourceAccount = {
+  source: string;
+  account: string;
+};
+
+type CustomReportOptions = {
+  templates: CustomReportTemplate[];
+  sources: string[];
+  source_accounts: CustomReportSourceAccount[];
+};
+
+type CustomReportSavedState = {
+  title: string;
   startMonth: string;
   endMonth: string;
+  terms: string;
+  sourceAccounts: string[];
+  flags?: Record<string, boolean>;
 };
 
 type BookingAdjustment = {
@@ -74,6 +159,18 @@ type BookingPreSplitAdjustment = {
   show_id: number;
   concept: string;
   destination: "artist" | "producer";
+  amount: number;
+  currency: "ARS" | "USD";
+  recovery_auto_apply?: number | boolean;
+  notes: string | null;
+};
+
+type BookingDirectCommission = {
+  id: number;
+  show_id: number;
+  concept: string;
+  recipient: string | null;
+  destination: "salida_directa" | "incorpora_base";
   amount: number;
   currency: "ARS" | "USD";
   notes: string | null;
@@ -117,6 +214,7 @@ type BookingShow = {
   venue_collected_amount: number;
   venue_balance_amount: number;
   venue_payment_status: string;
+  venue_shortfall_policy: "deuda_boliche" | "ajustar_cachet";
   venue_payment_notes: string | null;
   cachet_amount: number;
   expenses_amount: number;
@@ -142,6 +240,7 @@ type BookingShow = {
   show_expenses: BookingExpense[];
   cash_movements: BookingCashMovement[];
   pre_split_adjustments: BookingPreSplitAdjustment[];
+  direct_commissions: BookingDirectCommission[];
   external_shares: BookingExternalShare[];
   artist_adjustments: BookingAdjustment[];
   receipt_refs: string[];
@@ -172,6 +271,79 @@ type BookingArtistForm = {
   notes: string;
   active: boolean;
 };
+
+type EmployeePermission = {
+  module_key: string;
+  can_access: boolean;
+  can_create: boolean;
+  can_view_history: boolean;
+  can_edit: boolean;
+  can_approve: boolean;
+  scope: Array<Record<string, string>>;
+  notes: string | null;
+};
+
+type EmployeeUser = {
+  id: number;
+  username: string;
+  global_role: "viewer" | "editor" | "admin";
+  active: boolean;
+  auth_source: string;
+  has_password?: boolean;
+  must_change_password?: boolean;
+  last_login_at?: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type EmployeeRecord = {
+  id: number;
+  display_name: string;
+  legal_name: string | null;
+  cuit: string | null;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  notes: string | null;
+  active: boolean;
+  functions: string[];
+  users: EmployeeUser[];
+  permissions: EmployeePermission[];
+  created_at: string;
+  updated_at: string;
+};
+
+type EmployeeModule = {
+  module_key: string;
+  label: string;
+};
+
+type EmployeeForm = {
+  displayName: string;
+  legalName: string;
+  cuit: string;
+  phone: string;
+  email: string;
+  address: string;
+  functions: string[];
+  username: string;
+  newPassword: string;
+  mustChangePassword: boolean;
+  userRole: "viewer" | "editor" | "admin";
+  userActive: boolean;
+  permissions: EmployeePermission[];
+  notes: string;
+  active: boolean;
+};
+
+const ARTIST_SCOPED_MODULES = new Set([
+  "booking",
+  "booking_detail",
+  "booking_summary",
+  "artist_finance",
+  "finance_movements",
+]);
 
 type BookingSummaryMonth = {
   shows: number;
@@ -243,6 +415,658 @@ type BookingArtistSummary = {
     indyana_income: number;
     commissionable_income: number;
     non_commissionable_income: number;
+  };
+};
+
+type ArtistFinanceOpenBalance = {
+  id: number;
+  artist: string;
+  show_date: string;
+  venue: string;
+  indyana_balance: number;
+  artist_balance: number;
+  venue_balance: number;
+  settlement_status: string | null;
+  status: string;
+  notes: string | null;
+};
+
+type ArtistFinanceLegacyMovement = {
+  id: number;
+  artist: string;
+  movement_date: string;
+  movement_type: string;
+  concept: string;
+  category: string;
+  project: string | null;
+  amount: number;
+  recoverable: number;
+  artist_percent: number;
+  producer_percent: number;
+  show_id: number | null;
+  notes: string | null;
+};
+
+type ArtistFinanceMonthlyBooking = {
+  month: string;
+  shows: number;
+  indyana_target: number;
+  indyana_balance: number;
+  artist_balance: number;
+  venue_balance: number;
+};
+
+type ArtistFinanceLedgerEntry = {
+  id: string;
+  ledger_date: string;
+  artist: string;
+  business_area: string;
+  ledger_type: string;
+  project_name: string | null;
+  concept: string;
+  source_module: string;
+  source_table: string;
+  source_id: string;
+  source_label: string | null;
+  amount_ars: number;
+  account_delta_ars: number;
+  venue_receivable_ars: number;
+  investment_ars: number;
+  recoverable_origin_ars: number;
+  recovered_amount_ars: number;
+  recoverable_open_ars: number;
+  status: string | null;
+  notes: string | null;
+};
+
+type ArtistFinanceSummary = {
+  generated_at: string;
+  selected_artist: string | null;
+  artists: string[];
+  summary: {
+    booking: {
+      shows: number;
+      cachet_total: number;
+      show_expenses: number;
+      artist_target: number;
+      indyana_target: number;
+      artist_paid: number;
+      indyana_received: number;
+      artist_balance: number;
+      indyana_balance: number;
+      venue_balance: number;
+      commissionable_indyana: number;
+      non_commissionable_indyana: number;
+      booking_current_balance_indyana: number;
+    };
+    legacy_ledger: {
+      rows: number;
+      amount_total: number;
+      recoverable_amount_total: number;
+      official: boolean;
+      note: string;
+    };
+    recoverables: {
+      open_amount: number;
+      paid_basis_amount: number;
+      recovered_amount: number;
+      pending_amount: number;
+      official: boolean;
+      note: string;
+    };
+    finance_staging: {
+      rows: number;
+      amount_ars: number;
+      paid_amount_ars: number;
+      pending_amount_ars: number;
+      recoverable_amount_ars: number;
+      recovered_amount_ars: number;
+      recoverable_paid_basis_ars: number;
+      recoverable_pending_basis_ars: number;
+      recoverable_defined_open_ars: number;
+      recoverable_pending_criteria_ars: number;
+      by_status: { status: string; rows: number; amount_ars: number; paid_amount_ars: number; pending_amount_ars: number }[];
+      official: boolean;
+      note: string;
+    };
+  };
+  monthly_booking: ArtistFinanceMonthlyBooking[];
+  open_booking_balances: ArtistFinanceOpenBalance[];
+  finance_ledger: {
+    entries: ArtistFinanceLedgerEntry[];
+    summary: {
+      account_current_net_ars: number;
+      artist_owes_indyana_ars: number;
+      indyana_owes_artist_ars: number;
+      venue_receivable_ars: number;
+      investment_ars: number;
+      recoverable_origin_ars: number;
+      recovered_amount_ars: number;
+      recoverable_open_ars: number;
+      rows: number;
+      official: boolean;
+      note: string;
+    };
+  };
+  legacy_movements: ArtistFinanceLegacyMovement[];
+  finance_project_summary: {
+    project_name: string;
+    business_area: string;
+    first_date: string | null;
+    last_date: string | null;
+    rows: number;
+    amount_ars: number;
+    paid_amount_ars: number;
+    pending_amount_ars: number;
+    recoverable_amount_ars: number;
+    recoverable_paid_ars: number;
+    recoverable_pending_criteria_ars: number;
+    recoverable_defined_ars: number;
+    recovered_amount_ars: number;
+    recoverable_open_ars: number;
+    recoverable_defined_open_ars: number;
+    recoverable_pending_criteria_open_ars: number;
+  }[];
+  finance_movements: FinanceMovement[];
+  recovery_applications: {
+    id: number;
+    artist: string;
+    application_date: string;
+    finance_movement_id: number;
+    project_name: string | null;
+    source_type: string;
+    source_id: string | null;
+    source_label: string | null;
+    amount_ars: number;
+    recovery_method: string;
+    notes: string | null;
+    created_at: string;
+  }[];
+};
+
+type FinanceProject = {
+  id: number;
+  name: string;
+  artist: string | null;
+  business_area: string;
+  status: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type FinanceMovement = {
+  id: number;
+  movement_date: string;
+  artist: string;
+  business_area: string;
+  movement_type: string;
+  category: string;
+  project_id: number | null;
+  project_name: string | null;
+  concept: string;
+  counterparty: string | null;
+  paid_by: string;
+  amount: number;
+  currency: "ARS" | "USD";
+  fx_rate: number | null;
+  amount_ars: number;
+  paid_amount: number;
+  paid_amount_ars: number;
+  pending_amount_ars: number;
+  payment_status: "pendiente" | "parcial" | "pagado";
+  due_date: string | null;
+  recoverable: number;
+  recoverable_percent: number;
+  recovery_method: string;
+  artist_percent: number;
+  producer_percent: number;
+  recovered_amount_ars: number;
+  recoverable_open_ars: number;
+  account_effect: string;
+  status: string;
+  source_type: string;
+  source_id: string | null;
+  proof_refs: string[];
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type FinanceMovementData = {
+  generated_at: string;
+  selected_artist: string | null;
+  selected_project: string | null;
+  artists: string[];
+  items: FinanceMovement[];
+  projects: FinanceProject[];
+  project_options: string[];
+  summary: {
+    rows: number;
+    amount_ars: number;
+    paid_amount_ars: number;
+    pending_amount_ars: number;
+    by_status: { status: string; rows: number; amount_ars: number }[];
+    official: boolean;
+    note: string;
+  };
+};
+
+type FinanceMovementLineForm = {
+  uid: string;
+  concept: string;
+  counterparty: string;
+  paidBy: "indyana" | "artista" | "manager" | "tercero" | "desconocido";
+  amount: string;
+  paidAmount: string;
+  dueDate: string;
+  paymentStatus: "pendiente" | "parcial" | "pagado" | "";
+  currency: "ARS" | "USD";
+  fxRate: string;
+};
+
+type FinanceMovementForm = {
+  movementDate: string;
+  artist: string;
+  businessArea: "booking" | "label" | "marketing" | "digitales" | "general";
+  movementType: "gasto" | "ingreso" | "recupero" | "adelanto" | "prestamo" | "ajuste" | "pago";
+  category: string;
+  projectName: string;
+  multipleConcepts: boolean;
+  concept: string;
+  counterparty: string;
+  paidBy: "indyana" | "artista" | "manager" | "tercero" | "desconocido";
+  amount: string;
+  paidAmount: string;
+  dueDate: string;
+  paymentStatus: "pendiente" | "parcial" | "pagado" | "";
+  currency: "ARS" | "USD";
+  fxRate: string;
+  recoverable: boolean;
+  recoverablePercent: string;
+  recoveryMethod: "none" | "before_split" | "after_split" | "direct_account" | "royalties" | "manual";
+  artistPercent: string;
+  producerPercent: string;
+  accountEffect: "sin_impacto" | "artista_debe_indyana" | "indyana_debe_artista" | "inversion_indyana";
+  status: "borrador" | "pendiente_control" | "aprobado" | "aplicado" | "anulado";
+  sourceType: "manual" | "legacy" | "booking" | "royalties" | "import";
+  sourceId: string;
+  proofRefs: string;
+  notes: string;
+  conceptLines: FinanceMovementLineForm[];
+};
+
+type SourceMonitorItem = {
+  id: string;
+  source: string;
+  account: string;
+  display_name: string;
+  input_path: string;
+  expected_frequency: string;
+  max_age_months: number;
+  monitoring_active: boolean;
+  alert_silenced: boolean;
+  portal_url: string;
+  notes: string;
+  last_manual_review_at: string | null;
+  last_statement_period: string | null;
+  statement_age_months: number | null;
+  statement_files_in_mart: number;
+  rows_in_mart: number;
+  files_in_mart: number;
+  raw_files: number;
+  raw_inventory_summary?: Record<string, number>;
+  ignored_raw_count?: number;
+  ignored_raw_files?: { file_name: string; status: string; reason: string; rows?: number | null }[];
+  latest_raw_file: string | null;
+  latest_raw_modified: string | null;
+  unprocessed_raw_files: string[];
+  unprocessed_raw_count: number;
+  status: "ok" | "attention" | "alert" | "inactive";
+  alert: boolean;
+  reason: string;
+};
+
+type SourceMonitorData = {
+  generated_at: string;
+  items: SourceMonitorItem[];
+  summary: {
+    total: number;
+    alerts: number;
+    status_counts: Record<string, number>;
+  };
+};
+
+type SourceMonitorProcessResult = {
+  ok: boolean;
+  processed_at: string;
+  display_name: string;
+  source: string;
+  account: string;
+  pending_files_before: string[];
+  last_statement_before: string | null;
+  last_statement_after: string | null;
+  pending_files_after: string[];
+  summary: { statement_period: string; rows: number; amount_usd: number; files: number }[];
+  total_rows: number;
+  total_amount_usd: number;
+};
+
+type SourceMonitorPublishResult = {
+  ok: boolean;
+  published_at: string;
+  bucket: string;
+  prefix: string;
+  uploaded: { file_name: string; object_name: string; size_bytes: number; size_mb: number }[];
+};
+
+type CatalogItem = {
+  catalog_key: string;
+  asset_isrc: string | null;
+  track_id: string | null;
+  track_title: string | null;
+  artist_statement: string | null;
+  first_transaction_month: string | null;
+  last_transaction_month: string | null;
+  amount_usd: number;
+  units: number;
+  sources: string | null;
+  accounts: string | null;
+  content_types: string | null;
+  source_sheets: string | null;
+  title_variants: string | null;
+  artist_variants: string | null;
+  external_release_date: string | null;
+  external_match_url: string | null;
+  external_label: string | null;
+  label_normalized_auto: string | null;
+  label_normalized_override: string | null;
+  label_normalized: string | null;
+  active: boolean;
+  include_in_reports: boolean;
+  catalog_business_status: string | null;
+  status_notes: string | null;
+  status_updated_at: string | null;
+};
+
+type CatalogData = {
+  items: CatalogItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  totals: {
+    amount_usd: number;
+    units: number;
+  };
+  options: {
+    sources: string[];
+    accounts: string[];
+    artists: string[];
+    labels: string[];
+    first_month: string | null;
+    last_month: string | null;
+  };
+};
+
+type DigitalIncomeItem = {
+  statement_period: string;
+  source: string;
+  account: string;
+  artist: string;
+  title: string;
+  total_usd: number;
+  total_eur: number;
+  has_share_in_out: boolean;
+  raw_rows: number;
+};
+
+type DigitalIncomeMonth = {
+  statement_period: string;
+  total_usd: number;
+  total_eur: number;
+  rows: number;
+};
+
+type DigitalIncomeSource = {
+  source: string;
+  account: string;
+  total_usd: number;
+  total_eur: number;
+  rows: number;
+  artists: number;
+};
+
+type DigitalIncomeMatrixRow = {
+  source: string;
+  account: string;
+  months: Record<string, number>;
+  total_usd: number;
+  total_eur: number;
+  rows: number;
+  artists: number;
+  has_share_in_out: boolean;
+};
+
+type DigitalIncomeData = {
+  items: DigitalIncomeItem[];
+  monthly: DigitalIncomeMonth[];
+  by_source: DigitalIncomeSource[];
+  matrix: DigitalIncomeMatrixRow[];
+  matrix_months: string[];
+  total: number;
+  limit: number;
+  offset: number;
+  keyword: string;
+  totals: {
+    total_usd: number;
+    total_eur: number;
+    rows: number;
+    months: number;
+    sources: number;
+    accounts: number;
+    first_month: string | null;
+    last_month: string | null;
+  };
+  options: {
+    sources: string[];
+    accounts: string[];
+    source_accounts: { source: string; account: string }[];
+    artists: string[];
+    first_month: string | null;
+    last_month: string | null;
+  };
+};
+
+type StatementDictionaryEntry = {
+  source: string;
+  account: string;
+  raw_sheet_or_file_type: string;
+  human_name: string;
+  human_description: string;
+  business_meaning: string;
+  amount_column: string | null;
+  currency_column: string | null;
+  period_column: string | null;
+  artist_column: string | null;
+  title_column: string | null;
+  identifier_columns: string[];
+  default_catalog_view: boolean | string;
+  default_statement_view: boolean | string;
+  default_cash_view: boolean | string;
+  decision_reason: string;
+  known_risks: string;
+  last_reviewed_at: string;
+  reviewed_by: string;
+};
+
+type ContractCutoff = {
+  cutoff_id: string;
+  source: string;
+  account: string;
+  business_entity: string;
+  contract_start_date: string | null;
+  contract_start_month: string | null;
+  date_status: string;
+  cutoff_basis: string;
+  evidence_type: string;
+  evidence_terms: string[];
+  evidence_first_transaction_month?: string | null;
+  evidence_first_statement_period?: string | null;
+  old_content_policy: string;
+  new_content_policy: string;
+  unknown_content_policy: string;
+  confidence: string;
+  notes: string;
+};
+
+type DistributorAccountPolicy = {
+  policy_id: string;
+  source: string;
+  account: string;
+  display_name: string;
+  account_type: string;
+  ownership_default: string;
+  monitoring_active: boolean;
+  catalog_view_enabled: boolean;
+  statement_view_enabled: boolean;
+  cash_view_enabled: boolean | string;
+  cash_view_mode?: string;
+  cash_view_label?: string;
+  cash_view_description?: string;
+  default_time_basis: string;
+  contract_cutoff_id: string | null;
+  shares_policy: string;
+  sheet_rules: Record<string, Record<string, boolean | string>>;
+  notes: string;
+  statement_dictionary: StatementDictionaryEntry[];
+  contract_cutoff: ContractCutoff | null;
+  rule_preview?: {
+    enabled: boolean;
+    cutoff_id?: string | null;
+    cutoff_basis?: string;
+    contract_start_date?: string | null;
+    contract_start_month?: string | null;
+    summary: {
+      status: string;
+      works: number;
+      amount_usd: number;
+      rows: number;
+    }[];
+    final_summary?: {
+      status: string;
+      works: number;
+      amount_usd: number;
+      rows: number;
+    }[];
+    alerts?: {
+      status: string;
+      rule_status?: string;
+      final_status?: string;
+      decision_basis: string | null;
+      reason: string;
+      final_reason?: string;
+      attention_level?: string;
+      catalog_key?: string | null;
+      catalog_active?: boolean | null;
+      catalog_include_in_reports?: boolean | null;
+      catalog_business_status?: string | null;
+      catalog_status_notes?: string | null;
+      source_sheet: string;
+      asset_isrc: string | null;
+      track_title: string | null;
+      artist: string | null;
+      amount_usd: number;
+      rows: number;
+      first_transaction_month: string | null;
+      last_transaction_month: string | null;
+      external_release_date: string | null;
+      external_label: string | null;
+    }[];
+    items: {
+      status: string;
+      rule_status?: string;
+      final_status?: string;
+      decision_basis: string | null;
+      reason: string;
+      final_reason?: string;
+      attention_level?: string;
+      catalog_key?: string | null;
+      catalog_active?: boolean | null;
+      catalog_include_in_reports?: boolean | null;
+      catalog_business_status?: string | null;
+      catalog_status_notes?: string | null;
+      source_sheet: string;
+      asset_isrc: string | null;
+      track_title: string | null;
+      artist: string | null;
+      amount_usd: number;
+      rows: number;
+      first_transaction_month: string | null;
+      last_transaction_month: string | null;
+      external_release_date: string | null;
+      external_label: string | null;
+    }[];
+  };
+  account_impact_stats?: {
+    rows: number;
+    works: number;
+    amount_usd: number;
+    units: number;
+    first_transaction_month: string | null;
+    last_transaction_month: string | null;
+    sheet_breakdown: {
+      source_sheet: string;
+      rows: number;
+      works: number;
+      amount_usd: number;
+      units: number;
+      first_transaction_month: string | null;
+      last_transaction_month: string | null;
+    }[];
+  };
+  catalog_stats?: {
+    works: number;
+    active: number;
+    inactive: number;
+    excluded_from_reports: number;
+    release_dates: number;
+    missing_release_dates: number;
+    labels: number;
+    missing_labels: number;
+    amount_usd: number;
+    first_transaction_month: string | null;
+    last_transaction_month: string | null;
+  };
+};
+
+type ReportTemplateConfig = {
+  template_key: string;
+  title: string;
+  report_family: string;
+  time_basis: string;
+  uses_catalog_status: boolean;
+  uses_account_policy: boolean | string;
+  output_profile: string;
+  default_filters: Record<string, string | number | boolean | null>;
+  rule_version: string;
+  enabled: boolean;
+  notes: string;
+};
+
+type DistributorConfigData = {
+  generated_at: string;
+  mode: string;
+  accounts: DistributorAccountPolicy[];
+  statement_dictionary: StatementDictionaryEntry[];
+  contract_cutoffs: ContractCutoff[];
+  report_templates: ReportTemplateConfig[];
+  summary: {
+    accounts: number;
+    dictionary_entries: number;
+    contract_cutoffs: number;
+    report_templates: number;
+    sources: Record<string, number>;
+    account_types: Record<string, number>;
   };
 };
 
@@ -434,6 +1258,7 @@ type BookingLabForm = {
   responsible: string;
   grossAmount: string;
   collectedAmount: string;
+  venueShortfallPolicy: "deuda_boliche" | "ajustar_cachet";
   currency: "ARS" | "USD";
   fxRate: string;
   status: "borrador" | "observado" | "cerrado" | "cerrado_cc";
@@ -473,6 +1298,16 @@ type BookingPreSplitAdjustmentForm = {
   concept: string;
   destination: "artist" | "producer";
   amount: string;
+  recoveryAutoApply: boolean;
+  notes: string;
+};
+
+type BookingDirectCommissionForm = {
+  uid: string;
+  concept: string;
+  recipient: string;
+  destination: "salida_directa" | "incorpora_base";
+  amount: string;
   notes: string;
 };
 
@@ -510,10 +1345,12 @@ type BookingForm = {
   cachetAmount: string;
   venuePaymentIssue: boolean;
   venueCollectedAmount: string;
+  venueShortfallPolicy: "deuda_boliche" | "ajustar_cachet";
   venuePaymentNotes: string;
   showExpenses: BookingExpenseForm[];
   cashMovements: BookingCashMovementForm[];
   preSplitAdjustments: BookingPreSplitAdjustmentForm[];
+  directCommissions: BookingDirectCommissionForm[];
   externalShares: BookingExternalShareForm[];
   artistPaidAmount: string;
   producerReceivedAmount: string;
@@ -542,7 +1379,6 @@ const BOOKING_EXPENSE_CATEGORIES = [
   { value: "comision_externa", label: "Comision externa" },
   { value: "varios", label: "Varios" },
 ];
-const PARTICIPATION_CACHE_KEY = "vpo_participation_last_result";
 const MONTH_NAMES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
 const MONTH_OPTIONS = Array.from({ length: 11 }, (_, yearIndex) => 2020 + yearIndex)
   .flatMap((year) => MONTH_NAMES.map((month, monthIndex) => {
@@ -578,12 +1414,115 @@ function money(value: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
 }
 
+function moneyCents(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function eurCents(value: number) {
+  return new Intl.NumberFormat("es-ES", {
+    style: "currency",
+    currency: "EUR",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
 function pct(value: number) {
   return `${value.toFixed(1)}%`;
 }
 
 function ars(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
+}
+
+const SOURCE_MONITOR_STATUS_LABELS: Record<string, string> = {
+  loaded_to_mart: "Cargados",
+  pending_real: "Pendientes",
+  ignored_empty: "Vacíos",
+  ignored_summary: "Summaries omitidos",
+  legacy_manual: "Legacy",
+};
+
+function sourceMonitorInventoryLabel(summary?: Record<string, number>) {
+  if (!summary) return "";
+  return Object.entries(summary)
+    .filter(([, count]) => count > 0)
+    .map(([status, count]) => `${SOURCE_MONITOR_STATUS_LABELS[status] || status}: ${count}`)
+    .join(" · ");
+}
+
+function flagLabel(value: boolean | string | null | undefined) {
+  if (value === true) return "Si";
+  if (value === false) return "No";
+  if (value === null || value === undefined || value === "") return "-";
+  if (value === "partial_by_contract_cutoff") return "Parcial por fecha contractual";
+  if (value === "only_content_after_contract_start") return "Desde contrato";
+  if (value === "depends_on_account_policy") return "Segun cuenta";
+  if (value === "cash_or_audit_not_generation") return "Caja/auditoria";
+  if (value === "audit_only") return "Solo auditoria";
+  if (value === "not_applicable") return "No aplica";
+  if (value === "not_relevant_currently") return "No relevante";
+  if (value === "transaction_month") return "Transaction month";
+  if (value === "statement_period") return "Statement period";
+  if (value === "release_date_preferred_transaction_month_fallback") return "Release date, fallback transaction";
+  if (value === "estimated") return "Estimada";
+  if (value === "confirmed") return "Confirmada";
+  if (value === "medium") return "Media";
+  if (value === "high") return "Alta";
+  if (value === "low") return "Baja";
+  if (value === "exclude_even_if_generates_later") return "Excluir aunque genere despues";
+  if (value === "include_if_content_first_seen_on_or_after_contract_start") return "Incluir si nace desde el contrato";
+  if (value === "include_if_release_date_or_content_first_seen_on_or_after_contract_start") return "Incluir si release/primer visto es desde contrato";
+  if (value === "manual_review") return "Revision manual";
+  return String(value);
+}
+
+function cashModeClass(value: boolean | string | null | undefined) {
+  if (value === true || value === "complete") return "ok";
+  if (value === "partial_by_contract_cutoff" || value === "partial_by_rule") return "warning";
+  return "inactive";
+}
+
+function accountCashLabel(account: DistributorAccountPolicy) {
+  if (account.cash_view_label) return account.cash_view_label;
+  if (account.cash_view_enabled === true) return "Caja completa";
+  if (account.cash_view_enabled === "partial_by_contract_cutoff") return "Caja parcial por regla";
+  return "No caja";
+}
+
+function ruleStatusLabel(status: string) {
+  if (status === "included") return "Incluido";
+  if (status === "excluded") return "Excluido";
+  if (status === "manual_review") return "Revision manual";
+  return status;
+}
+
+function ruleStatusClass(status: string) {
+  if (status === "included") return "ok";
+  if (status === "excluded") return "inactive";
+  if (status === "manual_review") return "warning";
+  return "inactive";
+}
+
+function finalDecisionLabel(status: string) {
+  if (status === "reportable") return "Reportable final";
+  if (status === "excluded_by_rule") return "Excluido por contrato";
+  if (status === "excluded_by_catalog") return "Excluido por catalogo";
+  if (status === "manual_review") return "Revision manual";
+  return status;
+}
+
+function finalDecisionClass(status: string) {
+  if (status === "reportable") return "ok";
+  if (status === "excluded_by_rule") return "inactive";
+  if (status === "excluded_by_catalog") return "warning";
+  if (status === "manual_review") return "warning";
+  return "inactive";
 }
 
 function localAmount(value: number, currency: string) {
@@ -611,8 +1550,16 @@ function suggestedAmount(value: number, currency: string) {
   }).format(value);
 }
 
-function amountToInput(value: number | null | undefined) {
-  return value && value !== 0 ? String(value) : "";
+function amountToInput(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === "") return "";
+  const parsed = typeof value === "number"
+    ? value
+    : Number(String(value).trim().replace(",", "."));
+  if (!Number.isFinite(parsed) || parsed === 0) return "";
+  const normalized = Number.isInteger(parsed)
+    ? String(parsed)
+    : parsed.toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+  return normalized;
 }
 
 function newBookingExpense(category = "general"): BookingExpenseForm {
@@ -690,6 +1637,18 @@ function newBookingPreSplitAdjustment(destination: "artist" | "producer" = "prod
   return {
     uid: `${Date.now()}-${Math.random()}`,
     concept: "",
+    destination,
+    amount: "",
+    recoveryAutoApply: destination === "producer",
+    notes: "",
+  };
+}
+
+function newBookingDirectCommission(destination: "salida_directa" | "incorpora_base" = "salida_directa"): BookingDirectCommissionForm {
+  return {
+    uid: `${Date.now()}-${Math.random()}`,
+    concept: "",
+    recipient: "",
     destination,
     amount: "",
     notes: "",
@@ -811,6 +1770,7 @@ function initialBookingLabForm(): BookingLabForm {
     responsible: "",
     grossAmount: "",
     collectedAmount: "",
+    venueShortfallPolicy: "deuda_boliche",
     currency: "ARS",
     fxRate: "",
     status: "borrador",
@@ -819,6 +1779,54 @@ function initialBookingLabForm(): BookingLabForm {
     directCommissions: [],
     lines: [newBookingLabLine("artista_vpo")],
     notes: "",
+  };
+}
+
+function newFinanceMovementLine(): FinanceMovementLineForm {
+  return {
+    uid: `${Date.now()}-${Math.random()}`,
+    concept: "",
+    counterparty: "",
+    paidBy: "indyana",
+    amount: "",
+    paidAmount: "",
+    dueDate: "",
+    paymentStatus: "",
+    currency: "ARS",
+    fxRate: "",
+  };
+}
+
+function initialFinanceMovementForm(): FinanceMovementForm {
+  return {
+    movementDate: new Date().toISOString().slice(0, 10),
+    artist: "",
+    businessArea: "label",
+    movementType: "gasto",
+    category: "",
+    projectName: "",
+    multipleConcepts: false,
+    concept: "",
+    counterparty: "",
+    paidBy: "indyana",
+    amount: "",
+    paidAmount: "",
+    dueDate: "",
+    paymentStatus: "",
+    currency: "ARS",
+    fxRate: "",
+    recoverable: false,
+    recoverablePercent: "0",
+    recoveryMethod: "none",
+    artistPercent: "0",
+    producerPercent: "100",
+    accountEffect: "inversion_indyana",
+    status: "pendiente_control",
+    sourceType: "manual",
+    sourceId: "",
+    proofRefs: "",
+    notes: "",
+    conceptLines: [newFinanceMovementLine()],
   };
 }
 
@@ -836,13 +1844,17 @@ function MonthSelect({ id, value, min, onChange }: MonthSelectProps) {
 }
 
 export default function Home() {
-  const demoMenuOnly = process.env.NEXT_PUBLIC_VPO_MENU_MODE === "demo";
   const [authenticated, setAuthenticated] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
   const [view, setView] = useState<View>("menu");
   const [currentUser, setCurrentUser] = useState<WebUser | null>(null);
+  const [currentUserModuleAccess, setCurrentUserModuleAccess] = useState<string[] | null>(null);
+  const [currentUserPermissions, setCurrentUserPermissions] = useState<EmployeePermission[] | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
   const [keywords, setKeywords] = useState("");
   const [startMonth, setStartMonth] = useState("");
   const [endMonth, setEndMonth] = useState("");
@@ -850,6 +1862,18 @@ export default function Home() {
   const [mode, setMode] = useState("any");
   const [rawLimit, setRawLimit] = useState("5000");
   const [statementMinTotal, setStatementMinTotal] = useState("0");
+  const [statementIncludeZeros, setStatementIncludeZeros] = useState(false);
+  const [statementReportVersion, setStatementReportVersion] = useState("legacy");
+  const [customReportOptions, setCustomReportOptions] = useState<CustomReportOptions | null>(null);
+  const [customReportTemplateKey, setCustomReportTemplateKey] = useState("los_anormales");
+  const [customReportTitle, setCustomReportTitle] = useState("Regalias Los Anormales");
+  const [customReportStartMonth, setCustomReportStartMonth] = useState("");
+  const [customReportEndMonth, setCustomReportEndMonth] = useState("2026-03");
+  const [customReportTerms, setCustomReportTerms] = useState(LOS_ANORMALES_DEFAULT_TERMS);
+  const [customReportSources, setCustomReportSources] = useState<string[]>([]);
+  const [customReportSourceAccounts, setCustomReportSourceAccounts] = useState<string[]>([]);
+  const [customReportFlags, setCustomReportFlags] = useState<Record<string, boolean>>({});
+  const [customReportLoading, setCustomReportLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [statementLoading, setStatementLoading] = useState(false);
@@ -861,6 +1885,39 @@ export default function Home() {
   const [participationPreset, setParticipationPreset] = useState("last_year");
   const [participationStartMonth, setParticipationStartMonth] = useState("");
   const [participationEndMonth, setParticipationEndMonth] = useState("");
+  const [sourceMonitor, setSourceMonitor] = useState<SourceMonitorData | null>(null);
+  const [sourceMonitorLoading, setSourceMonitorLoading] = useState(false);
+  const [sourceMonitorProcessingId, setSourceMonitorProcessingId] = useState("");
+  const [sourceMonitorLastProcess, setSourceMonitorLastProcess] = useState<SourceMonitorProcessResult | null>(null);
+  const [sourceMonitorPublishing, setSourceMonitorPublishing] = useState(false);
+  const [sourceMonitorLastPublish, setSourceMonitorLastPublish] = useState<SourceMonitorPublishResult | null>(null);
+  const [catalogData, setCatalogData] = useState<CatalogData | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogSource, setCatalogSource] = useState("");
+  const [catalogAccount, setCatalogAccount] = useState("");
+  const [catalogArtist, setCatalogArtist] = useState("");
+  const [catalogKeyword, setCatalogKeyword] = useState("");
+  const [catalogLabel, setCatalogLabel] = useState("");
+  const [catalogStartMonth, setCatalogStartMonth] = useState("");
+  const [catalogEndMonth, setCatalogEndMonth] = useState("");
+  const [catalogStatus, setCatalogStatus] = useState<"active" | "inactive" | "all">("active");
+  const [catalogOffset, setCatalogOffset] = useState(0);
+  const [catalogLabelEditKey, setCatalogLabelEditKey] = useState("");
+  const [catalogLabelDraft, setCatalogLabelDraft] = useState("");
+  const [catalogLabelSaving, setCatalogLabelSaving] = useState("");
+  const catalogLimit = 50;
+  const [digitalIncome, setDigitalIncome] = useState<DigitalIncomeData | null>(null);
+  const [digitalIncomeLoading, setDigitalIncomeLoading] = useState(false);
+  const [digitalIncomeArtistKeyword, setDigitalIncomeArtistKeyword] = useState("");
+  const [digitalIncomeSource, setDigitalIncomeSource] = useState("");
+  const [digitalIncomeAccount, setDigitalIncomeAccount] = useState("");
+  const [digitalIncomeStartMonth, setDigitalIncomeStartMonth] = useState("");
+  const [digitalIncomeEndMonth, setDigitalIncomeEndMonth] = useState("");
+  const digitalIncomeLimit = 500;
+  const [distributorConfig, setDistributorConfig] = useState<DistributorConfigData | null>(null);
+  const [distributorConfigLoading, setDistributorConfigLoading] = useState(false);
+  const [distributorConfigSource, setDistributorConfigSource] = useState("");
+  const [distributorConfigAccountId, setDistributorConfigAccountId] = useState("");
   const [bookingLoading, setBookingLoading] = useState(false);
   const [bookingItems, setBookingItems] = useState<BookingShow[]>([]);
   const [bookingSearch, setBookingSearch] = useState("");
@@ -871,7 +1928,19 @@ export default function Home() {
   const [bookingArtistSummary, setBookingArtistSummary] = useState<BookingArtistSummary | null>(null);
   const [bookingArtistSummaryArtist, setBookingArtistSummaryArtist] = useState("");
   const [bookingArtistSummaryLoading, setBookingArtistSummaryLoading] = useState(false);
-  const [bookingArtistSummaryLatestOnly, setBookingArtistSummaryLatestOnly] = useState(false);
+  const [bookingArtistSummaryLatestOnly, setBookingArtistSummaryLatestOnly] = useState(true);
+  const [artistFinance, setArtistFinance] = useState<ArtistFinanceSummary | null>(null);
+  const [artistFinanceArtist, setArtistFinanceArtist] = useState("");
+  const [artistFinanceView, setArtistFinanceView] = useState<"summary" | "booking" | "projects" | "account" | "technical">("summary");
+  const [artistFinanceProjectFilter, setArtistFinanceProjectFilter] = useState("");
+  const [artistFinanceLoading, setArtistFinanceLoading] = useState(false);
+  const [financeMovements, setFinanceMovements] = useState<FinanceMovementData | null>(null);
+  const [financeMovementLoading, setFinanceMovementLoading] = useState(false);
+  const [financeMovementEditingId, setFinanceMovementEditingId] = useState<number | null>(null);
+  const [financeMovementArtistFilter, setFinanceMovementArtistFilter] = useState("");
+  const [financeMovementProjectFilter, setFinanceMovementProjectFilter] = useState("");
+  const [financeMovementStatusFilter, setFinanceMovementStatusFilter] = useState("");
+  const [financeMovementForm, setFinanceMovementForm] = useState<FinanceMovementForm>(() => initialFinanceMovementForm());
   const [artistRecords, setArtistRecords] = useState<BookingArtistRecord[]>([]);
   const [artistRecordSearch, setArtistRecordSearch] = useState("");
   const [artistRecordLoading, setArtistRecordLoading] = useState(false);
@@ -883,6 +1952,29 @@ export default function Home() {
     phone: "",
     email: "",
     address: "",
+    notes: "",
+    active: true,
+  });
+  const [employeeRecords, setEmployeeRecords] = useState<EmployeeRecord[]>([]);
+  const [employeeFunctionOptions, setEmployeeFunctionOptions] = useState<string[]>([]);
+  const [employeeModules, setEmployeeModules] = useState<EmployeeModule[]>([]);
+  const [employeeSearch, setEmployeeSearch] = useState("");
+  const [employeeLoading, setEmployeeLoading] = useState(false);
+  const [employeeEditingId, setEmployeeEditingId] = useState<number | null>(null);
+  const [employeeForm, setEmployeeForm] = useState<EmployeeForm>({
+    displayName: "",
+    legalName: "",
+    cuit: "",
+    phone: "",
+    email: "",
+    address: "",
+    functions: [],
+    username: "",
+    newPassword: "",
+    mustChangePassword: true,
+    userRole: "viewer",
+    userActive: true,
+    permissions: [],
     notes: "",
     active: true,
   });
@@ -935,10 +2027,12 @@ export default function Home() {
     cachetAmount: "",
     venuePaymentIssue: false,
     venueCollectedAmount: "",
+    venueShortfallPolicy: "deuda_boliche",
     venuePaymentNotes: "",
     showExpenses: [],
     cashMovements: [],
     preSplitAdjustments: [],
+    directCommissions: [],
     externalShares: [],
     artistPaidAmount: "",
     producerReceivedAmount: "",
@@ -966,16 +2060,15 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (authenticated && view === "participation" && !participation) {
-      const cached = loadParticipationCache();
-      if (cached) {
-        setParticipation(cached.data);
-        setParticipationPreset(cached.preset);
-        setParticipationStartMonth(cached.startMonth);
-        setParticipationEndMonth(cached.endMonth);
-        return;
-      }
+    if (authenticated && currentUser) {
+      loadCurrentUserPermissions();
+    } else {
+      setCurrentUserModuleAccess(null);
+    }
+  }, [authenticated, currentUser?.username, currentUser?.role]);
 
+  useEffect(() => {
+    if (authenticated && view === "participation" && !participation) {
       loadParticipation(false);
     }
   }, [authenticated, view, participation]);
@@ -988,12 +2081,70 @@ export default function Home() {
   }, [authenticated, view]);
 
   useEffect(() => {
+    if (authenticated && view === "source-monitor") {
+      loadSourceMonitor();
+    }
+  }, [authenticated, view]);
+
+  useEffect(() => {
+    if (authenticated && view === "catalog") {
+      loadCatalog();
+    }
+  }, [authenticated, view, catalogSource, catalogAccount, catalogArtist, catalogStatus, catalogStartMonth, catalogEndMonth, catalogOffset]);
+
+  useEffect(() => {
+    if (authenticated && view === "digital-income") {
+      loadDigitalIncome();
+    }
+  }, [authenticated, view]);
+
+  useEffect(() => {
+    if (authenticated && view === "distributor-config" && !distributorConfig) {
+      loadDistributorConfig();
+    }
+  }, [authenticated, view, distributorConfig]);
+
+  useEffect(() => {
+    setCatalogOffset(0);
+  }, [catalogSource, catalogAccount, catalogArtist, catalogKeyword, catalogLabel, catalogStatus, catalogStartMonth, catalogEndMonth]);
+
+  useEffect(() => {
+    if (authenticated && view === "custom-reports" && !customReportOptions) {
+      loadCustomReportOptions();
+    }
+  }, [authenticated, view, customReportOptions]);
+
+  useEffect(() => {
+    if (authenticated && view === "custom-reports" && customReportOptions) {
+      saveCustomReportState();
+    }
+  }, [
+    authenticated,
+    view,
+    customReportOptions,
+    customReportTemplateKey,
+    customReportTitle,
+    customReportStartMonth,
+    customReportEndMonth,
+    customReportTerms,
+    customReportSourceAccounts,
+    customReportFlags,
+  ]);
+
+  useEffect(() => {
     setBookingVisibleCount(5);
   }, [bookingSearch]);
 
   useEffect(() => {
     if (authenticated && view === "artists") {
       loadArtistRecords();
+    }
+  }, [authenticated, view]);
+
+  useEffect(() => {
+    if (authenticated && view === "employees") {
+      loadBookingArtists();
+      loadEmployeeRecords();
     }
   }, [authenticated, view]);
 
@@ -1028,6 +2179,26 @@ export default function Home() {
       loadBookingArtistSummary();
     }
   }, [authenticated, view, bookingArtistSummaryArtist]);
+
+  useEffect(() => {
+    if (authenticated && view === "artist-finance") {
+      loadArtistFinance();
+    }
+  }, [authenticated, view, artistFinanceArtist]);
+
+  useEffect(() => {
+    if (authenticated && view === "finance-movements") {
+      loadFinanceMovements();
+    }
+  }, [authenticated, view, financeMovementArtistFilter, financeMovementProjectFilter, financeMovementStatusFilter]);
+
+  const digitalIncomeAccountOptions = useMemo(() => {
+    if (!digitalIncome) return [];
+    if (!digitalIncomeSource) return digitalIncome.options.accounts;
+    return digitalIncome.options.source_accounts
+      .filter((item) => item.source === digitalIncomeSource)
+      .map((item) => item.account);
+  }, [digitalIncome, digitalIncomeSource]);
 
   const pieStyle = useMemo(() => {
     if (!participation?.items.length) return { background: "#e4e7ec" };
@@ -1067,6 +2238,19 @@ export default function Home() {
     }, { total: 0, artist: 0, producer: 0 });
   }, [bookingForm.preSplitAdjustments, bookingFxRate]);
 
+  const bookingDirectCommissionSummary = useMemo(() => {
+    return bookingForm.directCommissions.reduce((totals, commission) => {
+      const amount = parseAmountInput(commission.amount, bookingFxRate);
+      totals.total += amount;
+      if (commission.destination === "incorpora_base") {
+        totals.incorporated += amount;
+      } else {
+        totals.outgoing += amount;
+      }
+      return totals;
+    }, { total: 0, outgoing: 0, incorporated: 0 });
+  }, [bookingForm.directCommissions, bookingFxRate]);
+
   const bookingCashSummary = useMemo(() => {
     return bookingForm.cashMovements.reduce((totals, movement) => {
       const amount = parseAmountInput(movement.amount, bookingFxRate);
@@ -1084,13 +2268,17 @@ export default function Home() {
     if (!bookingForm.venuePaymentIssue) {
       return parseAmountInput(bookingForm.cachetAmount, bookingFxRate);
     }
+    if (bookingForm.venueShortfallPolicy === "deuda_boliche") {
+      return parseAmountInput(bookingForm.cachetAmount, bookingFxRate);
+    }
     return parseAmountInput(bookingForm.venueCollectedAmount, bookingFxRate);
-  }, [bookingForm.cachetAmount, bookingForm.venueCollectedAmount, bookingForm.venuePaymentIssue, bookingFxRate]);
+  }, [bookingForm.cachetAmount, bookingForm.venueCollectedAmount, bookingForm.venuePaymentIssue, bookingForm.venueShortfallPolicy, bookingFxRate]);
 
   const bookingVenueBalance = useMemo(() => {
     if (!bookingForm.venuePaymentIssue) return 0;
+    if (bookingForm.venueShortfallPolicy === "ajustar_cachet") return 0;
     return Math.max(0, parseAmountInput(bookingForm.cachetAmount, bookingFxRate) - parseAmountInput(bookingForm.venueCollectedAmount, bookingFxRate));
-  }, [bookingForm.cachetAmount, bookingForm.venueCollectedAmount, bookingForm.venuePaymentIssue, bookingFxRate]);
+  }, [bookingForm.cachetAmount, bookingForm.venueCollectedAmount, bookingForm.venuePaymentIssue, bookingForm.venueShortfallPolicy, bookingFxRate]);
 
   const bookingSuggestion = useMemo(() => {
     const cachet = bookingEffectiveCachet;
@@ -1099,7 +2287,7 @@ export default function Home() {
     const producerPercent = bookingForm.producerPercent
       ? parseMoneyInput(bookingForm.producerPercent)
       : Math.max(0, 100 - artistPercent);
-    const net = cachet - expenses;
+    const net = cachet - expenses - bookingDirectCommissionSummary.total + bookingDirectCommissionSummary.incorporated;
     const splitBase = net - bookingPreSplitSummary.total;
 
     return {
@@ -1111,6 +2299,8 @@ export default function Home() {
   }, [
     bookingEffectiveCachet,
     bookingExpenseTotal,
+    bookingDirectCommissionSummary.total,
+    bookingDirectCommissionSummary.incorporated,
     bookingPreSplitSummary.total,
     bookingForm.artistPercent,
     bookingForm.producerPercent,
@@ -1241,6 +2431,62 @@ export default function Home() {
     ].some((value) => String(value || "").toLowerCase().includes(query)));
   }, [artistRecords, artistRecordSearch]);
 
+  const filteredEmployeeRecords = useMemo(() => {
+    const query = employeeSearch.trim().toLowerCase();
+    if (!query) return employeeRecords;
+
+    return employeeRecords.filter((item) => [
+      item.display_name,
+      item.legal_name,
+      item.cuit,
+      item.phone,
+      item.email,
+      item.address,
+      item.notes,
+      item.functions.join(" "),
+      item.active ? "activo" : "inactivo",
+    ].some((value) => String(value || "").toLowerCase().includes(query)));
+  }, [employeeRecords, employeeSearch]);
+
+  function canShowMenuView(targetView: View) {
+    if (targetView === "menu") return true;
+    if (currentUser?.role === "admin") return true;
+
+    const moduleKey = VIEW_MODULE_KEYS[targetView];
+    if (!moduleKey) return false;
+
+    const allowed = currentUserModuleAccess ?? [];
+    return allowed.includes("*") || allowed.includes(moduleKey);
+  }
+
+  function currentModulePermission(moduleKey: string) {
+    if (currentUser?.role === "admin") {
+      return {
+        module_key: moduleKey,
+        can_access: true,
+        can_create: true,
+        can_view_history: true,
+        can_edit: true,
+        can_approve: true,
+        scope: [{ scope_type: "all", scope_ref: "*" }],
+        notes: null,
+      } as EmployeePermission;
+    }
+    return (currentUserPermissions || []).find((permission) => permission.module_key === moduleKey) || null;
+  }
+
+  function canCreateModule(moduleKey: string) {
+    return Boolean(currentModulePermission(moduleKey)?.can_create);
+  }
+
+  function canEditModule(moduleKey: string) {
+    return Boolean(currentModulePermission(moduleKey)?.can_edit);
+  }
+
+  function canApproveModule(moduleKey: string) {
+    return Boolean(currentModulePermission(moduleKey)?.can_approve);
+  }
+
   const caserioPreview = useMemo(() => {
     const gross = parseAmountInput(caserioForm.grossAmount, caserioFxRate);
     const linesTotal = caserioForm.lines.reduce((total, line) => total + parseAmountInput(line.amount, caserioFxRate), 0);
@@ -1338,6 +2584,7 @@ export default function Home() {
     const collected = bookingLabForm.collectedAmount
       ? parseAmountInput(bookingLabForm.collectedAmount, bookingLabFxRate)
       : gross;
+    const effectiveGross = bookingLabForm.venueShortfallPolicy === "ajustar_cachet" ? collected : gross;
     const eventExpenses = bookingLabForm.expenses.reduce((total, expense) => total + parseAmountInput(expense.amount, bookingLabFxRate), 0);
     const directCommissions = bookingLabForm.directCommissions.reduce((total, commission) => total + parseAmountInput(commission.amount, bookingLabFxRate), 0);
     const incorporatedCommissionsByArtist = bookingLabForm.directCommissions
@@ -1349,7 +2596,7 @@ export default function Home() {
         return items;
       }, {});
     const incorporatedCommissions = Object.values(incorporatedCommissionsByArtist).reduce((total, amount) => total + amount, 0);
-    const eventBase = collected - eventExpenses - directCommissions;
+    const eventBase = effectiveGross - eventExpenses - directCommissions;
     const linePool = eventBase + incorporatedCommissions;
     const equalLines = bookingLabForm.lines.filter((line) => line.lineType === "artista_vpo" && line.allocationMode === "equal").length;
     const equalShare = equalLines > 0 ? eventBase / equalLines : 0;
@@ -1468,6 +2715,7 @@ export default function Home() {
     return {
       gross,
       collected,
+      effectiveGross,
       eventExpenses,
       directCommissions,
       incorporatedCommissions,
@@ -1487,7 +2735,7 @@ export default function Home() {
       artistBalance,
       producerBalance,
       eventCashToSettle,
-      venueBalance: gross - collected,
+      venueBalance: bookingLabForm.venueShortfallPolicy === "deuda_boliche" ? gross - collected : 0,
       linePreviews,
     };
   }, [bookingLabForm, bookingLabFxRate]);
@@ -1559,10 +2807,42 @@ export default function Home() {
     setAuthenticated(false);
     setCurrentUser(null);
     setUsername("");
+    setPassword("");
+    setCurrentPassword("");
+    setNewPassword("");
+    setNewPasswordConfirm("");
     setView("menu");
     setMessage(null);
     setLastFile("");
     setLastSheetUrl("");
+  }
+
+  async function changeOwnPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage(null);
+    if (newPassword !== newPasswordConfirm) {
+      setMessage({ type: "error", text: "La confirmacion no coincide." });
+      return;
+    }
+    setLoading(true);
+    const response = await fetch("/api/change-password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({ error: "No se pudo cambiar la contrasena." }));
+      setMessage({ type: "error", text: data.error || "No se pudo cambiar la contrasena." });
+      setLoading(false);
+      return;
+    }
+    const data = await response.json();
+    setCurrentUser(data.user || (currentUser ? { ...currentUser, mustChangePassword: false } : null));
+    setCurrentPassword("");
+    setNewPassword("");
+    setNewPasswordConfirm("");
+    setMessage({ type: "ok", text: "Contrasena actualizada correctamente." });
+    setLoading(false);
   }
 
   function buildPayload(output: "excel" | "google_sheet") {
@@ -1656,6 +2936,8 @@ export default function Home() {
       body: JSON.stringify({
         refresh_cache: false,
         min_artist_total_usd: Number(statementMinTotal) || 0,
+        include_zero_total_artists: statementIncludeZeros,
+        report_version: statementReportVersion,
       }),
     });
 
@@ -1674,34 +2956,207 @@ export default function Home() {
     setStatementLoading(false);
   }
 
-  function loadParticipationCache(): ParticipationCache | null {
-    try {
-      const raw = window.localStorage.getItem(PARTICIPATION_CACHE_KEY);
-      if (!raw) return null;
+  async function loadCustomReportOptions() {
+    const response = await fetch("/api/custom-reports", { cache: "no-store" });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({ error: "No se pudieron cargar los reportes personalizados." }));
+      setMessage({ type: "error", text: data.error || "No se pudieron cargar los reportes personalizados." });
+      return;
+    }
 
-      const cached = JSON.parse(raw) as ParticipationCache;
-      if (!cached?.data?.items) return null;
-
-      return cached;
-    } catch {
-      return null;
+    const data = await response.json() as CustomReportOptions;
+    setCustomReportOptions(data);
+    const allAccountKeys = (data.source_accounts || []).map(customReportSourceAccountKey);
+    if (data.sources?.length) {
+      setCustomReportSources(data.sources);
+    }
+    const template = data.templates?.find((item) => item.key === "los_anormales") || data.templates?.[0];
+    if (template) {
+      applyCustomReportTemplateState(template.key, template, allAccountKeys);
     }
   }
 
-  function saveParticipationCache(data: ParticipationData) {
+  function readCustomReportStates(): Record<string, CustomReportSavedState> {
+    if (typeof window === "undefined") return {};
     try {
-      window.localStorage.setItem(
-        PARTICIPATION_CACHE_KEY,
-        JSON.stringify({
-          data,
-          preset: participationPreset,
-          startMonth: participationStartMonth,
-          endMonth: participationEndMonth,
-        }),
-      );
+      const raw = window.localStorage.getItem(CUSTOM_REPORT_STATE_KEY);
+      return raw ? JSON.parse(raw) : {};
     } catch {
-      // Si el navegador bloquea localStorage, la torta sigue funcionando sin cache.
+      return {};
     }
+  }
+
+  function saveCustomReportState(key = customReportTemplateKey) {
+    if (typeof window === "undefined" || !key) return;
+    try {
+      const states = readCustomReportStates();
+      states[key] = {
+        title: customReportTitle,
+        startMonth: customReportStartMonth,
+        endMonth: customReportEndMonth,
+        terms: customReportTerms,
+        sourceAccounts: customReportSourceAccounts,
+        flags: customReportFlags,
+      };
+      window.localStorage.setItem(CUSTOM_REPORT_STATE_KEY, JSON.stringify(states));
+    } catch {
+      // El reporte sigue funcionando aunque el navegador bloquee localStorage.
+    }
+  }
+
+  function applyCustomReportTemplateState(key: string, template: CustomReportTemplate, allAccountKeys?: string[]) {
+    const saved = readCustomReportStates()[key];
+    const defaultFlags = Object.fromEntries((template.options || []).map((option) => [option.key, Boolean(option.default)]));
+    setCustomReportTemplateKey(key);
+    setCustomReportTitle(saved?.title || template.title);
+    setCustomReportStartMonth(saved?.startMonth || "");
+    setCustomReportEndMonth(saved?.endMonth || template.default_end_month || "2026-03");
+    setCustomReportTerms(saved?.terms || template.terms.join("\n"));
+    setCustomReportSourceAccounts(saved?.sourceAccounts?.length ? saved.sourceAccounts : (allAccountKeys || (customReportOptions?.source_accounts || []).map(customReportSourceAccountKey)));
+    setCustomReportFlags(saved?.flags || defaultFlags);
+  }
+
+  function selectCustomReportTemplate(key: string) {
+    if (key === customReportTemplateKey) return;
+    saveCustomReportState();
+    const template = customReportOptions?.templates.find((item) => item.key === key);
+    if (template) {
+      applyCustomReportTemplateState(key, template);
+      setLastFile("");
+      setMessage(null);
+    }
+  }
+
+  function customReportTermList() {
+    return customReportTerms
+      .split(/\r?\n|;/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  function currentCustomReportTemplate() {
+    return customReportOptions?.templates.find((template) => template.key === customReportTemplateKey);
+  }
+
+  function customReportRequiresTerms() {
+    return currentCustomReportTemplate()?.requires_terms !== false;
+  }
+
+  function customReportSupportsSources() {
+    return currentCustomReportTemplate()?.supports_sources !== false;
+  }
+
+  function customReportSupportsStartMonth() {
+    return currentCustomReportTemplate()?.supports_start_month !== false;
+  }
+
+  function setCustomReportFlag(key: string, value: boolean) {
+    setCustomReportFlags((current) => ({ ...current, [key]: value }));
+  }
+
+  function customReportSourceAccountKey(item: CustomReportSourceAccount) {
+    return `${item.source}||${item.account}`;
+  }
+
+  function customReportAccountPayload() {
+    return customReportSourceAccounts
+      .map((key) => {
+        const [source, account] = key.split("||");
+        return { source, account };
+      })
+      .filter((item) => item.source && item.account);
+  }
+
+  function customReportAccountsForSource(source: string) {
+    return (customReportOptions?.source_accounts || []).filter((item) => item.source === source);
+  }
+
+  function customReportSourceFullySelected(source: string) {
+    const accounts = customReportAccountsForSource(source);
+    return accounts.length > 0 && accounts.every((item) => customReportSourceAccounts.includes(customReportSourceAccountKey(item)));
+  }
+
+  function toggleCustomReportSource(source: string) {
+    const accountKeys = customReportAccountsForSource(source).map(customReportSourceAccountKey);
+    if (!accountKeys.length) return;
+    const allSelected = accountKeys.every((key) => customReportSourceAccounts.includes(key));
+    setCustomReportSourceAccounts((current) => (
+      allSelected
+        ? current.filter((key) => !accountKeys.includes(key))
+        : Array.from(new Set([...current, ...accountKeys]))
+    ));
+  }
+
+  function toggleCustomReportSourceAccount(key: string) {
+    setCustomReportSourceAccounts((current) => (
+      current.includes(key)
+        ? current.filter((item) => item !== key)
+        : [...current, key]
+    ));
+  }
+
+  function selectAllCustomReportSources() {
+    setCustomReportSources(customReportOptions?.sources || []);
+    setCustomReportSourceAccounts((customReportOptions?.source_accounts || []).map(customReportSourceAccountKey));
+  }
+
+  function clearCustomReportSources() {
+    setCustomReportSources([]);
+    setCustomReportSourceAccounts([]);
+  }
+
+  async function generateCustomReport(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage(null);
+    setLastFile("");
+
+    if (customReportSupportsStartMonth() && customReportStartMonth && customReportEndMonth && customReportStartMonth > customReportEndMonth) {
+      setMessage({ type: "error", text: "El periodo desde no puede ser mayor que hasta." });
+      return;
+    }
+
+    const terms = customReportTermList();
+    if (customReportRequiresTerms() && terms.length === 0) {
+      setMessage({ type: "error", text: "La lista editable no puede quedar vacia." });
+      return;
+    }
+    if (customReportSupportsSources() && customReportOptions?.source_accounts?.length && customReportSourceAccounts.length === 0) {
+      setMessage({ type: "error", text: "Selecciona al menos una distribuidora/cuenta." });
+      return;
+    }
+
+    const selectedAccounts = customReportSupportsSources() ? customReportAccountPayload() : [];
+    setCustomReportLoading(true);
+    const response = await fetch("/api/custom-reports", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        template_key: customReportTemplateKey,
+        report_title: customReportTitle || "Regalias Los Anormales",
+        terms,
+        start_month: customReportSupportsStartMonth() ? (customReportStartMonth || null) : null,
+        end_month: customReportEndMonth || null,
+        sources: Array.from(new Set(selectedAccounts.map((item) => item.source))),
+        source_accounts: selectedAccounts,
+        refresh_cache: false,
+        hide_zero_amounts: Boolean(customReportFlags.hide_zero_amounts),
+        exclude_related_videos: Boolean(customReportFlags.exclude_related_videos),
+      }),
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({ error: "No se pudo generar el reporte personalizado." }));
+      setMessage({ type: "error", text: data.error || "No se pudo generar el reporte personalizado." });
+      setCustomReportLoading(false);
+      return;
+    }
+
+    const blob = await response.blob();
+    const filename = filenameFromDisposition(response.headers.get("content-disposition"), "reporte_personalizado.xlsx");
+    downloadBlob(blob, filename);
+    setLastFile(filename);
+    setMessage({ type: "ok", text: "Reporte personalizado generado correctamente." });
+    setCustomReportLoading(false);
   }
 
   async function loadParticipation(refresh: boolean) {
@@ -1739,7 +3194,6 @@ export default function Home() {
 
     const data = await response.json();
     setParticipation(data);
-    saveParticipationCache(data);
     setParticipationLoading(false);
   }
 
@@ -1836,8 +3290,40 @@ export default function Home() {
   ) {
     setBookingForm((current) => ({
       ...current,
-      preSplitAdjustments: current.preSplitAdjustments.map((adjustment) => (
-        adjustment.uid === uid ? { ...adjustment, [key]: value } : adjustment
+      preSplitAdjustments: current.preSplitAdjustments.map((adjustment) => {
+        if (adjustment.uid !== uid) return adjustment;
+        const next = { ...adjustment, [key]: value };
+        if (key === "destination" && value === "artist") {
+          next.recoveryAutoApply = false;
+        }
+        return next;
+      }),
+    }));
+  }
+
+  function addBookingDirectCommission(destination: "salida_directa" | "incorpora_base" = "salida_directa") {
+    setBookingForm((current) => ({
+      ...current,
+      directCommissions: [...current.directCommissions, newBookingDirectCommission(destination)],
+    }));
+  }
+
+  function removeBookingDirectCommission(uid: string) {
+    setBookingForm((current) => ({
+      ...current,
+      directCommissions: current.directCommissions.filter((commission) => commission.uid !== uid),
+    }));
+  }
+
+  function updateBookingDirectCommissionField<K extends keyof BookingDirectCommissionForm>(
+    uid: string,
+    key: K,
+    value: BookingDirectCommissionForm[K],
+  ) {
+    setBookingForm((current) => ({
+      ...current,
+      directCommissions: current.directCommissions.map((commission) => (
+        commission.uid === uid ? { ...commission, [key]: value } : commission
       )),
     }));
   }
@@ -1953,6 +3439,226 @@ export default function Home() {
     setBookingVisibleCount(5);
   }
 
+  async function loadSourceMonitor() {
+    setSourceMonitorLoading(true);
+    try {
+      const response = await fetch("/api/source-monitor", { cache: "no-store" });
+      if (response.ok) {
+        const data = await response.json();
+        setSourceMonitor(data);
+      } else {
+        setMessage({ type: "error", text: "No se pudo cargar el control de distribuidoras." });
+      }
+    } catch {
+      setMessage({ type: "error", text: "No se pudo cargar el control de distribuidoras." });
+    } finally {
+      setSourceMonitorLoading(false);
+    }
+  }
+
+  async function loadCatalog(nextOffset = catalogOffset) {
+    setCatalogLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (catalogSource) params.set("source", catalogSource);
+      if (catalogAccount) params.set("account", catalogAccount);
+      if (catalogArtist) params.set("artist", catalogArtist);
+      if (catalogKeyword.trim()) params.set("keyword", catalogKeyword.trim());
+      if (catalogLabel.trim()) params.set("label", catalogLabel.trim());
+      if (catalogStartMonth) params.set("start_month", catalogStartMonth);
+      if (catalogEndMonth) params.set("end_month", catalogEndMonth);
+      params.set("status", catalogStatus);
+      params.set("limit", String(catalogLimit));
+      params.set("offset", String(nextOffset));
+
+      const response = await fetch(`/api/catalog?${params.toString()}`, { cache: "no-store" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({ error: "No se pudo cargar el catalogo." }));
+        setMessage({ type: "error", text: payload.error || "No se pudo cargar el catalogo." });
+        return;
+      }
+      const data = await response.json();
+      setCatalogData(data);
+      setCatalogOffset(nextOffset);
+    } catch {
+      setMessage({ type: "error", text: "No se pudo cargar el catalogo." });
+    } finally {
+      setCatalogLoading(false);
+    }
+  }
+
+  async function loadDigitalIncome() {
+    setDigitalIncomeLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (digitalIncomeArtistKeyword.trim()) params.set("artist_keyword", digitalIncomeArtistKeyword.trim());
+      if (digitalIncomeSource) params.set("source", digitalIncomeSource);
+      if (digitalIncomeAccount) params.set("account", digitalIncomeAccount);
+      if (digitalIncomeStartMonth) params.set("start_month", digitalIncomeStartMonth);
+      if (digitalIncomeEndMonth) params.set("end_month", digitalIncomeEndMonth);
+      params.set("limit", String(digitalIncomeLimit));
+
+      const response = await fetch(`/api/digital-income?${params.toString()}`, { cache: "no-store" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({ error: "No se pudo cargar ingresos digitales." }));
+        setMessage({ type: "error", text: payload.error || "No se pudo cargar ingresos digitales." });
+        return;
+      }
+      const data = await response.json();
+      setDigitalIncome(data);
+    } catch {
+      setMessage({ type: "error", text: "No se pudo cargar ingresos digitales." });
+    } finally {
+      setDigitalIncomeLoading(false);
+    }
+  }
+
+  async function loadDistributorConfig() {
+    setDistributorConfigLoading(true);
+    try {
+      const response = await fetch("/api/distributor-config", { cache: "no-store" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({ error: "No se pudo cargar el configurador." }));
+        setMessage({ type: "error", text: payload.error || "No se pudo cargar el configurador." });
+        return;
+      }
+      const data = await response.json();
+      setDistributorConfig(data);
+      if (!distributorConfigAccountId && data.accounts?.length) {
+        setDistributorConfigAccountId(data.accounts[0].policy_id);
+      }
+    } catch {
+      setMessage({ type: "error", text: "No se pudo cargar el configurador." });
+    } finally {
+      setDistributorConfigLoading(false);
+    }
+  }
+
+  async function updateCatalogStatus(item: CatalogItem, active: boolean) {
+    const response = await fetch("/api/catalog", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        catalog_key: item.catalog_key,
+        active,
+        include_in_reports: active,
+        business_status: active ? "vpo_catalog" : "inactive",
+        notes: active ? "" : "Excluido manualmente desde Catalogo General.",
+      }),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({ error: "No se pudo actualizar el catalogo." }));
+      setMessage({ type: "error", text: payload.error || "No se pudo actualizar el catalogo." });
+      return;
+    }
+    setMessage({ type: "ok", text: active ? "Tema marcado como activo." : "Tema marcado como inactivo." });
+    await loadCatalog(catalogOffset);
+  }
+
+  async function updateCatalogLabel(item: CatalogItem) {
+    if (!currentUser?.canEdit) return;
+    setCatalogLabelSaving(item.catalog_key);
+    const response = await fetch("/api/catalog", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        catalog_key: item.catalog_key,
+        active: item.active,
+        include_in_reports: item.include_in_reports,
+        business_status: item.catalog_business_status || (item.active ? "vpo_catalog" : "inactive"),
+        notes: item.status_notes || "",
+        label_normalized_override: catalogLabelDraft.trim() || null,
+      }),
+    });
+    setCatalogLabelSaving("");
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({ error: "No se pudo actualizar el label." }));
+      setMessage({ type: "error", text: payload.error || "No se pudo actualizar el label." });
+      return;
+    }
+    setCatalogLabelEditKey("");
+    setCatalogLabelDraft("");
+    setMessage({ type: "ok", text: "Label normalizado actualizado." });
+    await loadCatalog(catalogOffset);
+  }
+
+  async function updateSourceMonitorItem(id: string, body: Partial<SourceMonitorItem>) {
+    setSourceMonitorLoading(true);
+    try {
+      const response = await fetch(`/api/source-monitor?id=${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        setMessage({ type: "error", text: "No se pudo actualizar el control de la distribuidora." });
+        return;
+      }
+      await loadSourceMonitor();
+    } catch {
+      setMessage({ type: "error", text: "No se pudo actualizar el control de la distribuidora." });
+    } finally {
+      setSourceMonitorLoading(false);
+    }
+  }
+
+  async function processSourceMonitorItem(id: string) {
+    setSourceMonitorProcessingId(id);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/source-monitor?id=${encodeURIComponent(id)}&action=process`, {
+        method: "POST",
+      });
+      if (!response.ok) {
+        let text = "No se pudo procesar la distribuidora.";
+        try {
+          const payload = await response.json();
+          text = payload.error || text;
+        } catch {
+          // keep generic message
+        }
+        setMessage({ type: "error", text });
+        return;
+      }
+      const data = await response.json();
+      setSourceMonitorLastProcess(data);
+      await loadSourceMonitor();
+      setMessage({ type: "ok", text: "Pipeline nuevo procesado localmente. Revisa el resumen antes de publicar a cloud." });
+    } catch {
+      setMessage({ type: "error", text: "No se pudo procesar la distribuidora." });
+    } finally {
+      setSourceMonitorProcessingId("");
+    }
+  }
+
+  async function publishSourceMonitorMarts() {
+    setSourceMonitorPublishing(true);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/source-monitor?action=publish", {
+        method: "POST",
+      });
+      if (!response.ok) {
+        let text = "No se pudieron publicar los marts a cloud.";
+        try {
+          const payload = await response.json();
+          text = payload.error || text;
+        } catch {
+          // keep generic message
+        }
+        setMessage({ type: "error", text });
+        return;
+      }
+      const data = await response.json();
+      setSourceMonitorLastPublish(data);
+      setMessage({ type: "ok", text: "Marts publicados a cloud. La web online puede usar estos datos." });
+    } catch {
+      setMessage({ type: "error", text: "No se pudieron publicar los marts a cloud." });
+    } finally {
+      setSourceMonitorPublishing(false);
+    }
+  }
+
   async function loadBookingSummary() {
     setBookingSummaryLoading(true);
     const response = await fetch("/api/booking/summary", { cache: "no-store" });
@@ -1978,6 +3684,307 @@ export default function Home() {
     setBookingArtistSummaryLoading(false);
   }
 
+  async function loadArtistFinance() {
+    setArtistFinanceLoading(true);
+    const params = new URLSearchParams();
+    if (artistFinanceArtist) params.set("artist", artistFinanceArtist);
+    const response = await fetch(`/api/artist-finance${params.toString() ? `?${params.toString()}` : ""}`, { cache: "no-store" });
+    if (response.ok) {
+      const data = await response.json();
+      setArtistFinance(data);
+      if (!artistFinanceArtist && data.artists?.length === 1) {
+        setArtistFinanceArtist(data.artists[0]);
+      }
+    }
+    setArtistFinanceLoading(false);
+  }
+
+  async function loadFinanceMovements() {
+    setFinanceMovementLoading(true);
+    const params = new URLSearchParams();
+    if (financeMovementArtistFilter) params.set("artist", financeMovementArtistFilter);
+    if (financeMovementProjectFilter) params.set("project", financeMovementProjectFilter);
+    if (financeMovementStatusFilter) params.set("status", financeMovementStatusFilter);
+    const response = await fetch(`/api/finance/movements${params.toString() ? `?${params.toString()}` : ""}`, { cache: "no-store" });
+    if (response.ok) {
+      const data = await response.json();
+      setFinanceMovements(data);
+    } else {
+      const data = await response.json().catch(() => ({}));
+      setMessage({ type: "error", text: data.error || "No se pudieron cargar los movimientos financieros." });
+    }
+    setFinanceMovementLoading(false);
+  }
+
+  function updateFinanceMovementField<K extends keyof FinanceMovementForm>(key: K, value: FinanceMovementForm[K]) {
+    setFinanceMovementForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function setFinanceMovementMultipleConcepts(enabled: boolean) {
+    setFinanceMovementForm((current) => {
+      if (!enabled) {
+        const firstLine = current.conceptLines[0] || newFinanceMovementLine();
+        return {
+          ...current,
+          multipleConcepts: false,
+          concept: current.concept || firstLine.concept,
+          counterparty: current.counterparty || firstLine.counterparty,
+          paidBy: firstLine.paidBy || current.paidBy,
+          amount: current.amount || firstLine.amount,
+          paidAmount: current.paidAmount || firstLine.paidAmount,
+          dueDate: current.dueDate || firstLine.dueDate,
+          paymentStatus: current.paymentStatus || firstLine.paymentStatus,
+          currency: firstLine.currency || current.currency,
+          fxRate: current.fxRate || firstLine.fxRate,
+        };
+      }
+      const seedLine: FinanceMovementLineForm = {
+        uid: `${Date.now()}-${Math.random()}`,
+        concept: current.concept,
+        counterparty: current.counterparty,
+        paidBy: current.paidBy,
+        amount: current.amount,
+        paidAmount: current.paidAmount,
+        dueDate: current.dueDate,
+        paymentStatus: current.paymentStatus,
+        currency: current.currency,
+        fxRate: current.fxRate,
+      };
+      const existingLines = current.conceptLines.length > 0 ? current.conceptLines : [seedLine];
+      const hasContent = existingLines.some((line) => (
+        line.concept.trim() || line.amount.trim() || line.counterparty.trim()
+      ));
+      return {
+        ...current,
+        multipleConcepts: true,
+        conceptLines: hasContent ? existingLines : [seedLine],
+      };
+    });
+  }
+
+  function addFinanceMovementLine() {
+    setFinanceMovementForm((current) => ({
+      ...current,
+      conceptLines: [
+        ...current.conceptLines,
+        {
+          ...newFinanceMovementLine(),
+          paidBy: current.paidBy,
+          currency: current.currency,
+          fxRate: current.fxRate,
+          paymentStatus: current.paymentStatus,
+          dueDate: current.dueDate,
+        },
+      ],
+    }));
+  }
+
+  function removeFinanceMovementLine(uid: string) {
+    setFinanceMovementForm((current) => ({
+      ...current,
+      conceptLines: current.conceptLines.length <= 1
+        ? current.conceptLines
+        : current.conceptLines.filter((line) => line.uid !== uid),
+    }));
+  }
+
+  function updateFinanceMovementLineField<K extends keyof FinanceMovementLineForm>(
+    uid: string,
+    key: K,
+    value: FinanceMovementLineForm[K],
+  ) {
+    setFinanceMovementForm((current) => ({
+      ...current,
+      conceptLines: current.conceptLines.map((line) => (
+        line.uid === uid ? { ...line, [key]: value } : line
+      )),
+    }));
+  }
+
+  function isFinanceMovementLocked(status: string) {
+    return ["aprobado", "aplicado", "anulado"].includes(status);
+  }
+
+  function editFinanceMovement(item: FinanceMovement) {
+    if (isFinanceMovementLocked(item.status)) {
+      setMessage({ type: "error", text: "Este movimiento financiero ya esta bloqueado. Para corregirlo, carga un nuevo movimiento." });
+      return;
+    }
+    setFinanceMovementEditingId(item.id);
+    setFinanceMovementForm({
+      movementDate: item.movement_date,
+      artist: item.artist,
+      businessArea: item.business_area as FinanceMovementForm["businessArea"],
+      movementType: item.movement_type as FinanceMovementForm["movementType"],
+      category: item.category,
+      projectName: item.project_name || "",
+      multipleConcepts: false,
+      concept: item.concept,
+      counterparty: item.counterparty || "",
+      paidBy: item.paid_by as FinanceMovementForm["paidBy"],
+      amount: amountToInput(item.amount),
+      paidAmount: amountToInput(item.paid_amount),
+      dueDate: item.due_date || "",
+      paymentStatus: item.payment_status,
+      currency: item.currency,
+      fxRate: amountToInput(item.fx_rate),
+      recoverable: Boolean(item.recoverable),
+      recoverablePercent: amountToInput(item.recoverable_percent),
+      recoveryMethod: (item.recovery_method || "none") as FinanceMovementForm["recoveryMethod"],
+      artistPercent: amountToInput(item.artist_percent),
+      producerPercent: amountToInput(item.producer_percent),
+      accountEffect: item.account_effect as FinanceMovementForm["accountEffect"],
+      status: item.status as FinanceMovementForm["status"],
+      sourceType: item.source_type as FinanceMovementForm["sourceType"],
+      sourceId: item.source_id || "",
+      proofRefs: (item.proof_refs || []).join("\n"),
+      notes: item.notes || "",
+      conceptLines: [{
+        uid: `${Date.now()}-${Math.random()}`,
+        concept: item.concept,
+        counterparty: item.counterparty || "",
+        paidBy: item.paid_by as FinanceMovementForm["paidBy"],
+        amount: amountToInput(item.amount),
+        paidAmount: amountToInput(item.paid_amount),
+        dueDate: item.due_date || "",
+        paymentStatus: item.payment_status,
+        currency: item.currency,
+        fxRate: amountToInput(item.fx_rate),
+      }],
+    });
+    setMessage({ type: "ok", text: `Editando movimiento financiero #${item.id}.` });
+  }
+
+  function resetFinanceMovementForm() {
+    setFinanceMovementEditingId(null);
+    setFinanceMovementForm(initialFinanceMovementForm());
+  }
+
+  async function saveFinanceMovement(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage(null);
+
+    if (financeMovementEditingId && financeMovementForm.multipleConcepts) {
+      setMessage({ type: "error", text: "Para editar un movimiento existente usa un solo concepto. Para un lote, carga movimientos nuevos." });
+      return;
+    }
+
+    const rawLines: FinanceMovementLineForm[] = financeMovementForm.multipleConcepts
+      ? financeMovementForm.conceptLines
+      : [{
+        uid: "single",
+        concept: financeMovementForm.concept,
+        counterparty: financeMovementForm.counterparty,
+        paidBy: financeMovementForm.paidBy,
+        amount: financeMovementForm.amount,
+        paidAmount: financeMovementForm.paidAmount,
+        dueDate: financeMovementForm.dueDate,
+        paymentStatus: financeMovementForm.paymentStatus,
+        currency: financeMovementForm.currency,
+        fxRate: financeMovementForm.fxRate,
+      }];
+
+    const movementLines = rawLines
+      .map((line) => {
+        const amount = parseMoneyInput(stripUsdPrefix(line.amount));
+        const currency = isUsdAmountInput(line.amount) ? "USD" : line.currency;
+        const fxRate = parseMoneyInput(line.fxRate);
+        const paidAmount = line.paidAmount.trim()
+          ? parseMoneyInput(stripUsdPrefix(line.paidAmount))
+          : null;
+        return {
+          ...line,
+          concept: line.concept.trim(),
+          counterparty: line.counterparty.trim(),
+          amount,
+          paidAmount,
+          currency,
+          fxRate,
+        };
+      })
+      .filter((line) => line.concept || line.amount > 0 || line.counterparty);
+
+    if (!financeMovementForm.artist || !financeMovementForm.category || movementLines.length === 0) {
+      setMessage({ type: "error", text: "Completa artista, categoria y al menos un concepto con importe." });
+      return;
+    }
+    const invalidLineIndex = movementLines.findIndex((line) => !line.concept || line.amount <= 0);
+    if (invalidLineIndex >= 0) {
+      setMessage({ type: "error", text: `Completa concepto e importe en la linea ${invalidLineIndex + 1}.` });
+      return;
+    }
+    if (financeMovementForm.recoverable && financeMovementForm.recoveryMethod === "none") {
+      setMessage({ type: "error", text: "Elegi como se recupera el gasto para que no quede ambiguo." });
+      return;
+    }
+    const missingFxIndex = movementLines.findIndex((line) => line.currency === "USD" && line.fxRate <= 0);
+    if (missingFxIndex >= 0) {
+      setMessage({ type: "error", text: `Para cargar USD, completa el tipo de cambio en la linea ${missingFxIndex + 1}.` });
+      return;
+    }
+
+    setFinanceMovementLoading(true);
+    let savedCount = 0;
+    for (const line of movementLines) {
+      const payload = {
+        movement_date: financeMovementForm.movementDate,
+        artist: financeMovementForm.artist,
+        business_area: financeMovementForm.businessArea,
+        movement_type: financeMovementForm.movementType,
+        category: financeMovementForm.category,
+        project_name: financeMovementForm.projectName || null,
+        concept: line.concept,
+        counterparty: line.counterparty || null,
+        paid_by: line.paidBy,
+        amount: line.amount,
+        paid_amount: line.paidAmount,
+        due_date: line.dueDate || null,
+        payment_status: line.paymentStatus || null,
+        currency: line.currency,
+        fx_rate: line.currency === "USD" ? line.fxRate : null,
+        recoverable: financeMovementForm.recoverable,
+        recoverable_percent: parseMoneyInput(financeMovementForm.recoverablePercent),
+        recovery_method: financeMovementForm.recoverable ? financeMovementForm.recoveryMethod : "none",
+        artist_percent: parseMoneyInput(financeMovementForm.artistPercent),
+        producer_percent: parseMoneyInput(financeMovementForm.producerPercent),
+        account_effect: financeMovementForm.accountEffect,
+        status: financeMovementForm.status,
+        source_type: financeMovementForm.sourceType,
+        source_id: financeMovementForm.sourceId || null,
+        proof_refs: financeMovementForm.proofRefs.split(/\r?\n/).map((proofLine) => proofLine.trim()).filter(Boolean),
+        notes: financeMovementForm.notes || null,
+      };
+
+      const url = financeMovementEditingId
+        ? `/api/finance/movements?id=${financeMovementEditingId}`
+        : "/api/finance/movements";
+      const response = await fetch(url, {
+        method: financeMovementEditingId ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setFinanceMovementLoading(false);
+        setMessage({ type: "error", text: data.error || `No se pudo guardar la linea ${savedCount + 1}.` });
+        return;
+      }
+      savedCount += 1;
+    }
+
+    setFinanceMovementLoading(false);
+    setMessage({
+      type: "ok",
+      text: financeMovementEditingId
+        ? "Movimiento financiero actualizado."
+        : savedCount === 1
+          ? "Movimiento financiero cargado en staging."
+          : `${savedCount} movimientos financieros cargados en staging para el mismo proyecto.`,
+    });
+    resetFinanceMovementForm();
+    loadFinanceMovements();
+  }
+
   async function loadBookingArtists() {
     const response = await fetch("/api/booking/artists", { cache: "no-store" });
     if (!response.ok) return;
@@ -1990,6 +3997,60 @@ export default function Home() {
     if (!response.ok) return;
     const data = await response.json();
     setArtistRecords(data.items || []);
+  }
+
+  async function loadEmployeeRecords() {
+    const response = await fetch("/api/employees", { cache: "no-store" });
+    if (!response.ok) return;
+    const data = await response.json();
+    setEmployeeRecords(data.items || []);
+    setEmployeeFunctionOptions(data.function_options || []);
+    setEmployeeModules(data.modules || []);
+    if (!employeeEditingId) {
+      const modules = (data.modules || []) as EmployeeModule[];
+      setEmployeeForm((current) => current.permissions.length ? current : {
+        ...current,
+        permissions: modules.map((module) => ({
+          module_key: module.module_key,
+          can_access: false,
+          can_create: false,
+          can_view_history: false,
+          can_edit: false,
+          can_approve: false,
+          scope: [],
+          notes: null,
+        })),
+      });
+    }
+  }
+
+  async function loadCurrentUserPermissions() {
+    if (!currentUser) {
+      setCurrentUserModuleAccess(null);
+      setCurrentUserPermissions(null);
+      return;
+    }
+    if (currentUser.role === "admin") {
+      setCurrentUserModuleAccess(["*"]);
+      setCurrentUserPermissions(null);
+      return;
+    }
+
+    const response = await fetch("/api/me/permissions", { cache: "no-store" });
+    if (!response.ok) {
+      setCurrentUserModuleAccess([]);
+      setCurrentUserPermissions([]);
+      return;
+    }
+    const data = await response.json();
+    const permissions = (data.permissions || []) as EmployeePermission[];
+    const access = permissions
+      .filter((permission) => permission.can_access)
+      .map((permission) => permission.module_key)
+      .filter((moduleKey) => moduleKey !== "home");
+
+    setCurrentUserPermissions(permissions);
+    setCurrentUserModuleAccess(access);
   }
 
   async function loadCaserioEvents() {
@@ -2867,6 +4928,298 @@ export default function Home() {
     setArtistRecordLoading(false);
   }
 
+  function defaultEmployeePermissions() {
+    return employeeModules.filter((module) => module.module_key !== "home").map((module) => ({
+      module_key: module.module_key,
+      can_access: false,
+      can_create: false,
+      can_view_history: false,
+      can_edit: false,
+      can_approve: false,
+      scope: [],
+      notes: null,
+    }));
+  }
+
+  function mergedEmployeePermissions(item?: EmployeeRecord) {
+    const existing = new Map((item?.permissions || []).map((permission) => [permission.module_key, permission]));
+    return employeeModules.filter((module) => module.module_key !== "home").map((module) => existing.get(module.module_key) || {
+      module_key: module.module_key,
+      can_access: false,
+      can_create: false,
+      can_view_history: false,
+      can_edit: false,
+      can_approve: false,
+      scope: [],
+      notes: null,
+    });
+  }
+
+  function updateEmployeeField<K extends keyof EmployeeForm>(key: K, value: EmployeeForm[K]) {
+    setEmployeeForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function employeePermissionLevel(permission: EmployeePermission) {
+    if (permission.can_approve && permission.can_edit && permission.can_create && permission.can_view_history && permission.can_access) return "admin";
+    if (permission.can_edit) return "edit";
+    if (permission.can_create) return "create";
+    if (permission.can_access || permission.can_view_history) return "view";
+    return "none";
+  }
+
+  function permissionUsesArtistScope(permission: EmployeePermission) {
+    return ARTIST_SCOPED_MODULES.has(permission.module_key);
+  }
+
+  function permissionHasAllArtists(permission: EmployeePermission) {
+    if (!permission.scope || permission.scope.length === 0) return true;
+    return permission.scope.some((item) => item.scope_type === "all" && item.scope_ref === "*");
+  }
+
+  function permissionArtistNames(permission: EmployeePermission) {
+    if (permissionHasAllArtists(permission)) return [];
+    return (permission.scope || [])
+      .filter((item) => item.scope_type === "artist" && item.scope_ref)
+      .map((item) => item.scope_ref);
+  }
+
+  function normalizeEmployeePermissionForSave(permission: EmployeePermission) {
+    if (!permission.can_access || !permissionUsesArtistScope(permission)) {
+      return permission;
+    }
+    if (permissionHasAllArtists(permission)) {
+      return { ...permission, scope: [{ scope_type: "all", scope_ref: "*" }] };
+    }
+    const artists = permissionArtistNames(permission);
+    if (artists.length === 0) {
+      return { ...permission, scope: [{ scope_type: "none", scope_ref: "*" }] };
+    }
+    return permission;
+  }
+
+  function updateEmployeePermissionLevel(moduleKey: string, level: string) {
+    const values = {
+      can_access: level !== "none",
+      can_create: ["create", "edit", "admin"].includes(level),
+      can_view_history: ["view", "edit", "admin"].includes(level),
+      can_edit: ["edit", "admin"].includes(level),
+      can_approve: level === "admin",
+    };
+    setEmployeeForm((current) => {
+      const basePermissions = current.permissions.length ? current.permissions : defaultEmployeePermissions();
+      return {
+        ...current,
+        permissions: basePermissions
+          .map((permission) => (
+            permission.module_key === moduleKey
+              ? { ...permission, ...values }
+              : permission
+          ))
+          .map((permission) => (
+            permission.module_key === moduleKey && permission.can_access && permissionUsesArtistScope(permission) && (!permission.scope || permission.scope.length === 0)
+              ? { ...permission, scope: [{ scope_type: "all", scope_ref: "*" }] }
+              : permission
+          )),
+      };
+    });
+  }
+
+  function updateEmployeePermissionArtistMode(moduleKey: string, mode: "all" | "selected") {
+    setEmployeeForm((current) => {
+      const basePermissions = current.permissions.length ? current.permissions : defaultEmployeePermissions();
+      return {
+        ...current,
+        permissions: basePermissions.map((permission) => {
+          if (permission.module_key !== moduleKey) return permission;
+          return {
+            ...permission,
+            scope: mode === "all" ? [{ scope_type: "all", scope_ref: "*" }] : [{ scope_type: "none", scope_ref: "*" }],
+          };
+        }),
+      };
+    });
+  }
+
+  function toggleEmployeePermissionArtist(moduleKey: string, artist: string) {
+    setEmployeeForm((current) => {
+      const basePermissions = current.permissions.length ? current.permissions : defaultEmployeePermissions();
+      return {
+        ...current,
+        permissions: basePermissions.map((permission) => {
+          if (permission.module_key !== moduleKey) return permission;
+          const currentArtists = new Set(permissionArtistNames(permission));
+          if (currentArtists.has(artist)) {
+            currentArtists.delete(artist);
+          } else {
+            currentArtists.add(artist);
+          }
+          return {
+            ...permission,
+            scope: currentArtists.size === 0
+              ? [{ scope_type: "none", scope_ref: "*" }]
+              : Array.from(currentArtists)
+                .sort((a, b) => a.localeCompare(b))
+                .map((scope_ref) => ({ scope_type: "artist", scope_ref })),
+          };
+        }),
+      };
+    });
+  }
+
+  function toggleEmployeeFunction(functionName: string) {
+    setEmployeeForm((current) => {
+      const exists = current.functions.includes(functionName);
+      return {
+        ...current,
+        functions: exists
+          ? current.functions.filter((item) => item !== functionName)
+          : [...current.functions, functionName],
+      };
+    });
+  }
+
+  function resetEmployeeForm() {
+    setEmployeeEditingId(null);
+    setEmployeeForm({
+      displayName: "",
+      legalName: "",
+      cuit: "",
+      phone: "",
+      email: "",
+      address: "",
+      functions: [],
+      username: "",
+      newPassword: "",
+      mustChangePassword: true,
+      userRole: "viewer",
+      userActive: true,
+      permissions: defaultEmployeePermissions(),
+      notes: "",
+      active: true,
+    });
+  }
+
+  function editEmployeeRecord(item: EmployeeRecord) {
+    const primaryUser = item.users?.[0];
+    setEmployeeEditingId(item.id);
+    setEmployeeForm({
+      displayName: item.display_name,
+      legalName: item.legal_name || "",
+      cuit: item.cuit || "",
+      phone: item.phone || "",
+      email: item.email || "",
+      address: item.address || "",
+      functions: item.functions || [],
+      username: primaryUser?.username || "",
+      newPassword: "",
+      mustChangePassword: primaryUser?.must_change_password ?? true,
+      userRole: primaryUser?.global_role || "viewer",
+      userActive: primaryUser?.active ?? true,
+      permissions: mergedEmployeePermissions(item),
+      notes: item.notes || "",
+      active: item.active,
+    });
+  }
+
+  async function submitEmployeeRecord(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setEmployeeLoading(true);
+    setMessage(null);
+
+    const response = await fetch(
+      employeeEditingId ? `/api/employees?id=${employeeEditingId}` : "/api/employees",
+      {
+        method: employeeEditingId ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          display_name: employeeForm.displayName,
+          legal_name: employeeForm.displayName || null,
+          cuit: employeeForm.cuit || null,
+          phone: employeeForm.phone || null,
+          email: employeeForm.email || null,
+          address: employeeForm.address || null,
+          functions: employeeForm.functions,
+          username: employeeForm.username || null,
+          password: employeeForm.newPassword || null,
+          must_change_password: employeeForm.newPassword ? employeeForm.mustChangePassword : null,
+          user_role: employeeForm.userRole,
+          user_active: employeeForm.userActive,
+          permissions: employeeForm.permissions
+            .filter((permission) => permission.module_key !== "home")
+            .map(normalizeEmployeePermissionForSave),
+          notes: employeeForm.notes || null,
+          active: employeeForm.active,
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({ error: "No se pudo guardar el empleado." }));
+      setMessage({ type: "error", text: data.error || "No se pudo guardar el empleado." });
+      setEmployeeLoading(false);
+      return;
+    }
+
+    const data = await response.json();
+    const item = data.item as EmployeeRecord;
+    setEmployeeRecords((current) => {
+      if (employeeEditingId) {
+        return current.map((record) => (record.id === item.id ? item : record));
+      }
+      return [item, ...current];
+    });
+    resetEmployeeForm();
+    setMessage({ type: "ok", text: employeeEditingId ? "Empleado actualizado correctamente." : "Empleado creado correctamente." });
+    setEmployeeLoading(false);
+  }
+
+  async function deactivateEmployeeRecord(item: EmployeeRecord) {
+    setEmployeeLoading(true);
+    setMessage(null);
+    const response = await fetch(`/api/employees?id=${item.id}`, { method: "DELETE" });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({ error: "No se pudo desactivar el empleado." }));
+      setMessage({ type: "error", text: data.error || "No se pudo desactivar el empleado." });
+      setEmployeeLoading(false);
+      return;
+    }
+
+    const data = await response.json();
+    const updated = data.item as EmployeeRecord;
+    setEmployeeRecords((current) => current.map((record) => (record.id === updated.id ? updated : record)));
+    if (employeeEditingId === updated.id) resetEmployeeForm();
+    setMessage({ type: "ok", text: "Empleado desactivado. Sigue guardado para historial y auditoria." });
+    setEmployeeLoading(false);
+  }
+
+  async function resetEmployeePassword(item: EmployeeRecord) {
+    setEmployeeLoading(true);
+    setMessage(null);
+    const response = await fetch(`/api/employees?id=${item.id}&action=password`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        use_default: true,
+        must_change_password: true,
+      }),
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({ error: "No se pudo establecer la contrasena." }));
+      setMessage({ type: "error", text: data.error || "No se pudo establecer la contrasena." });
+      setEmployeeLoading(false);
+      return;
+    }
+
+    const data = await response.json();
+    const updated = data.item as EmployeeRecord;
+    setEmployeeRecords((current) => current.map((record) => (record.id === updated.id ? updated : record)));
+    if (employeeEditingId === updated.id) editEmployeeRecord(updated);
+    setMessage({ type: "ok", text: `Contrasena default establecida para ${item.display_name}.` });
+    setEmployeeLoading(false);
+  }
+
   function resetBookingForm() {
     setBookingEditingId(null);
     setBookingForm((current) => ({
@@ -2883,10 +5236,12 @@ export default function Home() {
       cachetAmount: "",
       venuePaymentIssue: false,
       venueCollectedAmount: "",
+      venueShortfallPolicy: "deuda_boliche",
       venuePaymentNotes: "",
       showExpenses: [],
       cashMovements: [],
       preSplitAdjustments: [],
+      directCommissions: [],
       externalShares: [],
       artistPaidAmount: "",
       producerReceivedAmount: "",
@@ -2901,6 +5256,10 @@ export default function Home() {
   }
 
   function editBookingShow(item: BookingShow) {
+    if (!canEditModule("booking")) {
+      setMessage({ type: "error", text: "No tenes permiso para editar shows de Booking Indyana." });
+      return;
+    }
     const hasVenueIssue = (item.venue_payment_status || "cobrado") !== "cobrado" || Math.abs(item.venue_balance_amount || 0) > 0.01;
     const cashMovementForms = (item.cash_movements || []).map((movement) => ({
       uid: `cash-${movement.id}-${Date.now()}`,
@@ -2927,6 +5286,7 @@ export default function Home() {
       cachetAmount: amountToInput(item.contracted_cachet_amount || item.cachet_amount),
       venuePaymentIssue: hasVenueIssue,
       venueCollectedAmount: amountToInput(item.venue_collected_amount || item.cachet_amount),
+      venueShortfallPolicy: item.venue_shortfall_policy || "deuda_boliche",
       venuePaymentNotes: item.venue_payment_notes || "",
       showExpenses: item.show_expenses.map((expense) => ({
         uid: `expense-${expense.id}-${Date.now()}`,
@@ -2941,7 +5301,16 @@ export default function Home() {
         concept: adjustment.concept || "",
         destination: adjustment.destination,
         amount: amountToInput(adjustment.amount),
+        recoveryAutoApply: Boolean(adjustment.recovery_auto_apply),
         notes: adjustment.notes || "",
+      })),
+      directCommissions: (item.direct_commissions || []).map((commission) => ({
+        uid: `direct-commission-${commission.id}-${Date.now()}`,
+        concept: commission.concept || "",
+        recipient: commission.recipient || "",
+        destination: commission.destination || "salida_directa",
+        amount: amountToInput(commission.amount),
+        notes: commission.notes || "",
       })),
       externalShares: (item.external_shares || []).map((share) => ({
         uid: `external-share-${share.id}-${Date.now()}`,
@@ -2954,8 +5323,8 @@ export default function Home() {
       })),
       artistPaidAmount: amountToInput(Math.max(0, item.artist_paid_amount - cashArtistTotal)),
       producerReceivedAmount: amountToInput(Math.max(0, item.producer_received_amount - cashProducerTotal)),
-      artistPercent: String(item.artist_percent),
-      producerPercent: String(item.producer_percent),
+      artistPercent: amountToInput(item.artist_percent),
+      producerPercent: amountToInput(item.producer_percent),
       bookingCommissionExempt: Boolean(item.booking_commission_exempt),
       bookingCommissionNotes: item.booking_commission_notes || "",
       artistAdjustments: item.artist_adjustments.map((adjustment) => ({
@@ -2967,8 +5336,8 @@ export default function Home() {
         area: adjustment.area,
         impact: adjustment.impact,
         recoverable: adjustment.recoverable,
-        artistPercent: String(adjustment.artist_percent),
-        producerPercent: String(adjustment.producer_percent),
+        artistPercent: amountToInput(adjustment.artist_percent),
+        producerPercent: amountToInput(adjustment.producer_percent),
         notes: adjustment.notes || "",
       })),
       receiptRefs: item.receipt_refs.join("\n"),
@@ -2980,6 +5349,10 @@ export default function Home() {
   async function submitBooking(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage(null);
+    if (bookingEditingId ? !canEditModule("booking") : !canCreateModule("booking")) {
+      setMessage({ type: "error", text: bookingEditingId ? "No tenes permiso para editar shows." : "No tenes permiso para cargar shows." });
+      return;
+    }
     setBookingLoading(true);
 
     if (needsFxRate(collectBookingAmountInputs()) && bookingFxRate <= 0) {
@@ -3019,8 +5392,9 @@ export default function Home() {
         contracted_cachet_amount: contractedCachet,
         venue_collected_amount: venueCollected,
         venue_payment_status: venuePaymentStatus,
+        venue_shortfall_policy: bookingForm.venuePaymentIssue ? bookingForm.venueShortfallPolicy : "deuda_boliche",
         venue_payment_notes: bookingForm.venuePaymentIssue ? bookingForm.venuePaymentNotes || null : null,
-        cachet_amount: venueCollected,
+        cachet_amount: bookingForm.venuePaymentIssue && bookingForm.venueShortfallPolicy === "ajustar_cachet" ? venueCollected : contractedCachet,
         cash_movements: bookingForm.cashMovements
           .map((movement) => ({
             recipient: movement.recipient,
@@ -3039,11 +5413,21 @@ export default function Home() {
             notes: expense.notes || null,
           }))
           .filter((expense) => expense.amount > 0),
+        direct_commissions: bookingForm.directCommissions
+          .map((commission) => ({
+            concept: commission.concept.trim() || "Comision directa",
+            recipient: commission.recipient.trim() || null,
+            destination: commission.destination,
+            amount: parseAmountInput(commission.amount, bookingFxRate),
+            notes: commission.notes || null,
+          }))
+          .filter((commission) => commission.amount > 0),
         pre_split_adjustments: bookingForm.preSplitAdjustments
           .map((adjustment) => ({
             concept: adjustment.concept.trim(),
             destination: adjustment.destination,
             amount: parseAmountInput(adjustment.amount, bookingFxRate),
+            recovery_auto_apply: adjustment.destination === "producer" && adjustment.recoveryAutoApply,
             notes: adjustment.notes || null,
           }))
           .filter((adjustment) => adjustment.concept && adjustment.amount > 0),
@@ -3102,6 +5486,27 @@ export default function Home() {
     setBookingLoading(false);
   }
 
+  async function deleteBookingShow(item: BookingShow) {
+    if (!canApproveModule("booking")) {
+      setMessage({ type: "error", text: "No tenes permiso para eliminar shows." });
+      return;
+    }
+    const confirmed = window.confirm(`Eliminar show #${item.id} - ${item.artist} / ${item.venue}?`);
+    if (!confirmed) return;
+    setBookingLoading(true);
+    setMessage(null);
+    const response = await fetch(`/api/booking?id=${item.id}`, { method: "DELETE" });
+    setBookingLoading(false);
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({ error: "No se pudo eliminar el show." }));
+      setMessage({ type: "error", text: payload.error || "No se pudo eliminar el show." });
+      return;
+    }
+    if (bookingEditingId === item.id) resetBookingForm();
+    setBookingItems((current) => current.filter((show) => show.id !== item.id));
+    setMessage({ type: "ok", text: `Show #${item.id} eliminado.` });
+  }
+
   function submitRoyalties(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     generateExcel();
@@ -3148,6 +5553,202 @@ export default function Home() {
     );
   }
 
+  if (currentUser?.mustChangePassword) {
+    return (
+      <div className="login">
+        <form className="panel" onSubmit={changeOwnPassword}>
+          <div className="login-brand">
+            <span className="brand-vpo">VPO</span>
+            <span className="brand-corp">Corp</span>
+          </div>
+          <p className="login-copy">Tenes que cambiar la contrasena default antes de ingresar.</p>
+          {message && <div className={`message ${message.type === "error" ? "error" : ""}`}>{message.text}</div>}
+          <label htmlFor="current_password">Contrasena actual</label>
+          <input
+            id="current_password"
+            type="password"
+            value={currentPassword}
+            onChange={(event) => setCurrentPassword(event.target.value)}
+            autoComplete="current-password"
+            required
+          />
+          <label htmlFor="new_password">Nueva contrasena</label>
+          <input
+            id="new_password"
+            type="password"
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+            autoComplete="new-password"
+            minLength={8}
+            required
+          />
+          <label htmlFor="new_password_confirm">Confirmar nueva contrasena</label>
+          <input
+            id="new_password_confirm"
+            type="password"
+            value={newPasswordConfirm}
+            onChange={(event) => setNewPasswordConfirm(event.target.value)}
+            autoComplete="new-password"
+            minLength={8}
+            required
+          />
+          <button type="submit" disabled={loading}>{loading ? "Guardando..." : "Cambiar contrasena"}</button>
+          <button type="button" onClick={logout}>Salir</button>
+        </form>
+      </div>
+    );
+  }
+
+  const sourceMonitorPendingTotal = (sourceMonitor?.items || []).reduce((sum, item) => sum + item.unprocessed_raw_count, 0);
+  const sourceMonitorIgnoredTotal = (sourceMonitor?.items || []).reduce((sum, item) => sum + (item.ignored_raw_count || 0), 0);
+  const sourceMonitorRawTotal = (sourceMonitor?.items || []).reduce((sum, item) => sum + item.raw_files, 0);
+  const sourceMonitorLoadedTotal = (sourceMonitor?.items || []).reduce((sum, item) => sum + item.files_in_mart, 0);
+  const canPublishMarts = Boolean(currentUser?.canEdit)
+    && sourceMonitorPendingTotal === 0
+    && !sourceMonitorPublishing
+    && !sourceMonitorProcessingId
+    && !sourceMonitorLoading;
+  const publishDisabledReason = !currentUser?.canEdit
+    ? "Necesitas entrar con usuario editor/admin."
+    : sourceMonitorLoading
+      ? "Primero termina la revision de directorios."
+      : sourceMonitorProcessingId
+        ? "Hay un procesamiento en curso."
+        : sourceMonitorPendingTotal > 0
+          ? "Hay archivos pendientes reales. Procesalos y revisa los importes antes de publicar."
+          : "Publica los marts validados a Google Cloud Storage.";
+  const distributorConfigSources = Object.keys(distributorConfig?.summary.sources || {}).sort((a, b) => a.localeCompare(b));
+  const distributorConfigAccounts = (distributorConfig?.accounts || [])
+    .filter((account) => !distributorConfigSource || account.source === distributorConfigSource);
+  const selectedDistributorAccount = distributorConfigAccounts.find((account) => account.policy_id === distributorConfigAccountId)
+    || distributorConfigAccounts[0]
+    || null;
+  const selectedDistributorRulePreview = selectedDistributorAccount?.rule_preview || null;
+  const selectedDictionaryEntries = selectedDistributorAccount?.statement_dictionary || [];
+  const selectedReportImpacts = (distributorConfig?.report_templates || []).filter((template) => {
+    const text = JSON.stringify(template).toLowerCase();
+    return selectedDistributorAccount
+      ? text.includes(selectedDistributorAccount.source.toLowerCase())
+        || text.includes(selectedDistributorAccount.account.toLowerCase())
+        || template.report_family === "statement"
+      : false;
+  });
+
+  const financeMovementPreviewLines: FinanceMovementLineForm[] = financeMovementForm.multipleConcepts
+    ? financeMovementForm.conceptLines
+    : [{
+      uid: "single",
+      concept: financeMovementForm.concept,
+      counterparty: financeMovementForm.counterparty,
+      paidBy: financeMovementForm.paidBy,
+      amount: financeMovementForm.amount,
+      paidAmount: financeMovementForm.paidAmount,
+      dueDate: financeMovementForm.dueDate,
+      paymentStatus: financeMovementForm.paymentStatus,
+      currency: financeMovementForm.currency,
+      fxRate: financeMovementForm.fxRate,
+    }];
+  const financeMovementPreviewTotals = financeMovementPreviewLines.reduce((totals, line) => {
+    const currency = isUsdAmountInput(line.amount) ? "USD" : line.currency;
+    const amount = parseMoneyInput(stripUsdPrefix(line.amount));
+    const paidAmount = line.paidAmount.trim()
+      ? parseMoneyInput(stripUsdPrefix(line.paidAmount))
+      : amount;
+    const fxRate = parseMoneyInput(line.fxRate);
+    const amountArs = currency === "USD" ? amount * fxRate : amount;
+    const paidArs = currency === "USD" ? paidAmount * fxRate : paidAmount;
+    return {
+      amountArs: totals.amountArs + amountArs,
+      paidArs: totals.paidArs + paidArs,
+    };
+  }, { amountArs: 0, paidArs: 0 });
+  const financeMovementAmountArs = financeMovementPreviewTotals.amountArs;
+  const financeMovementPaidArs = financeMovementPreviewTotals.paidArs;
+  const financeMovementPendingArs = Math.max(financeMovementAmountArs - financeMovementPaidArs, 0);
+  const financeMovementRecoverablePct = parseMoneyInput(financeMovementForm.recoverablePercent);
+  const financeMovementArtistPct = parseMoneyInput(financeMovementForm.artistPercent);
+  const financeMovementProducerPct = parseMoneyInput(financeMovementForm.producerPercent);
+  const financeMovementRecoverableBase = financeMovementForm.recoverable
+    ? financeMovementAmountArs * financeMovementRecoverablePct / 100
+    : 0;
+  const financeMovementArtistEconomicCost = financeMovementRecoverableBase * financeMovementArtistPct / 100;
+  const financeMovementProducerEconomicCost = financeMovementRecoverableBase * financeMovementProducerPct / 100;
+  const financeMovementCashRecovery = financeMovementForm.recoverable
+    ? financeMovementRecoverableBase
+    : 0;
+  const financeRecoveryMethodHelp: Record<FinanceMovementForm["recoveryMethod"], string> = {
+    none: "Elegilo si el gasto no se recupera o todavia no esta definido.",
+    before_split: "Se descuenta antes del split del show: Indyana recupera caja, pero el costo economico se reparte por el split.",
+    after_split: "Se descuenta despues del split, normalmente del pago del artista.",
+    direct_account: "Genera saldo de cuenta corriente contra el artista o tercero.",
+    royalties: "Se recupera contra regalias digitales futuras.",
+    manual: "Caso especial que se va a aplicar con un movimiento o ajuste especifico.",
+  };
+  const financeProjectOptions = (financeMovements?.projects || []).filter((project) => (
+    !financeMovementForm.artist
+      || !project.artist
+      || project.artist === financeMovementForm.artist
+  ));
+  const financeMovementProjectOptions = financeMovements?.project_options || [];
+  const artistFinanceProjectOptions = Array.from(new Set([
+    ...(artistFinance?.finance_project_summary || []).map((project) => project.project_name),
+    ...(artistFinance?.finance_movements || []).map((item) => item.project_name || "(sin proyecto)"),
+  ])).filter(Boolean).sort();
+  const filteredArtistFinanceProjects = (artistFinance?.finance_project_summary || []).filter((project) => (
+    !artistFinanceProjectFilter || project.project_name === artistFinanceProjectFilter
+  )).sort((a, b) => {
+    const dateA = a.last_date || a.first_date || "";
+    const dateB = b.last_date || b.first_date || "";
+    return dateB.localeCompare(dateA) || a.project_name.localeCompare(b.project_name);
+  });
+  const filteredArtistFinanceMovements = (artistFinance?.finance_movements || []).filter((item) => (
+    !artistFinanceProjectFilter || (item.project_name || "(sin proyecto)") === artistFinanceProjectFilter
+  ));
+  const filteredArtistFinanceRecoveries = (artistFinance?.recovery_applications || []).filter((item) => (
+    !artistFinanceProjectFilter || (item.project_name || "(sin proyecto)") === artistFinanceProjectFilter
+  ));
+  const artistFinanceLedgerSummary = artistFinance?.finance_ledger.summary;
+  const artistFinanceBookingSummary = artistFinance?.summary.booking;
+  const artistFinanceAccountNet = artistFinanceLedgerSummary?.account_current_net_ars || 0;
+  const artistFinanceVenueDebt = artistFinanceLedgerSummary?.venue_receivable_ars || 0;
+  const artistFinancePendingCriteria = artistFinance?.summary.finance_staging.recoverable_pending_criteria_ars || 0;
+  const artistFinanceDefinedRecoverableOpen = artistFinance?.summary.finance_staging.recoverable_defined_open_ars ?? Math.max((artistFinanceLedgerSummary?.recoverable_open_ars || 0) - artistFinancePendingCriteria, 0);
+  const artistFinanceProjectRows = artistFinance?.summary.finance_staging.rows || 0;
+  const artistFinanceSelectedLabel = artistFinance?.selected_artist || "Todos";
+  const artistFinanceStatus = (() => {
+    if (Math.abs(artistFinanceAccountNet) > 0.01) {
+      return {
+        tone: artistFinanceAccountNet > 0 ? "warn" : "attention",
+        title: artistFinanceAccountNet > 0 ? "Nos deben" : "Le debemos",
+        body: artistFinanceAccountNet > 0
+          ? `${artistFinanceSelectedLabel} tiene saldo abierto a favor de Indyana.`
+          : `Indyana tiene saldo abierto a favor de ${artistFinanceSelectedLabel}.`,
+      };
+    }
+    if (artistFinancePendingCriteria > 0.01) {
+      return {
+        tone: "attention",
+        title: "Pendiente de criterio",
+        body: "Hay gastos cargados que todavia necesitan decision de negocio antes de tratarlos como recuperables o inversion final.",
+      };
+    }
+    if (artistFinanceDefinedRecoverableOpen > 0.01) {
+      return {
+        tone: "warn",
+        title: "Hay recuperables",
+        body: "La cuenta corriente esta al dia, pero quedan proyectos con dinero por recuperar.",
+      };
+    }
+    return {
+      tone: "ok",
+      title: "Al dia",
+      body: "No hay saldos abiertos visibles para este filtro.",
+    };
+  })();
+  const artistFinanceAccountEntries = (artistFinance?.finance_ledger.entries || []).filter((item) => (
+    Math.abs(item.account_delta_ars || 0) > 0.01 || Math.abs(item.venue_receivable_ars || 0) > 0.01
+  ));
+
   return (
     <div className="shell">
       <header className="topbar">
@@ -3184,64 +5785,96 @@ export default function Home() {
             </section>
 
             <div className="menu-grid">
-              {!demoMenuOnly && (
-                <>
-                  <button type="button" className="menu-card" onClick={() => openView("statement")}>
+                  <button type="button" className={`menu-card ${canShowMenuView("statement") ? "" : "menu-card-hidden"}`} onClick={() => openView("statement")}>
                     <span className="card-index">01</span>
                     <strong>Reporte por statement</strong>
                     <span>Totales por artista, statement y distribuidora.</span>
                   </button>
-                  <button type="button" className="menu-card" onClick={() => openView("royalties")}>
+                  <button type="button" className={`menu-card ${canShowMenuView("royalties") ? "" : "menu-card-hidden"}`} onClick={() => openView("royalties")}>
                     <span className="card-index">02</span>
                     <strong>Reporte de regalias</strong>
                     <span>Busqueda por palabra clave, periodo, Excel o Google Sheets.</span>
                   </button>
-                  <button type="button" className="menu-card" onClick={() => openView("participation")}>
+                  <button type="button" className={`menu-card ${canShowMenuView("custom-reports") ? "" : "menu-card-hidden"}`} onClick={() => openView("custom-reports")}>
                     <span className="card-index">03</span>
+                    <strong>Reportes Personalizados</strong>
+                    <span>Plantillas especiales con fechas, listado editable y distribuidoras.</span>
+                  </button>
+                  <button type="button" className={`menu-card ${canShowMenuView("participation") ? "" : "menu-card-hidden"}`} onClick={() => openView("participation")}>
+                    <span className="card-index">04</span>
                     <strong>Participacion en distribuidoras</strong>
                     <span>Torta simple por fuente, guardada desde marts publicados.</span>
                   </button>
-                  <button type="button" className="menu-card" onClick={() => openView("booking")}>
-                    <span className="card-index">04</span>
+                  <button type="button" className={`menu-card ${canShowMenuView("digital-income") ? "" : "menu-card-hidden"}`} onClick={() => openView("digital-income")}>
+                    <span className="card-index">05</span>
+                    <strong>Ingresos Digitales</strong>
+                    <span>Ingresos reales por statement, distribuidora, subcompañía y artista.</span>
+                  </button>
+                  <button type="button" className={`menu-card ${canShowMenuView("source-monitor") ? "" : "menu-card-hidden"}`} onClick={() => openView("source-monitor")}>
+                    <span className="card-index">06</span>
+                    <strong>Control de distribuidoras</strong>
+                    <span>Ultimo statement cargado, raw pendiente y alertas operativas.</span>
+                  </button>
+                  <button type="button" className={`menu-card ${canShowMenuView("distributor-config") ? "" : "menu-card-hidden"}`} onClick={() => openView("distributor-config")}>
+                    <span className="card-index">07</span>
+                    <strong>Configurador distribuidoras</strong>
+                    <span>Politicas read-only, diccionario de statements y fechas contractuales.</span>
+                  </button>
+                  <button type="button" className={`menu-card ${canShowMenuView("booking") ? "" : "menu-card-hidden"}`} onClick={() => openView("booking")}>
+                    <span className="card-index">08</span>
                     <strong>Booking Indyana</strong>
                     <span>Shows propios: cachet, gastos, split, pagos y comprobantes.</span>
                   </button>
-                  <button type="button" className="menu-card" onClick={() => openView("booking-summary")}>
-                    <span className="card-index">05</span>
+                  <button type="button" className={`menu-card ${canShowMenuView("booking-summary") ? "" : "menu-card-hidden"}`} onClick={() => openView("booking-summary")}>
+                    <span className="card-index">09</span>
                     <strong>Resumen booking</strong>
                     <span>Indyana por artista y mes, separando base comisionable y excepciones.</span>
                   </button>
-                </>
-              )}
-              <button type="button" className="menu-card" onClick={() => openView("booking-artist-summary")}>
-                <span className="card-index">{demoMenuOnly ? "01" : "06"}</span>
+              <button type="button" className={`menu-card ${canShowMenuView("booking-artist-summary") ? "" : "menu-card-hidden"}`} onClick={() => openView("booking-artist-summary")}>
+                <span className="card-index">10</span>
                 <strong>Detalle Booking</strong>
                 <span>Shows por fecha y venue, con cachet, ingreso artista e Indyana.</span>
               </button>
-              {!demoMenuOnly && (
-                <>
-                  <button type="button" className="menu-card" onClick={() => openView("artists")}>
-                    <span className="card-index">07</span>
+              <button type="button" className={`menu-card ${canShowMenuView("catalog") ? "" : "menu-card-hidden"}`} onClick={() => openView("catalog")}>
+                <span className="card-index">11</span>
+                <strong>Catalogo General</strong>
+                <span>Base de temas, ISRC, artistas, distribuidoras y estado activo/inactivo.</span>
+              </button>
+                  <button type="button" className={`menu-card ${canShowMenuView("artist-finance") ? "" : "menu-card-hidden"}`} onClick={() => openView("artist-finance")}>
+                    <span className="card-index">12</span>
+                    <strong>Finanzas Artista</strong>
+                    <span>Vista de lectura: cuenta corriente, booking, inversiones y recuperables.</span>
+                  </button>
+                  <button type="button" className={`menu-card ${canShowMenuView("finance-movements") ? "" : "menu-card-hidden"}`} onClick={() => openView("finance-movements")}>
+                    <span className="card-index">13</span>
+                    <strong>Movimientos financieros</strong>
+                    <span>Carga staging de gastos, inversiones, recuperos y ajustes por artista.</span>
+                  </button>
+                  <button type="button" className={`menu-card ${canShowMenuView("artists") ? "" : "menu-card-hidden"}`} onClick={() => openView("artists")}>
+                    <span className="card-index">14</span>
                     <strong>ABM de artistas</strong>
                     <span>Ficha legal, contacto y datos base para booking.</span>
                   </button>
-                  <button type="button" className="menu-card" onClick={() => openView("caserio")}>
-                    <span className="card-index">08</span>
+                  <button type="button" className={`menu-card ${canShowMenuView("employees") ? "" : "menu-card-hidden"}`} onClick={() => openView("employees")}>
+                    <span className="card-index">15</span>
+                    <strong>ABM de empleados</strong>
+                    <span>Equipo VPO, funciones y base para permisos por modulo.</span>
+                  </button>
+                  <button type="button" className={`menu-card ${canShowMenuView("caserio") ? "" : "menu-card-hidden"}`} onClick={() => openView("caserio")}>
+                    <span className="card-index">16</span>
                     <strong>El Caserio</strong>
                     <span>Eventos sociedad, artistas externos y shows VPO vinculados.</span>
                   </button>
-                  <button type="button" className="menu-card" onClick={() => openView("booking-lab")}>
-                    <span className="card-index">09</span>
+                  <button type="button" className={`menu-card ${canShowMenuView("booking-lab") ? "" : "menu-card-hidden"}`} onClick={() => openView("booking-lab")}>
+                    <span className="card-index">17</span>
                     <strong>Carga de Shows laboratorio</strong>
                     <span>Flujo dinamico sin guardar: simple, reglas especiales y eventos con varios artistas.</span>
                   </button>
-                  <button type="button" className="menu-card" onClick={() => openView("composite-booking")}>
-                    <span className="card-index">10</span>
+                  <button type="button" className={`menu-card ${canShowMenuView("composite-booking") ? "" : "menu-card-hidden"}`} onClick={() => openView("composite-booking")}>
+                    <span className="card-index">18</span>
                     <strong>Liquidaciones compuestas</strong>
                     <span>Pantalla actual con guardado de madres/hijas. Usar solo para cargas ya validadas.</span>
                   </button>
-                </>
-              )}
             </div>
           </>
         )}
@@ -3250,6 +5883,18 @@ export default function Home() {
           <section className="panel">
             <h1>Reporte por statement</h1>
             <p>Genera el reporte historico por statement usando los marts nuevos publicados.</p>
+            <label htmlFor="statement_report_version">Tipo de reporte</label>
+            <select
+              id="statement_report_version"
+              value={statementReportVersion}
+              onChange={(event) => setStatementReportVersion(event.target.value)}
+            >
+              <option value="legacy">Reporte viejo</option>
+              <option value="new">Reporte nuevo</option>
+            </select>
+            <p className="field-help">
+              El nuevo excluye ONErpm MAWZ y usa las variantes post Motorcito / La Nueva Sangre.
+            </p>
             <label htmlFor="statement_min_total">No mostrar artistas menores a USD</label>
             <input
               id="statement_min_total"
@@ -3260,6 +5905,17 @@ export default function Home() {
               onChange={(event) => setStatementMinTotal(event.target.value)}
             />
             <p className="field-help">Se aplica por artista dentro de cada distribuidora/cuenta.</p>
+            <label className="checkbox-line">
+              <input
+                type="checkbox"
+                checked={statementIncludeZeros}
+                onChange={(event) => setStatementIncludeZeros(event.target.checked)}
+              />
+              Incluir artistas exactamente en cero
+            </label>
+            <p className="field-help">
+              Si esta desmarcado y el minimo es 0, muestra cualquier total mayor a cero, aunque sea 0.01.
+            </p>
             <button type="button" disabled={statementLoading} onClick={generateStatementReport}>
               {statementLoading ? "Generando..." : "Descargar reporte por statement"}
             </button>
@@ -3329,13 +5985,163 @@ export default function Home() {
           </div>
         )}
 
+        {view === "custom-reports" && (
+          <section className="panel">
+            <div className="section-heading">
+              <div>
+                <h1>Reportes Personalizados</h1>
+                <p>Scripts especiales conectados a los marts nuevos. Cada uno conserva su configuracion editable.</p>
+              </div>
+              <button type="button" onClick={loadCustomReportOptions}>
+                Actualizar opciones
+              </button>
+            </div>
+
+            <div className="custom-script-menu">
+              {(customReportOptions?.templates || []).map((template, index) => (
+                <button
+                  type="button"
+                  className={`custom-script-card ${template.key === customReportTemplateKey ? "active" : ""}`}
+                  key={template.key}
+                  onClick={() => selectCustomReportTemplate(template.key)}
+                >
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <strong>{template.title}</strong>
+                  <small>{template.enabled === false ? "Pendiente de definir" : "Listo para generar"}</small>
+                </button>
+              ))}
+              {!customReportOptions && <p className="field-help">Cargando scripts disponibles...</p>}
+            </div>
+
+            <form onSubmit={generateCustomReport}>
+              {customReportOptions?.templates.find((template) => template.key === customReportTemplateKey)?.description && (
+                <p className="field-help script-description">
+                  {customReportOptions.templates.find((template) => template.key === customReportTemplateKey)?.description}
+                </p>
+              )}
+
+              <label htmlFor="custom_report_title">Nombre del reporte</label>
+              <input
+                id="custom_report_title"
+                value={customReportTitle}
+                onChange={(event) => setCustomReportTitle(event.target.value)}
+              />
+
+              <div className="row">
+                {customReportSupportsStartMonth() && (
+                  <div>
+                    <label htmlFor="custom_start_month">Statement desde</label>
+                    <MonthSelect id="custom_start_month" value={customReportStartMonth} onChange={setCustomReportStartMonth} />
+                  </div>
+                )}
+                <div>
+                  <label htmlFor="custom_end_month">Statement hasta</label>
+                  <MonthSelect id="custom_end_month" value={customReportEndMonth} onChange={setCustomReportEndMonth} />
+                </div>
+              </div>
+
+              {(currentCustomReportTemplate()?.options || []).length > 0 && (
+                <div className="custom-report-options">
+                  {(currentCustomReportTemplate()?.options || []).map((option) => (
+                    <label className="checkbox-field custom-report-option" key={option.key}>
+                      <input
+                        type="checkbox"
+                        checked={Boolean(customReportFlags[option.key])}
+                        onChange={(event) => setCustomReportFlag(option.key, event.target.checked)}
+                      />
+                      <span>
+                        <strong>{option.label}</strong>
+                        {option.description && <small>{option.description}</small>}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+
+              {customReportRequiresTerms() && (
+                <>
+                  <label htmlFor="custom_terms">Listado editable</label>
+                  <textarea
+                    id="custom_terms"
+                    className="custom-report-terms"
+                    value={customReportTerms}
+                    onChange={(event) => setCustomReportTerms(event.target.value)}
+                  />
+                  <p className="field-help">
+                    Una busqueda por linea. Usa <strong>Tema</strong> para buscar solo por nombre, o <strong>Tema | Artista</strong> para exigir ambos.
+                  </p>
+                </>
+              )}
+
+              {customReportSupportsSources() && (
+                <>
+                  <div className="section-heading compact-heading">
+                    <div>
+                      <h2>Distribuidoras y cuentas</h2>
+                      <p>Por defecto quedan todas seleccionadas. Podes desmarcar una distribuidora completa o solo una cuenta.</p>
+                    </div>
+                    <div className="inline-actions">
+                      <button type="button" className="inline-action" onClick={selectAllCustomReportSources}>Todas</button>
+                      <button type="button" className="inline-action" onClick={clearCustomReportSources}>Ninguna</button>
+                    </div>
+                  </div>
+
+                  <div className="source-account-grid">
+                    {(customReportOptions?.sources || customReportSources).map((source) => (
+                      <div className="source-account-card" key={source}>
+                        <label className="checkbox-field source-checkbox source-parent-checkbox">
+                          <input
+                            type="checkbox"
+                            checked={customReportSourceFullySelected(source)}
+                            onChange={() => toggleCustomReportSource(source)}
+                          />
+                          {source}
+                        </label>
+                        <div className="source-account-list">
+                          {customReportAccountsForSource(source).map((item) => {
+                            const key = customReportSourceAccountKey(item);
+                            return (
+                              <label className="checkbox-field source-checkbox source-child-checkbox" key={key}>
+                                <input
+                                  type="checkbox"
+                                  checked={customReportSourceAccounts.includes(key)}
+                                  onChange={() => toggleCustomReportSourceAccount(key)}
+                                />
+                                {item.account}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                    {!customReportOptions && <p className="field-help">Cargando distribuidoras disponibles...</p>}
+                  </div>
+                </>
+              )}
+
+              <button
+                type="submit"
+                disabled={customReportLoading || customReportOptions?.templates.find((template) => template.key === customReportTemplateKey)?.enabled === false}
+              >
+                {customReportLoading
+                  ? "Generando..."
+                  : customReportOptions?.templates.find((template) => template.key === customReportTemplateKey)?.enabled === false
+                    ? "Script pendiente"
+                    : "Descargar Excel"}
+              </button>
+              {lastFile && <p className="filename">{lastFile}</p>}
+            </form>
+          </section>
+        )}
+
         {view === "participation" && (
           <section className="panel">
             <div className="section-heading">
               <div>
                 <h1>Participacion en distribuidoras</h1>
                 <p>
-                  Ultima actualizacion: {participation?.updated_at || "sin cargar"}
+                  Ingresos reportables por distribuidora, aplicando la capa de negocio de statements.
+                  {" "}Ultima actualizacion: {participation?.updated_at || "sin cargar"}
                   {participation?.start_month && participation?.end_month ? ` - ${participation.start_month} a ${participation.end_month}` : ""}
                 </p>
               </div>
@@ -3354,7 +6160,7 @@ export default function Home() {
                 >
                   <option value="last_month">Ultimo mes</option>
                   <option value="last_3_months">Ultimos tres meses</option>
-                  <option value="last_year">Ultimo a?o</option>
+                  <option value="last_year">Ultimo ano</option>
                   <option value="all_history">Historico</option>
                   <option value="custom">Rango</option>
                 </select>
@@ -3410,6 +6216,1333 @@ export default function Home() {
                 ))}
               </div>
             </div>
+
+            {!!participation?.account_items?.length && (
+              <div className="table-scroll compact-table">
+                <table className="summary-table">
+                  <thead>
+                    <tr>
+                      <th>Distribuidora</th>
+                      <th>Cuenta</th>
+                      <th>USD reportable</th>
+                      <th>Participacion</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {participation.account_items.map((item) => (
+                      <tr key={`${item.source}-${item.account}`}>
+                        <td>{item.source}</td>
+                        <td>{item.account}</td>
+                        <td>{money(item.amount_usd)}</td>
+                        <td>{pct(item.percentage)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        )}
+
+        {view === "digital-income" && (
+          <section className="panel wide-panel">
+            <div className="section-heading">
+              <div>
+                <h1>Ingresos Digitales</h1>
+                <p>Lectura directa de los statements: ingresos reales informados por las distribuidoras, sin aplicar reglas de negocio, splits, comisiones, contratos ni estado del catalogo.</p>
+              </div>
+              <button type="button" onClick={loadDigitalIncome} disabled={digitalIncomeLoading}>
+                {digitalIncomeLoading ? "Cargando..." : "Actualizar"}
+              </button>
+            </div>
+
+            <div className="period-controls catalog-controls">
+              <div>
+                <label htmlFor="digital_income_artist">Artista / keyword</label>
+                <input
+                  id="digital_income_artist"
+                  value={digitalIncomeArtistKeyword}
+                  onChange={(event) => setDigitalIncomeArtistKeyword(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      loadDigitalIncome();
+                    }
+                  }}
+                  placeholder="Ej: Gusty, Aneley, Candu"
+                />
+              </div>
+              <div>
+                <label htmlFor="digital_income_source">Distribuidora</label>
+                <select
+                  id="digital_income_source"
+                  value={digitalIncomeSource}
+                  onChange={(event) => {
+                    setDigitalIncomeSource(event.target.value);
+                    setDigitalIncomeAccount("");
+                  }}
+                >
+                  <option value="">Todas</option>
+                  {digitalIncome?.options.sources.map((item) => (
+                    <option key={item} value={item}>{item}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="digital_income_account">Subcompañía</label>
+                <select
+                  id="digital_income_account"
+                  value={digitalIncomeAccount}
+                  onChange={(event) => setDigitalIncomeAccount(event.target.value)}
+                >
+                  <option value="">Todas</option>
+                  {digitalIncomeAccountOptions.map((item) => (
+                    <option key={item} value={item}>{item}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="digital_income_start">Desde</label>
+                <MonthSelect id="digital_income_start" value={digitalIncomeStartMonth} onChange={setDigitalIncomeStartMonth} />
+              </div>
+              <div>
+                <label htmlFor="digital_income_end">Hasta</label>
+                <MonthSelect id="digital_income_end" value={digitalIncomeEndMonth} onChange={setDigitalIncomeEndMonth} />
+              </div>
+              <button type="button" onClick={loadDigitalIncome} disabled={digitalIncomeLoading}>
+                Buscar
+              </button>
+            </div>
+
+            <div className="control-dashboard">
+              <div>
+                <span>Total USD</span>
+                <strong>{moneyCents(digitalIncome?.totals.total_usd || 0)}</strong>
+              </div>
+              <div>
+                <span>Filas</span>
+                <strong>{(digitalIncome?.total || 0).toLocaleString("es-AR")}</strong>
+              </div>
+              <div>
+                <span>Meses</span>
+                <strong>{digitalIncome?.totals.months || 0}</strong>
+              </div>
+              <div>
+                <span>Distribuidoras</span>
+                <strong>{digitalIncome?.totals.sources || 0}</strong>
+              </div>
+              <div>
+                <span>Subcompañías</span>
+                <strong>{digitalIncome?.totals.accounts || 0}</strong>
+              </div>
+              <div>
+                <span>Rango</span>
+                <strong>{digitalIncome?.totals.first_month || "-"} / {digitalIncome?.totals.last_month || "-"}</strong>
+              </div>
+            </div>
+
+            <div className="period-meta">
+              <strong>Vista</strong>
+              <span>Ingresos reales agrupados por distribuidora/cuenta</span>
+              <strong>Fuente</strong>
+              <span>{digitalIncome?.options.first_month || "-"} a {digitalIncome?.options.last_month || "-"}</span>
+              <strong>Reglas</strong>
+              <span>Sin comisiones internas ni capa de negocio</span>
+            </div>
+
+            <div className="section-heading compact-heading">
+              <div>
+                <h2>Últimos meses por distribuidora</h2>
+                <p>
+                  Cada fila es una distribuidora/subcompañía. Las columnas muestran los meses del rango aplicado
+                  {digitalIncomeArtistKeyword.trim() ? ` para la búsqueda "${digitalIncomeArtistKeyword.trim()}".` : "."}
+                </p>
+              </div>
+            </div>
+
+            <div className="summary-table-wrap">
+              <table className="summary-table digital-income-matrix">
+                <thead>
+                  <tr>
+                    <th>Distribuidora / cuenta</th>
+                    {(digitalIncome?.matrix_months || []).map((month) => (
+                      <th key={month}>{month}</th>
+                    ))}
+                    <th>Total</th>
+                    <th>Artistas</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {digitalIncomeLoading && (
+                    <tr>
+                      <td colSpan={(digitalIncome?.matrix_months.length || 0) + 3}>Cargando ingresos...</td>
+                    </tr>
+                  )}
+                  {!digitalIncomeLoading && digitalIncome?.matrix.length === 0 && (
+                    <tr>
+                      <td colSpan={(digitalIncome?.matrix_months.length || 0) + 3}>Sin datos para este filtro.</td>
+                    </tr>
+                  )}
+                  {digitalIncome?.matrix.map((item) => (
+                    <tr key={`${item.source}-${item.account}`}>
+                      <td>
+                        <strong>{item.source}</strong>
+                        <span className="cell-note">{item.account}</span>
+                        {item.has_share_in_out && <span className="cell-note">Incluye Share In/Out</span>}
+                      </td>
+                      {digitalIncome.matrix_months.map((month) => (
+                        <td key={month}>{moneyCents(item.months[month] || 0)}</td>
+                      ))}
+                      <td><strong>{moneyCents(item.total_usd || 0)}</strong></td>
+                      <td>{item.artists.toLocaleString("es-AR")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="section-heading compact-heading">
+              <div>
+                <h2>Detalle de respaldo</h2>
+                <p>
+                  Mostrando {digitalIncome?.items.length || 0} de {(digitalIncome?.total || 0).toLocaleString("es-AR")} grupos artista/mes.
+                  {(digitalIncome?.total || 0) > (digitalIncome?.items.length || 0) ? " Ajusta los filtros para ver un recorte mas chico." : ""}
+                </p>
+              </div>
+            </div>
+
+            <div className="summary-table-wrap">
+              <table className="summary-table">
+                <thead>
+                  <tr>
+                    <th>Mes statement</th>
+                    <th>Distribuidora</th>
+                    <th>Subcompañía</th>
+                    <th>Artista statement</th>
+                    <th>Tema / referencia</th>
+                    <th>Ingreso USD</th>
+                    <th>Ingreso EUR</th>
+                    <th>Share In/Out</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {digitalIncomeLoading && (
+                    <tr>
+                      <td colSpan={8}>Cargando ingresos...</td>
+                    </tr>
+                  )}
+                  {!digitalIncomeLoading && digitalIncome?.items.length === 0 && (
+                    <tr>
+                      <td colSpan={8}>Sin filas para este filtro.</td>
+                    </tr>
+                  )}
+                  {digitalIncome?.items.map((item, idx) => (
+                    <tr key={`${item.statement_period}-${item.source}-${item.account}-${item.artist}-${idx}`}>
+                      <td>{item.statement_period}</td>
+                      <td>{item.source}</td>
+                      <td>{item.account}</td>
+                      <td>{item.artist || "-"}</td>
+                      <td>{item.title || "-"}</td>
+                      <td>{moneyCents(item.total_usd || 0)}</td>
+                      <td>{item.total_eur ? eurCents(item.total_eur) : "-"}</td>
+                      <td>
+                        <span className={`status-pill ${item.has_share_in_out ? "warning" : "inactive"}`}>
+                          {item.has_share_in_out ? "Si" : "No"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {view === "source-monitor" && (
+          <section className="panel wide-panel">
+            <div className="section-heading">
+              <div>
+                <h1>Control de distribuidoras</h1>
+                <p>Monitoreo operativo de descargas. Inactivo solo apaga alertas: no excluye datos historicos de reportes.</p>
+              </div>
+              <button type="button" onClick={loadSourceMonitor} disabled={sourceMonitorLoading}>
+                {sourceMonitorLoading ? "Revisando..." : "Revisar todos"}
+              </button>
+            </div>
+
+            {!currentUser?.canEdit && (
+              <p className="field-help danger-text">
+                Estas ingresado como viewer. Para procesar o cambiar alertas, entra con un usuario editor/admin.
+              </p>
+            )}
+
+            <div className="control-dashboard">
+              <div>
+                <span>Fuentes</span>
+                <strong>{sourceMonitor?.summary.total ?? 0}</strong>
+              </div>
+              <div>
+                <span>Raw detectados</span>
+                <strong>{sourceMonitorRawTotal}</strong>
+              </div>
+              <div>
+                <span>Cargados</span>
+                <strong>{sourceMonitorLoadedTotal}</strong>
+              </div>
+              <div className={sourceMonitorPendingTotal > 0 ? "warn" : ""}>
+                <span>Pendientes reales</span>
+                <strong>{sourceMonitorPendingTotal}</strong>
+              </div>
+              <div>
+                <span>Ignorados validos</span>
+                <strong>{sourceMonitorIgnoredTotal}</strong>
+              </div>
+              <div className={(sourceMonitor?.summary.alerts || 0) > 0 ? "danger" : ""}>
+                <span>Alertas</span>
+                <strong>{sourceMonitor?.summary.alerts ?? 0}</strong>
+              </div>
+              <div>
+                <span>OK</span>
+                <strong>{sourceMonitor?.summary.status_counts?.ok ?? 0}</strong>
+              </div>
+              <div>
+                <span>Inactivas</span>
+                <strong>{sourceMonitor?.summary.status_counts?.inactive ?? 0}</strong>
+              </div>
+            </div>
+
+            {sourceMonitorLastProcess && (
+              <div className="process-summary">
+                <div className="section-heading">
+                  <div>
+                    <h2>Resumen procesado</h2>
+                    <p>{sourceMonitorLastProcess.display_name} - {sourceMonitorLastProcess.processed_at}</p>
+                  </div>
+                  <div className="mini-total">
+                    <span>Total USD</span>
+                    <strong>{money(sourceMonitorLastProcess.total_amount_usd)}</strong>
+                  </div>
+                </div>
+                <div className="period-meta">
+                  <strong>Antes</strong>
+                  <span>{sourceMonitorLastProcess.last_statement_before || "-"}</span>
+                  <strong>Despues</strong>
+                  <span>{sourceMonitorLastProcess.last_statement_after || "-"}</span>
+                  <strong>Pendientes</strong>
+                  <span>{sourceMonitorLastProcess.pending_files_after.length}</span>
+                </div>
+                <div className="muted">
+                  Archivos: {sourceMonitorLastProcess.pending_files_before.length ? sourceMonitorLastProcess.pending_files_before.join(", ") : "sin archivos pendientes detectados"}
+                </div>
+                {sourceMonitorLastProcess.summary.length > 0 && (
+                  <table className="summary-table compact-table">
+                    <thead>
+                      <tr>
+                        <th>Statement</th>
+                        <th>Filas</th>
+                        <th>Archivos</th>
+                        <th>USD</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sourceMonitorLastProcess.summary.map((row) => (
+                        <tr key={row.statement_period}>
+                          <td>{row.statement_period}</td>
+                          <td>{row.rows.toLocaleString("es-AR")}</td>
+                          <td>{row.files}</td>
+                          <td>{money(row.amount_usd)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            )}
+
+            <div className="summary-table-wrap">
+              <table className="summary-table source-monitor-table">
+                <thead>
+                  <tr>
+                    <th>Distribuidora</th>
+                    <th>Estado carga</th>
+                    <th>Archivos</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(sourceMonitor?.items || []).map((item) => (
+                    <tr key={item.id}>
+                      <td>
+                        <strong>{item.display_name}</strong>
+                        <div className="muted">{item.source} / {item.account}</div>
+                        <div className="muted">{item.input_path || "sin carpeta configurada"}</div>
+                      </td>
+                      <td>
+                        <div><strong>Statement:</strong> {item.last_statement_period || "-"}</div>
+                        <div className="muted">
+                          {item.statement_age_months === null ? "sin edad" : `${item.statement_age_months} mes(es) atras`} / tolerancia {item.max_age_months}
+                        </div>
+                        <div className="muted">Filas mart: {item.rows_in_mart.toLocaleString("es-AR")}</div>
+                      </td>
+                      <td>
+                        <div className="file-count-grid">
+                          <span><strong>Raw</strong>{item.raw_files}</span>
+                          <span><strong>Mart</strong>{item.files_in_mart}</span>
+                          <span className={item.unprocessed_raw_count > 0 ? "warn-text" : ""}><strong>Pend.</strong>{item.unprocessed_raw_count}</span>
+                          <span><strong>Ign.</strong>{item.ignored_raw_count || 0}</span>
+                        </div>
+                        {sourceMonitorInventoryLabel(item.raw_inventory_summary) && (
+                          <div className="muted truncate-text" title={sourceMonitorInventoryLabel(item.raw_inventory_summary)}>
+                            {sourceMonitorInventoryLabel(item.raw_inventory_summary)}
+                          </div>
+                        )}
+                        {(item.ignored_raw_count || 0) > 0 && (
+                          <div
+                            className="muted truncate-text"
+                            title={(item.ignored_raw_files || []).map((raw) => `${raw.file_name}: ${raw.reason}`).join("\n")}
+                          >
+                            Ignorados con regla: {item.ignored_raw_count}
+                          </div>
+                        )}
+                        <div className="muted truncate-text" title={item.latest_raw_file || ""}>Ultimo raw: {item.latest_raw_file || "sin archivos"}</div>
+                      </td>
+                      <td>
+                        <span className={`status-pill ${item.status}`}>{item.status}</span>
+                        <div className={item.alert ? "danger-text" : "muted"}>{item.reason}</div>
+                        {item.notes && <div className="muted">{item.notes}</div>}
+                      </td>
+                      <td>
+                        <div className="stack-actions">
+                          {item.portal_url && <a className="button secondary" href={item.portal_url} target="_blank" rel="noreferrer">Portal</a>}
+                          <button
+                            type="button"
+                            disabled={sourceMonitorLoading}
+                            title="Vuelve a comparar la carpeta input_raw contra lo procesado localmente."
+                            onClick={loadSourceMonitor}
+                          >
+                            {sourceMonitorLoading ? "Revisando..." : "Revisar directorio"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={sourceMonitorLoading || !currentUser?.canEdit}
+                            title={!currentUser?.canEdit ? "Necesitas entrar con usuario editor/admin." : "Marca que ya revisaste esta distribuidora."}
+                            onClick={() => updateSourceMonitorItem(item.id, { last_manual_review_at: new Date().toISOString(), alert_silenced: false })}
+                          >
+                            Marcar revisada
+                          </button>
+                          <button
+                            type="button"
+                            disabled={sourceMonitorProcessingId !== "" || !currentUser?.canEdit || item.unprocessed_raw_count === 0}
+                            title={!currentUser?.canEdit ? "Necesitas entrar con usuario editor/admin." : sourceMonitorProcessingId !== "" ? "Hay un procesamiento en curso." : item.unprocessed_raw_count === 0 ? "No hay archivos nuevos pendientes para procesar." : "Ejecuta el ingest nuevo local para esta distribuidora."}
+                            onClick={() => processSourceMonitorItem(item.id)}
+                          >
+                            {sourceMonitorProcessingId === item.id ? "Procesando..." : item.unprocessed_raw_count === 0 ? "Sin pendientes" : "Procesar nuevos"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={sourceMonitorLoading || !currentUser?.canEdit}
+                            title={!currentUser?.canEdit ? "Necesitas entrar con usuario editor/admin." : item.alert_silenced ? "Vuelve a activar la alerta para esta distribuidora." : "Oculta la alerta actual sin desactivar la data historica."}
+                            onClick={() => updateSourceMonitorItem(item.id, { alert_silenced: !item.alert_silenced })}
+                          >
+                            {item.alert_silenced ? "Reactivar alerta" : "Silenciar alerta"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={sourceMonitorLoading || !currentUser?.canEdit}
+                            title={!currentUser?.canEdit ? "Necesitas entrar con usuario editor/admin." : item.monitoring_active ? "Deja de monitorear alertas nuevas, sin excluir lo ya cargado." : "Reactiva el monitoreo de alertas."}
+                            onClick={() => updateSourceMonitorItem(item.id, { monitoring_active: !item.monitoring_active, alert_silenced: item.monitoring_active ? true : false })}
+                          >
+                            {item.monitoring_active ? "No monitorear" : "Monitorear"}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="cloud-publish-box">
+              <div>
+                <h2>Publicacion cloud</h2>
+                <p>
+                  Este paso debe hacerse despues de revisar los resumenes locales. Publicar cloud actualiza la web online con los marts validados.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={!canPublishMarts}
+                title={publishDisabledReason}
+                onClick={publishSourceMonitorMarts}
+              >
+                {sourceMonitorPublishing ? "Publicando..." : "Publicar marts a cloud"}
+              </button>
+              <p className="field-help">
+                Flujo correcto: revisar carpetas, procesar pendientes reales, validar importes locales y recien ahi publicar.
+                {sourceMonitorPendingTotal > 0 ? ` Hay ${sourceMonitorPendingTotal} archivo(s) pendiente(s) real(es).` : " No hay pendientes reales detectados."}
+              </p>
+              {sourceMonitorLastPublish && (
+                <div className="publish-result">
+                  <strong>Ultima publicacion: {sourceMonitorLastPublish.published_at}</strong>
+                  <span>{sourceMonitorLastPublish.bucket}/{sourceMonitorLastPublish.prefix}</span>
+                  <span>
+                    {sourceMonitorLastPublish.uploaded.map((file) => `${file.file_name} (${file.size_mb.toFixed(1)} MB)`).join(" · ")}
+                  </span>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
+
+        {view === "catalog" && (
+          <section className="panel wide-panel">
+            <div className="section-heading">
+              <div>
+                <h1>Catalogo General</h1>
+                <p>Base maestra deduplicada desde statements. Los cambios de activo/inactivo no modifican los crudos.</p>
+              </div>
+              <div className="button-row">
+                <button type="button" onClick={() => loadCatalog(0)} disabled={catalogLoading}>
+                  {catalogLoading ? "Cargando..." : "Actualizar"}
+                </button>
+              </div>
+            </div>
+
+            <div className="period-controls catalog-controls">
+              <div>
+                <label htmlFor="catalog_source">Distribuidora</label>
+                <select
+                  id="catalog_source"
+                  value={catalogSource}
+                  onChange={(event) => setCatalogSource(event.target.value)}
+                >
+                  <option value="">Todas</option>
+                  {catalogData?.options.sources.map((item) => (
+                    <option key={item} value={item}>{item}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="catalog_account">Cuenta</label>
+                <select
+                  id="catalog_account"
+                  value={catalogAccount}
+                  onChange={(event) => setCatalogAccount(event.target.value)}
+                >
+                  <option value="">Todas</option>
+                  {catalogData?.options.accounts.map((item) => (
+                    <option key={item} value={item}>{item}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="catalog_artist">Artista</label>
+                <select
+                  id="catalog_artist"
+                  value={catalogArtist}
+                  onChange={(event) => setCatalogArtist(event.target.value)}
+                >
+                  <option value="">Todos</option>
+                  {catalogData?.options.artists.map((item) => (
+                    <option key={item} value={item}>{item}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="catalog_keyword">Palabra clave</label>
+                <input
+                  id="catalog_keyword"
+                  value={catalogKeyword}
+                  onChange={(event) => setCatalogKeyword(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      loadCatalog(0);
+                    }
+                  }}
+                  placeholder="tema, artista o ISRC"
+                />
+              </div>
+              <div>
+                <label htmlFor="catalog_label">Label</label>
+                <select
+                  id="catalog_label"
+                  value={catalogLabel}
+                  onChange={(event) => setCatalogLabel(event.target.value)}
+                >
+                  <option value="">Todos</option>
+                  <option value="__missing__">No identificadas</option>
+                  {catalogData?.options.labels.map((item) => (
+                    <option key={item} value={item}>{item}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="catalog_start">Desde</label>
+                <MonthSelect id="catalog_start" value={catalogStartMonth} onChange={setCatalogStartMonth} />
+              </div>
+              <div>
+                <label htmlFor="catalog_end">Hasta</label>
+                <MonthSelect id="catalog_end" value={catalogEndMonth} onChange={setCatalogEndMonth} />
+              </div>
+              <div>
+                <label htmlFor="catalog_status">Estado</label>
+                <select
+                  id="catalog_status"
+                  value={catalogStatus}
+                  onChange={(event) => setCatalogStatus(event.target.value as "active" | "inactive" | "all")}
+                >
+                  <option value="active">Activos</option>
+                  <option value="inactive">Inactivos</option>
+                  <option value="all">Todos</option>
+                </select>
+              </div>
+              <button type="button" onClick={() => loadCatalog(0)} disabled={catalogLoading}>
+                Buscar
+              </button>
+            </div>
+
+            <div className="control-dashboard">
+              <div>
+                <span>Items</span>
+                <strong>{catalogData?.total.toLocaleString("es-AR") || 0}</strong>
+              </div>
+              <div>
+                <span>Total USD</span>
+                <strong>{money(catalogData?.totals.amount_usd || 0)}</strong>
+              </div>
+              <div>
+                <span>Unidades</span>
+                <strong>{Math.round(catalogData?.totals.units || 0).toLocaleString("es-AR")}</strong>
+              </div>
+              <div>
+                <span>Rango fuente</span>
+                <strong>{catalogData?.options.first_month || "-"} / {catalogData?.options.last_month || "-"}</strong>
+              </div>
+            </div>
+
+            <div className="catalog-pagination">
+              <span>
+                Mostrando {catalogData ? catalogData.offset + 1 : 0}
+                {" - "}
+                {catalogData ? Math.min(catalogData.offset + catalogData.items.length, catalogData.total) : 0}
+                {" de "}
+                {catalogData?.total || 0}
+              </span>
+              <div className="button-row">
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={catalogLoading || catalogOffset === 0}
+                  onClick={() => loadCatalog(Math.max(0, catalogOffset - catalogLimit))}
+                >
+                  Anterior
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={catalogLoading || !catalogData || catalogOffset + catalogLimit >= catalogData.total}
+                  onClick={() => loadCatalog(catalogOffset + catalogLimit)}
+                >
+                  Siguiente
+                </button>
+              </div>
+            </div>
+
+            <div className="summary-table-wrap catalog-table-wrap">
+              <table className="summary-table catalog-table">
+                <thead>
+                  <tr>
+                    <th>Estado</th>
+                    <th>Tema</th>
+                    <th>Artista</th>
+                    <th>ISRC / ID</th>
+                    <th>Distribuidoras</th>
+                    <th>Fechas</th>
+                    <th>USD</th>
+                    <th>Release</th>
+                    <th>Label</th>
+                    <th>Accion</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {catalogLoading && (
+                    <tr>
+                      <td colSpan={10}>Cargando catalogo...</td>
+                    </tr>
+                  )}
+                  {!catalogLoading && catalogData?.items.length === 0 && (
+                    <tr>
+                      <td colSpan={10}>Sin items para este filtro.</td>
+                    </tr>
+                  )}
+                  {catalogData?.items.map((item) => (
+                    <tr key={item.catalog_key} className={item.include_in_reports === false ? "inactive-row" : ""}>
+                      <td>
+                        <span className={`status-pill ${item.include_in_reports !== false ? "ok" : "inactive"}`}>
+                          {item.include_in_reports !== false ? "entra en reportes" : "fuera de reportes"}
+                        </span>
+                        {item.catalog_business_status && <span className="cell-note">{item.catalog_business_status}</span>}
+                        {item.status_notes && <span className="cell-note">{item.status_notes}</span>}
+                      </td>
+                      <td>
+                        <strong>{item.track_title || "Sin titulo"}</strong>
+                        {item.title_variants && item.title_variants !== item.track_title && (
+                          <span className="cell-note truncate-text" title={item.title_variants}>Variantes: {item.title_variants}</span>
+                        )}
+                      </td>
+                      <td>
+                        {item.artist_statement || "Sin artista"}
+                        {item.artist_variants && item.artist_variants !== item.artist_statement && (
+                          <span className="cell-note truncate-text" title={item.artist_variants}>Variantes: {item.artist_variants}</span>
+                        )}
+                      </td>
+                      <td>
+                        <strong>{item.asset_isrc || item.track_id || "-"}</strong>
+                        <span className="cell-note">{item.catalog_key}</span>
+                      </td>
+                      <td>
+                        <strong>{item.sources || "-"}</strong>
+                        <span className="cell-note">{item.accounts || "-"}</span>
+                        {item.content_types && <span className="cell-note">{item.content_types}</span>}
+                      </td>
+                      <td>
+                        <strong>{item.first_transaction_month || "-"} / {item.last_transaction_month || "-"}</strong>
+                      </td>
+                      <td>{money(item.amount_usd || 0)}</td>
+                      <td>
+                        {item.external_release_date || "-"}
+                        {item.external_match_url && (
+                          <a className="cell-note" href={item.external_match_url} target="_blank" rel="noreferrer">metadata</a>
+                        )}
+                      </td>
+                      <td>
+                        {catalogLabelEditKey === item.catalog_key ? (
+                          <div className="inline-edit">
+                            <input
+                              value={catalogLabelDraft}
+                              onChange={(event) => setCatalogLabelDraft(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  updateCatalogLabel(item);
+                                }
+                                if (event.key === "Escape") {
+                                  setCatalogLabelEditKey("");
+                                  setCatalogLabelDraft("");
+                                }
+                              }}
+                              autoFocus
+                            />
+                            <button
+                              type="button"
+                              className="secondary"
+                              disabled={catalogLabelSaving === item.catalog_key}
+                              onClick={() => updateCatalogLabel(item)}
+                            >
+                              Guardar
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary"
+                              disabled={catalogLabelSaving === item.catalog_key}
+                              onClick={() => {
+                                setCatalogLabelEditKey("");
+                                setCatalogLabelDraft("");
+                              }}
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        ) : currentUser?.canEdit ? (
+                          <button
+                            type="button"
+                            className="metadata-edit-chip"
+                            onClick={() => {
+                              setCatalogLabelEditKey(item.catalog_key);
+                              setCatalogLabelDraft(item.label_normalized || item.label_normalized_auto || item.external_label || "");
+                            }}
+                          >
+                            {item.label_normalized || "-"}
+                          </button>
+                        ) : (
+                          <strong>{item.label_normalized || "-"}</strong>
+                        )}
+                        {item.label_normalized_override && <span className="cell-note">manual</span>}
+                        {item.external_label && item.external_label !== item.label_normalized && (
+                          <span className="cell-note truncate-text" title={item.external_label}>Original: {item.external_label}</span>
+                        )}
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="secondary"
+                          disabled={!currentUser?.canEdit}
+                          title={!currentUser?.canEdit ? "Necesitas usuario editor/admin." : item.active ? "Marcar este item como inactivo." : "Reactivar este item."}
+                          onClick={() => updateCatalogStatus(item, !item.active)}
+                        >
+                          {item.active ? "Inactivar" : "Activar"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {view === "distributor-config" && (
+          <section className="panel wide-panel">
+            <div className="section-heading">
+              <div>
+                <h1>Configurador distribuidoras</h1>
+                <p>Vista read-only de politicas, diccionario de statements y fechas contractuales. Todavia no gobierna reportes productivos.</p>
+              </div>
+              <button type="button" onClick={loadDistributorConfig} disabled={distributorConfigLoading}>
+                {distributorConfigLoading ? "Cargando..." : "Actualizar"}
+              </button>
+            </div>
+
+            <div className="control-dashboard">
+              <div>
+                <span>Cuentas</span>
+                <strong>{distributorConfig?.summary.accounts || 0}</strong>
+              </div>
+              <div>
+                <span>Diccionario</span>
+                <strong>{distributorConfig?.summary.dictionary_entries || 0}</strong>
+              </div>
+              <div>
+                <span>Fechas corte</span>
+                <strong>{distributorConfig?.summary.contract_cutoffs || 0}</strong>
+              </div>
+              <div>
+                <span>Templates</span>
+                <strong>{distributorConfig?.summary.report_templates || 0}</strong>
+              </div>
+              <div>
+                <span>Modo</span>
+                <strong>{distributorConfig?.mode || "seed"}</strong>
+              </div>
+            </div>
+
+            <div className="period-controls catalog-controls">
+              <div>
+                <label htmlFor="distributor_config_source">Distribuidora</label>
+                <select
+                  id="distributor_config_source"
+                  value={distributorConfigSource}
+                  onChange={(event) => {
+                    setDistributorConfigSource(event.target.value);
+                    setDistributorConfigAccountId("");
+                  }}
+                >
+                  <option value="">Todas</option>
+                  {distributorConfigSources.map((source) => (
+                    <option key={source} value={source}>{source}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="distributor_config_account">Cuenta</label>
+                <select
+                  id="distributor_config_account"
+                  value={selectedDistributorAccount?.policy_id || ""}
+                  onChange={(event) => setDistributorConfigAccountId(event.target.value)}
+                >
+                  {distributorConfigAccounts.map((account) => (
+                    <option key={account.policy_id} value={account.policy_id}>
+                      {account.display_name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="button"
+                className="secondary"
+                disabled={!selectedDistributorAccount}
+                onClick={() => {
+                  if (!selectedDistributorAccount) return;
+                  setCatalogSource(selectedDistributorAccount.source);
+                  setCatalogAccount(selectedDistributorAccount.account);
+                  setCatalogStatus("all");
+                  setView("catalog");
+                }}
+              >
+                Ver obras en catalogo
+              </button>
+            </div>
+
+            {!distributorConfig && !distributorConfigLoading && (
+              <p className="field-help">Sin configuracion cargada todavia.</p>
+            )}
+
+            {selectedDistributorAccount && (
+              <>
+                <div className="grid">
+                  <section className="subpanel">
+                    <div className="subpanel-title">
+                      <div>
+                        <h2>Decision de cuenta</h2>
+                        <p>{selectedDistributorAccount.source} / {selectedDistributorAccount.account}</p>
+                      </div>
+                      <span className={`status-pill ${cashModeClass(selectedDistributorAccount.cash_view_enabled)}`}>
+                        {accountCashLabel(selectedDistributorAccount)}
+                      </span>
+                    </div>
+                    <div className="policy-summary">
+                      <div>
+                        <span>Tipo</span>
+                        <strong>{selectedDistributorAccount.account_type}</strong>
+                      </div>
+                      <div>
+                        <span>Ownership</span>
+                        <strong>{selectedDistributorAccount.ownership_default}</strong>
+                      </div>
+                      <div>
+                        <span>Base temporal</span>
+                        <strong>{flagLabel(selectedDistributorAccount.default_time_basis)}</strong>
+                      </div>
+                      <div>
+                        <span>Monitoreo</span>
+                        <strong>{flagLabel(selectedDistributorAccount.monitoring_active)}</strong>
+                      </div>
+                    </div>
+                    <div className="policy-flags">
+                      <span>Catalogo: {flagLabel(selectedDistributorAccount.catalog_view_enabled)}</span>
+                      <span>Statement: {flagLabel(selectedDistributorAccount.statement_view_enabled)}</span>
+                      <span>{accountCashLabel(selectedDistributorAccount)}</span>
+                    </div>
+                    {selectedDistributorAccount.cash_view_description && (
+                      <p className="field-help">{selectedDistributorAccount.cash_view_description}</p>
+                    )}
+                    <p className="field-help">{selectedDistributorAccount.notes}</p>
+                  </section>
+
+                  <section className="subpanel">
+                    <div className="subpanel-title">
+                      <div>
+                        <h2>Regla contractual</h2>
+                        <p>Criterio humano para separar catalogo propio, ajeno o pendiente de revision.</p>
+                      </div>
+                    </div>
+                    {selectedDistributorAccount.contract_cutoff ? (
+                      <>
+                        <div className="policy-summary">
+                          <div>
+                            <span>Entidad</span>
+                            <strong>{selectedDistributorAccount.contract_cutoff.business_entity}</strong>
+                          </div>
+                          <div>
+                            <span>Fecha real</span>
+                            <strong>{selectedDistributorAccount.contract_cutoff.contract_start_date || "No cargada"}</strong>
+                          </div>
+                          <div>
+                            <span>Mes de corte</span>
+                            <strong>{selectedDistributorAccount.contract_cutoff.contract_start_month || "-"}</strong>
+                          </div>
+                          <div>
+                            <span>Base de decision</span>
+                            <strong>{flagLabel(selectedDistributorAccount.contract_cutoff.cutoff_basis)}</strong>
+                          </div>
+                          <div>
+                            <span>Estado fecha</span>
+                            <strong>{flagLabel(selectedDistributorAccount.contract_cutoff.date_status)}</strong>
+                          </div>
+                          <div>
+                            <span>Confianza</span>
+                            <strong>{flagLabel(selectedDistributorAccount.contract_cutoff.confidence)}</strong>
+                          </div>
+                        </div>
+                        <div className="rule-flow">
+                          <div>
+                            <span>Contenido anterior</span>
+                            <strong>{flagLabel(selectedDistributorAccount.contract_cutoff.old_content_policy)}</strong>
+                          </div>
+                          <div>
+                            <span>Contenido nuevo</span>
+                            <strong>{flagLabel(selectedDistributorAccount.contract_cutoff.new_content_policy)}</strong>
+                          </div>
+                          <div>
+                            <span>Contenido dudoso</span>
+                            <strong>{flagLabel(selectedDistributorAccount.contract_cutoff.unknown_content_policy)}</strong>
+                          </div>
+                        </div>
+                        <p className="field-help">
+                          Evidencia: {selectedDistributorAccount.contract_cutoff.evidence_terms.join(", ")}
+                          {" "}({selectedDistributorAccount.contract_cutoff.evidence_first_transaction_month || "-"} transaction / {selectedDistributorAccount.contract_cutoff.evidence_first_statement_period || "-"} statement).
+                        </p>
+                        <p className="field-help">{selectedDistributorAccount.contract_cutoff.notes}</p>
+                      </>
+                    ) : (
+                      <p className="field-help">Esta cuenta no tiene fecha contractual configurada.</p>
+                    )}
+                  </section>
+                </div>
+
+                <section className="subpanel">
+                  <div className="subpanel-title">
+                    <div>
+                      <h2>Impacto de esta seleccion</h2>
+                      <p>Numeros directos de {selectedDistributorAccount.source} / {selectedDistributorAccount.account}, sin sumar otras cuentas relacionadas.</p>
+                    </div>
+                  </div>
+                  <div className="control-dashboard compact-dashboard">
+                    <div>
+                      <span>Obras</span>
+                      <strong>{selectedDistributorAccount.account_impact_stats?.works || 0}</strong>
+                    </div>
+                    <div>
+                      <span>Filas song level</span>
+                      <strong>{selectedDistributorAccount.account_impact_stats?.rows || 0}</strong>
+                    </div>
+                    <div>
+                      <span>Generacion directa de cuenta</span>
+                      <strong>{money(selectedDistributorAccount.account_impact_stats?.amount_usd || 0)}</strong>
+                    </div>
+                    <div>
+                      <span>Unidades</span>
+                      <strong>{Math.round(selectedDistributorAccount.account_impact_stats?.units || 0).toLocaleString("es-AR")}</strong>
+                    </div>
+                  </div>
+                  <p className="field-help">
+                    Periodo observado: {selectedDistributorAccount.account_impact_stats?.first_transaction_month || "-"}
+                    {" "}a {selectedDistributorAccount.account_impact_stats?.last_transaction_month || "-"}.
+                    {" "}Esta es la lectura directa de la cuenta seleccionada.
+                  </p>
+                  <div className="summary-table-wrap">
+                    <table className="summary-table compact-table policy-table">
+                      <thead>
+                        <tr>
+                          <th>Hoja / tipo</th>
+                          <th>Obras</th>
+                          <th>Filas</th>
+                          <th>Generacion</th>
+                          <th>Periodo</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(selectedDistributorAccount.account_impact_stats?.sheet_breakdown || []).map((sheet) => (
+                          <tr key={sheet.source_sheet}>
+                            <td><strong>{sheet.source_sheet}</strong></td>
+                            <td>{sheet.works}</td>
+                            <td>{sheet.rows}</td>
+                            <td>{money(sheet.amount_usd)}</td>
+                            <td>{sheet.first_transaction_month || "-"} a {sheet.last_transaction_month || "-"}</td>
+                          </tr>
+                        ))}
+                        {(selectedDistributorAccount.account_impact_stats?.sheet_breakdown || []).length === 0 && (
+                          <tr>
+                            <td colSpan={5}>Sin datos directos para esta cuenta.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+
+                {selectedDistributorRulePreview?.enabled && (
+                  <section className="subpanel">
+                    <div className="subpanel-title">
+                      <div>
+                        <h2>Decision final de negocio</h2>
+                        <p>Combina regla contractual y catalogo. Esta es la foto que deberia leer un reporte.</p>
+                      </div>
+                    </div>
+                    <div className="control-dashboard compact-dashboard">
+                      {(selectedDistributorRulePreview.final_summary || selectedDistributorRulePreview.summary).map((item) => (
+                        <div key={item.status} className={item.status === "manual_review" || item.status === "excluded_by_catalog" ? "warn" : ""}>
+                          <span>{finalDecisionLabel(item.status)}</span>
+                          <strong>{money(item.amount_usd)}</strong>
+                          <small>{item.works} obra(s) / {item.rows} fila(s)</small>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="decision-rule-list">
+                      <div>
+                        <span>Regla contractual</span>
+                        <strong>
+                          Corte {selectedDistributorRulePreview.contract_start_date || selectedDistributorRulePreview.contract_start_month || "-"}
+                        </strong>
+                        <small>{flagLabel(selectedDistributorRulePreview.cutoff_basis)}</small>
+                      </div>
+                      <div>
+                        <span>Regla de catalogo</span>
+                        <strong>Catalogo inactivo excluye siempre</strong>
+                        <small>Si una obra esta fuera de reportes, pisa la inclusion contractual.</small>
+                      </div>
+                      <div>
+                        <span>Resultado</span>
+                        <strong>Reportable final</strong>
+                        <small>Esta lectura sigue siendo read-only; no modifica reportes ni marts.</small>
+                      </div>
+                    </div>
+                    <div className="subpanel-title mini-title">
+                      <div>
+                        <h3>Alertas que requieren mirada</h3>
+                        <p>Solo aparecen conflictos o casos incompletos. La lista completa queda plegada.</p>
+                      </div>
+                    </div>
+                    {(selectedDistributorRulePreview.alerts || []).length > 0 ? (
+                      <div className="summary-table-wrap">
+                        <table className="summary-table rule-alert-table">
+                          <thead>
+                            <tr>
+                              <th>Estado final</th>
+                              <th>Obra</th>
+                              <th>Regla</th>
+                              <th>Catalogo</th>
+                              <th>Generacion</th>
+                              <th>Motivo</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(selectedDistributorRulePreview.alerts || []).map((item, index) => (
+                              <tr key={`alert-${item.final_status || item.status}-${item.asset_isrc || item.track_title}-${index}`}>
+                                <td>
+                                  <span className={`status-pill ${finalDecisionClass(item.final_status || item.status)}`}>
+                                    {finalDecisionLabel(item.final_status || item.status)}
+                                  </span>
+                                </td>
+                                <td>
+                                  <strong>{item.track_title || "-"}</strong>
+                                  <span className="cell-note">{item.artist || "-"}</span>
+                                  {item.asset_isrc && <span className="cell-note">{item.asset_isrc}</span>}
+                                </td>
+                                <td>{ruleStatusLabel(item.rule_status || item.status)} / {item.decision_basis || "-"}</td>
+                                <td>
+                                  {item.catalog_key || "Sin match"}
+                                  <span className="cell-note">
+                                    activo: {item.catalog_active === false ? "no" : item.catalog_active === true ? "si" : "-"}
+                                    {" "}reportes: {item.catalog_include_in_reports === false ? "no" : item.catalog_include_in_reports === true ? "si" : "-"}
+                                  </span>
+                                </td>
+                                <td>{money(item.amount_usd)}</td>
+                                <td>{item.final_reason || item.reason}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="field-help ok-help">Sin alertas: la regla contractual y el catalogo no muestran conflictos en esta cuenta.</p>
+                    )}
+                    <details className="audit-details">
+                      <summary>Ver auditoria completa ({selectedDistributorRulePreview.items.length} principales por importe)</summary>
+                      <div className="summary-table-wrap">
+                        <table className="summary-table rule-preview-table">
+                          <thead>
+                            <tr>
+                              <th>Final</th>
+                              <th>Regla</th>
+                              <th>Obra</th>
+                              <th>Hoja</th>
+                              <th>Base</th>
+                              <th>Release</th>
+                              <th>Generacion</th>
+                              <th>Motivo</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {selectedDistributorRulePreview.items.map((item, index) => (
+                              <tr key={`${item.final_status || item.status}-${item.asset_isrc || item.track_title}-${index}`}>
+                                <td>
+                                  <span className={`status-pill ${finalDecisionClass(item.final_status || item.status)}`}>
+                                    {finalDecisionLabel(item.final_status || item.status)}
+                                  </span>
+                                </td>
+                                <td>
+                                  <span className={`status-pill ${ruleStatusClass(item.rule_status || item.status)}`}>
+                                    {ruleStatusLabel(item.rule_status || item.status)}
+                                  </span>
+                                </td>
+                                <td>
+                                  <strong>{item.track_title || "-"}</strong>
+                                  <span className="cell-note">{item.artist || "-"}</span>
+                                  {item.asset_isrc && <span className="cell-note">{item.asset_isrc}</span>}
+                                  {item.catalog_key && <span className="cell-note">{item.catalog_key}</span>}
+                                </td>
+                                <td>{item.source_sheet}</td>
+                                <td>{item.decision_basis || "-"}</td>
+                                <td>
+                                  {item.external_release_date || "-"}
+                                  {item.external_label && <span className="cell-note">{item.external_label}</span>}
+                                </td>
+                                <td>{money(item.amount_usd)}</td>
+                                <td>{item.final_reason || item.reason}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </details>
+                  </section>
+                )}
+
+                <section className="subpanel">
+                  <div className="subpanel-title">
+                    <div>
+                      <h2>Generacion total de obras relacionadas</h2>
+                      <p>Vista ampliada de catalogo: obras donde aparece esta cuenta, aunque tambien generen en otras fuentes.</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => {
+                        setCatalogSource(selectedDistributorAccount.source);
+                        setCatalogAccount(selectedDistributorAccount.account);
+                        setCatalogStatus("all");
+                        setView("catalog");
+                      }}
+                    >
+                      Abrir catalogo filtrado
+                    </button>
+                  </div>
+                  <div className="control-dashboard compact-dashboard">
+                    <div><span>Obras relacionadas</span><strong>{selectedDistributorAccount.catalog_stats?.works || 0}</strong></div>
+                    <div><span>Activas</span><strong>{selectedDistributorAccount.catalog_stats?.active || 0}</strong></div>
+                    <div className={(selectedDistributorAccount.catalog_stats?.inactive || 0) > 0 ? "warn" : ""}><span>Inactivas</span><strong>{selectedDistributorAccount.catalog_stats?.inactive || 0}</strong></div>
+                    <div><span>Release date</span><strong>{selectedDistributorAccount.catalog_stats?.release_dates || 0}</strong></div>
+                    <div className={(selectedDistributorAccount.catalog_stats?.missing_release_dates || 0) > 0 ? "warn" : ""}><span>Sin release</span><strong>{selectedDistributorAccount.catalog_stats?.missing_release_dates || 0}</strong></div>
+                    <div><span>Label</span><strong>{selectedDistributorAccount.catalog_stats?.labels || 0}</strong></div>
+                    <div><span>Total obras relacionadas</span><strong>{money(selectedDistributorAccount.catalog_stats?.amount_usd || 0)}</strong></div>
+                  </div>
+                  <p className="field-help">
+                    Periodo observado: {selectedDistributorAccount.catalog_stats?.first_transaction_month || "-"}
+                    {" "}a {selectedDistributorAccount.catalog_stats?.last_transaction_month || "-"}.
+                    {" "}Estos numeros pueden incluir otras cuentas/fuentes relacionadas a las mismas obras.
+                  </p>
+                  {Math.abs((selectedDistributorAccount.catalog_stats?.amount_usd || 0) - (selectedDistributorAccount.account_impact_stats?.amount_usd || 0)) > 0.01 && (
+                    <p className="field-help compact-note">
+                      La diferencia contra la cuenta directa es {money((selectedDistributorAccount.catalog_stats?.amount_usd || 0) - (selectedDistributorAccount.account_impact_stats?.amount_usd || 0))}
+                      {" "}porque algunas obras tambien aparecen en otras fuentes o cuentas.
+                    </p>
+                  )}
+                </section>
+
+                <section className="subpanel">
+                  <div className="subpanel-title">
+                    <div>
+                      <h2>Reglas por hoja</h2>
+                      <p>Que entra a catalogo, reportes y caja para cada hoja original.</p>
+                    </div>
+                  </div>
+                  <div className="summary-table-wrap">
+                    <table className="summary-table compact-table policy-table">
+                      <thead>
+                        <tr>
+                          <th>Hoja / tipo</th>
+                          <th>Catalogo</th>
+                          <th>Statement</th>
+                          <th>Caja</th>
+                          <th>Base</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(selectedDistributorAccount.sheet_rules).map(([sheet, rules]) => (
+                          <tr key={sheet}>
+                            <td><strong>{sheet}</strong></td>
+                            <td>{flagLabel(rules.catalog_view)}</td>
+                            <td>{flagLabel(rules.statement_view)}</td>
+                            <td>
+                              <span className={`status-pill ${cashModeClass(rules.cash_view)}`}>
+                                {flagLabel(rules.cash_view)}
+                              </span>
+                            </td>
+                            <td>{flagLabel(rules.revenue_basis)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+
+                <section className="subpanel">
+                  <div className="subpanel-title">
+                    <div>
+                      <h2>Diccionario del statement</h2>
+                      <p>Explicacion humana de cada hoja original, columnas usadas y riesgos conocidos.</p>
+                    </div>
+                  </div>
+                  <div className="summary-table-wrap dictionary-wrap">
+                    <table className="summary-table">
+                      <thead>
+                        <tr>
+                          <th>Hoja / archivo</th>
+                          <th>Significado</th>
+                          <th>Tipo</th>
+                          <th>Columnas clave</th>
+                          <th>Decision</th>
+                          <th>Riesgos</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedDictionaryEntries.map((entry) => (
+                          <tr key={`${entry.source}-${entry.account}-${entry.raw_sheet_or_file_type}`}>
+                            <td>
+                              <strong>{entry.raw_sheet_or_file_type}</strong>
+                              <span className="cell-note">{entry.human_name}</span>
+                            </td>
+                            <td>{entry.human_description}</td>
+                            <td>{entry.business_meaning}</td>
+                            <td>
+                              <div><strong>Importe:</strong> {entry.amount_column || "-"}</div>
+                              <div><strong>Periodo:</strong> {entry.period_column || "-"}</div>
+                              <div><strong>ID:</strong> {entry.identifier_columns.join(", ") || "-"}</div>
+                            </td>
+                            <td>
+                              <div>Catalogo: {flagLabel(entry.default_catalog_view)}</div>
+                              <div>Statement: {flagLabel(entry.default_statement_view)}</div>
+                              <div>Caja: {flagLabel(entry.default_cash_view)}</div>
+                              <span className="cell-note">{entry.decision_reason}</span>
+                            </td>
+                            <td>{entry.known_risks}</td>
+                          </tr>
+                        ))}
+                        {selectedDictionaryEntries.length === 0 && (
+                          <tr>
+                            <td colSpan={6}>Sin diccionario asociado a esta cuenta.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+
+                <section className="subpanel">
+                  <h2>Impacto en reportes</h2>
+                  <p className="field-help">Panel secundario solo lectura. Sirve para entender donde podria impactar esta cuenta; no configura reglas.</p>
+                  <div className="summary-table-wrap">
+                    <table className="summary-table compact-table">
+                      <thead>
+                        <tr>
+                          <th>Template</th>
+                          <th>Familia</th>
+                          <th>Periodo</th>
+                          <th>Catalogo</th>
+                          <th>Politica cuenta</th>
+                          <th>Notas</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedReportImpacts.map((template) => (
+                          <tr key={template.template_key}>
+                            <td><strong>{template.title}</strong></td>
+                            <td>{template.report_family}</td>
+                            <td>{template.time_basis}</td>
+                            <td>{flagLabel(template.uses_catalog_status)}</td>
+                            <td>{flagLabel(template.uses_account_policy)}</td>
+                            <td>{template.notes}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </>
+            )}
           </section>
         )}
 
@@ -3662,6 +7795,1033 @@ export default function Home() {
           </section>
         )}
 
+        {view === "artist-finance" && (
+          <section className="panel wide-panel">
+            <div className="section-heading">
+              <div>
+                <h1>Finanzas Artista</h1>
+                <p>Vista operativa: saldos de shows, cuenta corriente, inversiones, proyectos y recuperables en lenguaje de negocio.</p>
+              </div>
+              <div className="button-row">
+                <button type="button" onClick={loadArtistFinance} disabled={artistFinanceLoading}>
+                  {artistFinanceLoading ? "Actualizando..." : "Actualizar"}
+                </button>
+              </div>
+            </div>
+
+            <div className="row">
+              <div>
+                <label htmlFor="artist_finance_artist">Artista</label>
+                <select
+                  id="artist_finance_artist"
+                  value={artistFinanceArtist}
+                  onChange={(event) => {
+                    setArtistFinanceArtist(event.target.value);
+                    setArtistFinanceProjectFilter("");
+                  }}
+                >
+                  <option value="">Todos</option>
+                  {artistFinance?.artists.map((artist) => (
+                    <option key={artist} value={artist}>{artist}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className={`finance-status-card ${artistFinanceStatus.tone}`}>
+              <span>Estado financiero</span>
+              <strong>{artistFinanceStatus.title}</strong>
+              <p>{artistFinanceStatus.body}</p>
+            </div>
+
+            <div className="finance-kpi-grid finance-kpi-grid-wide">
+              <div className="finance-kpi primary">
+                <span>Cuenta corriente</span>
+                <strong>{ars(artistFinanceAccountNet)}</strong>
+                <small>{artistFinanceAccountNet >= 0 ? "a favor de Indyana" : "a favor del artista"}</small>
+              </div>
+              <div className="finance-kpi">
+                <span>Booking pendiente</span>
+                <strong>{ars((artistFinanceBookingSummary?.indyana_balance || 0) - (artistFinanceBookingSummary?.artist_balance || 0))}</strong>
+                <small>shows con saldo abierto</small>
+              </div>
+              <div className="finance-kpi">
+                <span>Invertido / pagado</span>
+                <strong>{ars(artistFinanceLedgerSummary?.investment_ars || 0)}</strong>
+                <small>{artistFinanceProjectRows} movimientos</small>
+              </div>
+              <div className="finance-kpi">
+                <span>Por recuperar definido</span>
+                <strong>{ars(artistFinanceDefinedRecoverableOpen)}</strong>
+                <small>recuperado {ars(artistFinanceLedgerSummary?.recovered_amount_ars || 0)}</small>
+              </div>
+              <div className="finance-kpi">
+                <span>Pendiente de criterio</span>
+                <strong>{ars(artistFinancePendingCriteria)}</strong>
+                <small>requiere decision</small>
+              </div>
+              <div className="finance-kpi">
+                <span>Proveedores pendientes</span>
+                <strong>{ars(artistFinance?.summary.finance_staging.pending_amount_ars || 0)}</strong>
+                <small>compromisos no pagados</small>
+              </div>
+            </div>
+
+            <div className="finance-tabs" role="tablist" aria-label="Vistas de finanzas del artista">
+              <button type="button" className={artistFinanceView === "summary" ? "active" : ""} onClick={() => setArtistFinanceView("summary")}>Resumen</button>
+              <button type="button" className={artistFinanceView === "booking" ? "active" : ""} onClick={() => setArtistFinanceView("booking")}>Booking</button>
+              <button type="button" className={artistFinanceView === "projects" ? "active" : ""} onClick={() => setArtistFinanceView("projects")}>Proyectos</button>
+              <button type="button" className={artistFinanceView === "account" ? "active" : ""} onClick={() => setArtistFinanceView("account")}>Cuenta corriente</button>
+              <button type="button" className={artistFinanceView === "technical" ? "active" : ""} onClick={() => setArtistFinanceView("technical")}>Detalle tecnico</button>
+            </div>
+
+            {(artistFinanceView === "projects" || artistFinanceView === "technical") && (
+              <div className="row finance-filter-row">
+                <div>
+                  <label htmlFor="artist_finance_project">Proyecto</label>
+                  <select id="artist_finance_project" value={artistFinanceProjectFilter} onChange={(event) => setArtistFinanceProjectFilter(event.target.value)}>
+                    <option value="">Todos los proyectos</option>
+                    {artistFinanceProjectOptions.map((project) => (
+                      <option key={project} value={project}>{project}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {artistFinanceView === "summary" && (
+              <>
+                <h2>Resumen claro</h2>
+                <div className="finance-story-grid">
+                  <div>
+                    <h3>Cuenta corriente</h3>
+                    {Math.abs(artistFinanceAccountNet) > 0.01 ? (
+                      <p>
+                        {artistFinanceAccountNet > 0
+                          ? `${artistFinanceSelectedLabel} debe ${ars(artistFinanceAccountNet)} a Indyana.`
+                          : `Indyana debe ${ars(Math.abs(artistFinanceAccountNet))} a ${artistFinanceSelectedLabel}.`}
+                      </p>
+                    ) : (
+                      <p>Sin saldo abierto entre artista/manager e Indyana para este filtro.</p>
+                    )}
+                  </div>
+                  <div>
+                    <h3>Booking</h3>
+                    <p>
+                      {artistFinanceBookingSummary?.shows || 0} shows cargados. Indyana objetivo:
+                      {" "}{ars(artistFinanceBookingSummary?.indyana_target || 0)}. Recibido:
+                      {" "}{ars(artistFinanceBookingSummary?.indyana_received || 0)}.
+                    </p>
+                    {artistFinanceVenueDebt > 0.01 && (
+                      <p className="field-help danger-text">Hay deuda de boliche por {ars(artistFinanceVenueDebt)}.</p>
+                    )}
+                  </div>
+                  <div>
+                    <h3>Proyectos</h3>
+                    <p>
+                      Indyana tiene {ars(artistFinanceLedgerSummary?.investment_ars || 0)} pagados/cargados en proyectos.
+                      {" "}Quedan {ars(artistFinanceDefinedRecoverableOpen)} por recuperar con criterio definido.
+                    </p>
+                  </div>
+                  <div>
+                    <h3>Pendiente de control</h3>
+                    <p>
+                      {artistFinancePendingCriteria > 0.01
+                        ? `${ars(artistFinancePendingCriteria)} necesitan criterio antes de contarlos como recuperables reales.`
+                        : "No hay recuperables pendientes de criterio para este filtro."}
+                    </p>
+                  </div>
+                </div>
+                <div className="finance-next-actions">
+                  <strong>Lectura recomendada</strong>
+                  <span>Usa Booking para revisar shows y saldos de shows.</span>
+                  <span>Usa Proyectos para inversiones, gastos recuperables y proveedores.</span>
+                  <span>Usa Cuenta corriente solo para ver quien debe dinero a quien.</span>
+                </div>
+              </>
+            )}
+
+            {artistFinanceView === "booking" && (
+              <>
+                <h2>Cuenta corriente booking abierta</h2>
+                <div className="finance-subgrid">
+                  <div className="metric-card">
+                    <span>Deben a Indyana</span>
+                    <strong>{ars(artistFinance?.summary.booking.indyana_balance || 0)}</strong>
+                  </div>
+                  <div className="metric-card">
+                    <span>Indyana debe artista</span>
+                    <strong>{ars(artistFinance?.summary.booking.artist_balance || 0)}</strong>
+                  </div>
+                  <div className="metric-card">
+                    <span>Deuda boliche</span>
+                    <strong>{ars(artistFinance?.summary.booking.venue_balance || 0)}</strong>
+                  </div>
+                  <div className="metric-card">
+                    <span>Shows</span>
+                    <strong>{artistFinance?.summary.booking.shows || 0}</strong>
+                  </div>
+                </div>
+                <div className="summary-table-wrap">
+                  <table className="summary-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Artista</th>
+                        <th>Venue</th>
+                        <th>Deben a Indyana</th>
+                        <th>Indyana debe artista</th>
+                        <th>Deuda boliche</th>
+                        <th>Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {!artistFinance && (
+                        <tr><td colSpan={7}>Cargando finanzas...</td></tr>
+                      )}
+                      {artistFinance?.open_booking_balances.length === 0 && (
+                        <tr><td colSpan={7}>Sin saldos abiertos para este filtro.</td></tr>
+                      )}
+                      {artistFinance?.open_booking_balances.map((item) => (
+                        <tr key={item.id}>
+                          <td>{item.show_date}</td>
+                          <td>{item.artist}</td>
+                          <td>
+                            <strong>{item.venue}</strong>
+                            {item.notes && <span className="cell-note">{item.notes}</span>}
+                          </td>
+                          <td>{ars(item.indyana_balance)}</td>
+                          <td>{ars(item.artist_balance)}</td>
+                          <td>{ars(item.venue_balance)}</td>
+                          <td>
+                            <span>{item.settlement_status || item.status}</span>
+                            <span className="cell-note">Show #{item.id}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            {artistFinanceView === "projects" && (
+              <>
+                <h2>Proyectos e inversiones</h2>
+                <p className="field-help">Ordenado por ultima fecha. Aca van inversiones, gastos, recuperables y pendientes de proveedor; no es cuenta corriente salvo que el movimiento lo indique.</p>
+                <div className="summary-table-wrap compact-table">
+                  <table className="summary-table">
+                    <thead>
+                      <tr>
+                        <th>Proyecto</th>
+                        <th>Area</th>
+                        <th>Fechas</th>
+                        <th>Movs</th>
+                        <th>Total</th>
+                        <th>Pagado</th>
+                        <th>Pendiente proveedor</th>
+                        <th>Por recuperar definido</th>
+                        <th>Pendiente criterio</th>
+                        <th>Recuperado</th>
+                        <th>Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredArtistFinanceProjects.length === 0 && (
+                        <tr><td colSpan={11}>Sin proyectos financieros para este filtro.</td></tr>
+                      )}
+                      {filteredArtistFinanceProjects.map((project) => (
+                        <tr key={`${project.project_name}-${project.business_area}`}>
+                          <td><strong>{project.project_name}</strong></td>
+                          <td>{project.business_area}</td>
+                          <td>
+                            <span>{project.first_date || "-"}</span>
+                            {project.last_date && project.last_date !== project.first_date && (
+                              <span className="cell-note">hasta {project.last_date}</span>
+                            )}
+                          </td>
+                          <td>{project.rows}</td>
+                          <td>{ars(project.amount_ars)}</td>
+                          <td>{ars(project.paid_amount_ars)}</td>
+                          <td className={project.pending_amount_ars > 0 ? "amount-warn" : ""}>{ars(project.pending_amount_ars)}</td>
+                          <td className={(project.recoverable_defined_open_ars || 0) > 0 ? "amount-warn" : ""}>{ars(project.recoverable_defined_open_ars || 0)}</td>
+                          <td className={(project.recoverable_pending_criteria_open_ars || 0) > 0 ? "amount-warn" : ""}>{ars(project.recoverable_pending_criteria_open_ars || 0)}</td>
+                          <td>{ars(project.recovered_amount_ars || 0)}</td>
+                          <td>
+                            {(project.pending_amount_ars || 0) > 0
+                              ? "Proveedor pendiente"
+                              : (project.recoverable_pending_criteria_open_ars || 0) > 0
+                                ? "Definir criterio"
+                                : (project.recoverable_defined_open_ars || 0) > 0
+                                  ? "Recupero abierto"
+                                  : "Controlado"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            {artistFinanceView === "account" && (
+              <>
+                <h2>Cuenta corriente</h2>
+                <p className="field-help">Solo muestra saldos vivos: quien debe a quien. Las inversiones y gastos de proyecto viven en Proyectos.</p>
+                <div className="finance-subgrid">
+                  <div className="metric-card">
+                    <span>Saldo neto</span>
+                    <strong>{ars(artistFinanceAccountNet)}</strong>
+                  </div>
+                  <div className="metric-card">
+                    <span>Nos deben</span>
+                    <strong>{ars(artistFinanceLedgerSummary?.artist_owes_indyana_ars || 0)}</strong>
+                  </div>
+                  <div className="metric-card">
+                    <span>Debemos</span>
+                    <strong>{ars(artistFinanceLedgerSummary?.indyana_owes_artist_ars || 0)}</strong>
+                  </div>
+                  <div className="metric-card">
+                    <span>Deuda boliche</span>
+                    <strong>{ars(artistFinanceVenueDebt)}</strong>
+                  </div>
+                </div>
+                <div className="summary-table-wrap compact-table">
+                  <table className="summary-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Origen</th>
+                        <th>Concepto</th>
+                        <th>Nos deben</th>
+                        <th>Debemos</th>
+                        <th>Deuda boliche</th>
+                        <th>Estado</th>
+                        <th>Notas</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {artistFinanceAccountEntries.length === 0 && (
+                        <tr><td colSpan={8}>Sin saldos de cuenta corriente para este filtro.</td></tr>
+                      )}
+                      {artistFinanceAccountEntries.map((item) => (
+                        <tr key={item.id}>
+                          <td>{item.ledger_date}</td>
+                          <td>
+                            <strong>{item.source_label || item.source_module}</strong>
+                            <span className="cell-note">{item.source_table} #{item.source_id}</span>
+                          </td>
+                          <td>{item.concept}</td>
+                          <td>{item.account_delta_ars > 0 ? ars(item.account_delta_ars) : "-"}</td>
+                          <td>{item.account_delta_ars < 0 ? ars(Math.abs(item.account_delta_ars)) : "-"}</td>
+                          <td>{item.venue_receivable_ars > 0 ? ars(item.venue_receivable_ars) : "-"}</td>
+                          <td>{item.status || "-"}</td>
+                          <td>{item.notes || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            {artistFinanceView === "technical" && (
+              <>
+                <h2>Detalle tecnico</h2>
+                <p className="field-help">Vista para auditoria: ledger de lectura, movimientos staging, recuperos aplicados y datos viejos. No es la pantalla operativa normal.</p>
+                <h3>Ledger de lectura</h3>
+                <div className="summary-table-wrap compact-table">
+                  <table className="summary-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Tipo</th>
+                        <th>Artista</th>
+                        <th>Proyecto</th>
+                        <th>Concepto</th>
+                        <th>Cuenta</th>
+                        <th>Inversion</th>
+                        <th>Recuperable</th>
+                        <th>Origen</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {artistFinance?.finance_ledger.entries.length === 0 && (
+                        <tr><td colSpan={9}>Sin movimientos tecnicos para este filtro.</td></tr>
+                      )}
+                      {artistFinance?.finance_ledger.entries.map((item) => (
+                        <tr key={item.id}>
+                          <td>{item.ledger_date}</td>
+                          <td>{item.ledger_type}</td>
+                          <td>{item.artist}</td>
+                          <td>{item.project_name || "-"}</td>
+                          <td>
+                            <strong>{item.concept}</strong>
+                            {item.notes && <span className="cell-note">{item.notes}</span>}
+                          </td>
+                          <td>{item.account_delta_ars ? ars(item.account_delta_ars) : "-"}</td>
+                          <td>{item.investment_ars ? ars(item.investment_ars) : "-"}</td>
+                          <td>{item.recoverable_open_ars ? ars(item.recoverable_open_ars) : "-"}</td>
+                          <td>
+                            <span>{item.source_module}</span>
+                            <span className="cell-note">{item.source_table} #{item.source_id}</span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <h3>Movimientos financieros staging</h3>
+                <div className="summary-table-wrap">
+                  <table className="summary-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Artista</th>
+                        <th>Area</th>
+                        <th>Proyecto</th>
+                        <th>Concepto</th>
+                        <th>Compromiso</th>
+                        <th>Pagado</th>
+                        <th>Pendiente</th>
+                        <th>Recuperable</th>
+                        <th>Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredArtistFinanceMovements.length === 0 && (
+                        <tr><td colSpan={10}>Sin movimientos financieros para este filtro.</td></tr>
+                      )}
+                      {filteredArtistFinanceMovements.map((item) => (
+                        <tr key={item.id}>
+                          <td>{item.movement_date}</td>
+                          <td>{item.artist}</td>
+                          <td>{item.business_area}</td>
+                          <td>{item.project_name || "-"}</td>
+                          <td>
+                            <strong>{item.concept}</strong>
+                            <span className="cell-note">{item.category} - {item.movement_type}</span>
+                            {item.recoverable ? (
+                              <span className="cell-note">Metodo: {item.recovery_method || "none"} | costo {item.artist_percent}% / {item.producer_percent}%</span>
+                            ) : null}
+                            {item.recovered_amount_ars ? (
+                              <span className="cell-note">Recuperado {ars(item.recovered_amount_ars)} | saldo {ars(item.recoverable_open_ars || 0)}</span>
+                            ) : null}
+                            {item.notes && <span className="cell-note">{item.notes}</span>}
+                          </td>
+                          <td>{ars(item.amount_ars)}</td>
+                          <td>{ars(item.paid_amount_ars)}</td>
+                          <td className={item.pending_amount_ars > 0 ? "amount-warn" : ""}>{ars(item.pending_amount_ars)}</td>
+                          <td>
+                            {item.recoverable ? "Si" : "No"}
+                            {item.recoverable ? <span className="cell-note">{item.recoverable_percent}%</span> : null}
+                          </td>
+                          <td>{item.status}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <h3>Recuperos aplicados</h3>
+                <div className="summary-table-wrap compact-table">
+                  <table className="summary-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Proyecto</th>
+                        <th>Origen</th>
+                        <th>Aplicado</th>
+                        <th>Metodo</th>
+                        <th>Movimiento destino</th>
+                        <th>Notas</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredArtistFinanceRecoveries.length === 0 && (
+                        <tr><td colSpan={7}>Sin aplicaciones de recupero para este filtro.</td></tr>
+                      )}
+                      {filteredArtistFinanceRecoveries.map((item) => (
+                        <tr key={item.id}>
+                          <td>{item.application_date}</td>
+                          <td>{item.project_name || "-"}</td>
+                          <td>
+                            <strong>{item.source_label || item.source_type}</strong>
+                            <span className="cell-note">{item.source_type} #{item.source_id || "-"}</span>
+                          </td>
+                          <td>{ars(item.amount_ars)}</td>
+                          <td>{item.recovery_method}</td>
+                          <td>Movimiento #{item.finance_movement_id}</td>
+                          <td>{item.notes || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            {artistFinanceView === "booking" && (
+              <>
+                <h2>Booking por mes</h2>
+                <div className="summary-table-wrap compact-table">
+                  <table className="summary-table">
+                    <thead>
+                      <tr>
+                        <th>Mes</th>
+                        <th>Shows</th>
+                        <th>Indyana objetivo</th>
+                        <th>Deben a Indyana</th>
+                        <th>Indyana debe artista</th>
+                        <th>Deuda boliche</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {artistFinance?.monthly_booking.map((month) => (
+                        <tr key={month.month}>
+                          <td><strong>{month.month}</strong></td>
+                          <td>{month.shows}</td>
+                          <td>{ars(month.indyana_target)}</td>
+                          <td>{ars(month.indyana_balance)}</td>
+                          <td>{ars(month.artist_balance)}</td>
+                          <td>{ars(month.venue_balance)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            {artistFinanceView === "technical" && (
+              <>
+                <h2>Auditoria vieja</h2>
+                <p className="field-help">Lectura tecnica de booking_artist_ledger. No es recupero vigente ni ledger financiero: solo se conserva para auditar datos historicos.</p>
+                <div className="summary-table-wrap compact-table">
+                  <table className="summary-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Tipo</th>
+                        <th>Proyecto</th>
+                        <th>Concepto</th>
+                        <th>Importe</th>
+                        <th>Recuperable</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(artistFinance?.legacy_movements || []).map((item) => (
+                        <tr key={item.id}>
+                          <td>{item.movement_date}</td>
+                          <td>{item.movement_type}</td>
+                          <td>{item.project || "-"}</td>
+                          <td>{item.concept}</td>
+                          <td>{ars(item.amount)}</td>
+                          <td>{item.recoverable ? "Si" : "No"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </section>
+        )}
+
+        {view === "finance-movements" && (
+          <section className="panel wide-panel">
+            <div className="section-heading">
+              <div>
+                <h1>Movimientos financieros</h1>
+                <p>Carga staging para gastos, inversiones, recuperos, adelantos y ajustes por artista. No impacta automaticamente saldos oficiales.</p>
+              </div>
+              <div className="button-row">
+                <button type="button" onClick={loadFinanceMovements} disabled={financeMovementLoading}>
+                  {financeMovementLoading ? "Actualizando..." : "Actualizar"}
+                </button>
+                <button type="button" className="secondary" onClick={resetFinanceMovementForm}>Limpiar</button>
+              </div>
+            </div>
+
+            <form className="panel nested-panel" onSubmit={saveFinanceMovement}>
+              <div className="row three">
+                <div>
+                  <label htmlFor="finance_date">Fecha</label>
+                  <input id="finance_date" type="date" value={financeMovementForm.movementDate} onChange={(event) => updateFinanceMovementField("movementDate", event.target.value)} />
+                </div>
+                <div>
+                  <label htmlFor="finance_artist">Artista</label>
+                  <select id="finance_artist" value={financeMovementForm.artist} onChange={(event) => updateFinanceMovementField("artist", event.target.value)}>
+                    <option value="">Elegir artista</option>
+                    {(financeMovements?.artists || bookingArtists).map((artist) => (
+                      <option key={artist} value={artist}>{artist}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="finance_area">Area</label>
+                  <select id="finance_area" value={financeMovementForm.businessArea} onChange={(event) => updateFinanceMovementField("businessArea", event.target.value as FinanceMovementForm["businessArea"])}>
+                    <option value="booking">Booking</option>
+                    <option value="label">Label</option>
+                    <option value="marketing">Marketing</option>
+                    <option value="digitales">Digitales</option>
+                    <option value="general">General</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="row three">
+                <div>
+                  <label htmlFor="finance_type">Tipo</label>
+                  <select id="finance_type" value={financeMovementForm.movementType} onChange={(event) => updateFinanceMovementField("movementType", event.target.value as FinanceMovementForm["movementType"])}>
+                    <option value="gasto">Gasto</option>
+                    <option value="ingreso">Ingreso</option>
+                    <option value="recupero">Recupero</option>
+                    <option value="adelanto">Adelanto</option>
+                    <option value="prestamo">Prestamo</option>
+                    <option value="ajuste">Ajuste</option>
+                    <option value="pago">Pago</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="finance_category">Categoria</label>
+                  <select id="finance_category" value={financeMovementForm.category} onChange={(event) => updateFinanceMovementField("category", event.target.value)}>
+                    <option value="">Elegir categoria</option>
+                    <option value="videoclip">Videoclip</option>
+                    <option value="dj_set">DJ set</option>
+                    <option value="estreno">Estreno</option>
+                    <option value="produccion">Produccion</option>
+                    <option value="marketing">Marketing</option>
+                    <option value="viaticos">Viaticos / movilidad</option>
+                    <option value="adelanto">Adelanto</option>
+                    <option value="prestamo">Prestamo</option>
+                    <option value="ajuste">Ajuste</option>
+                    <option value="otro">Otro</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="finance_project">Proyecto</label>
+                  <input
+                    id="finance_project"
+                    list="finance_project_options"
+                    value={financeMovementForm.projectName}
+                    onChange={(event) => updateFinanceMovementField("projectName", event.target.value)}
+                    placeholder="Ej: Set Padel, DJ Set Techengue"
+                  />
+                  <datalist id="finance_project_options">
+                    {financeProjectOptions.map((project) => (
+                      <option key={project.id} value={project.name} />
+                    ))}
+                  </datalist>
+                </div>
+              </div>
+
+              <div className="section-heading compact">
+                <div>
+                  <h2>Conceptos</h2>
+                  <p>Usa un solo concepto para una carga simple, o multiples conceptos para un proyecto con varias partidas.</p>
+                </div>
+                <label className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={financeMovementForm.multipleConcepts}
+                    disabled={Boolean(financeMovementEditingId)}
+                    onChange={(event) => setFinanceMovementMultipleConcepts(event.target.checked)}
+                  />
+                  Multiples conceptos
+                </label>
+              </div>
+
+              {!financeMovementForm.multipleConcepts && (
+                <>
+                  <label htmlFor="finance_concept">Concepto</label>
+                  <input id="finance_concept" value={financeMovementForm.concept} onChange={(event) => updateFinanceMovementField("concept", event.target.value)} placeholder="Ej: fotografa, sonido, anticipo, recupero show" />
+
+                  <div className="row three">
+                    <div>
+                      <label htmlFor="finance_counterparty">A quien se pago / de quien viene</label>
+                      <input id="finance_counterparty" value={financeMovementForm.counterparty} onChange={(event) => updateFinanceMovementField("counterparty", event.target.value)} placeholder="Proveedor, manager, artista, tercero" />
+                    </div>
+                    <div>
+                      <label htmlFor="finance_paid_by">Quien pago / recibio</label>
+                      <select id="finance_paid_by" value={financeMovementForm.paidBy} onChange={(event) => updateFinanceMovementField("paidBy", event.target.value as FinanceMovementForm["paidBy"])}>
+                        <option value="indyana">Indyana</option>
+                        <option value="artista">Artista</option>
+                        <option value="manager">Manager</option>
+                        <option value="tercero">Tercero</option>
+                        <option value="desconocido">Desconocido</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="finance_amount">Compromiso total</label>
+                      <input id="finance_amount" inputMode="decimal" value={financeMovementForm.amount} onChange={(event) => updateFinanceMovementField("amount", event.target.value)} placeholder="ARS o u$ 300" />
+                    </div>
+                  </div>
+
+                  <div className="row three">
+                    <div>
+                      <label htmlFor="finance_paid_amount">Pagado real</label>
+                      <input id="finance_paid_amount" inputMode="decimal" value={financeMovementForm.paidAmount} onChange={(event) => updateFinanceMovementField("paidAmount", event.target.value)} placeholder="Si esta vacio, asume total pagado" />
+                    </div>
+                    <div>
+                      <label htmlFor="finance_payment_status">Estado de pago</label>
+                      <select id="finance_payment_status" value={financeMovementForm.paymentStatus} onChange={(event) => updateFinanceMovementField("paymentStatus", event.target.value as FinanceMovementForm["paymentStatus"])}>
+                        <option value="">Automatico</option>
+                        <option value="pendiente">Pendiente</option>
+                        <option value="parcial">Parcial</option>
+                        <option value="pagado">Pagado</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="finance_due_date">Vencimiento</label>
+                      <input id="finance_due_date" type="date" value={financeMovementForm.dueDate} onChange={(event) => updateFinanceMovementField("dueDate", event.target.value)} />
+                    </div>
+                  </div>
+
+                  <div className="row three">
+                    <div>
+                      <label htmlFor="finance_currency">Moneda</label>
+                      <select id="finance_currency" value={financeMovementForm.currency} onChange={(event) => updateFinanceMovementField("currency", event.target.value as "ARS" | "USD")}>
+                        <option value="ARS">ARS</option>
+                        <option value="USD">USD</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="finance_fx">Tipo de cambio</label>
+                      <input id="finance_fx" inputMode="decimal" value={financeMovementForm.fxRate} onChange={(event) => updateFinanceMovementField("fxRate", event.target.value)} placeholder="Solo si es USD" />
+                    </div>
+                    <div className="metric-card">
+                      <span>Compromiso ARS</span>
+                      <strong>{ars(financeMovementAmountArs || 0)}</strong>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {financeMovementForm.multipleConcepts && (
+                <div className="summary-table-wrap compact-table">
+                  <table className="summary-table">
+                    <thead>
+                      <tr>
+                        <th>Concepto</th>
+                        <th>A quien</th>
+                        <th>Quien pago</th>
+                        <th>Compromiso</th>
+                        <th>Pagado</th>
+                        <th>Moneda</th>
+                        <th>TC</th>
+                        <th>Estado</th>
+                        <th>Vence</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {financeMovementForm.conceptLines.map((line, index) => (
+                        <tr key={line.uid}>
+                          <td>
+                            <input value={line.concept} onChange={(event) => updateFinanceMovementLineField(line.uid, "concept", event.target.value)} placeholder={`Concepto ${index + 1}`} />
+                          </td>
+                          <td>
+                            <input value={line.counterparty} onChange={(event) => updateFinanceMovementLineField(line.uid, "counterparty", event.target.value)} placeholder="Proveedor / tercero" />
+                          </td>
+                          <td>
+                            <select value={line.paidBy} onChange={(event) => updateFinanceMovementLineField(line.uid, "paidBy", event.target.value as FinanceMovementLineForm["paidBy"])}>
+                              <option value="indyana">Indyana</option>
+                              <option value="artista">Artista</option>
+                              <option value="manager">Manager</option>
+                              <option value="tercero">Tercero</option>
+                              <option value="desconocido">Desconocido</option>
+                            </select>
+                          </td>
+                          <td>
+                            <input inputMode="decimal" value={line.amount} onChange={(event) => updateFinanceMovementLineField(line.uid, "amount", event.target.value)} placeholder="ARS o u$" />
+                          </td>
+                          <td>
+                            <input inputMode="decimal" value={line.paidAmount} onChange={(event) => updateFinanceMovementLineField(line.uid, "paidAmount", event.target.value)} placeholder="vacio = total" />
+                          </td>
+                          <td>
+                            <select value={line.currency} onChange={(event) => updateFinanceMovementLineField(line.uid, "currency", event.target.value as "ARS" | "USD")}>
+                              <option value="ARS">ARS</option>
+                              <option value="USD">USD</option>
+                            </select>
+                          </td>
+                          <td>
+                            <input inputMode="decimal" value={line.fxRate} onChange={(event) => updateFinanceMovementLineField(line.uid, "fxRate", event.target.value)} placeholder="si USD" />
+                          </td>
+                          <td>
+                            <select value={line.paymentStatus} onChange={(event) => updateFinanceMovementLineField(line.uid, "paymentStatus", event.target.value as FinanceMovementLineForm["paymentStatus"])}>
+                              <option value="">Auto</option>
+                              <option value="pendiente">Pendiente</option>
+                              <option value="parcial">Parcial</option>
+                              <option value="pagado">Pagado</option>
+                            </select>
+                          </td>
+                          <td>
+                            <input type="date" value={line.dueDate} onChange={(event) => updateFinanceMovementLineField(line.uid, "dueDate", event.target.value)} />
+                          </td>
+                          <td>
+                            <button type="button" className="secondary" onClick={() => removeFinanceMovementLine(line.uid)} disabled={financeMovementForm.conceptLines.length <= 1}>Quitar</button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="button-row">
+                    <button type="button" onClick={addFinanceMovementLine}>Agregar concepto</button>
+                  </div>
+                </div>
+              )}
+
+              <div className="control-dashboard">
+                <div>
+                  <span>Pagado ARS</span>
+                  <strong>{ars(financeMovementPaidArs || 0)}</strong>
+                </div>
+                <div className={financeMovementPendingArs > 0 ? "danger" : ""}>
+                  <span>Deuda pendiente</span>
+                  <strong>{ars(financeMovementPendingArs || 0)}</strong>
+                </div>
+                <div>
+                  <span>Estado sugerido</span>
+                  <strong>{financeMovementPendingArs <= 0 ? "pagado" : financeMovementPaidArs > 0 ? "parcial" : "pendiente"}</strong>
+                </div>
+              </div>
+
+              <div className="row three">
+                <label className="checkbox-field">
+                  <input type="checkbox" checked={financeMovementForm.recoverable} onChange={(event) => updateFinanceMovementField("recoverable", event.target.checked)} />
+                  Recuperable
+                </label>
+                <div>
+                  <label htmlFor="finance_recoverable_pct">Parte recuperable %</label>
+                  <input id="finance_recoverable_pct" inputMode="decimal" value={financeMovementForm.recoverablePercent} onChange={(event) => updateFinanceMovementField("recoverablePercent", event.target.value)} />
+                </div>
+                <div>
+                  <label htmlFor="finance_effect">Impacto esperado</label>
+                  <select id="finance_effect" value={financeMovementForm.accountEffect} onChange={(event) => updateFinanceMovementField("accountEffect", event.target.value as FinanceMovementForm["accountEffect"])}>
+                    <option value="inversion_indyana">Inversion Indyana</option>
+                    <option value="artista_debe_indyana">Artista debe a Indyana</option>
+                    <option value="indyana_debe_artista">Indyana debe artista</option>
+                    <option value="sin_impacto">Sin impacto por ahora</option>
+                  </select>
+                </div>
+              </div>
+
+              {financeMovementForm.recoverable && (
+                <div className="recoupment-panel">
+                  <div className="row three">
+                    <div>
+                      <label htmlFor="finance_recovery_method">Como se recupera</label>
+                      <select id="finance_recovery_method" value={financeMovementForm.recoveryMethod} onChange={(event) => updateFinanceMovementField("recoveryMethod", event.target.value as FinanceMovementForm["recoveryMethod"])}>
+                        <option value="none">Elegir metodo</option>
+                        <option value="before_split">Antes del split del show</option>
+                        <option value="after_split">Despues del split</option>
+                        <option value="direct_account">Cuenta corriente directa</option>
+                        <option value="royalties">Regalias digitales</option>
+                        <option value="manual">Manual / caso especial</option>
+                      </select>
+                      <p className="field-help">{financeRecoveryMethodHelp[financeMovementForm.recoveryMethod]}</p>
+                    </div>
+                    <div>
+                      <label htmlFor="finance_artist_pct">Costo economico artista %</label>
+                      <input id="finance_artist_pct" inputMode="decimal" value={financeMovementForm.artistPercent} onChange={(event) => updateFinanceMovementField("artistPercent", event.target.value)} />
+                    </div>
+                    <div>
+                      <label htmlFor="finance_producer_pct">Costo economico Indyana %</label>
+                      <input id="finance_producer_pct" inputMode="decimal" value={financeMovementForm.producerPercent} onChange={(event) => updateFinanceMovementField("producerPercent", event.target.value)} />
+                    </div>
+                  </div>
+                  <div className="control-dashboard">
+                    <div>
+                      <span>Base recuperable</span>
+                      <strong>{ars(financeMovementRecoverableBase)}</strong>
+                    </div>
+                    <div>
+                      <span>Recupero caja Indyana</span>
+                      <strong>{ars(financeMovementCashRecovery)}</strong>
+                    </div>
+                    <div>
+                      <span>Costo artista</span>
+                      <strong>{ars(financeMovementArtistEconomicCost)}</strong>
+                    </div>
+                    <div>
+                      <span>Costo Indyana</span>
+                      <strong>{ars(financeMovementProducerEconomicCost)}</strong>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="row three">
+                <div>
+                  <label htmlFor="finance_status">Estado</label>
+                  <select id="finance_status" value={financeMovementForm.status} onChange={(event) => updateFinanceMovementField("status", event.target.value as FinanceMovementForm["status"])}>
+                    <option value="borrador">Borrador</option>
+                    <option value="pendiente_control">Pendiente control</option>
+                    <option value="aprobado">Aprobado</option>
+                    <option value="aplicado">Aplicado</option>
+                    <option value="anulado">Anulado</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="finance_source">Origen</label>
+                  <select id="finance_source" value={financeMovementForm.sourceType} onChange={(event) => updateFinanceMovementField("sourceType", event.target.value as FinanceMovementForm["sourceType"])}>
+                    <option value="manual">Manual</option>
+                    <option value="legacy">Legacy</option>
+                    <option value="booking">Booking</option>
+                    <option value="royalties">Regalias</option>
+                    <option value="import">Import</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="finance_source_id">Referencia origen</label>
+                  <input id="finance_source_id" value={financeMovementForm.sourceId} onChange={(event) => updateFinanceMovementField("sourceId", event.target.value)} placeholder="Show ID, reporte, Excel, etc." />
+                </div>
+              </div>
+
+              <label htmlFor="finance_proofs">Comprobantes / links</label>
+              <textarea id="finance_proofs" value={financeMovementForm.proofRefs} onChange={(event) => updateFinanceMovementField("proofRefs", event.target.value)} placeholder="Uno por linea" />
+
+              <label htmlFor="finance_notes">Notas</label>
+              <textarea id="finance_notes" value={financeMovementForm.notes} onChange={(event) => updateFinanceMovementField("notes", event.target.value)} />
+
+              <button type="submit" disabled={financeMovementLoading || !currentUser?.canEdit}>
+                {financeMovementLoading ? "Guardando..." : financeMovementEditingId ? "Actualizar movimiento" : "Guardar en staging"}
+              </button>
+              {!currentUser?.canEdit && <p className="field-help">Necesitas usuario editor/admin para guardar.</p>}
+            </form>
+
+            <div className="section-heading">
+              <div>
+                <h2>Movimientos cargados</h2>
+                <p>{financeMovements?.summary.note || "Capa de staging financiero."}</p>
+              </div>
+            </div>
+
+            <div className="row three">
+              <div>
+                <label htmlFor="finance_filter_artist">Filtrar artista</label>
+                <select
+                  id="finance_filter_artist"
+                  value={financeMovementArtistFilter}
+                  onChange={(event) => {
+                    setFinanceMovementArtistFilter(event.target.value);
+                    setFinanceMovementProjectFilter("");
+                  }}
+                >
+                  <option value="">Todos</option>
+                  {(financeMovements?.artists || []).map((artist) => (
+                    <option key={artist} value={artist}>{artist}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label htmlFor="finance_filter_project">Filtrar proyecto</label>
+                <select id="finance_filter_project" value={financeMovementProjectFilter} onChange={(event) => setFinanceMovementProjectFilter(event.target.value)}>
+                  <option value="">Todos los proyectos</option>
+                  {financeMovementProjectOptions.map((project) => (
+                    <option key={project} value={project}>{project}</option>
+                  ))}
+                </select>
+                <p className="field-help">Si queda vacio, muestra todo lo del artista seleccionado.</p>
+              </div>
+              <div>
+                <label htmlFor="finance_filter_status">Filtrar estado</label>
+                <select id="finance_filter_status" value={financeMovementStatusFilter} onChange={(event) => setFinanceMovementStatusFilter(event.target.value)}>
+                  <option value="">Todos</option>
+                  <option value="borrador">Borrador</option>
+                  <option value="pendiente_control">Pendiente control</option>
+                  <option value="aprobado">Aprobado</option>
+                  <option value="aplicado">Aplicado</option>
+                  <option value="anulado">Anulado</option>
+                </select>
+              </div>
+              <div className="metric-card">
+                <span>Compromiso visible</span>
+                <strong>{ars(financeMovements?.summary.amount_ars || 0)}</strong>
+              </div>
+              <div className="metric-card">
+                <span>Pagado visible</span>
+                <strong>{ars(financeMovements?.summary.paid_amount_ars || 0)}</strong>
+              </div>
+              <div className="metric-card">
+                <span>Deuda visible</span>
+                <strong>{ars(financeMovements?.summary.pending_amount_ars || 0)}</strong>
+              </div>
+            </div>
+
+            <div className="summary-table-wrap">
+              <table className="summary-table">
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Artista</th>
+                    <th>Area</th>
+                    <th>Proyecto</th>
+                    <th>Concepto</th>
+                    <th>Compromiso</th>
+                    <th>Pagado</th>
+                    <th>Pendiente</th>
+                    <th>Recuperable</th>
+                    <th>Estado</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {!financeMovements && (
+                    <tr><td colSpan={11}>Cargando movimientos...</td></tr>
+                  )}
+                  {financeMovements?.items.length === 0 && (
+                    <tr><td colSpan={11}>Sin movimientos para este filtro.</td></tr>
+                  )}
+                  {financeMovements?.items.map((item) => (
+                    <tr key={item.id}>
+                      <td>{item.movement_date}</td>
+                      <td>{item.artist}</td>
+                      <td>{item.business_area}</td>
+                      <td>{item.project_name || "-"}</td>
+                      <td>
+                        <strong>{item.concept}</strong>
+                        <span className="cell-note">{item.category} - {item.movement_type}</span>
+                        {item.notes && <span className="cell-note">{item.notes}</span>}
+                        {item.recoverable ? (
+                          <span className="cell-note">Metodo: {item.recovery_method || "none"} | costo {item.artist_percent}% / {item.producer_percent}%</span>
+                        ) : null}
+                      </td>
+                      <td>
+                        {ars(item.amount_ars)}
+                        {item.currency === "USD" && <span className="cell-note">USD {item.amount} x {item.fx_rate}</span>}
+                      </td>
+                      <td>{ars(item.paid_amount_ars)}</td>
+                      <td className={item.pending_amount_ars > 0 ? "amount-warn" : ""}>
+                        {ars(item.pending_amount_ars)}
+                        {item.pending_amount_ars > 0 && <span className="cell-note">{item.payment_status}</span>}
+                        {item.due_date && <span className="cell-note">Vence {item.due_date}</span>}
+                      </td>
+                      <td>
+                        {item.recoverable ? "Si" : "No"}
+                        {item.recoverable ? <span className="cell-note">{item.recoverable_percent}%</span> : null}
+                      </td>
+                      <td>
+                        {item.status}
+                        {isFinanceMovementLocked(item.status) && <span className="cell-note">Bloqueado</span>}
+                      </td>
+                      <td>
+                        {isFinanceMovementLocked(item.status) ? (
+                          <span className="cell-note">Sin edicion</span>
+                        ) : (
+                          <button type="button" className="secondary" onClick={() => editFinanceMovement(item)}>Editar</button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
         {view === "booking-lab" && (
           <section className="panel wide-panel">
             <div className="section-heading">
@@ -3728,6 +8888,31 @@ export default function Home() {
                   <input id="booking_lab_fx" inputMode="decimal" value={bookingLabForm.fxRate} onChange={(event) => updateBookingLabField("fxRate", event.target.value)} placeholder="1390" />
                 </div>
               </div>
+              {bookingLabForm.collectedAmount.trim() && parseAmountInput(bookingLabForm.collectedAmount, bookingLabFxRate) < parseAmountInput(bookingLabForm.grossAmount, bookingLabFxRate) && (
+                <div className="booking-payment-box">
+                  <div className="row">
+                    <label className="check-row">
+                      <input
+                        type="radio"
+                        name="booking_lab_shortfall_policy"
+                        checked={bookingLabForm.venueShortfallPolicy === "deuda_boliche"}
+                        onChange={() => updateBookingLabField("venueShortfallPolicy", "deuda_boliche")}
+                      />
+                      <span>Dejar saldo al boliche</span>
+                    </label>
+                    <label className="check-row">
+                      <input
+                        type="radio"
+                        name="booking_lab_shortfall_policy"
+                        checked={bookingLabForm.venueShortfallPolicy === "ajustar_cachet"}
+                        onChange={() => updateBookingLabField("venueShortfallPolicy", "ajustar_cachet")}
+                      />
+                      <span>Ajustar cachet al cobrado</span>
+                    </label>
+                  </div>
+                  <p className="field-help">Esta decision define si la base del evento usa el pactado o el cobrado real.</p>
+                </div>
+              )}
 
               <div className="booking-suggestion">
                 <div className={bookingLabMode.kind === "mother" ? "warn" : ""}>
@@ -5200,6 +10385,325 @@ export default function Home() {
           </div>
         )}
 
+        {view === "employees" && (
+          <div className="grid artist-grid">
+            <form className="panel" onSubmit={submitEmployeeRecord}>
+              <div className="section-heading compact">
+                <div>
+                  <h1>{employeeEditingId ? `Editando empleado #${employeeEditingId}` : "ABM de empleados"}</h1>
+                  <p>Equipo VPO, funciones y base para permisos por modulo.</p>
+                </div>
+                {employeeEditingId && (
+                  <button type="button" onClick={resetEmployeeForm}>Cancelar</button>
+                )}
+              </div>
+
+              <label htmlFor="employee_display_name">Nombre</label>
+              <input
+                id="employee_display_name"
+                value={employeeForm.displayName}
+                onChange={(event) => updateEmployeeField("displayName", event.target.value)}
+                required
+              />
+
+              <div className="row">
+                <div>
+                  <label htmlFor="employee_cuit">CUIT / CUIL</label>
+                  <input
+                    id="employee_cuit"
+                    value={employeeForm.cuit}
+                    onChange={(event) => updateEmployeeField("cuit", event.target.value)}
+                  />
+                </div>
+                <div>
+                  <label htmlFor="employee_phone">Telefono</label>
+                  <input
+                    id="employee_phone"
+                    value={employeeForm.phone}
+                    onChange={(event) => updateEmployeeField("phone", event.target.value)}
+                  />
+                </div>
+              </div>
+
+              <label htmlFor="employee_email">Email</label>
+              <input
+                id="employee_email"
+                type="email"
+                value={employeeForm.email}
+                onChange={(event) => updateEmployeeField("email", event.target.value)}
+              />
+
+              <label htmlFor="employee_address">Domicilio</label>
+              <input
+                id="employee_address"
+                value={employeeForm.address}
+                onChange={(event) => updateEmployeeField("address", event.target.value)}
+              />
+
+              <div className="section-heading compact">
+                <div>
+                  <h2>Funciones</h2>
+                  <p>Un empleado puede tener mas de una funcion.</p>
+                </div>
+              </div>
+              <div className="checkbox-grid">
+                {(employeeFunctionOptions.length ? employeeFunctionOptions : ["Tour Manager", "Project Manager", "Label", "Digitales", "Administracion", "Presidente", "Vice Presidente"]).map((functionName) => (
+                  <label className="checkbox-field" key={functionName}>
+                    <input
+                      type="checkbox"
+                      checked={employeeForm.functions.includes(functionName)}
+                      onChange={() => toggleEmployeeFunction(functionName)}
+                    />
+                    {functionName}
+                  </label>
+                ))}
+              </div>
+
+              <div className="section-heading compact">
+                <div>
+                  <h2>Usuario web</h2>
+                  <p>Este usuario ya es la base operativa de login local/cloud.</p>
+                </div>
+              </div>
+              <div className="row three">
+                <div>
+                  <label htmlFor="employee_username">Usuario</label>
+                  <input
+                    id="employee_username"
+                    value={employeeForm.username}
+                    onChange={(event) => updateEmployeeField("username", event.target.value)}
+                    placeholder="salomef"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="employee_user_role">Rol global</label>
+                  <select
+                    id="employee_user_role"
+                    value={employeeForm.userRole}
+                    onChange={(event) => updateEmployeeField("userRole", event.target.value as EmployeeForm["userRole"])}
+                  >
+                    <option value="viewer">Viewer</option>
+                    <option value="editor">Editor</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+                <label className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={employeeForm.userActive}
+                    onChange={(event) => updateEmployeeField("userActive", event.target.checked)}
+                  />
+                  Usuario activo
+                </label>
+              </div>
+              <div className="row">
+                <div>
+                  <label htmlFor="employee_new_password">Establecer contrasena</label>
+                  <input
+                    id="employee_new_password"
+                    type="password"
+                    value={employeeForm.newPassword}
+                    onChange={(event) => updateEmployeeField("newPassword", event.target.value)}
+                    placeholder="Dejar vacio para no cambiar"
+                    autoComplete="new-password"
+                  />
+                </div>
+                <label className="checkbox-field">
+                  <input
+                    type="checkbox"
+                    checked={employeeForm.mustChangePassword}
+                    onChange={(event) => updateEmployeeField("mustChangePassword", event.target.checked)}
+                  />
+                  Pedir cambio al ingresar
+                </label>
+              </div>
+              <p className="field-help">
+                Default inicial: Indyana2026!. Si estableces esa clave, deja marcado pedir cambio.
+              </p>
+
+              <div className="section-heading compact">
+                <div>
+                  <h2>Permisos por modulo</h2>
+                  <p>Inicio se habilita automaticamente si tiene acceso a algun modulo. Estos permisos todavia no bloquean pantallas.</p>
+                </div>
+              </div>
+              <div className="permission-level-list">
+                {(employeeForm.permissions.length ? employeeForm.permissions : defaultEmployeePermissions()).map((permission) => {
+                  const moduleLabel = employeeModules.find((module) => module.module_key === permission.module_key)?.label || permission.module_key;
+                  const level = employeePermissionLevel(permission);
+                  const usesArtistScope = permissionUsesArtistScope(permission);
+                  const allArtists = permissionHasAllArtists(permission);
+                  const selectedArtists = permissionArtistNames(permission);
+                  const levelHelp = {
+                    none: "No puede abrir el modulo.",
+                    view: "Puede entrar y ver historial.",
+                    create: "Puede entrar y cargar nuevo, sin historial amplio.",
+                    edit: "Puede ver historial, cargar y editar.",
+                    admin: "Puede hacer todo, incluyendo aprobar/cerrar.",
+                  }[level];
+                  return (
+                    <div className="permission-level-row" key={permission.module_key}>
+                      <div>
+                        <strong>{moduleLabel}</strong>
+                        <span>{levelHelp}</span>
+                      </div>
+                      <select
+                        value={level}
+                        onChange={(event) => updateEmployeePermissionLevel(permission.module_key, event.target.value)}
+                      >
+                        <option value="none">Sin acceso</option>
+                        <option value="view">Ver</option>
+                        <option value="create">Cargar</option>
+                        <option value="edit">Editar</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                      {usesArtistScope && level !== "none" && (
+                        <div className="permission-scope-box">
+                          <div className="permission-scope-header">
+                            <strong>Artistas</strong>
+                            <span>{allArtists ? "Todos" : `${selectedArtists.length} seleccionado(s)`}</span>
+                          </div>
+                          <div className="permission-scope-mode">
+                            <label className="check-row">
+                              <input
+                                type="radio"
+                                name={`artist_scope_${permission.module_key}`}
+                                checked={allArtists}
+                                onChange={() => updateEmployeePermissionArtistMode(permission.module_key, "all")}
+                              />
+                              <span>Todos los artistas</span>
+                            </label>
+                            <label className="check-row">
+                              <input
+                                type="radio"
+                                name={`artist_scope_${permission.module_key}`}
+                                checked={!allArtists}
+                                onChange={() => updateEmployeePermissionArtistMode(permission.module_key, "selected")}
+                              />
+                              <span>Solo seleccionados</span>
+                            </label>
+                          </div>
+                          {!allArtists && (
+                            <div className="permission-artist-grid">
+                              {bookingArtists.map((artist) => (
+                                <label className="checkbox-field compact" key={`${permission.module_key}_${artist}`}>
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedArtists.includes(artist)}
+                                    onChange={() => toggleEmployeePermissionArtist(permission.module_key, artist)}
+                                  />
+                                  {artist}
+                                </label>
+                              ))}
+                              {bookingArtists.length === 0 && (
+                                <p className="field-help">No hay artistas cargados para seleccionar.</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <label htmlFor="employee_notes">Notas</label>
+              <textarea
+                id="employee_notes"
+                value={employeeForm.notes}
+                onChange={(event) => updateEmployeeField("notes", event.target.value)}
+              />
+
+              <label className="checkbox-field">
+                <input
+                  type="checkbox"
+                  checked={employeeForm.active}
+                  onChange={(event) => updateEmployeeField("active", event.target.checked)}
+                />
+                Activo
+              </label>
+
+              <button type="submit" disabled={employeeLoading}>
+                {employeeLoading ? "Guardando..." : employeeEditingId ? "Guardar cambios" : "Crear empleado"}
+              </button>
+            </form>
+
+            <section className="panel">
+              <div className="section-heading compact">
+                <div>
+                  <h1>Empleados</h1>
+                  <p>La edicion granular de permisos queda preparada para la siguiente etapa.</p>
+                </div>
+                <button type="button" onClick={loadEmployeeRecords}>Actualizar</button>
+              </div>
+
+              <label htmlFor="employee_search">Buscar empleado</label>
+              <input
+                id="employee_search"
+                value={employeeSearch}
+                onChange={(event) => setEmployeeSearch(event.target.value)}
+                placeholder="Nombre, funcion, email, telefono"
+              />
+              <p className="field-help">
+                Mostrando {filteredEmployeeRecords.length} de {employeeRecords.length} empleado(s). Modulos definidos: {employeeModules.length}.
+              </p>
+
+              <div className="artist-record-list">
+                {employeeRecords.length === 0 && (
+                  <p className="field-help">Todavia no hay empleados cargados.</p>
+                )}
+                {employeeRecords.length > 0 && filteredEmployeeRecords.length === 0 && (
+                  <p className="field-help">No hay empleados que coincidan con la busqueda.</p>
+                )}
+
+                {filteredEmployeeRecords.map((item) => {
+                  const enabledPermissions = item.permissions.filter((permission) => permission.can_access).length;
+                  const primaryUser = item.users?.[0];
+                  return (
+                    <div className={`artist-record-item ${item.active ? "" : "inactive"}`} key={item.id}>
+                      <div>
+                        <strong>{item.display_name}</strong>
+                        <span>{item.active ? "Empleado activo" : "Empleado inactivo"}</span>
+                      </div>
+                      <div className="artist-record-meta">
+                        <span>{item.functions.length ? item.functions.join(" / ") : "Sin funcion"}</span>
+                        <span>{item.phone || "Sin telefono"}</span>
+                        <span>{item.email || "Sin email"}</span>
+                        <span>{item.active ? "Activo" : "Inactivo"}</span>
+                      </div>
+                      <div className="artist-record-meta">
+                        <span>{primaryUser ? `Usuario: ${primaryUser.username}` : "Sin usuario"}</span>
+                        <span>{primaryUser ? `Rol: ${primaryUser.global_role}` : "Sin rol"}</span>
+                        <span>{primaryUser?.active ? "Login activo" : primaryUser ? "Login inactivo" : "Login pendiente"}</span>
+                        <span>{primaryUser?.has_password ? "Con contrasena" : "Sin contrasena"}</span>
+                        {primaryUser?.must_change_password && <span>Cambio requerido</span>}
+                        <span>{primaryUser?.auth_source || "Sin origen auth"}</span>
+                      </div>
+                      {item.address && <p>{item.address}</p>}
+                      {item.notes && <p>{item.notes}</p>}
+                      <div className="booking-status">
+                        <span>{enabledPermissions} permiso(s) con acceso</span>
+                        {item.display_name.toLowerCase() === "ruben elkowich" && <span>Super-admin</span>}
+                      </div>
+                      <div className="booking-actions">
+                        <button type="button" onClick={() => editEmployeeRecord(item)}>Editar</button>
+                        <button type="button" onClick={() => resetEmployeePassword(item)} disabled={employeeLoading}>
+                          Establecer contrasena default
+                        </button>
+                        {item.active && item.display_name.toLowerCase() !== "ruben elkowich" && (
+                          <button type="button" className="secondary-danger" onClick={() => deactivateEmployeeRecord(item)}>
+                            Desactivar
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          </div>
+        )}
+
         {view === "booking" && (
           <div className="grid booking-grid">
             <form className="panel" onSubmit={submitBooking}>
@@ -5288,6 +10792,7 @@ export default function Home() {
                         ...current,
                         venuePaymentIssue: checked,
                         venueCollectedAmount: checked && !current.venueCollectedAmount ? current.cachetAmount : current.venueCollectedAmount,
+                        venueShortfallPolicy: checked ? current.venueShortfallPolicy : "deuda_boliche",
                         venuePaymentNotes: checked ? current.venuePaymentNotes : "",
                       }));
                     }}
@@ -5309,9 +10814,32 @@ export default function Home() {
                         </div>
                       </div>
                     </div>
+                    <div className="row">
+                      <label className="check-row">
+                        <input
+                          type="radio"
+                          name="booking_venue_shortfall_policy"
+                          checked={bookingForm.venueShortfallPolicy === "deuda_boliche"}
+                          onChange={() => updateBookingField("venueShortfallPolicy", "deuda_boliche")}
+                        />
+                        <span>Dejar saldo al boliche</span>
+                      </label>
+                      <label className="check-row">
+                        <input
+                          type="radio"
+                          name="booking_venue_shortfall_policy"
+                          checked={bookingForm.venueShortfallPolicy === "ajustar_cachet"}
+                          onChange={() => updateBookingField("venueShortfallPolicy", "ajustar_cachet")}
+                        />
+                        <span>Ajustar cachet al cobrado</span>
+                      </label>
+                    </div>
                     <label htmlFor="booking_venue_payment_notes">Nota deuda boliche</label>
                     <textarea id="booking_venue_payment_notes" value={bookingForm.venuePaymentNotes} onChange={(event) => updateBookingField("venuePaymentNotes", event.target.value)} placeholder="Ej: cachet pactado 1.500.000, el venue pago 1.000.000 y queda deuda." />
-                    <p className="field-help">Los calculos del show usan el cobrado real. La diferencia queda como alerta separada de la rendicion del PM.</p>
+                    <p className="field-help">
+                      Con saldo al boliche, el show liquida sobre el cachet pactado y la diferencia queda pendiente.
+                      Con ajuste de cachet, liquida sobre el cobrado real y no genera deuda del boliche.
+                    </p>
                   </>
                 )}
               </div>
@@ -5371,6 +10899,69 @@ export default function Home() {
               <div className="artist-adjustments">
                 <div className="section-heading compact">
                   <div>
+                    <h2>Comision directa / booking fee</h2>
+                    <p>Usalo cuando una comision se resuelve antes del split del artista.</p>
+                  </div>
+                  <div className="button-row">
+                    <button type="button" onClick={() => addBookingDirectCommission("salida_directa")}>Salida directa</button>
+                    <button type="button" onClick={() => addBookingDirectCommission("incorpora_base")}>Suma a base</button>
+                  </div>
+                </div>
+
+                {bookingForm.directCommissions.length === 0 && (
+                  <p className="field-help">Sin comision directa. Para shows comunes no hace falta cargar nada aca.</p>
+                )}
+
+                {bookingForm.directCommissions.length > 0 && (
+                  <div className="adjustment-summary">
+                    <span>Total fee {localAmount(bookingDirectCommissionSummary.total, bookingForm.currency)}</span>
+                    <span>Sale directo {localAmount(bookingDirectCommissionSummary.outgoing, bookingForm.currency)}</span>
+                    <span>Suma a base {localAmount(bookingDirectCommissionSummary.incorporated, bookingForm.currency)}</span>
+                    <span>Neto para split {localAmount(bookingSuggestion.splitBase, bookingForm.currency)}</span>
+                  </div>
+                )}
+
+                {bookingForm.directCommissions.map((commission, index) => (
+                  <div className="adjustment-card" key={commission.uid}>
+                    <div className="adjustment-card-title">
+                      <strong>Comision directa {index + 1}</strong>
+                      <button type="button" onClick={() => removeBookingDirectCommission(commission.uid)}>Quitar</button>
+                    </div>
+
+                    <div className="row four">
+                      <div>
+                        <label htmlFor={`direct_commission_concept_${commission.uid}`}>Concepto</label>
+                        <input id={`direct_commission_concept_${commission.uid}`} value={commission.concept} onChange={(event) => updateBookingDirectCommissionField(commission.uid, "concept", event.target.value)} placeholder="Booking fee, Marce, Gaston" />
+                      </div>
+                      <div>
+                        <label htmlFor={`direct_commission_recipient_${commission.uid}`}>Quien cobra / recibe</label>
+                        <input id={`direct_commission_recipient_${commission.uid}`} value={commission.recipient} onChange={(event) => updateBookingDirectCommissionField(commission.uid, "recipient", event.target.value)} placeholder="Marce, Gaston, otro" />
+                      </div>
+                      <div>
+                        <label htmlFor={`direct_commission_destination_${commission.uid}`}>Tratamiento</label>
+                        <select id={`direct_commission_destination_${commission.uid}`} value={commission.destination} onChange={(event) => updateBookingDirectCommissionField(commission.uid, "destination", event.target.value as "salida_directa" | "incorpora_base")}>
+                          <option value="salida_directa">Sale directo</option>
+                          <option value="incorpora_base">Suma a base</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label htmlFor={`direct_commission_amount_${commission.uid}`}>Importe</label>
+                        <input id={`direct_commission_amount_${commission.uid}`} inputMode="decimal" value={commission.amount} onChange={(event) => updateBookingDirectCommissionField(commission.uid, "amount", event.target.value)} />
+                      </div>
+                    </div>
+
+                    <p className="field-help">
+                      Sale directo baja el neto del show. Suma a base queda trazado como booking fee, pero vuelve a la base del artista antes del split.
+                    </p>
+                    <label htmlFor={`direct_commission_notes_${commission.uid}`}>Nota</label>
+                    <textarea id={`direct_commission_notes_${commission.uid}`} value={commission.notes} onChange={(event) => updateBookingDirectCommissionField(commission.uid, "notes", event.target.value)} />
+                  </div>
+                ))}
+              </div>
+
+              <div className="artist-adjustments">
+                <div className="section-heading compact">
+                  <div>
                     <h2>Ajustes antes del split</h2>
                     <p>Importes que salen del neto antes de calcular el 70/30 u otro acuerdo.</p>
                   </div>
@@ -5418,6 +11009,23 @@ export default function Home() {
                       </div>
                     </div>
 
+                    {adjustment.destination === "producer" && (
+                      <label className="inline-check">
+                        <input
+                          type="checkbox"
+                          checked={adjustment.recoveryAutoApply}
+                          onChange={(event) => updateBookingPreSplitAdjustmentField(adjustment.uid, "recoveryAutoApply", event.target.checked)}
+                        />
+                        Imputar como recupero al saldo pendiente mas viejo
+                      </label>
+                    )}
+                    {adjustment.destination === "producer" && adjustment.recoveryAutoApply && (
+                      <p className="field-help">
+                        Al guardar, el sistema aplica este importe por FIFO contra proyectos recuperables abiertos del artista.
+                        Si no hay saldo abierto, no permite guardar para evitar una imputacion falsa.
+                      </p>
+                    )}
+
                     <label htmlFor={`pre_split_notes_${adjustment.uid}`}>Nota</label>
                     <textarea id={`pre_split_notes_${adjustment.uid}`} value={adjustment.notes} onChange={(event) => updateBookingPreSplitAdjustmentField(adjustment.uid, "notes", event.target.value)} />
                   </div>
@@ -5437,7 +11045,7 @@ export default function Home() {
                 </div>
 
                 {bookingForm.cashMovements.length === 0 && (
-                  <p className="field-help">Sin caja detallada. PodÃ©s usar los campos pagado/rendido de abajo como antes.</p>
+                  <p className="field-help">Sin caja detallada. Podes usar los campos pagado/rendido de abajo como antes.</p>
                 )}
 
                 {bookingForm.cashMovements.length > 0 && (
@@ -5845,9 +11453,12 @@ export default function Home() {
               <label htmlFor="booking_notes">Notas</label>
               <textarea id="booking_notes" value={bookingForm.notes} onChange={(event) => updateBookingField("notes", event.target.value)} />
 
-              <button type="submit" disabled={bookingLoading || bookingArtists.length === 0}>
+              <button type="submit" disabled={bookingLoading || bookingArtists.length === 0 || (bookingEditingId ? !canEditModule("booking") : !canCreateModule("booking"))}>
                 {bookingLoading ? "Guardando..." : bookingEditingId ? "Actualizar show" : "Guardar show"}
               </button>
+              {!(bookingEditingId ? canEditModule("booking") : canCreateModule("booking")) && (
+                <p className="field-help">Tu usuario puede consultar la pantalla, pero no tiene permiso para esta accion.</p>
+              )}
             </form>
 
             <section className="panel">
@@ -5951,7 +11562,12 @@ export default function Home() {
                       {item.artist_adjustments.length > 0 && <span>{item.artist_adjustments.length} ajuste(s)</span>}
                     </div>
                     <div className="booking-actions">
-                      <button type="button" onClick={() => editBookingShow(item)}>Editar</button>
+                      {canEditModule("booking") && <button type="button" onClick={() => editBookingShow(item)}>Editar</button>}
+                      {canApproveModule("booking") && (
+                        <button type="button" className="secondary-danger" onClick={() => deleteBookingShow(item)}>
+                          Eliminar
+                        </button>
+                      )}
                     </div>
                   </article>
                 ))}

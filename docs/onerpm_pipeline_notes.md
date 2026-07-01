@@ -2,12 +2,13 @@
 
 ## Objetivo
 
-Unificar las tres subcuentas de ONErpm dentro de un solo mart `onerpm`, preservando reglas distintas por cuenta y agregando flags de vista para reportes.
+Unificar las subcuentas de ONErpm dentro de un solo mart `onerpm`, preservando reglas distintas por cuenta y agregando flags de vista para reportes.
 
 ## Inputs
 
 - `C:\royalties_pipeline\input_raw\onerpm\henry_remix`
 - `C:\royalties_pipeline\input_raw\onerpm\gusty_dj`
+- `C:\royalties_pipeline\input_raw\onerpm\la_nueva_sangre`
 - `C:\royalties_pipeline\input_raw\onerpm\mawzrecords`
 
 Cada archivo suele tener hojas:
@@ -37,15 +38,29 @@ Cada archivo suele tener hojas:
 ### Gusty DJ
 
 - Se carga `Masters`.
+- Se carga `Youtube Channels`.
 - `Shares In & Out` no se carga como filas de ingreso.
 - `Shares In & Out` se usa para flags/alertas sobre Masters.
 - Es una cuenta externa historica: sirve para vista catalogo, no para cash propio.
 
+### La Nueva Sangre
+
+- Se carga `Masters`.
+- Se carga `Youtube Channels`.
+- `Shares In & Out` no se carga como filas de ingreso.
+- `Shares In & Out` se usa para flags/alertas sobre Masters.
+- Es una cuenta externa tipo Gusty: principalmente catalogo de DJ Plaga.
+- Los `Shares In` pueden corresponder a colaboraciones donde la cuenta recibio participacion, pero no representan administracion/porcentaje de VPO.
+- Diferencia esperada: el `Summary` de ONErpm puede incluir `Share In/Out`; el mart operativo de La Nueva Sangre solo incluye ingresos de catalogo/Youtube y deja los shares como senales de auditoria.
+
 ### MAWZ Records
 
 - Se carga `Masters`.
+- Se carga `Youtube Channels`.
 - Se carga `Shares In & Out` como filas porque representa movimientos relevantes de la cuenta.
 - Se marca `possible_internal_transfer = true` para Shares.
+- En los archivos actuales de MAWZ, la hoja `Youtube Channels` existe pero viene sin filas de datos.
+- En el reporte por statement nuevo, MAWZ se informa solo con `Masters`; los shares permanecen en el mart para auditoria/caja pero no se suman a generacion de catalogo.
 
 ## Reglas de monto
 
@@ -86,7 +101,7 @@ El standardized incluye flags:
 Uso esperado:
 
 - Cash/statement: Henry + MAWZ
-- Catalogo: Masters de las cuentas, incluyendo Gusty
+- Catalogo: Masters/Youtube de las cuentas, incluyendo Gusty y La Nueva Sangre
 - Auditoria/raw: todo
 
 ## Diferencias conocidas contra pipeline viejo

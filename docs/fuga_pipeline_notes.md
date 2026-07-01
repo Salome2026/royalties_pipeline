@@ -44,6 +44,58 @@ Replicar exactamente la logica del pipeline viejo de FUGA, pero guardando el det
   - `product_artist_statement`
   - `product_title_statement`
 
+## Product vs Asset
+
+FUGA puede informar ingresos a nivel `Asset` o a nivel `Product`.
+
+### Asset
+
+Fila normal de tema/asset:
+
+- `Asset/Product`: `Asset`
+- suele traer `Asset ISRC`
+- suele traer `Asset Title`
+- suele traer `Asset Artist`
+- las unidades vienen en `Asset Quantity`
+
+### Product
+
+Fila a nivel producto/release:
+
+- `Asset/Product`: `Product`
+- puede traer `Product UPC`
+- puede traer `Product Title`
+- puede traer `Product Artist`
+- las unidades vienen en `Product Quantity`
+- puede no traer `Asset ISRC`
+
+Esto no debe corregirse dentro del ingest. El standardized debe conservarlo tal
+cual vino.
+
+Regla operativa:
+
+- `asset_isrc` solo sale de `Asset ISRC`.
+- `product_upc` sale de `Product UPC`.
+- `asset_product_type` conserva `Asset/Product`.
+- Si `Asset ISRC` viene vacio, no se inventa ISRC en standardized.
+- La resolucion por UPC, si corresponde, pertenece a catalogo/reportes.
+
+Caso testigo validado:
+
+- `March2026StatementRun_INDYANARECORDSLLC-royalty_product_and_asset.csv`
+- `Product UPC`: `198474357444`
+- `Product Title`: `Perreo TL`
+- `Product Artist`: `mamiyosoyelth and Lihueeel`
+- `Asset/Product`: `Product`
+- `Asset ISRC`: vacio
+- `DSP`: `Amazon`
+- `Sale Type`: `Download`
+- `Product Quantity`: `1`
+
+La fila se puede asociar en catalogo a `QZK6L2413497` porque ese UPC aparece con
+un unico ISRC y la metadata externa confirma el par UPC/ISRC. Pero la fila raw y
+standardized deben seguir mostrando que FUGA la reporto como producto.
+
 ## Correcciones
 
 FUGA puede traer archivos de correccion. Esos archivos no deben ignorarse. En el pipeline nuevo se incorporan respetando la misma base de monto y metadata que los regulares.
@@ -66,6 +118,8 @@ Resultado esperado:
 
 - `standardized_raw_fuga.amount_usd` debe cerrar contra `royalties_detail.net_amount_usd`
 - El song-level debe cerrar contra standardized
+- Si aparecen filas `Product` sin ISRC, revisar si el catalogo las resuelve por
+  UPC unico. Esa revision no debe cambiar el total de `amount_usd`.
 
 ## Nota para reporte por statement
 

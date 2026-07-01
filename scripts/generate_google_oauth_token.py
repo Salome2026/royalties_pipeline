@@ -7,8 +7,8 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 
 
 BASE = Path(r"C:\royalties_pipeline")
-CLIENT_SECRET_PATH = BASE / "secrets" / "google_oauth_client.json"
-TOKEN_OUTPUT_PATH = BASE / "secrets" / "google_oauth_token.json"
+CLIENT_SECRET_PATH = BASE / ".secrets" / "google_oauth_client.json"
+TOKEN_OUTPUT_PATH = BASE / ".secrets" / "google_oauth_token.json"
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",

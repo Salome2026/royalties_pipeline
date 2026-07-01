@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
 import os
+import secrets
 import sqlite3
+import subprocess
 import sys
 from calendar import monthrange
 from datetime import date
@@ -23,6 +26,16 @@ from googleapiclient.discovery import build as google_build
 from googleapiclient.errors import HttpError
 from pydantic import BaseModel, Field
 
+from app.operational_db import (
+    db_bool,
+    db_sql,
+    is_postgres_connection,
+    operational_connect,
+    operational_db_healthcheck,
+    operational_db_settings,
+    operational_sqlite_compatible_connect,
+)
+
 
 BASE = Path(__file__).resolve().parents[1]
 SCRIPTS = BASE / "scripts"
@@ -32,7 +45,73 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from build_keyword_royalty_report import build_report, build_report_tables, normalize_keywords  # noqa: E402
-from build_statement_report_from_mart import build_statement_report_from_summary  # noqa: E402
+from build_statement_report_from_mart import build_statement_report_from_mart  # noqa: E402
+from build_custom_title_royalty_report import (  # noqa: E402
+    DEFAULT_LOS_ANORMALES_TERMS,
+    build_custom_title_report,
+)
+from build_fuga_gusty_contract_report import build_fuga_gusty_contract_report  # noqa: E402
+import build_la_nueva_sangre_report as la_nueva_sangre_report  # noqa: E402
+import build_la_juntada_report as la_juntada_report  # noqa: E402
+
+CUSTOM_REPORT_TEMPLATES = [
+    {
+        "key": "los_anormales",
+        "title": "Regalias Los Anormales",
+        "description": "Reporte validado por listado editable de temas/artistas, con summaries por fuente, titulo, statement, comercio, uso, pais y song matches.",
+        "terms": DEFAULT_LOS_ANORMALES_TERMS,
+        "enabled": True,
+    },
+    {
+        "key": "gusty_fuga_contracts",
+        "title": "Gusty Fuga contratos nuevo & viejo",
+        "description": "Reporte FUGA Gusty con separacion contractual nuevo/viejo segun mapa ONErpm/Motorcito. Usa fecha de statement y genera las hojas validadas de resumen, listado, mensual, store, territorio, content type, statement y detalle.",
+        "terms": ["Gusty"],
+        "enabled": True,
+    },
+    {
+        "key": "la_nueva_sangre",
+        "title": "La Nueva Sangre",
+        "description": "Reporte personalizado con capa de negocio: ingresos ONErpm, ingresos FUGA, excluidos Boxindanga, excluidos propios y analisis de YouTube.",
+        "terms": [],
+        "enabled": True,
+        "requires_terms": False,
+        "supports_sources": False,
+        "supports_start_month": False,
+        "options": [
+            {
+                "key": "hide_zero_amounts",
+                "label": "Sacar filas que suman 0",
+                "description": "Oculta grupos sin importe neto para que el Excel quede mas limpio.",
+                "default": True,
+            },
+            {
+                "key": "exclude_related_videos",
+                "label": "Sacar videos relacionados a temas excluidos",
+                "description": "Excluye videos aunque tengan fecha posterior si corresponden a un master excluido por corte/catalogo.",
+                "default": True,
+            },
+        ],
+    },
+    {
+        "key": "la_juntada_artistas",
+        "title": "La juntada de los artistas",
+        "description": "Reporte listo para presentar: ingresos consolidados por distribuidora, cuenta, mes, tema, pais/DSP y detalle.",
+        "terms": [],
+        "enabled": True,
+        "requires_terms": False,
+        "supports_sources": False,
+        "supports_start_month": False,
+        "default_end_month": "2026-05",
+    },
+    {
+        "key": "especial_fin_de_ano",
+        "title": "Script Especial Fin de Ano",
+        "description": "Plantilla reservada para cierres especiales de periodo. Queda visible para ordenar el menu, pero sin ejecucion hasta definir la logica.",
+        "terms": [],
+        "enabled": False,
+    },
+]
 
 
 def load_local_env(path: Path) -> None:
@@ -61,16 +140,40 @@ VPO_LOCAL_MARTS_DIR = Path(VPO_LOCAL_MARTS_DIR_RAW).expanduser() if VPO_LOCAL_MA
 VPO_API_CACHE_DIR = Path(os.environ.get("VPO_API_CACHE_DIR", BASE / "cache" / "gcs_marts"))
 VPO_API_REPORTS_DIR = Path(os.environ.get("VPO_API_REPORTS_DIR", BASE / "reports" / "api"))
 VPO_BOOKING_DB_PATH = Path(os.environ.get("VPO_BOOKING_DB_PATH", BASE / "warehouse" / "booking" / "live" / "booking_live.sqlite"))
+VPO_BOOKING_GCS_OBJECT = os.environ.get("VPO_BOOKING_GCS_OBJECT", "").strip("/")
+VPO_BOOKING_READONLY_GCS = os.environ.get("VPO_BOOKING_READONLY_GCS", "").strip().lower() in {"1", "true", "yes", "on"}
+VPO_BOOKING_REFRESH_ON_REQUEST = os.environ.get("VPO_BOOKING_REFRESH_ON_REQUEST", "").strip().lower() in {"1", "true", "yes", "on"}
 BOOKING_RAW_DIR = BASE / "warehouse" / "booking" / "raw"
 BOOKING_STANDARDIZED_PATH = BASE / "warehouse" / "booking" / "standardized" / "standardized_booking_movements.parquet"
+BOOKING_ARTIST_REGISTRY_PATH = BASE / "warehouse" / "booking" / "registry" / "booking_artists.json"
+SOURCE_MONITOR_CONFIG_PATH = BASE / "warehouse" / "registry" / "source_monitor_config.json"
 GOOGLE_SHEETS_SHARE_EMAIL = os.environ.get("GOOGLE_SHEETS_SHARE_EMAIL", "").strip()
 GOOGLE_DRIVE_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
 
 SONG_FILE = "song_level_all_sources.parquet"
 STANDARDIZED_FILE = "standardized_raw_all_sources.parquet"
+STANDARDIZED_ONERPM_FILE = "standardized_raw_onerpm.parquet"
+STANDARDIZED_FUGA_FILE = "standardized_raw_fuga.parquet"
 CATALOG_FILE = "catalog_candidates.parquet"
+CATALOG_MASTER_FILE = "catalog_master.parquet"
+CATALOG_RELEASE_METADATA_FILE = "catalog_release_metadata.parquet"
 STATEMENT_SUMMARY_FILE = "statement_summary_all_sources.parquet"
-REQUIRED_MART_FILES = [SONG_FILE, STANDARDIZED_FILE, CATALOG_FILE, STATEMENT_SUMMARY_FILE]
+DIGITAL_INCOME_SUMMARY_FILE = "digital_income_statement_summary.parquet"
+DIGITAL_INCOME_SUMMARY_PATH = BASE / "warehouse" / "marts" / "digital_income_statement_summary.parquet"
+REQUIRED_MART_FILES = [SONG_FILE, STANDARDIZED_FILE, CATALOG_FILE, CATALOG_MASTER_FILE, STATEMENT_SUMMARY_FILE, DIGITAL_INCOME_SUMMARY_FILE]
+CATALOG_STATUS_PATH = BASE / "warehouse" / "registry" / "catalog_status.parquet"
+CONFIG_REGISTRY_DIR = BASE / "warehouse" / "registry"
+CONFIG_SEED_FILES = {
+    "distributor-account-policies": CONFIG_REGISTRY_DIR / "distributor_account_policies.json",
+    "statement-source-dictionary": CONFIG_REGISTRY_DIR / "statement_source_dictionary.json",
+    "contract-cutoffs": CONFIG_REGISTRY_DIR / "contract_cutoffs.json",
+    "report-templates": CONFIG_REGISTRY_DIR / "report_templates.json",
+}
+VPO_CATALOG_STATUS_GCS_OBJECT = os.environ.get("VPO_CATALOG_STATUS_GCS_OBJECT", "").strip("/")
+VPO_CATALOG_STATUS_SYNC_GCS = (
+    os.environ.get("VPO_CATALOG_STATUS_SYNC_GCS", "1").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
 
 
 class KeywordReportRequest(BaseModel):
@@ -90,6 +193,100 @@ class RefreshRequest(BaseModel):
 class StatementReportRequest(BaseModel):
     refresh_cache: bool = False
     min_artist_total_usd: float = Field(default=0.0, ge=0.0, le=1_000_000.0)
+    include_zero_total_artists: bool = False
+    report_version: Literal["legacy", "new"] = "legacy"
+
+
+class CatalogStatusRequest(BaseModel):
+    catalog_key: str = Field(..., min_length=1)
+    active: bool
+    include_in_reports: bool | None = None
+    business_status: Literal["vpo_catalog", "artist_personal", "external_catalog", "pending_review", "inactive"] = "vpo_catalog"
+    notes: str | None = Field(default=None, max_length=1000)
+    label_normalized_override: str | None = Field(default=None, max_length=300)
+
+
+class CustomRoyaltyReportRequest(BaseModel):
+    template_key: str = Field(default="los_anormales", min_length=1, max_length=80)
+    report_title: str = Field(default="Regalias Los Anormales", min_length=1, max_length=120)
+    terms: list[str] = Field(default_factory=lambda: list(DEFAULT_LOS_ANORMALES_TERMS))
+    start_month: str | None = None
+    end_month: str | None = None
+    sources: list[str] = Field(default_factory=list)
+    source_accounts: list[dict[str, str]] = Field(default_factory=list)
+    refresh_cache: bool = False
+    hide_zero_amounts: bool = False
+    exclude_related_videos: bool = False
+
+
+class SourceMonitorUpdateRequest(BaseModel):
+    monitoring_active: bool | None = None
+    alert_silenced: bool | None = None
+    last_manual_review_at: str | None = Field(default=None, max_length=40)
+    notes: str | None = Field(default=None, max_length=1000)
+    portal_url: str | None = Field(default=None, max_length=500)
+    max_age_months: int | None = Field(default=None, ge=0, le=24)
+
+
+class BookingArtistRecordRequest(BaseModel):
+    stage_name: str = Field(..., min_length=1, max_length=160)
+    legal_name: str | None = Field(default=None, max_length=180)
+    cuit: str | None = Field(default=None, max_length=40)
+    phone: str | None = Field(default=None, max_length=80)
+    email: str | None = Field(default=None, max_length=180)
+    address: str | None = Field(default=None, max_length=300)
+    notes: str | None = Field(default=None, max_length=2000)
+    active: bool = True
+
+
+class EmployeePermissionRequest(BaseModel):
+    module_key: str = Field(..., min_length=1, max_length=80)
+    can_access: bool = False
+    can_create: bool = False
+    can_view_history: bool = False
+    can_edit: bool = False
+    can_approve: bool = False
+    scope: list[dict[str, str]] = Field(default_factory=list, max_length=50)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class EmployeeRecordRequest(BaseModel):
+    display_name: str = Field(..., min_length=1, max_length=180)
+    legal_name: str | None = Field(default=None, max_length=180)
+    cuit: str | None = Field(default=None, max_length=40)
+    phone: str | None = Field(default=None, max_length=80)
+    email: str | None = Field(default=None, max_length=180)
+    address: str | None = Field(default=None, max_length=300)
+    functions: list[str] = Field(default_factory=list, max_length=20)
+    username: str | None = Field(default=None, max_length=80)
+    password: str | None = Field(default=None, max_length=200)
+    must_change_password: bool | None = None
+    user_role: Literal["viewer", "editor", "admin"] = "viewer"
+    user_active: bool = True
+    permissions: list[EmployeePermissionRequest] | None = None
+    notes: str | None = Field(default=None, max_length=2000)
+    active: bool = True
+
+
+class AuthLoginRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=80)
+    password: str = Field(..., min_length=1, max_length=200)
+
+
+class AuthSessionRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=80)
+
+
+class AuthChangePasswordRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=80)
+    current_password: str = Field(..., min_length=1, max_length=200)
+    new_password: str = Field(..., min_length=8, max_length=200)
+
+
+class EmployeePasswordRequest(BaseModel):
+    password: str | None = Field(default=None, min_length=8, max_length=200)
+    use_default: bool = False
+    must_change_password: bool = True
 
 
 class BookingArtistAdjustmentRequest(BaseModel):
@@ -116,7 +313,93 @@ class BookingPreSplitAdjustmentRequest(BaseModel):
     concept: str = Field(..., min_length=1, max_length=180)
     destination: Literal["artist", "producer"] = "producer"
     amount: float = Field(default=0.0, ge=0.0)
+    recovery_auto_apply: bool = False
     notes: str | None = Field(default=None, max_length=1000)
+
+
+class BookingDirectCommissionRequest(BaseModel):
+    concept: str = Field(..., min_length=1, max_length=180)
+    recipient: str | None = Field(default=None, max_length=160)
+    destination: Literal["salida_directa", "incorpora_base"] = "salida_directa"
+    amount: float = Field(default=0.0, ge=0.0)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class BookingExternalShareRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=160)
+    role: Literal["manager_externo", "socio_externo", "tercero", "otro"] = "tercero"
+    percent: float | None = Field(default=None, ge=0.0, le=100.0)
+    amount: float = Field(default=0.0, ge=0.0)
+    cash_handled_by_vpo: bool = False
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class BookingCashMovementRequest(BaseModel):
+    recipient: Literal["producer", "artist"] = "producer"
+    concept: str = Field(..., min_length=1, max_length=180)
+    amount: float = Field(default=0.0, ge=0.0)
+    payment_method: Literal["transferencia", "efectivo", "seña", "sena", "se?a", "seÃ±a", "seÃƒÂ±a", "seÃƒÆ’Ã‚Â±a", "otro"] = "seña"
+    paid_by: str | None = Field(default=None, max_length=180)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class FinanceProjectRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=180)
+    artist: str | None = Field(default=None, max_length=160)
+    business_area: Literal["booking", "label", "marketing", "digitales", "general"] = "general"
+    status: Literal["activo", "cerrado", "pausado"] = "activo"
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class FinanceMovementRequest(BaseModel):
+    movement_date: str = Field(..., min_length=10, max_length=10)
+    artist: str = Field(..., min_length=1, max_length=160)
+    business_area: Literal["booking", "label", "marketing", "digitales", "general"] = "general"
+    movement_type: Literal["gasto", "ingreso", "recupero", "adelanto", "prestamo", "ajuste", "pago"] = "gasto"
+    category: str = Field(..., min_length=1, max_length=100)
+    project_id: int | None = None
+    project_name: str | None = Field(default=None, max_length=180)
+    concept: str = Field(..., min_length=1, max_length=240)
+    counterparty: str | None = Field(default=None, max_length=180)
+    paid_by: Literal["indyana", "artista", "manager", "tercero", "desconocido"] = "indyana"
+    amount: float = Field(..., ge=0.0)
+    paid_amount: float | None = Field(default=None, ge=0.0)
+    due_date: str | None = Field(default=None, max_length=10)
+    payment_status: Literal["pendiente", "parcial", "pagado"] | None = None
+    currency: Literal["ARS", "USD"] = "ARS"
+    fx_rate: float | None = Field(default=None, gt=0)
+    recoverable: bool = False
+    recoverable_percent: float = Field(default=0.0, ge=0.0, le=100.0)
+    recovery_method: Literal[
+        "none",
+        "before_split",
+        "after_split",
+        "direct_account",
+        "royalties",
+        "manual",
+    ] = "none"
+    artist_percent: float = Field(default=0.0, ge=0.0, le=100.0)
+    producer_percent: float = Field(default=100.0, ge=0.0, le=100.0)
+    account_effect: Literal[
+        "sin_impacto",
+        "artista_debe_indyana",
+        "indyana_debe_artista",
+        "inversion_indyana",
+    ] = "inversion_indyana"
+    status: Literal["borrador", "pendiente_control", "aprobado", "aplicado", "anulado"] = "pendiente_control"
+    source_type: Literal["manual", "legacy", "booking", "royalties", "import"] = "manual"
+    source_id: str | None = Field(default=None, max_length=120)
+    proof_refs: list[str] = Field(default_factory=list, max_length=30)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+
+def normalize_booking_cash_method(value: str) -> str:
+    if value in {"seña", "seÃ±a", "sena", "se?a", "seÃƒÂ±a", "seÃƒÆ’Ã‚Â±a"}:
+        return "seña"
+    if value in {"transferencia", "efectivo", "otro"}:
+        return value
+    return "otro"
 
 
 class BookingQuickShowRequest(BaseModel):
@@ -129,17 +412,93 @@ class BookingQuickShowRequest(BaseModel):
     status: Literal["pendiente", "realizado", "rendido", "aprobado", "cancelado", "no_cobrado"] = "realizado"
     currency: Literal["ARS", "USD"] = "ARS"
     fx_rate: float | None = Field(default=None, gt=0)
+    contracted_cachet_amount: float | None = Field(default=None, ge=0.0)
+    venue_collected_amount: float | None = Field(default=None, ge=0.0)
+    venue_payment_status: Literal["cobrado", "parcial", "no_cobrado"] = "cobrado"
+    venue_shortfall_policy: Literal["deuda_boliche", "ajustar_cachet"] = "deuda_boliche"
+    venue_payment_notes: str | None = Field(default=None, max_length=1000)
     cachet_amount: float = Field(default=0.0, ge=0.0)
     expenses_amount: float = Field(default=0.0, ge=0.0)
     show_expenses: list[BookingShowExpenseRequest] = Field(default_factory=list, max_length=50)
+    direct_commissions: list[BookingDirectCommissionRequest] = Field(default_factory=list, max_length=20)
     pre_split_adjustments: list[BookingPreSplitAdjustmentRequest] = Field(default_factory=list, max_length=30)
+    external_shares: list[BookingExternalShareRequest] = Field(default_factory=list, max_length=20)
+    cash_movements: list[BookingCashMovementRequest] = Field(default_factory=list, max_length=30)
     artist_paid_amount: float = Field(default=0.0, ge=0.0)
     producer_received_amount: float = Field(default=0.0, ge=0.0)
     artist_percent: float = Field(default=70.0, ge=0.0, le=100.0)
     producer_percent: float | None = Field(default=None, ge=0.0, le=100.0)
+    booking_commission_exempt: bool = False
+    booking_commission_notes: str | None = Field(default=None, max_length=1000)
     artist_adjustments: list[BookingArtistAdjustmentRequest] = Field(default_factory=list, max_length=20)
     receipt_refs: list[str] = Field(default_factory=list, max_length=30)
     notes: str | None = Field(default=None, max_length=2000)
+
+
+class CaserioEventLineRequest(BaseModel):
+    line_type: Literal["gasto_general", "artista_externo", "artista_vpo"] = "gasto_general"
+    description: str = Field(..., min_length=1, max_length=180)
+    amount: float = Field(default=0.0, ge=0.0)
+    artist: str | None = Field(default=None, max_length=160)
+    artist_percent: float = Field(default=70.0, ge=0.0, le=100.0)
+    producer_percent: float | None = Field(default=None, ge=0.0, le=100.0)
+    show_expenses: list[BookingShowExpenseRequest] = Field(default_factory=list, max_length=30)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class CaserioEventRequest(BaseModel):
+    event_date: str = Field(..., min_length=10, max_length=10)
+    venue: str = Field(..., min_length=1, max_length=180)
+    city: str | None = Field(default=None, max_length=120)
+    responsible: str | None = Field(default=None, max_length=160)
+    gross_amount: float = Field(default=0.0, ge=0.0)
+    currency: Literal["ARS", "USD"] = "ARS"
+    fx_rate: float | None = Field(default=None, gt=0)
+    status: Literal["borrador", "rendido", "observado", "cerrado"] = "borrador"
+    received_amount: float = Field(default=0.0, ge=0.0)
+    receipt_refs: list[str] = Field(default_factory=list, max_length=30)
+    notes: str | None = Field(default=None, max_length=2000)
+    lines: list[CaserioEventLineRequest] = Field(default_factory=list, max_length=80)
+
+
+class BookingCompositeEventExpenseRequest(BaseModel):
+    concept: str = Field(..., min_length=1, max_length=180)
+    category: str = Field(default="general", min_length=1, max_length=80)
+    amount: float = Field(default=0.0, ge=0.0)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class BookingCompositeEventLineRequest(BaseModel):
+    id: int | None = Field(default=None, ge=1)
+    line_type: Literal["artista_vpo", "artista_externo", "comision_externa"] = "artista_vpo"
+    description: str = Field(..., min_length=1, max_length=180)
+    artist: str | None = Field(default=None, max_length=160)
+    amount: float = Field(default=0.0, ge=0.0)
+    artist_percent: float = Field(default=70.0, ge=0.0, le=100.0)
+    producer_percent: float | None = Field(default=None, ge=0.0, le=100.0)
+    artist_paid_amount: float = Field(default=0.0, ge=0.0)
+    producer_received_amount: float = Field(default=0.0, ge=0.0)
+    show_expenses: list[BookingShowExpenseRequest] = Field(default_factory=list, max_length=30)
+    external_shares: list[BookingExternalShareRequest] = Field(default_factory=list, max_length=20)
+    booking_commission_exempt: bool = True
+    booking_commission_notes: str | None = Field(default=None, max_length=1000)
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class BookingCompositeEventRequest(BaseModel):
+    event_date: str = Field(..., min_length=10, max_length=10)
+    venue: str = Field(..., min_length=1, max_length=180)
+    city: str | None = Field(default=None, max_length=120)
+    responsible: str | None = Field(default=None, max_length=160)
+    status: Literal["borrador", "rendido", "observado", "cerrado"] = "borrador"
+    currency: Literal["ARS", "USD"] = "ARS"
+    fx_rate: float | None = Field(default=None, gt=0)
+    gross_amount: float = Field(default=0.0, ge=0.0)
+    received_amount: float = Field(default=0.0, ge=0.0)
+    receipt_refs: list[str] = Field(default_factory=list, max_length=30)
+    notes: str | None = Field(default=None, max_length=2000)
+    expenses: list[BookingCompositeEventExpenseRequest] = Field(default_factory=list, max_length=80)
+    lines: list[BookingCompositeEventLineRequest] = Field(default_factory=list, max_length=80)
 
 
 ParticipationPreset = Literal["last_month", "last_3_months", "last_year", "all_history", "custom"]
@@ -162,6 +521,490 @@ def require_api_key(x_vpo_api_key: str | None) -> None:
 
     if x_vpo_api_key != VPO_API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key.")
+
+
+def load_config_seed(config_name: str) -> dict:
+    path = CONFIG_SEED_FILES.get(config_name)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Configuracion no soportada.")
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"No existe configuracion seed: {path.name}")
+
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail=f"JSON invalido en {path.name}: {exc}") from exc
+
+
+def catalog_stats_by_account(refresh_cache: bool = False) -> dict[tuple[str, str], dict]:
+    try:
+        marts = ensure_marts(refresh_cache=refresh_cache, filenames=[CATALOG_MASTER_FILE])
+        path = marts[CATALOG_MASTER_FILE]
+        if not path.exists():
+            return {}
+        catalog = pl.read_parquet(path)
+    except Exception:
+        return {}
+
+    if "external_label" not in catalog.columns:
+        catalog = catalog.with_columns(pl.lit(None).cast(pl.Utf8).alias("external_label"))
+    if "label_normalized_auto" not in catalog.columns:
+        catalog = catalog.with_columns(
+            normalized_label_expr(pl.col("external_label")).alias("label_normalized_auto")
+        )
+    if "label_normalized" not in catalog.columns:
+        catalog = catalog.with_columns(
+            pl.coalesce(["label_normalized_auto", "external_label"]).alias("label_normalized")
+        )
+
+    status_df = load_catalog_status()
+    if status_df.is_empty():
+        catalog = catalog.with_columns([
+            pl.lit(True).alias("active"),
+            pl.lit(True).alias("include_in_reports"),
+            pl.lit(None).cast(pl.Utf8).alias("label_normalized_override"),
+        ])
+    else:
+        catalog = (
+            catalog
+            .join(status_df.select(["catalog_key", "active", "include_in_reports", "label_normalized_override"]), on="catalog_key", how="left")
+            .with_columns([
+                pl.col("active").fill_null(True),
+                pl.col("include_in_reports").fill_null(pl.col("active")).fill_null(True),
+                pl.col("label_normalized_override").cast(pl.Utf8, strict=False),
+            ])
+        )
+    catalog = catalog.with_columns([
+        pl.when(pl.col("label_normalized_override").str.strip_chars() == "")
+        .then(pl.lit(None).cast(pl.Utf8))
+        .otherwise(pl.col("label_normalized_override").str.strip_chars())
+        .alias("label_normalized_override"),
+    ]).with_columns([
+        pl.coalesce(["label_normalized_override", "label_normalized_auto", "external_label"]).alias("label_normalized"),
+    ])
+
+    result: dict[tuple[str, str], dict] = {}
+    if "sources" not in catalog.columns or "accounts" not in catalog.columns:
+        return result
+
+    pairs: set[tuple[str, str]] = set()
+    for row in catalog.select(["sources", "accounts"]).to_dicts():
+        sources = [item.strip() for item in str(row.get("sources") or "").split(" | ") if item.strip()]
+        accounts = [item.strip() for item in str(row.get("accounts") or "").split(" | ") if item.strip()]
+        for source in sources:
+            for account in accounts:
+                pairs.add((source, account))
+
+    for source, account in pairs:
+        filtered = catalog.filter(
+            pl.col("sources").fill_null("").str.contains(source, literal=True)
+            & pl.col("accounts").fill_null("").str.contains(account, literal=True)
+        )
+        if filtered.is_empty():
+            continue
+        amount = filtered.get_column("amount_usd").sum() if "amount_usd" in filtered.columns else 0.0
+        release_dates = (
+            filtered.filter(pl.col("external_release_date").is_not_null()).height
+            if "external_release_date" in filtered.columns
+            else 0
+        )
+        labels = (
+            filtered.filter(pl.col("label_normalized").is_not_null()).height
+            if "label_normalized" in filtered.columns
+            else 0
+        )
+        inactive = filtered.filter(pl.col("active") == False).height
+        excluded = filtered.filter(pl.col("include_in_reports") == False).height
+        result[(source, account)] = {
+            "works": filtered.height,
+            "active": filtered.height - inactive,
+            "inactive": inactive,
+            "excluded_from_reports": excluded,
+            "release_dates": release_dates,
+            "missing_release_dates": filtered.height - release_dates,
+            "labels": labels,
+            "missing_labels": filtered.height - labels,
+            "amount_usd": round(float(amount or 0.0), 2),
+            "first_transaction_month": filtered.get_column("first_transaction_month").drop_nulls().min() if "first_transaction_month" in filtered.columns else None,
+            "last_transaction_month": filtered.get_column("last_transaction_month").drop_nulls().max() if "last_transaction_month" in filtered.columns else None,
+        }
+    return result
+
+
+def account_impact_stats_by_account(refresh_cache: bool = False) -> dict[tuple[str, str], dict]:
+    try:
+        marts = ensure_marts(refresh_cache=refresh_cache, filenames=[SONG_FILE])
+        path = marts[SONG_FILE]
+        if not path.exists():
+            return {}
+        song = pl.read_parquet(path)
+    except Exception:
+        return {}
+
+    required = {"source", "account", "amount_usd"}
+    if not required.issubset(set(song.columns)):
+        return {}
+
+    if "source_sheet" not in song.columns:
+        song = song.with_columns(pl.lit(None).cast(pl.Utf8).alias("source_sheet"))
+    if "units" not in song.columns:
+        song = song.with_columns(pl.lit(0.0).alias("units"))
+    if "transaction_month" not in song.columns:
+        song = song.with_columns(pl.lit(None).cast(pl.Utf8).alias("transaction_month"))
+    if "asset_isrc" not in song.columns:
+        song = song.with_columns(pl.lit(None).cast(pl.Utf8).alias("asset_isrc"))
+    if "track_id" not in song.columns:
+        song = song.with_columns(pl.lit(None).cast(pl.Utf8).alias("track_id"))
+    if "track_statement_style" not in song.columns:
+        song = song.with_columns(pl.lit(None).cast(pl.Utf8).alias("track_statement_style"))
+    if "artist_statement_style" not in song.columns:
+        song = song.with_columns(pl.lit(None).cast(pl.Utf8).alias("artist_statement_style"))
+
+    song = song.with_columns(
+        pl.when(pl.col("asset_isrc").is_not_null() & (pl.col("asset_isrc") != ""))
+        .then(pl.concat_str([pl.lit("ISRC:"), pl.col("asset_isrc")]))
+        .when(pl.col("track_id").is_not_null() & (pl.col("track_id") != ""))
+        .then(pl.concat_str([pl.lit("TRACK:"), pl.col("track_id")]))
+        .otherwise(pl.concat_str([
+            pl.lit("TEXT:"),
+            pl.col("artist_statement_style").fill_null(""),
+            pl.lit("|"),
+            pl.col("track_statement_style").fill_null(""),
+        ]))
+        .alias("_work_key")
+    )
+
+    result: dict[tuple[str, str], dict] = {}
+    for row in (
+        song
+        .group_by(["source", "account"])
+        .agg([
+            pl.len().alias("rows"),
+            pl.col("_work_key").n_unique().alias("works"),
+            pl.sum("amount_usd").round(2).alias("amount_usd"),
+            pl.sum("units").round(2).alias("units"),
+            pl.min("transaction_month").alias("first_transaction_month"),
+            pl.max("transaction_month").alias("last_transaction_month"),
+        ])
+        .to_dicts()
+    ):
+        source = str(row.get("source") or "")
+        account = str(row.get("account") or "")
+        result[(source, account)] = {
+            "rows": int(row.get("rows") or 0),
+            "works": int(row.get("works") or 0),
+            "amount_usd": float(row.get("amount_usd") or 0.0),
+            "units": float(row.get("units") or 0.0),
+            "first_transaction_month": row.get("first_transaction_month"),
+            "last_transaction_month": row.get("last_transaction_month"),
+            "sheet_breakdown": [],
+        }
+
+    sheet_rows = (
+        song
+        .group_by(["source", "account", "source_sheet"])
+        .agg([
+            pl.len().alias("rows"),
+            pl.col("_work_key").n_unique().alias("works"),
+            pl.sum("amount_usd").round(2).alias("amount_usd"),
+            pl.sum("units").round(2).alias("units"),
+            pl.min("transaction_month").alias("first_transaction_month"),
+            pl.max("transaction_month").alias("last_transaction_month"),
+        ])
+        .sort(["source", "account", "amount_usd"], descending=[False, False, True])
+        .to_dicts()
+    )
+    for row in sheet_rows:
+        key = (str(row.get("source") or ""), str(row.get("account") or ""))
+        if key not in result:
+            continue
+        result[key]["sheet_breakdown"].append({
+            "source_sheet": row.get("source_sheet") or "detalle",
+            "rows": int(row.get("rows") or 0),
+            "works": int(row.get("works") or 0),
+            "amount_usd": float(row.get("amount_usd") or 0.0),
+            "units": float(row.get("units") or 0.0),
+            "first_transaction_month": row.get("first_transaction_month"),
+            "last_transaction_month": row.get("last_transaction_month"),
+        })
+
+    return result
+
+
+def account_rule_preview_by_account(cutoff_entries: list[dict], refresh_cache: bool = False) -> dict[tuple[str, str], dict]:
+    if not cutoff_entries:
+        return {}
+    try:
+        marts = ensure_marts(refresh_cache=refresh_cache, filenames=[SONG_FILE, CATALOG_MASTER_FILE])
+        song_path = marts[SONG_FILE]
+        catalog_path = marts[CATALOG_MASTER_FILE]
+        if not song_path.exists() or not catalog_path.exists():
+            return {}
+        song = pl.read_parquet(song_path)
+        catalog = pl.read_parquet(catalog_path)
+    except Exception:
+        return {}
+
+    if not {"source", "account", "amount_usd"}.issubset(set(song.columns)):
+        return {}
+    for column in ["source_sheet", "transaction_month", "asset_isrc", "track_statement_style", "artist_statement_style"]:
+        if column not in song.columns:
+            song = song.with_columns(pl.lit(None).cast(pl.Utf8).alias(column))
+
+    status_df = load_catalog_status()
+    if status_df.is_empty():
+        catalog = catalog.with_columns([
+            pl.lit(True).alias("active"),
+            pl.lit(True).alias("include_in_reports"),
+            pl.lit(None).cast(pl.Utf8).alias("catalog_business_status"),
+            pl.lit(None).cast(pl.Utf8).alias("status_notes"),
+        ])
+    else:
+        catalog = (
+            catalog
+            .join(status_df.select(["catalog_key", "active", "include_in_reports", "catalog_business_status", "status_notes"]), on="catalog_key", how="left")
+            .with_columns([
+                pl.col("active").fill_null(True),
+                pl.col("include_in_reports").fill_null(pl.col("active")).fill_null(True),
+                pl.col("catalog_business_status").cast(pl.Utf8, strict=False),
+                pl.col("status_notes").cast(pl.Utf8, strict=False),
+            ])
+        )
+
+    def norm_text(value: object) -> str:
+        return str(value or "").strip().casefold()
+
+    catalog_lookup: dict[str, dict] = {}
+
+    def add_catalog_key(key: str, payload: dict) -> None:
+        clean = str(key or "").strip()
+        if clean and clean not in catalog_lookup:
+            catalog_lookup[clean] = payload
+
+    for catalog_row in catalog.to_dicts():
+        payload = {
+            "catalog_key": catalog_row.get("catalog_key"),
+            "catalog_active": bool(catalog_row.get("active", True)),
+            "catalog_include_in_reports": bool(catalog_row.get("include_in_reports", catalog_row.get("active", True))),
+            "catalog_business_status": catalog_row.get("catalog_business_status"),
+            "catalog_status_notes": catalog_row.get("status_notes"),
+            "external_release_date": catalog_row.get("external_release_date"),
+            "external_label": catalog_row.get("external_label"),
+        }
+        add_catalog_key(str(catalog_row.get("catalog_key") or ""), payload)
+        for raw_field in ["asset_isrc", "track_id", "identity_asset_isrc", "identity_video_id", "identity_track_id"]:
+            raw_value = catalog_row.get(raw_field)
+            if raw_value:
+                add_catalog_key(str(raw_value), payload)
+        for list_field in ["isrcs", "video_ids", "track_ids"]:
+            for part in str(catalog_row.get(list_field) or "").split(" | "):
+                add_catalog_key(part, payload)
+        text_key = f"{norm_text(catalog_row.get('track_title'))}|{norm_text(catalog_row.get('artist_statement'))}"
+        add_catalog_key(f"TEXT:{text_key}", payload)
+        reverse_text_key = f"{norm_text(catalog_row.get('artist_statement'))}|{norm_text(catalog_row.get('track_title'))}"
+        add_catalog_key(f"TEXT:{reverse_text_key}", payload)
+
+    release_map = pl.DataFrame({
+        "asset_isrc": pl.Series([], dtype=pl.Utf8),
+        "external_release_date": pl.Series([], dtype=pl.Utf8),
+        "external_label": pl.Series([], dtype=pl.Utf8),
+    })
+    if {"asset_isrc", "external_release_date"}.issubset(set(catalog.columns)):
+        label_expr = (
+            pl.col("external_label").first().alias("external_label")
+            if "external_label" in catalog.columns
+            else pl.lit(None).cast(pl.Utf8).alias("external_label")
+        )
+        release_map = (
+            catalog
+            .filter(pl.col("asset_isrc").is_not_null() & (pl.col("asset_isrc") != ""))
+            .group_by("asset_isrc")
+            .agg([
+                pl.col("external_release_date").drop_nulls().min().alias("external_release_date"),
+                label_expr,
+            ])
+        )
+
+    result: dict[tuple[str, str], dict] = {}
+    for cutoff in cutoff_entries:
+        source = str(cutoff.get("source") or "")
+        account = str(cutoff.get("account") or "")
+        if not source or not account:
+            continue
+        cutoff_month = cutoff.get("contract_start_month")
+        cutoff_date = cutoff.get("contract_start_date") or (f"{cutoff_month}-01" if cutoff_month else None)
+        cutoff_basis = str(cutoff.get("cutoff_basis") or "")
+
+        scoped = (
+            song
+            .filter((pl.col("source") == source) & (pl.col("account") == account))
+            .with_columns(
+                pl.when(pl.col("asset_isrc").is_not_null() & (pl.col("asset_isrc") != ""))
+                .then(pl.concat_str([pl.lit("ISRC:"), pl.col("asset_isrc")]))
+                .otherwise(pl.concat_str([
+                    pl.lit("TEXT:"),
+                    pl.col("artist_statement_style").fill_null(""),
+                    pl.lit("|"),
+                    pl.col("track_statement_style").fill_null(""),
+                ]))
+                .alias("_work_key")
+            )
+            .group_by(["_work_key", "asset_isrc", "track_statement_style", "artist_statement_style", "source_sheet"])
+            .agg([
+                pl.sum("amount_usd").round(2).alias("amount_usd"),
+                pl.len().alias("rows"),
+                pl.min("transaction_month").alias("first_transaction_month"),
+                pl.max("transaction_month").alias("last_transaction_month"),
+            ])
+            .join(release_map, on="asset_isrc", how="left")
+        )
+        if scoped.is_empty():
+            result[(source, account)] = {
+                "enabled": False,
+                "cutoff_id": cutoff.get("cutoff_id"),
+                "summary": [],
+                "items": [],
+            }
+            continue
+
+        rows = []
+        for row in scoped.to_dicts():
+            release_date = row.get("external_release_date")
+            external_label = row.get("external_label")
+            first_tx = row.get("first_transaction_month")
+            decision_basis = None
+            rule_status = "manual_review"
+            reason = "Sin fecha suficiente para decidir."
+
+            if cutoff_basis == "transaction_month":
+                decision_basis = first_tx
+                if first_tx and cutoff_month:
+                    if str(first_tx) >= str(cutoff_month):
+                        rule_status = "included"
+                        reason = "Primer transaction month desde el contrato."
+                    else:
+                        rule_status = "excluded"
+                        reason = "Primer transaction month anterior al contrato."
+            elif cutoff_basis == "release_date_preferred_transaction_month_fallback":
+                if release_date and cutoff_date:
+                    decision_basis = release_date
+                    if str(release_date) >= str(cutoff_date):
+                        rule_status = "included"
+                        reason = "Release date desde el contrato."
+                    else:
+                        rule_status = "excluded"
+                        reason = "Release date anterior al contrato."
+                elif first_tx and cutoff_month:
+                    decision_basis = first_tx
+                    if str(first_tx) >= str(cutoff_month):
+                        rule_status = "included"
+                        reason = "Sin release date; fallback por primer transaction month desde contrato."
+                    else:
+                        rule_status = "excluded"
+                        reason = "Sin release date; fallback por primer transaction month anterior al contrato."
+
+            catalog_payload = None
+            asset_id = row.get("asset_isrc")
+            if asset_id:
+                catalog_payload = (
+                    catalog_lookup.get(str(asset_id))
+                    or catalog_lookup.get(f"ISRC:{asset_id}")
+                    or catalog_lookup.get(f"VIDEO:{asset_id}")
+                )
+            if catalog_payload is None:
+                text_key = f"{norm_text(row.get('track_statement_style'))}|{norm_text(row.get('artist_statement_style'))}"
+                reverse_text_key = f"{norm_text(row.get('artist_statement_style'))}|{norm_text(row.get('track_statement_style'))}"
+                catalog_payload = catalog_lookup.get(f"TEXT:{text_key}") or catalog_lookup.get(f"TEXT:{reverse_text_key}")
+
+            catalog_active = catalog_payload.get("catalog_active") if catalog_payload else None
+            include_in_reports = catalog_payload.get("catalog_include_in_reports") if catalog_payload else None
+            if catalog_payload and not release_date:
+                release_date = catalog_payload.get("external_release_date")
+            if catalog_payload and not external_label:
+                external_label = catalog_payload.get("external_label")
+
+            final_status = "manual_review"
+            final_reason = reason
+            attention_level = "none"
+            if rule_status == "excluded":
+                final_status = "excluded_by_rule"
+                final_reason = reason
+            elif rule_status == "manual_review":
+                final_status = "manual_review"
+                attention_level = "warning"
+                final_reason = "La regla contractual no alcanza para decidir."
+            elif catalog_payload is None:
+                final_status = "manual_review"
+                attention_level = "warning"
+                final_reason = "Incluido por regla, pero sin match claro en catalogo."
+            elif include_in_reports is False or catalog_active is False:
+                final_status = "excluded_by_catalog"
+                attention_level = "warning"
+                final_reason = "Incluido por regla, pero el catalogo lo marca fuera de reportes."
+            else:
+                final_status = "reportable"
+                final_reason = "Incluido por regla y activo/reportable en catalogo."
+
+            rows.append({
+                "status": rule_status,
+                "rule_status": rule_status,
+                "final_status": final_status,
+                "decision_basis": decision_basis,
+                "reason": reason,
+                "final_reason": final_reason,
+                "attention_level": attention_level,
+                "catalog_key": catalog_payload.get("catalog_key") if catalog_payload else None,
+                "catalog_active": catalog_active,
+                "catalog_include_in_reports": include_in_reports,
+                "catalog_business_status": catalog_payload.get("catalog_business_status") if catalog_payload else None,
+                "catalog_status_notes": catalog_payload.get("catalog_status_notes") if catalog_payload else None,
+                "source_sheet": row.get("source_sheet") or "detalle",
+                "asset_isrc": row.get("asset_isrc"),
+                "track_title": row.get("track_statement_style"),
+                "artist": row.get("artist_statement_style"),
+                "amount_usd": float(row.get("amount_usd") or 0.0),
+                "rows": int(row.get("rows") or 0),
+                "first_transaction_month": row.get("first_transaction_month"),
+                "last_transaction_month": row.get("last_transaction_month"),
+                "external_release_date": release_date,
+                "external_label": external_label,
+            })
+
+        summary = []
+        for status in ["included", "excluded", "manual_review"]:
+            status_rows = [row for row in rows if row["rule_status"] == status]
+            summary.append({
+                "status": status,
+                "works": len(status_rows),
+                "amount_usd": round(sum(row["amount_usd"] for row in status_rows), 2),
+                "rows": sum(row["rows"] for row in status_rows),
+            })
+        final_summary = []
+        for status in ["reportable", "excluded_by_rule", "excluded_by_catalog", "manual_review"]:
+            status_rows = [row for row in rows if row["final_status"] == status]
+            final_summary.append({
+                "status": status,
+                "works": len(status_rows),
+                "amount_usd": round(sum(row["amount_usd"] for row in status_rows), 2),
+                "rows": sum(row["rows"] for row in status_rows),
+            })
+        alerts = [
+            row for row in rows
+            if row["final_status"] in {"excluded_by_catalog", "manual_review"}
+        ]
+
+        result[(source, account)] = {
+            "enabled": True,
+            "cutoff_id": cutoff.get("cutoff_id"),
+            "cutoff_basis": cutoff_basis,
+            "contract_start_date": cutoff.get("contract_start_date"),
+            "contract_start_month": cutoff_month,
+            "summary": summary,
+            "final_summary": final_summary,
+            "alerts": sorted(alerts, key=lambda item: abs(item["amount_usd"]), reverse=True)[:12],
+            "items": sorted(rows, key=lambda item: abs(item["amount_usd"]), reverse=True)[:25],
+        }
+    return result
 
 
 def report_signature_payload(
@@ -285,10 +1128,14 @@ def object_name(filename: str) -> str:
     return f"{GCS_PREFIX}/{filename}" if GCS_PREFIX else filename
 
 
+def catalog_status_object_name() -> str:
+    return VPO_CATALOG_STATUS_GCS_OBJECT or object_name("catalog_status.parquet")
+
+
 def ensure_marts(refresh_cache: bool = False, filenames: list[str] | None = None) -> dict[str, Path]:
     requested_files = filenames or REQUIRED_MART_FILES
 
-    if VPO_LOCAL_MARTS_DIR is not None and VPO_LOCAL_MARTS_DIR.exists() and not refresh_cache:
+    if VPO_LOCAL_MARTS_DIR is not None and VPO_LOCAL_MARTS_DIR.exists():
         paths = {filename: VPO_LOCAL_MARTS_DIR / filename for filename in requested_files}
         missing = [str(path) for path in paths.values() if not path.exists()]
         if missing:
@@ -323,6 +1170,99 @@ def ensure_marts(refresh_cache: bool = False, filenames: list[str] | None = None
     return paths
 
 
+def load_catalog_status() -> pl.DataFrame:
+    if not CATALOG_STATUS_PATH.exists() and GCS_BUCKET and VPO_CATALOG_STATUS_SYNC_GCS:
+        try:
+            client = gcs_client()
+            bucket = client.bucket(GCS_BUCKET)
+            blob = bucket.blob(catalog_status_object_name())
+            if blob.exists(client):
+                CATALOG_STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
+                blob.download_to_filename(str(CATALOG_STATUS_PATH))
+        except Exception:
+            # Catalog status is a governance layer. If remote sync is unavailable,
+            # the API can still operate with the local/default active status.
+            pass
+
+    if not CATALOG_STATUS_PATH.exists():
+        return pl.DataFrame({
+            "catalog_key": pl.Series([], dtype=pl.Utf8),
+            "active": pl.Series([], dtype=pl.Boolean),
+            "include_in_reports": pl.Series([], dtype=pl.Boolean),
+            "catalog_business_status": pl.Series([], dtype=pl.Utf8),
+            "status_notes": pl.Series([], dtype=pl.Utf8),
+            "label_normalized_override": pl.Series([], dtype=pl.Utf8),
+            "updated_at": pl.Series([], dtype=pl.Utf8),
+        })
+    status_df = pl.read_parquet(CATALOG_STATUS_PATH)
+    if "label_normalized_override" not in status_df.columns:
+        status_df = status_df.with_columns(pl.lit(None).cast(pl.Utf8).alias("label_normalized_override"))
+    return status_df
+
+
+def normalized_label_expr(expr: pl.Expr) -> pl.Expr:
+    cleaned = (
+        expr
+        .fill_null("")
+        .cast(pl.Utf8, strict=False)
+        .str.strip_chars()
+        .str.replace_all(r"(?i)^\s*(?:\([pc]\)|[℗©])\.?\s*", "")
+        .str.replace_all(r"(?i)^\s*[pc]\.?\s+((?:19|20)\d{2}\b)", "$1")
+        .str.replace_all(r"^\s*(?:19|20)\d{2}\s*", "")
+        .str.replace_all(r"(?i)^\s*(?:\([pc]\)|[℗©])\.?\s*", "")
+        .str.replace_all(r"(?i)^\s*[pc]\.?\s+((?:19|20)\d{2}\b)", "$1")
+        .str.replace_all(r"^\s*(?:19|20)\d{2}\s*", "")
+        .str.replace_all(r"\s+", " ")
+        .str.strip_chars(" -–—")
+    )
+    return pl.when(cleaned == "").then(pl.lit(None).cast(pl.Utf8)).otherwise(cleaned)
+
+
+def save_catalog_status(df: pl.DataFrame) -> None:
+    CATALOG_STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    df.write_parquet(CATALOG_STATUS_PATH)
+    if GCS_BUCKET and VPO_CATALOG_STATUS_SYNC_GCS:
+        client = gcs_client()
+        bucket = client.bucket(GCS_BUCKET)
+        blob = bucket.blob(catalog_status_object_name())
+        blob.upload_from_filename(str(CATALOG_STATUS_PATH))
+
+
+def configure_catalog_report_env(marts: dict[str, Path] | None = None) -> None:
+    if marts and CATALOG_MASTER_FILE in marts:
+        os.environ["VPO_CATALOG_MASTER_PATH"] = str(marts[CATALOG_MASTER_FILE])
+    os.environ["VPO_CATALOG_STATUS_PATH"] = str(CATALOG_STATUS_PATH)
+
+
+def ensure_booking_db_from_gcs(refresh: bool = False) -> None:
+    if not VPO_BOOKING_READONLY_GCS:
+        return
+
+    if not VPO_BOOKING_GCS_OBJECT:
+        raise HTTPException(status_code=500, detail="VPO_BOOKING_GCS_OBJECT is not configured.")
+
+    if not GCS_BUCKET:
+        raise HTTPException(status_code=500, detail="GCS_BUCKET is not configured.")
+
+    if VPO_BOOKING_DB_PATH.exists() and not refresh:
+        return
+
+    VPO_BOOKING_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    client = gcs_client()
+    bucket = client.bucket(GCS_BUCKET)
+    blob = bucket.blob(VPO_BOOKING_GCS_OBJECT)
+
+    if not blob.exists(client):
+        raise HTTPException(
+            status_code=500,
+            detail=f"GCS booking DB not found: gs://{GCS_BUCKET}/{VPO_BOOKING_GCS_OBJECT}",
+        )
+
+    tmp_path = VPO_BOOKING_DB_PATH.with_suffix(".download")
+    blob.download_to_filename(str(tmp_path))
+    tmp_path.replace(VPO_BOOKING_DB_PATH)
+
+
 def shift_month(month: str, delta: int) -> str:
     year, month_number = (int(part) for part in month.split("-", 1))
     month_index = year * 12 + month_number - 1 + delta
@@ -334,6 +1274,498 @@ def shift_month(month: str, delta: int) -> str:
 def previous_calendar_month(today: date | None = None) -> str:
     current = today or date.today()
     return shift_month(f"{current.year:04d}-{current.month:02d}", -1)
+
+
+def default_source_monitor_config() -> list[dict]:
+    return [
+        {
+            "id": "dashgo_mawzrecords",
+            "source": "dashgo",
+            "account": "mawzrecords",
+            "display_name": "DashGo / Mawz Records",
+            "input_path": "input_raw/dashgo",
+            "expected_frequency": "monthly",
+            "max_age_months": 2,
+            "monitoring_active": True,
+            "alert_silenced": False,
+            "portal_url": "",
+            "notes": "",
+        },
+        {
+            "id": "fuga_indyana_records",
+            "source": "fuga",
+            "account": "indyana_records",
+            "display_name": "FUGA / Indyana Records",
+            "input_path": "input_raw/fuga",
+            "expected_frequency": "monthly",
+            "max_age_months": 2,
+            "monitoring_active": True,
+            "alert_silenced": False,
+            "portal_url": "",
+            "notes": "",
+        },
+        {
+            "id": "onerpm_gusty_dj",
+            "source": "onerpm",
+            "account": "gusty_dj",
+            "display_name": "ONErpm / Gusty DJ",
+            "input_path": "input_raw/onerpm/gusty_dj",
+            "expected_frequency": "monthly",
+            "max_age_months": 2,
+            "monitoring_active": True,
+            "alert_silenced": False,
+            "portal_url": "",
+            "notes": "",
+        },
+        {
+            "id": "onerpm_henry_remix",
+            "source": "onerpm",
+            "account": "henry_remix",
+            "display_name": "ONErpm / Henry Remix",
+            "input_path": "input_raw/onerpm/henry_remix",
+            "expected_frequency": "monthly",
+            "max_age_months": 2,
+            "monitoring_active": True,
+            "alert_silenced": False,
+            "portal_url": "",
+            "notes": "",
+        },
+        {
+            "id": "onerpm_la_nueva_sangre",
+            "source": "onerpm",
+            "account": "la_nueva_sangre",
+            "display_name": "ONErpm / La Nueva Sangre",
+            "input_path": "input_raw/onerpm/la_nueva_sangre",
+            "expected_frequency": "monthly",
+            "max_age_months": 2,
+            "monitoring_active": True,
+            "alert_silenced": False,
+            "portal_url": "",
+            "notes": "Cuenta externa tipo Gusty: Masters y Youtube Channels para catalogo; Shares solo como flags.",
+        },
+        {
+            "id": "onerpm_mawzrecords",
+            "source": "onerpm",
+            "account": "mawzrecords",
+            "display_name": "ONErpm / Mawz Records",
+            "input_path": "input_raw/onerpm/mawzrecords",
+            "expected_frequency": "monthly",
+            "max_age_months": 2,
+            "monitoring_active": True,
+            "alert_silenced": False,
+            "portal_url": "",
+            "notes": "",
+        },
+        {
+            "id": "orchard_mawzrecords",
+            "source": "orchard",
+            "account": "mawzrecords",
+            "display_name": "Orchard / Mawz Records",
+            "input_path": "input_raw/orchard",
+            "expected_frequency": "monthly",
+            "max_age_months": 2,
+            "monitoring_active": True,
+            "alert_silenced": False,
+            "portal_url": "",
+            "notes": "",
+        },
+        {
+            "id": "soundon_soundon",
+            "source": "soundon",
+            "account": "soundon",
+            "display_name": "SoundOn",
+            "input_path": "input_raw/soundon",
+            "expected_frequency": "monthly",
+            "max_age_months": 2,
+            "monitoring_active": True,
+            "alert_silenced": False,
+            "portal_url": "",
+            "notes": "",
+        },
+        {
+            "id": "altafonte_legacy",
+            "source": "altafonte",
+            "account": "legacy",
+            "display_name": "Altafonte / Legacy",
+            "input_path": "input_raw/altafonte",
+            "expected_frequency": "legacy",
+            "max_age_months": 24,
+            "monitoring_active": False,
+            "alert_silenced": True,
+            "portal_url": "",
+            "notes": "Legacy historico. No alertar, pero conservar datos en reportes.",
+        },
+    ]
+
+
+def source_monitor_id(source: str, account: str) -> str:
+    safe_source = "".join(ch if ch.isalnum() else "_" for ch in source.lower()).strip("_")
+    safe_account = "".join(ch if ch.isalnum() else "_" for ch in account.lower()).strip("_")
+    return f"{safe_source}_{safe_account}"
+
+
+def load_source_monitor_config() -> list[dict]:
+    defaults = default_source_monitor_config()
+    if not SOURCE_MONITOR_CONFIG_PATH.exists():
+        return defaults
+
+    try:
+        overrides = json.loads(SOURCE_MONITOR_CONFIG_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return defaults
+
+    if not isinstance(overrides, list):
+        return defaults
+
+    by_id = {item["id"]: dict(item) for item in defaults}
+    for item in overrides:
+        if not isinstance(item, dict):
+            continue
+        item_id = str(item.get("id") or "").strip()
+        if not item_id:
+            continue
+        base = by_id.get(item_id, {"id": item_id})
+        base.update(item)
+        by_id[item_id] = base
+    return list(by_id.values())
+
+
+def save_source_monitor_config(items: list[dict]) -> None:
+    SOURCE_MONITOR_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SOURCE_MONITOR_CONFIG_PATH.write_text(
+        json.dumps(items, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def month_age(month: str | None, today: date | None = None) -> int | None:
+    if not month:
+        return None
+    try:
+        year, month_number = (int(part) for part in str(month)[:7].split("-", 1))
+    except ValueError:
+        return None
+    current = today or date.today()
+    return (current.year - year) * 12 + (current.month - month_number)
+
+
+def latest_raw_file_info(input_path: str) -> dict:
+    folder = (BASE / input_path).resolve()
+    try:
+        folder.relative_to(BASE.resolve())
+    except ValueError:
+        return {"raw_files": 0, "latest_raw_file": None, "latest_raw_modified": None, "raw_file_names": []}
+
+    if not folder.exists():
+        return {"raw_files": 0, "latest_raw_file": None, "latest_raw_modified": None, "raw_file_names": []}
+
+    files = sorted([path for path in folder.iterdir() if path.is_file()], key=lambda path: path.name.lower())
+    latest = max(files, key=lambda path: path.stat().st_mtime, default=None)
+    return {
+        "raw_files": len(files),
+        "latest_raw_file": latest.name if latest else None,
+        "latest_raw_modified": datetime.fromtimestamp(latest.stat().st_mtime).isoformat(timespec="seconds") if latest else None,
+        "raw_file_names": [path.name for path in files],
+    }
+
+
+def count_csv_rows(path: Path) -> int | None:
+    try:
+        return pl.read_csv(
+            path,
+            infer_schema_length=100,
+            ignore_errors=True,
+            encoding="utf8-lossy",
+        ).height
+    except Exception:
+        return None
+
+
+def count_excel_sheet_rows(path: Path, sheet_name: str) -> int | None:
+    try:
+        return pl.read_excel(path, sheet_name=sheet_name).height
+    except Exception:
+        return None
+
+
+def count_onerpm_monitor_rows(path: Path) -> dict:
+    account = path.parent.name.lower()
+    included_sheets = ["Masters", "Youtube Channels"]
+    if account == "mawzrecords":
+        included_sheets.append("Shares In & Out")
+
+    rows_by_sheet = {
+        sheet_name: count_excel_sheet_rows(path, sheet_name)
+        for sheet_name in included_sheets
+    }
+    total_rows = sum(row_count or 0 for row_count in rows_by_sheet.values())
+    return {
+        "rows": total_rows,
+        "rows_by_sheet": rows_by_sheet,
+    }
+
+
+def classify_raw_file(source: str, path: Path, mart_names: set[str]) -> dict:
+    name = path.name
+    lower_name = name.lower()
+
+    if name in mart_names:
+        return {"file_name": name, "status": "loaded_to_mart", "reason": "Cargado en mart nuevo."}
+
+    if source == "altafonte":
+        return {
+            "file_name": name,
+            "status": "legacy_manual",
+            "reason": "Legacy historico cargado dentro del mart Orchard/Altafonte.",
+        }
+
+    if source == "soundon":
+        if "_summary.csv" in lower_name:
+            return {
+                "file_name": name,
+                "status": "ignored_summary",
+                "reason": "Summary de SoundOn se omite para no duplicar My Royalty.",
+            }
+
+        if "_share in.csv" in lower_name or "_share out.csv" in lower_name:
+            row_count = count_csv_rows(path)
+            if row_count == 0:
+                return {
+                    "file_name": name,
+                    "status": "ignored_empty",
+                    "reason": "Share in/out de SoundOn sin filas.",
+                    "rows": row_count,
+                }
+            return {
+                "file_name": name,
+                "status": "pending_real",
+                "reason": "Share in/out con filas; debe entrar al ingest nuevo.",
+                "rows": row_count,
+            }
+
+    if source == "fuga" and path.suffix.lower() == ".csv":
+        row_count = count_csv_rows(path)
+        if row_count == 0:
+            return {
+                "file_name": name,
+                "status": "ignored_empty",
+                "reason": "Statement FUGA sin movimientos.",
+                "rows": row_count,
+            }
+
+    if source == "onerpm" and path.suffix.lower() in {".xlsx", ".xlsm"}:
+        monitor_rows = count_onerpm_monitor_rows(path)
+        if monitor_rows["rows"] == 0:
+            return {
+                "file_name": name,
+                "status": "ignored_no_included_rows",
+                "reason": "Statement ONErpm sin filas en hojas cargables para esta cuenta.",
+                **monitor_rows,
+            }
+        return {
+            "file_name": name,
+            "status": "pending_real",
+            "reason": "Tiene filas en hojas cargables y no aparece en el mart nuevo.",
+            **monitor_rows,
+        }
+
+    return {"file_name": name, "status": "pending_real", "reason": "No aparece en el mart nuevo."}
+
+
+def build_raw_inventory(source: str, input_path: str, mart_names: set[str]) -> dict:
+    folder = (BASE / input_path).resolve()
+    try:
+        folder.relative_to(BASE.resolve())
+    except ValueError:
+        return {"items": [], "summary": {}}
+
+    if not folder.exists():
+        return {"items": [], "summary": {}}
+
+    items = [
+        classify_raw_file(source, path, mart_names)
+        for path in sorted([item for item in folder.iterdir() if item.is_file()], key=lambda item: item.name.lower())
+    ]
+    summary: dict[str, int] = {}
+    for item in items:
+        status = str(item.get("status") or "unknown")
+        summary[status] = summary.get(status, 0) + 1
+    return {"items": items, "summary": summary}
+
+
+def source_monitor_mart_summary(standardized_path: Path) -> dict[tuple[str, str], dict]:
+    if not standardized_path.exists():
+        return {}
+
+    scan = pl.scan_parquet(standardized_path)
+    schema = scan.collect_schema()
+    required_columns = {"source", "account", "statement_period"}
+    if not required_columns.issubset(set(schema.names())):
+        return {}
+
+    has_statement_file = "statement_file_name" in schema.names()
+    selected_columns = ["source", "account", "statement_period"]
+    if has_statement_file:
+        selected_columns.append("statement_file_name")
+
+    aggregations = [
+        pl.max("statement_period").alias("last_statement_period"),
+        pl.len().alias("rows_in_mart"),
+    ]
+    if has_statement_file:
+        aggregations.extend([
+            pl.n_unique("statement_file_name").alias("statement_files_in_mart"),
+            pl.col("statement_file_name").unique().alias("mart_file_names"),
+        ])
+
+    frame = (
+        scan
+        .select(selected_columns)
+        .filter(pl.col("source").is_not_null() & pl.col("account").is_not_null())
+        .group_by(["source", "account"])
+        .agg(aggregations)
+        .collect()
+    )
+
+    return {
+        (row["source"], row["account"]): {
+            **dict(row),
+            "statement_files_in_mart": int(row.get("statement_files_in_mart") or 0),
+            "mart_file_names": row.get("mart_file_names") or [],
+        }
+        for row in frame.to_dicts()
+    }
+
+
+def latest_period(*periods: str | None) -> str | None:
+    valid = [period for period in periods if period]
+    if not valid:
+        return None
+    return sorted(valid)[-1]
+
+
+def publish_required_marts_to_gcs() -> dict:
+    if not GCS_BUCKET:
+        raise HTTPException(status_code=500, detail="GCS_BUCKET no esta configurado.")
+
+    client = gcs_client()
+    bucket = client.bucket(GCS_BUCKET)
+    prefix = GCS_PREFIX.strip("/")
+    uploaded = []
+
+    for filename in REQUIRED_MART_FILES:
+        local_path = BASE / "warehouse" / "marts" / filename
+        if not local_path.exists():
+            raise HTTPException(status_code=500, detail=f"No existe mart requerido: {local_path}")
+
+        object_name = f"{prefix}/{filename}" if prefix else filename
+        blob = bucket.blob(object_name)
+        blob.upload_from_filename(str(local_path))
+        uploaded.append({
+            "file_name": filename,
+            "object_name": object_name,
+            "size_bytes": local_path.stat().st_size,
+            "size_mb": round(local_path.stat().st_size / 1024 / 1024, 2),
+        })
+
+    return {
+        "ok": True,
+        "published_at": datetime.now().isoformat(timespec="seconds"),
+        "bucket": GCS_BUCKET,
+        "prefix": prefix,
+        "uploaded": uploaded,
+    }
+
+
+def source_monitor_pipeline_scripts(source: str) -> list[str]:
+    source_scripts = {
+        "dashgo": ["ingest_standardized_dashgo.py", "build_song_level_dashgo.py"],
+        "fuga": ["ingest_standardized_fuga.py", "build_song_level_fuga.py"],
+        "onerpm": ["ingest_standardized_onerpm.py", "build_song_level_onerpm.py"],
+        "orchard": ["ingest_standardized_orchard.py", "build_song_level_orchard.py"],
+        "soundon": ["ingest_standardized_soundon.py", "build_song_level_soundon.py"],
+    }
+    scripts = source_scripts.get(source, [])
+    if not scripts:
+        return []
+    return [
+        *scripts,
+        "build_consolidated_marts.py",
+        "build_statement_summary_mart.py",
+    ]
+
+
+def run_pipeline_script(script_name: str) -> dict:
+    script_path = SCRIPTS / script_name
+    if not script_path.exists():
+        raise HTTPException(status_code=500, detail=f"No existe script: {script_name}")
+
+    result = subprocess.run(
+        [sys.executable, str(script_path)],
+        cwd=str(SCRIPTS),
+        text=True,
+        capture_output=True,
+    )
+    output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+    lines = output.splitlines()
+    return {
+        "script": script_name,
+        "returncode": result.returncode,
+        "tail": lines[-40:],
+    }
+
+
+def statement_summary_for_files(standardized_path: Path, source: str, account: str, file_names: list[str]) -> list[dict]:
+    if not file_names or not standardized_path.exists():
+        return []
+
+    frame = (
+        pl.scan_parquet(standardized_path)
+        .filter(
+            (pl.col("source") == source)
+            & (pl.col("account") == account)
+            & pl.col("statement_file_name").is_in(file_names)
+        )
+        .group_by("statement_period")
+        .agg([
+            pl.len().alias("rows"),
+            pl.sum("amount_usd").alias("amount_usd"),
+            pl.n_unique("statement_file_name").alias("files"),
+        ])
+        .sort("statement_period")
+        .collect()
+    )
+
+    return frame.to_dicts()
+
+
+def get_source_monitor_item(monitor_id: str) -> dict | None:
+    marts = ensure_marts(refresh_cache=False, filenames=[STANDARDIZED_FILE])
+    mart_summary = source_monitor_mart_summary(marts[STANDARDIZED_FILE])
+    for config in load_source_monitor_config():
+        item_id = config.get("id") or source_monitor_id(str(config.get("source") or ""), str(config.get("account") or ""))
+        if item_id != monitor_id:
+            continue
+        source = str(config.get("source") or "")
+        account = str(config.get("account") or "")
+        raw_info = latest_raw_file_info(str(config.get("input_path") or ""))
+        mart_info = mart_summary.get((source, account), {})
+        mart_names = set(mart_info.get("mart_file_names") or [])
+        raw_inventory = build_raw_inventory(source, str(config.get("input_path") or ""), mart_names)
+        pending_real_files = [
+            str(item.get("file_name"))
+            for item in raw_inventory["items"]
+            if item.get("status") == "pending_real"
+        ]
+        return {
+            "id": item_id,
+            "source": source,
+            "account": account,
+            "display_name": config.get("display_name") or f"{source} / {account}",
+            "last_statement_period": mart_info.get("last_statement_period"),
+            "unprocessed_raw_files": pending_real_files,
+        }
+    return None
 
 
 def first_business_day(month: str) -> str:
@@ -352,7 +1784,10 @@ def last_business_day(month: str) -> str:
     return current.isoformat()
 
 
-def booking_connect() -> sqlite3.Connection:
+def booking_connect():
+    if operational_db_settings().driver == "postgres":
+        return operational_sqlite_compatible_connect()
+    ensure_booking_db_from_gcs(refresh=VPO_BOOKING_REFRESH_ON_REQUEST)
     VPO_BOOKING_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(VPO_BOOKING_DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -361,7 +1796,123 @@ def booking_connect() -> sqlite3.Connection:
 
 
 def init_booking_db() -> None:
+    if operational_db_settings().driver == "postgres":
+        return
     with booking_connect() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS booking_artists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stage_name TEXT NOT NULL UNIQUE,
+                legal_name TEXT,
+                cuit TEXT,
+                phone TEXT,
+                email TEXT,
+                address TEXT,
+                notes TEXT,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS employees (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                display_name TEXT NOT NULL UNIQUE,
+                legal_name TEXT,
+                cuit TEXT,
+                phone TEXT,
+                email TEXT,
+                address TEXT,
+                notes TEXT,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS employee_functions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+                function_code TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(employee_id, function_code)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT,
+                must_change_password INTEGER NOT NULL DEFAULT 0,
+                last_login_at TEXT,
+                global_role TEXT NOT NULL DEFAULT 'viewer',
+                active INTEGER NOT NULL DEFAULT 1,
+                auth_source TEXT NOT NULL DEFAULT 'operational',
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        ensure_sqlite_column(conn, "app_users", "password_hash", "TEXT")
+        ensure_sqlite_column(conn, "app_users", "must_change_password", "INTEGER NOT NULL DEFAULT 0")
+        ensure_sqlite_column(conn, "app_users", "last_login_at", "TEXT")
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_modules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                module_key TEXT NOT NULL UNIQUE,
+                label TEXT NOT NULL,
+                active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS module_permissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+                module_key TEXT NOT NULL,
+                can_access INTEGER NOT NULL DEFAULT 0,
+                can_create INTEGER NOT NULL DEFAULT 0,
+                can_view_history INTEGER NOT NULL DEFAULT 0,
+                can_edit INTEGER NOT NULL DEFAULT 0,
+                can_approve INTEGER NOT NULL DEFAULT 0,
+                scope_json TEXT NOT NULL DEFAULT '[]',
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(employee_id, module_key)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_audit_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                occurred_at TEXT NOT NULL,
+                actor_username TEXT,
+                employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
+                module_key TEXT,
+                action TEXT NOT NULL,
+                entity_table TEXT,
+                entity_id TEXT,
+                before_json TEXT,
+                after_json TEXT,
+                source TEXT NOT NULL DEFAULT 'web',
+                notes TEXT
+            )
+            """
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS booking_shows (
@@ -375,6 +1926,12 @@ def init_booking_db() -> None:
                 status TEXT NOT NULL,
                 currency TEXT NOT NULL,
                 fx_rate REAL,
+                contracted_cachet_amount REAL NOT NULL DEFAULT 0,
+                venue_collected_amount REAL NOT NULL DEFAULT 0,
+                venue_balance_amount REAL NOT NULL DEFAULT 0,
+                venue_payment_status TEXT NOT NULL DEFAULT 'cobrado',
+                venue_shortfall_policy TEXT NOT NULL DEFAULT 'deuda_boliche',
+                venue_payment_notes TEXT,
                 cachet_amount REAL NOT NULL DEFAULT 0,
                 expenses_amount REAL NOT NULL DEFAULT 0,
                 net_amount REAL NOT NULL DEFAULT 0,
@@ -391,9 +1948,112 @@ def init_booking_db() -> None:
                 balance_artist_amount REAL NOT NULL DEFAULT 0,
                 balance_producer_amount REAL NOT NULL DEFAULT 0,
                 receipt_refs_json TEXT NOT NULL DEFAULT '[]',
+                settlement_status TEXT NOT NULL DEFAULT 'pendiente',
+                settlement_group TEXT,
+                settlement_closed_at TEXT,
+                settlement_notes TEXT,
+                origin_type TEXT,
+                origin_id INTEGER,
                 notes TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS caserio_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_date TEXT NOT NULL,
+                venue TEXT NOT NULL,
+                city TEXT,
+                responsible TEXT,
+                status TEXT NOT NULL,
+                currency TEXT NOT NULL,
+                fx_rate REAL,
+                gross_amount REAL NOT NULL DEFAULT 0,
+                caserio_expected_amount REAL NOT NULL DEFAULT 0,
+                producer_expected_amount REAL NOT NULL DEFAULT 0,
+                total_expected_amount REAL NOT NULL DEFAULT 0,
+                received_amount REAL NOT NULL DEFAULT 0,
+                balance_amount REAL NOT NULL DEFAULT 0,
+                receipt_refs_json TEXT NOT NULL DEFAULT '[]',
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS caserio_event_lines (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id INTEGER NOT NULL REFERENCES caserio_events(id) ON DELETE CASCADE,
+                line_type TEXT NOT NULL,
+                description TEXT NOT NULL,
+                artist TEXT,
+                amount REAL NOT NULL DEFAULT 0,
+                booking_show_id INTEGER REFERENCES booking_shows(id) ON DELETE SET NULL,
+                notes TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS booking_composite_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_date TEXT NOT NULL,
+                venue TEXT NOT NULL,
+                city TEXT,
+                responsible TEXT,
+                status TEXT NOT NULL,
+                currency TEXT NOT NULL,
+                fx_rate REAL,
+                gross_amount REAL NOT NULL DEFAULT 0,
+                general_expenses_amount REAL NOT NULL DEFAULT 0,
+                allocated_amount REAL NOT NULL DEFAULT 0,
+                producer_expected_amount REAL NOT NULL DEFAULT 0,
+                received_amount REAL NOT NULL DEFAULT 0,
+                balance_amount REAL NOT NULL DEFAULT 0,
+                receipt_refs_json TEXT NOT NULL DEFAULT '[]',
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS booking_composite_event_expenses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id INTEGER NOT NULL REFERENCES booking_composite_events(id) ON DELETE CASCADE,
+                concept TEXT NOT NULL,
+                category TEXT NOT NULL,
+                amount REAL NOT NULL DEFAULT 0,
+                notes TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS booking_composite_event_lines (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id INTEGER NOT NULL REFERENCES booking_composite_events(id) ON DELETE CASCADE,
+                line_type TEXT NOT NULL,
+                description TEXT NOT NULL,
+                artist TEXT,
+                amount REAL NOT NULL DEFAULT 0,
+                artist_percent REAL NOT NULL DEFAULT 0,
+                producer_percent REAL NOT NULL DEFAULT 0,
+                artist_paid_amount REAL NOT NULL DEFAULT 0,
+                producer_received_amount REAL NOT NULL DEFAULT 0,
+                booking_commission_exempt INTEGER NOT NULL DEFAULT 1,
+                booking_commission_notes TEXT,
+                booking_show_id INTEGER REFERENCES booking_shows(id) ON DELETE SET NULL,
+                notes TEXT,
+                created_at TEXT NOT NULL
             )
             """
         )
@@ -437,6 +2097,40 @@ def init_booking_db() -> None:
                 amount REAL NOT NULL DEFAULT 0,
                 currency TEXT NOT NULL,
                 fx_rate REAL,
+                recovery_auto_apply INTEGER NOT NULL DEFAULT 0,
+                notes TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS booking_direct_commissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                show_id INTEGER NOT NULL REFERENCES booking_shows(id) ON DELETE CASCADE,
+                concept TEXT NOT NULL,
+                recipient TEXT,
+                destination TEXT NOT NULL,
+                amount REAL NOT NULL DEFAULT 0,
+                currency TEXT NOT NULL,
+                fx_rate REAL,
+                notes TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS booking_external_shares (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                show_id INTEGER NOT NULL REFERENCES booking_shows(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                role TEXT NOT NULL,
+                percent REAL,
+                amount REAL NOT NULL DEFAULT 0,
+                currency TEXT NOT NULL,
+                fx_rate REAL,
+                cash_handled_by_vpo INTEGER NOT NULL DEFAULT 0,
                 notes TEXT,
                 created_at TEXT NOT NULL
             )
@@ -465,11 +2159,176 @@ def init_booking_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS booking_artist_ledger (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                artist TEXT NOT NULL,
+                movement_date TEXT NOT NULL,
+                movement_type TEXT NOT NULL,
+                concept TEXT NOT NULL,
+                category TEXT NOT NULL,
+                project TEXT,
+                amount REAL NOT NULL DEFAULT 0,
+                original_amount REAL,
+                recoverable INTEGER NOT NULL DEFAULT 1,
+                artist_percent REAL NOT NULL DEFAULT 0,
+                producer_percent REAL NOT NULL DEFAULT 0,
+                show_id INTEGER REFERENCES booking_shows(id) ON DELETE SET NULL,
+                notes TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS finance_projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                artist TEXT,
+                business_area TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'activo',
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(name, artist, business_area)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS finance_staging_movements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                movement_date TEXT NOT NULL,
+                artist TEXT NOT NULL,
+                business_area TEXT NOT NULL,
+                movement_type TEXT NOT NULL,
+                category TEXT NOT NULL,
+                project_id INTEGER REFERENCES finance_projects(id) ON DELETE SET NULL,
+                project_name TEXT,
+                concept TEXT NOT NULL,
+                counterparty TEXT,
+                paid_by TEXT NOT NULL,
+                amount REAL NOT NULL DEFAULT 0,
+                currency TEXT NOT NULL DEFAULT 'ARS',
+                fx_rate REAL,
+                amount_ars REAL NOT NULL DEFAULT 0,
+                paid_amount REAL NOT NULL DEFAULT 0,
+                paid_amount_ars REAL NOT NULL DEFAULT 0,
+                pending_amount_ars REAL NOT NULL DEFAULT 0,
+                payment_status TEXT NOT NULL DEFAULT 'pagado',
+                due_date TEXT,
+                recoverable INTEGER NOT NULL DEFAULT 0,
+                recoverable_percent REAL NOT NULL DEFAULT 0,
+                recovery_method TEXT NOT NULL DEFAULT 'none',
+                artist_percent REAL NOT NULL DEFAULT 0,
+                producer_percent REAL NOT NULL DEFAULT 100,
+                account_effect TEXT NOT NULL DEFAULT 'inversion_indyana',
+                status TEXT NOT NULL DEFAULT 'pendiente_control',
+                source_type TEXT NOT NULL DEFAULT 'manual',
+                source_id TEXT,
+                proof_refs_json TEXT NOT NULL DEFAULT '[]',
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS finance_recovery_applications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                artist TEXT NOT NULL,
+                application_date TEXT NOT NULL,
+                finance_movement_id INTEGER NOT NULL REFERENCES finance_staging_movements(id) ON DELETE CASCADE,
+                project_name TEXT,
+                source_type TEXT NOT NULL DEFAULT 'booking',
+                source_id TEXT,
+                source_label TEXT,
+                amount_ars REAL NOT NULL DEFAULT 0,
+                recovery_method TEXT NOT NULL DEFAULT 'manual',
+                notes TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        ensure_sqlite_column(conn, "finance_staging_movements", "paid_amount", "REAL NOT NULL DEFAULT 0")
+        ensure_sqlite_column(conn, "finance_staging_movements", "paid_amount_ars", "REAL NOT NULL DEFAULT 0")
+        ensure_sqlite_column(conn, "finance_staging_movements", "pending_amount_ars", "REAL NOT NULL DEFAULT 0")
+        ensure_sqlite_column(conn, "finance_staging_movements", "payment_status", "TEXT NOT NULL DEFAULT 'pagado'")
+        ensure_sqlite_column(conn, "finance_staging_movements", "due_date", "TEXT")
+        ensure_sqlite_column(conn, "finance_staging_movements", "recovery_method", "TEXT NOT NULL DEFAULT 'none'")
+        ensure_sqlite_column(conn, "booking_pre_split_adjustments", "recovery_auto_apply", "INTEGER NOT NULL DEFAULT 0")
+        conn.execute(
+            """
+            UPDATE finance_staging_movements
+            SET paid_amount = amount,
+                paid_amount_ars = amount_ars,
+                pending_amount_ars = 0,
+                payment_status = 'pagado'
+            WHERE paid_amount = 0
+              AND amount > 0
+              AND amount_ars > 0
+              AND payment_status = 'pagado'
+            """
+        )
         ensure_sqlite_column(conn, "booking_shows", "pre_split_adjustments_amount", "REAL NOT NULL DEFAULT 0")
         ensure_sqlite_column(conn, "booking_shows", "split_base_amount", "REAL NOT NULL DEFAULT 0")
         ensure_sqlite_column(conn, "booking_shows", "artist_cash_target_amount", "REAL NOT NULL DEFAULT 0")
         ensure_sqlite_column(conn, "booking_shows", "producer_cash_target_amount", "REAL NOT NULL DEFAULT 0")
+        ensure_sqlite_column(conn, "booking_shows", "contracted_cachet_amount", "REAL NOT NULL DEFAULT 0")
+        ensure_sqlite_column(conn, "booking_shows", "venue_collected_amount", "REAL NOT NULL DEFAULT 0")
+        ensure_sqlite_column(conn, "booking_shows", "venue_balance_amount", "REAL NOT NULL DEFAULT 0")
+        ensure_sqlite_column(conn, "booking_shows", "venue_payment_status", "TEXT NOT NULL DEFAULT 'cobrado'")
+        ensure_sqlite_column(conn, "booking_shows", "venue_shortfall_policy", "TEXT NOT NULL DEFAULT 'deuda_boliche'")
+        ensure_sqlite_column(conn, "booking_shows", "venue_payment_notes", "TEXT")
+        ensure_sqlite_column(conn, "booking_shows", "booking_commission_exempt", "INTEGER NOT NULL DEFAULT 0")
+        ensure_sqlite_column(conn, "booking_shows", "booking_commission_notes", "TEXT")
+        ensure_sqlite_column(conn, "booking_shows", "settlement_status", "TEXT NOT NULL DEFAULT 'pendiente'")
+        ensure_sqlite_column(conn, "booking_shows", "settlement_group", "TEXT")
+        ensure_sqlite_column(conn, "booking_shows", "settlement_closed_at", "TEXT")
+        ensure_sqlite_column(conn, "booking_shows", "settlement_notes", "TEXT")
+        ensure_sqlite_column(conn, "booking_shows", "origin_type", "TEXT")
+        ensure_sqlite_column(conn, "booking_shows", "origin_id", "INTEGER")
         ensure_sqlite_column(conn, "booking_artist_adjustments", "applied_amount", "REAL NOT NULL DEFAULT 0")
+        ensure_sqlite_column(conn, "booking_artists", "active", "INTEGER NOT NULL DEFAULT 1")
+        seed_app_modules(conn)
+        seed_initial_employees(conn)
+        conn.execute(
+            """
+            UPDATE booking_shows
+            SET contracted_cachet_amount = cachet_amount
+            WHERE contracted_cachet_amount = 0
+              AND cachet_amount > 0
+            """
+        )
+        conn.execute(
+            """
+            UPDATE booking_shows
+            SET venue_collected_amount = cachet_amount
+            WHERE venue_collected_amount = 0
+              AND cachet_amount > 0
+            """
+        )
+        conn.execute(
+            """
+            UPDATE booking_shows
+            SET venue_payment_status = 'no_cobrado'
+            WHERE cachet_amount = 0
+              AND COALESCE(venue_payment_status, 'cobrado') = 'cobrado'
+              AND status = 'no_cobrado'
+            """
+        )
+        conn.execute(
+            """
+            UPDATE booking_shows
+            SET venue_shortfall_policy = 'ajustar_cachet'
+            WHERE venue_balance_amount > 0.01
+              AND ABS(COALESCE(cachet_amount, 0) - COALESCE(venue_collected_amount, 0)) <= 0.01
+              AND COALESCE(venue_shortfall_policy, 'deuda_boliche') = 'deuda_boliche'
+            """
+        )
+        seed_booking_artist_registry(conn)
 
 
 def ensure_sqlite_column(conn: sqlite3.Connection, table_name: str, column_name: str, definition: str) -> None:
@@ -479,6 +2338,665 @@ def ensure_sqlite_column(conn: sqlite3.Connection, table_name: str, column_name:
     }
     if column_name not in columns:
         conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+
+DEFAULT_WEB_PASSWORD = "Indyana2026!"
+
+
+def base64url_no_padding(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def base64url_decode(value: str) -> bytes:
+    padding = "=" * (-len(value) % 4)
+    return base64.urlsafe_b64decode((value + padding).encode("ascii"))
+
+
+def hash_web_password(password: str) -> str:
+    salt = base64url_no_padding(secrets.token_bytes(16))
+    digest = hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=salt.encode("utf-8"),
+        n=16384,
+        r=8,
+        p=1,
+        dklen=32,
+    )
+    return f"scrypt${salt}${base64url_no_padding(digest)}"
+
+
+def verify_web_password(password: str, password_hash: str | None) -> bool:
+    if not password_hash:
+        return False
+    parts = password_hash.split("$")
+    if len(parts) != 3 or parts[0] != "scrypt":
+        return False
+    _scheme, salt, expected = parts
+    try:
+        actual = hashlib.scrypt(
+            password.encode("utf-8"),
+            salt=salt.encode("utf-8"),
+            n=16384,
+            r=8,
+            p=1,
+            dklen=32,
+        )
+        expected_bytes = base64url_decode(expected)
+    except Exception:
+        return False
+    return hmac.compare_digest(actual, expected_bytes)
+
+
+def generated_employee_username(display_name: str) -> str | None:
+    cleaned = " ".join((display_name or "").strip().split())
+    if not cleaned:
+        return None
+    parts = cleaned.split()
+    if len(parts) == 1:
+        base = parts[0]
+    else:
+        base = f"{parts[0]}{parts[-1][0]}"
+    return "".join(ch for ch in base.lower() if ch.isalnum())
+
+
+EMPLOYEE_FUNCTION_OPTIONS = [
+    "Tour Manager",
+    "Project Manager",
+    "Label",
+    "Digitales",
+    "Administracion",
+    "Presidente",
+    "Vice Presidente",
+    "Management",
+    "Booking",
+    "Otro",
+]
+
+
+APP_MODULES = [
+    ("home", "Inicio"),
+    ("statement_reports", "Reporte por statement"),
+    ("royalty_reports", "Reporte de regalias"),
+    ("custom_reports", "Reportes Personalizados"),
+    ("participation", "Participacion en distribuidoras"),
+    ("booking", "Booking Indyana"),
+    ("booking_lab", "Carga de Shows laboratorio"),
+    ("booking_detail", "Detalle Booking"),
+    ("booking_summary", "Resumen Booking"),
+    ("booking_commissions", "Resumen Booking Comisiones"),
+    ("composite_booking", "Liquidaciones compuestas"),
+    ("caserio", "El Caserio"),
+    ("finance_movements", "Movimientos financieros"),
+    ("artist_finance", "Finanzas Artista"),
+    ("artists", "ABM Artistas"),
+    ("employees", "ABM Empleados"),
+    ("catalog", "Catalogo General"),
+    ("digital_income", "Ingresos Digitales"),
+    ("distributor_config", "Configuracion Distribuidoras"),
+    ("source_monitor", "Control Distribuidoras"),
+]
+
+
+INITIAL_EMPLOYEES = [
+    ("Ruben Elkowich", ["Administracion"]),
+    ("Juan Manuel Fornasari", ["Presidente"]),
+    ("Carolina Vanesa Alvarez", ["Vice Presidente"]),
+    ("Salome Fornasari", ["Tour Manager", "Project Manager"]),
+    ("Santiago Damonte", ["Tour Manager", "Project Manager"]),
+    ("Santiago Mareco", ["Tour Manager", "Project Manager"]),
+    ("Lautaro Alarcon", ["Tour Manager", "Project Manager"]),
+    ("David Carbone", ["Tour Manager", "Project Manager"]),
+    ("Walter Robales", ["Tour Manager"]),
+]
+
+
+def normalize_employee_function(value: str) -> str | None:
+    cleaned = clean_optional_text(value)
+    if not cleaned:
+        return None
+
+    lookup = {option.casefold(): option for option in EMPLOYEE_FUNCTION_OPTIONS}
+    return lookup.get(cleaned.casefold(), cleaned)
+
+
+def clean_employee_functions(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        normalized = normalize_employee_function(value)
+        if not normalized:
+            continue
+        key = normalized.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(normalized)
+    return result
+
+
+def seed_app_modules(conn: sqlite3.Connection) -> None:
+    now = datetime.now().isoformat(timespec="seconds")
+    for module_key, label in APP_MODULES:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO app_modules (module_key, label, active, created_at)
+            VALUES (?, ?, 1, ?)
+            """,
+            (module_key, label, now),
+        )
+
+
+def upsert_employee_functions(conn: sqlite3.Connection, employee_id: int, functions: list[str]) -> None:
+    now = datetime.now().isoformat(timespec="seconds")
+    cleaned_functions = clean_employee_functions(functions)
+    conn.execute("DELETE FROM employee_functions WHERE employee_id = ?", (employee_id,))
+    for function_code in cleaned_functions:
+        if is_postgres_connection(conn):
+            conn.execute(
+                """
+                INSERT INTO employee_functions (employee_id, function_code, created_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(employee_id, function_code) DO NOTHING
+                """,
+                (employee_id, function_code, now),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO employee_functions (employee_id, function_code, created_at)
+                VALUES (?, ?, ?)
+                """,
+                (employee_id, function_code, now),
+            )
+
+
+def clean_username(value: str | None) -> str | None:
+    cleaned = clean_optional_text(value)
+    if not cleaned:
+        return None
+    return cleaned.strip().lower()
+
+
+def upsert_employee_user(
+    conn: sqlite3.Connection,
+    employee_id: int,
+    username: str | None,
+    role: str = "viewer",
+    active: bool = True,
+    auth_source: str = "operational",
+    password: str | None = None,
+    must_change_password: bool | None = None,
+) -> None:
+    clean_user = clean_username(username)
+    if not clean_user:
+        return
+
+    if role not in {"viewer", "editor", "admin"}:
+        role = "viewer"
+
+    now = datetime.now().isoformat(timespec="seconds")
+    existing = conn.execute(
+        "SELECT id, password_hash FROM app_users WHERE lower(username) = lower(?)",
+        (clean_user,),
+    ).fetchone()
+    password_hash = hash_web_password(password) if password else None
+    if existing is None:
+        conn.execute(
+            """
+            INSERT INTO app_users (
+                employee_id, username, password_hash, must_change_password, global_role, active,
+                auth_source, notes, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                employee_id,
+                clean_user,
+                password_hash,
+                1 if must_change_password else 0,
+                role,
+                1 if active else 0,
+                auth_source,
+                "Usuario operativo cloud/local.",
+                now,
+                now,
+            ),
+        )
+    else:
+        update_password_sql = ""
+        params: list[object] = [
+            employee_id,
+            role,
+            1 if active else 0,
+            auth_source,
+        ]
+        if password_hash:
+            update_password_sql = """
+                password_hash = ?,
+                must_change_password = ?,
+            """
+            params.extend([password_hash, 1 if must_change_password else 0])
+        conn.execute(
+            f"""
+            UPDATE app_users
+            SET employee_id = ?,
+                global_role = ?,
+                active = ?,
+                auth_source = ?,
+                {update_password_sql}
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (*params, now, existing["id"]),
+        )
+
+
+def upsert_employee_permissions(
+    conn: sqlite3.Connection,
+    employee_id: int,
+    permissions: list[EmployeePermissionRequest],
+) -> None:
+    now = datetime.now().isoformat(timespec="seconds")
+    valid_modules = {module_key for module_key, _label in APP_MODULES}
+    for permission in permissions:
+        if permission.module_key not in valid_modules:
+            continue
+        if is_postgres_connection(conn):
+            from psycopg.types.json import Jsonb
+
+            scope_payload = Jsonb(permission.scope)
+        else:
+            scope_payload = json.dumps(permission.scope, ensure_ascii=False)
+        conn.execute(
+            """
+            INSERT INTO module_permissions (
+                employee_id, module_key, can_access, can_create, can_view_history,
+                can_edit, can_approve, scope_json, notes, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(employee_id, module_key) DO UPDATE SET
+                can_access = excluded.can_access,
+                can_create = excluded.can_create,
+                can_view_history = excluded.can_view_history,
+                can_edit = excluded.can_edit,
+                can_approve = excluded.can_approve,
+                scope_json = excluded.scope_json,
+                notes = excluded.notes,
+                updated_at = excluded.updated_at
+            """,
+            (
+                employee_id,
+                permission.module_key,
+                1 if permission.can_access else 0,
+                1 if permission.can_create else 0,
+                1 if permission.can_view_history else 0,
+                1 if permission.can_edit else 0,
+                1 if permission.can_approve else 0,
+                scope_payload,
+                clean_optional_text(permission.notes),
+                now,
+                now,
+            ),
+        )
+
+
+def parse_permission_scope(scope_json) -> list[dict[str, str]]:
+    if isinstance(scope_json, list):
+        raw_scope = scope_json
+    elif isinstance(scope_json, dict):
+        raw_scope = [scope_json]
+    else:
+        try:
+            raw_scope = json.loads(scope_json or "[]")
+        except (TypeError, json.JSONDecodeError):
+            return []
+    if not isinstance(raw_scope, list):
+        return []
+    scope: list[dict[str, str]] = []
+    for item in raw_scope:
+        if not isinstance(item, dict):
+            continue
+        scope_type = clean_optional_text(item.get("scope_type") or item.get("type"))
+        scope_ref = clean_optional_text(item.get("scope_ref") or item.get("ref") or item.get("value"))
+        if scope_type and scope_ref:
+            scope.append({"scope_type": scope_type, "scope_ref": scope_ref})
+    return scope
+
+
+def user_module_permission(
+    conn: sqlite3.Connection,
+    username: str | None,
+    module_key: str,
+) -> dict:
+    username = clean_username(username or "")
+    if not username:
+        return {
+            "allowed": True,
+            "is_admin": True,
+            "can_access": True,
+            "can_create": True,
+            "can_view_history": True,
+            "can_edit": True,
+            "can_approve": True,
+            "scope": None,
+        }
+
+    user = conn.execute(
+        """
+        SELECT u.*, e.id AS employee_ref
+        FROM app_users u
+        LEFT JOIN employees e ON e.id = u.employee_id
+        WHERE lower(u.username) = lower(?)
+          AND u.active = 1
+        """,
+        (username,),
+    ).fetchone()
+    if user is None:
+        return {"allowed": False, "is_admin": False, "scope": set()}
+
+    if str(user["global_role"] or "").lower() == "admin":
+        return {
+            "allowed": True,
+            "is_admin": True,
+            "can_access": True,
+            "can_create": True,
+            "can_view_history": True,
+            "can_edit": True,
+            "can_approve": True,
+            "scope": None,
+        }
+
+    employee_id = user["employee_ref"]
+    if employee_id is None:
+        return {"allowed": False, "is_admin": False, "scope": set()}
+
+    permission = conn.execute(
+        """
+        SELECT can_access, can_create, can_view_history, can_edit, can_approve, scope_json
+        FROM module_permissions
+        WHERE employee_id = ?
+          AND module_key = ?
+        """,
+        (employee_id, module_key),
+    ).fetchone()
+    if permission is None or not bool(permission["can_access"]):
+        return {"allowed": False, "is_admin": False, "scope": set()}
+
+    scope_items = parse_permission_scope(permission["scope_json"])
+    scoped_artists: set[str] | None
+    if not scope_items or any(item["scope_type"] == "all" and item["scope_ref"] == "*" for item in scope_items):
+        scoped_artists = None
+    else:
+        scoped_artists = {
+            cleaned.casefold()
+            for item in scope_items
+            if item["scope_type"] == "artist"
+            for cleaned in [clean_booking_artist(item["scope_ref"])]
+            if cleaned
+        }
+        if not scoped_artists:
+            return {"allowed": False, "is_admin": False, "scope": set()}
+
+    return {
+        "allowed": True,
+        "is_admin": False,
+        "can_access": bool(permission["can_access"]),
+        "can_create": bool(permission["can_create"]),
+        "can_view_history": bool(permission["can_view_history"]),
+        "can_edit": bool(permission["can_edit"]),
+        "can_approve": bool(permission["can_approve"]),
+        "scope": scoped_artists,
+    }
+
+
+def require_module_permission(
+    conn: sqlite3.Connection,
+    username: str | None,
+    module_key: str,
+    action: Literal["access", "create", "edit", "approve"],
+    *,
+    artist: str | None = None,
+    existing_artist: str | None = None,
+) -> dict:
+    permission = user_module_permission(conn, username, module_key)
+    action_key = {
+        "access": "can_access",
+        "create": "can_create",
+        "edit": "can_edit",
+        "approve": "can_approve",
+    }[action]
+    if not permission.get("allowed") or not permission.get(action_key):
+        raise HTTPException(status_code=403, detail="No tenes permiso para esta accion.")
+
+    scoped_artists = permission.get("scope")
+    if scoped_artists is not None:
+        for value in (artist, existing_artist):
+            cleaned = clean_booking_artist(value or "")
+            if cleaned and cleaned.casefold() not in scoped_artists:
+                raise HTTPException(status_code=403, detail="No tenes permiso para operar este artista.")
+    return permission
+
+
+def user_artist_scope_for_module(
+    conn: sqlite3.Connection,
+    username: str | None,
+    module_key: str,
+) -> tuple[bool, set[str] | None]:
+    """Return (allowed, artist_set). artist_set None means all artists.
+
+    Missing username means an internal/API-key maintenance call, so it keeps the
+    previous unrestricted behavior. Empty scope also means all artists for
+    backward compatibility with permissions created before artist scopes.
+    """
+    permission = user_module_permission(conn, username, module_key)
+    return bool(permission.get("allowed")), permission.get("scope")
+
+
+def apply_artist_scope_sql(
+    conn: sqlite3.Connection,
+    username: str | None,
+    module_key: str,
+    params: list,
+    *,
+    column: str = "artist",
+) -> str:
+    allowed, scoped_artists = user_artist_scope_for_module(conn, username, module_key)
+    if not allowed:
+        return " AND 1 = 0"
+    if scoped_artists is None:
+        return ""
+    placeholders = ", ".join("?" for _ in scoped_artists)
+    params.extend(sorted(scoped_artists))
+    return f" AND lower({column}) IN ({placeholders})"
+
+
+def filter_artists_by_scope(
+    artists: list[str],
+    conn: sqlite3.Connection,
+    username: str | None,
+    module_key: str,
+) -> list[str]:
+    allowed, scoped_artists = user_artist_scope_for_module(conn, username, module_key)
+    if not allowed:
+        return []
+    if scoped_artists is None:
+        return artists
+    return [artist for artist in artists if artist.casefold() in scoped_artists]
+
+
+def grant_employee_all_permissions(conn: sqlite3.Connection, employee_id: int) -> None:
+    now = datetime.now().isoformat(timespec="seconds")
+    for module_key, _label in APP_MODULES:
+        conn.execute(
+            """
+            INSERT INTO module_permissions (
+                employee_id, module_key, can_access, can_create, can_view_history,
+                can_edit, can_approve, scope_json, notes, created_at, updated_at
+            )
+            VALUES (?, ?, 1, 1, 1, 1, 1, ?, ?, ?, ?)
+            ON CONFLICT(employee_id, module_key) DO UPDATE SET
+                can_access = 1,
+                can_create = 1,
+                can_view_history = 1,
+                can_edit = 1,
+                can_approve = 1,
+                scope_json = excluded.scope_json,
+                notes = excluded.notes,
+                updated_at = excluded.updated_at
+            """,
+            (
+                employee_id,
+                module_key,
+                json.dumps([{"scope_type": "all", "scope_ref": "*"}], ensure_ascii=False),
+                "Super-admin inicial. No bloquear a Ruben.",
+                now,
+                now,
+            ),
+        )
+
+
+def grant_employee_view_permissions_if_empty(
+    conn: sqlite3.Connection,
+    employee_id: int,
+    module_keys: list[str],
+    notes: str,
+) -> None:
+    existing = conn.execute(
+        "SELECT COUNT(*) AS count FROM module_permissions WHERE employee_id = ?",
+        (employee_id,),
+    ).fetchone()
+    if existing and int(existing["count"] or 0) > 0:
+        return
+
+    now = datetime.now().isoformat(timespec="seconds")
+    valid_modules = {module_key for module_key, _label in APP_MODULES}
+    for module_key in module_keys:
+        if module_key not in valid_modules:
+            continue
+        conn.execute(
+            """
+            INSERT INTO module_permissions (
+                employee_id, module_key, can_access, can_create, can_view_history,
+                can_edit, can_approve, scope_json, notes, created_at, updated_at
+            )
+            VALUES (?, ?, 1, 0, 1, 0, 0, ?, ?, ?, ?)
+            ON CONFLICT(employee_id, module_key) DO NOTHING
+            """,
+            (
+                employee_id,
+                module_key,
+                json.dumps([{"scope_type": "all", "scope_ref": "*"}], ensure_ascii=False),
+                notes,
+                now,
+                now,
+            ),
+        )
+
+
+def ensure_user_default_password(conn: sqlite3.Connection, username: str) -> None:
+    now = datetime.now().isoformat(timespec="seconds")
+    conn.execute(
+        """
+        UPDATE app_users
+        SET password_hash = ?,
+            must_change_password = 1,
+            updated_at = ?
+        WHERE lower(username) = lower(?)
+          AND (password_hash IS NULL OR password_hash = '')
+        """,
+        (hash_web_password(DEFAULT_WEB_PASSWORD), now, username),
+    )
+
+
+def seed_initial_employees(conn: sqlite3.Connection) -> None:
+    now = datetime.now().isoformat(timespec="seconds")
+    for display_name, functions in INITIAL_EMPLOYEES:
+        existing = conn.execute(
+            "SELECT id FROM employees WHERE lower(display_name) = lower(?)",
+            (display_name,),
+        ).fetchone()
+        if existing is None:
+            cursor = conn.execute(
+                """
+                INSERT INTO employees (
+                    display_name, legal_name, active, notes, created_at, updated_at
+                )
+                VALUES (?, ?, 1, ?, ?, ?)
+                """,
+                (display_name, display_name, "Seed inicial de empleados VPO.", now, now),
+            )
+            employee_id = int(cursor.lastrowid)
+        else:
+            employee_id = int(existing["id"])
+
+        existing_functions = conn.execute(
+            "SELECT COUNT(*) AS count FROM employee_functions WHERE employee_id = ?",
+            (employee_id,),
+        ).fetchone()
+        if not existing_functions or int(existing_functions["count"] or 0) == 0:
+            upsert_employee_functions(conn, employee_id, functions)
+
+        if display_name.casefold() == "ruben elkowich":
+            grant_employee_all_permissions(conn, employee_id)
+            upsert_employee_user(conn, employee_id, "rubene", "admin", True, "operational")
+            conn.execute(
+                """
+                DELETE FROM app_users
+                WHERE lower(username) IN ('ruben', 'admin')
+                """,
+            )
+        elif display_name.casefold() == "juan manuel fornasari":
+            upsert_employee_user(conn, employee_id, "juanf", "viewer", True, "operational")
+            conn.execute(
+                """
+                DELETE FROM app_users
+                WHERE lower(username) = lower('jfornasari')
+                """,
+            )
+            grant_employee_view_permissions_if_empty(
+                conn,
+                employee_id,
+                ["booking_detail", "catalog"],
+                "Permisos operativos iniciales. Ajustar desde ABM empleados.",
+            )
+        else:
+            generated_username = generated_employee_username(display_name)
+            if generated_username:
+                upsert_employee_user(conn, employee_id, generated_username, "viewer", True, "operational")
+
+        for user_row in conn.execute(
+            "SELECT username FROM app_users WHERE employee_id = ?",
+            (employee_id,),
+        ).fetchall():
+            ensure_user_default_password(conn, user_row["username"])
+
+
+def seed_booking_artist_registry(conn: sqlite3.Connection) -> None:
+    if not BOOKING_ARTIST_REGISTRY_PATH.exists():
+        return
+
+    try:
+        registry = json.loads(BOOKING_ARTIST_REGISTRY_PATH.read_text(encoding="utf-8-sig"))
+    except json.JSONDecodeError:
+        return
+
+    if not isinstance(registry, list):
+        return
+
+    now = datetime.now().isoformat(timespec="seconds")
+    for value in registry:
+        cleaned = clean_booking_artist(value)
+        if not cleaned:
+            continue
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO booking_artists (
+                stage_name, active, created_at, updated_at
+            )
+            VALUES (?, 1, ?, ?)
+            """,
+            (cleaned, now, now),
+        )
 
 
 def validate_iso_date(value: str) -> str:
@@ -496,8 +3014,111 @@ def row_to_booking_show(row: sqlite3.Row) -> dict:
     data = dict(row)
     data["receipt_refs"] = json.loads(data.pop("receipt_refs_json") or "[]")
     data["show_expenses"] = []
+    data["cash_movements"] = []
     data["pre_split_adjustments"] = []
+    data["direct_commissions"] = []
+    data["external_shares"] = []
     data["artist_adjustments"] = []
+    return data
+
+
+def row_to_booking_artist(row: sqlite3.Row) -> dict:
+    data = dict(row)
+    data["active"] = bool(data.get("active", 1))
+    return data
+
+
+def parse_scope_payload(value) -> list[dict[str, str]]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        return [value]
+    try:
+        raw = json.loads(value or "[]")
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return raw if isinstance(raw, list) else []
+
+
+def row_to_employee(conn, row) -> dict:
+    data = dict(row)
+    data["active"] = bool(data.get("active", 1))
+    function_rows = conn.execute(
+        db_sql(
+            conn,
+            """
+        SELECT function_code
+        FROM employee_functions
+        WHERE employee_id = ?
+        ORDER BY function_code
+        """,
+        ),
+        (data["id"],),
+    ).fetchall()
+    data["functions"] = [item["function_code"] for item in function_rows]
+    user_rows = conn.execute(
+        db_sql(
+            conn,
+            """
+        SELECT id, username, global_role, active, auth_source, notes, created_at, updated_at,
+               password_hash, must_change_password, last_login_at
+        FROM app_users
+        WHERE employee_id = ?
+        ORDER BY active DESC, username
+        """,
+        ),
+        (data["id"],),
+    ).fetchall()
+    data["users"] = [
+        {
+            **{key: value for key, value in dict(item).items() if key != "password_hash"},
+            "active": bool(item["active"]),
+            "has_password": bool(item["password_hash"]),
+            "must_change_password": bool(item["must_change_password"]),
+        }
+        for item in user_rows
+    ]
+    permission_rows = conn.execute(
+        db_sql(
+            conn,
+            """
+        SELECT module_key, can_access, can_create, can_view_history, can_edit, can_approve, scope_json, notes
+        FROM module_permissions
+        WHERE employee_id = ?
+        ORDER BY module_key
+        """,
+        ),
+        (data["id"],),
+    ).fetchall()
+    data["permissions"] = [
+        {
+            **dict(item),
+            "can_access": bool(item["can_access"]),
+            "can_create": bool(item["can_create"]),
+            "can_view_history": bool(item["can_view_history"]),
+            "can_edit": bool(item["can_edit"]),
+            "can_approve": bool(item["can_approve"]),
+            "scope": parse_scope_payload(item["scope_json"]),
+        }
+        for item in permission_rows
+    ]
+    return data
+
+
+def row_to_session_user(row: sqlite3.Row) -> dict:
+    role = row["global_role"] if row["global_role"] in {"viewer", "editor", "admin"} else "viewer"
+    return {
+        "username": row["username"],
+        "role": role,
+        "canEdit": role in {"editor", "admin"},
+        "mustChangePassword": bool(row["must_change_password"]),
+    }
+
+
+def row_to_caserio_event(row: sqlite3.Row) -> dict:
+    data = dict(row)
+    data["receipt_refs"] = json.loads(data.pop("receipt_refs_json") or "[]")
+    data["lines"] = []
     return data
 
 
@@ -509,9 +3130,44 @@ def row_to_booking_pre_split_adjustment(row: sqlite3.Row) -> dict:
     return dict(row)
 
 
+def row_to_booking_direct_commission(row: sqlite3.Row) -> dict:
+    return dict(row)
+
+
+def row_to_booking_external_share(row: sqlite3.Row) -> dict:
+    data = dict(row)
+    data["cash_handled_by_vpo"] = bool(data["cash_handled_by_vpo"])
+    return data
+
+
 def row_to_booking_adjustment(row: sqlite3.Row) -> dict:
     data = dict(row)
     data["recoverable"] = bool(data["recoverable"])
+    return data
+
+
+def row_to_booking_cash_movement(row: sqlite3.Row) -> dict:
+    data = dict(row)
+    category = str(data.get("category") or "")
+    parts = category.split(":", 2)
+    if len(parts) == 3 and parts[0] == "cash_received":
+        data["recipient"] = parts[1]
+        data["payment_method"] = parts[2]
+    else:
+        data["recipient"] = "producer"
+        data["payment_method"] = "otro"
+
+    raw_notes = data.get("notes")
+    metadata = {}
+    if raw_notes:
+        try:
+            metadata = json.loads(raw_notes)
+        except json.JSONDecodeError:
+            metadata = {"notes": raw_notes}
+
+    data["concept"] = metadata.get("concept") or "Movimiento de caja"
+    data["paid_by"] = metadata.get("paid_by")
+    data["notes"] = metadata.get("notes")
     return data
 
 
@@ -567,6 +3223,85 @@ def attach_booking_pre_split_adjustments(conn: sqlite3.Connection, shows: list[d
     return shows
 
 
+def attach_booking_direct_commissions(conn: sqlite3.Connection, shows: list[dict]) -> list[dict]:
+    if not shows:
+        return shows
+
+    show_ids = [show["id"] for show in shows]
+    placeholders = ",".join("?" for _ in show_ids)
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM booking_direct_commissions
+        WHERE show_id IN ({placeholders})
+        ORDER BY id
+        """,
+        show_ids,
+    ).fetchall()
+
+    by_show: dict[int, list[dict]] = {show_id: [] for show_id in show_ids}
+    for row in rows:
+        commission = row_to_booking_direct_commission(row)
+        by_show.setdefault(commission["show_id"], []).append(commission)
+
+    for show in shows:
+        show["direct_commissions"] = by_show.get(show["id"], [])
+    return shows
+
+
+def attach_booking_external_shares(conn: sqlite3.Connection, shows: list[dict]) -> list[dict]:
+    if not shows:
+        return shows
+
+    show_ids = [show["id"] for show in shows]
+    placeholders = ",".join("?" for _ in show_ids)
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM booking_external_shares
+        WHERE show_id IN ({placeholders})
+        ORDER BY id
+        """,
+        show_ids,
+    ).fetchall()
+
+    by_show: dict[int, list[dict]] = {show_id: [] for show_id in show_ids}
+    for row in rows:
+        share = row_to_booking_external_share(row)
+        by_show.setdefault(share["show_id"], []).append(share)
+
+    for show in shows:
+        show["external_shares"] = by_show.get(show["id"], [])
+    return shows
+
+
+def attach_booking_cash_movements(conn: sqlite3.Connection, shows: list[dict]) -> list[dict]:
+    if not shows:
+        return shows
+
+    show_ids = [show["id"] for show in shows]
+    placeholders = ",".join("?" for _ in show_ids)
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM booking_movements
+        WHERE show_id IN ({placeholders})
+          AND category LIKE 'cash_received:%'
+        ORDER BY id
+        """,
+        show_ids,
+    ).fetchall()
+
+    by_show: dict[int, list[dict]] = {show_id: [] for show_id in show_ids}
+    for row in rows:
+        movement = row_to_booking_cash_movement(row)
+        by_show.setdefault(movement["show_id"], []).append(movement)
+
+    for show in shows:
+        show["cash_movements"] = by_show.get(show["id"], [])
+    return shows
+
+
 def attach_booking_adjustments(conn: sqlite3.Connection, shows: list[dict]) -> list[dict]:
     if not shows:
         return shows
@@ -593,15 +3328,38 @@ def attach_booking_adjustments(conn: sqlite3.Connection, shows: list[dict]) -> l
     return shows
 
 
-def prepare_booking_show_payload(request: BookingQuickShowRequest) -> dict:
+def prepare_booking_show_payload(request: BookingQuickShowRequest, *, validate_artist: bool = True) -> dict:
     show_date = validate_iso_date(request.show_date)
-    artist = require_known_booking_artist(request.artist)
+    artist = require_known_booking_artist(request.artist) if validate_artist else clean_booking_artist(request.artist)
+    if not artist:
+        raise HTTPException(status_code=400, detail="artist is required.")
     venue = request.venue.strip()
     city = (request.city or "").strip() or None
     tour_manager = (request.tour_manager or "").strip() or None
     seller = (request.seller or "").strip() or None
     notes = (request.notes or "").strip() or None
+    venue_payment_notes = (request.venue_payment_notes or "").strip() or None
+    booking_commission_notes = (request.booking_commission_notes or "").strip() or None
     receipt_refs = clean_receipt_refs(request.receipt_refs)
+    contracted_cachet = request.contracted_cachet_amount
+    if contracted_cachet is None:
+        contracted_cachet = request.cachet_amount
+
+    venue_collected = request.venue_collected_amount
+    if venue_collected is None:
+        venue_collected = request.cachet_amount
+
+    if venue_collected > contracted_cachet + 0.01:
+        raise HTTPException(status_code=400, detail="venue_collected_amount cannot exceed contracted_cachet_amount.")
+
+    shortfall_policy = request.venue_shortfall_policy
+    raw_venue_shortfall = max(0.0, contracted_cachet - venue_collected)
+    venue_balance = raw_venue_shortfall if shortfall_policy == "deuda_boliche" else 0.0
+    venue_payment_status = request.venue_payment_status
+    if raw_venue_shortfall > 0.01 and venue_payment_status == "cobrado":
+        venue_payment_status = "parcial"
+    if venue_payment_status == "no_cobrado" and venue_collected > 0.01:
+        venue_payment_status = "parcial"
 
     prepared_expenses = []
     for expense in request.show_expenses:
@@ -621,6 +3379,20 @@ def prepare_booking_show_payload(request: BookingQuickShowRequest) -> dict:
     if not prepared_expenses:
         expenses_amount = request.expenses_amount
 
+    prepared_direct_commissions = []
+    for commission in request.direct_commissions:
+        concept = commission.concept.strip()
+        if not concept or commission.amount <= 0:
+            continue
+
+        prepared_direct_commissions.append({
+            "concept": concept,
+            "recipient": (commission.recipient or "").strip() or None,
+            "destination": commission.destination,
+            "amount": commission.amount,
+            "notes": (commission.notes or "").strip() or None,
+        })
+
     prepared_pre_split_adjustments = []
     for adjustment in request.pre_split_adjustments:
         concept = adjustment.concept.strip()
@@ -631,6 +3403,7 @@ def prepare_booking_show_payload(request: BookingQuickShowRequest) -> dict:
             "concept": concept,
             "destination": adjustment.destination,
             "amount": adjustment.amount,
+            "recovery_auto_apply": bool(adjustment.recovery_auto_apply),
             "notes": (adjustment.notes or "").strip() or None,
         })
 
@@ -674,7 +3447,29 @@ def prepare_booking_show_payload(request: BookingQuickShowRequest) -> dict:
             "notes": (adjustment.notes or "").strip() or None,
         })
 
-    net_amount = request.cachet_amount - expenses_amount
+    prepared_cash_movements = []
+    for movement in request.cash_movements:
+        concept = movement.concept.strip()
+        if not concept or movement.amount <= 0:
+            continue
+
+        prepared_cash_movements.append({
+            "recipient": movement.recipient,
+            "concept": concept,
+            "amount": movement.amount,
+            "payment_method": normalize_booking_cash_method(movement.payment_method),
+            "paid_by": (movement.paid_by or "").strip() or None,
+            "notes": (movement.notes or "").strip() or None,
+        })
+
+    effective_cachet_amount = venue_collected if shortfall_policy == "ajustar_cachet" else contracted_cachet
+    direct_commissions_amount = sum(commission["amount"] for commission in prepared_direct_commissions)
+    direct_commissions_incorporated_amount = sum(
+        commission["amount"]
+        for commission in prepared_direct_commissions
+        if commission["destination"] == "incorpora_base"
+    )
+    net_amount = effective_cachet_amount - expenses_amount - direct_commissions_amount + direct_commissions_incorporated_amount
     pre_split_adjustments_amount = sum(adjustment["amount"] for adjustment in prepared_pre_split_adjustments)
     pre_split_artist_amount = sum(
         adjustment["amount"]
@@ -690,13 +3485,61 @@ def prepare_booking_show_payload(request: BookingQuickShowRequest) -> dict:
     if split_base_amount < 0:
         raise HTTPException(status_code=400, detail="Pre-split adjustments cannot exceed show net amount.")
 
+    prepared_external_shares = []
+    external_percent_total = 0.0
+    external_amount_total = 0.0
+    for share in request.external_shares:
+        name = share.name.strip()
+        if not name:
+            continue
+
+        amount = share.amount
+        if amount <= 0 and share.percent is not None:
+            amount = split_base_amount * share.percent / 100
+
+        if amount <= 0:
+            continue
+
+        if share.percent is not None:
+            external_percent_total += share.percent
+        external_amount_total += amount
+        prepared_external_shares.append({
+            "name": name,
+            "role": share.role,
+            "percent": share.percent,
+            "amount": amount,
+            "cash_handled_by_vpo": share.cash_handled_by_vpo,
+            "notes": (share.notes or "").strip() or None,
+        })
+
+    if round(request.artist_percent + producer_percent + external_percent_total, 4) > 100.0:
+        raise HTTPException(
+            status_code=400,
+            detail="artist_percent + producer_percent + external share percent cannot exceed 100.",
+        )
+
+    if external_amount_total > split_base_amount + 0.01:
+        raise HTTPException(status_code=400, detail="External shares cannot exceed split base amount.")
+
     artist_share = split_base_amount * request.artist_percent / 100
     producer_share = split_base_amount * producer_percent / 100
     post_split_applied_amount = sum(adjustment["applied_amount"] for adjustment in prepared_adjustments)
     artist_cash_target = artist_share + pre_split_artist_amount - post_split_applied_amount
     producer_cash_target = producer_share + pre_split_producer_amount + post_split_applied_amount
-    balance_artist = artist_cash_target - request.artist_paid_amount
-    balance_producer = producer_cash_target - request.producer_received_amount
+    cash_artist_received = sum(
+        movement["amount"]
+        for movement in prepared_cash_movements
+        if movement["recipient"] == "artist"
+    )
+    cash_producer_received = sum(
+        movement["amount"]
+        for movement in prepared_cash_movements
+        if movement["recipient"] == "producer"
+    )
+    effective_artist_paid = request.artist_paid_amount + cash_artist_received
+    effective_producer_received = request.producer_received_amount + cash_producer_received
+    balance_artist = artist_cash_target - effective_artist_paid
+    balance_producer = producer_cash_target - effective_producer_received
 
     return {
         "show_date": show_date,
@@ -706,9 +3549,23 @@ def prepare_booking_show_payload(request: BookingQuickShowRequest) -> dict:
         "tour_manager": tour_manager,
         "seller": seller,
         "notes": notes,
+        "contracted_cachet": contracted_cachet,
+        "venue_collected": venue_collected,
+        "venue_balance": venue_balance,
+        "venue_payment_status": venue_payment_status,
+        "venue_shortfall_policy": shortfall_policy,
+        "venue_payment_notes": venue_payment_notes,
+        "effective_cachet_amount": effective_cachet_amount,
+        "booking_commission_exempt": 1 if request.booking_commission_exempt else 0,
+        "booking_commission_notes": booking_commission_notes,
         "receipt_refs": receipt_refs,
         "expenses": prepared_expenses,
+        "direct_commissions": prepared_direct_commissions,
+        "direct_commissions_amount": direct_commissions_amount,
+        "direct_commissions_incorporated_amount": direct_commissions_incorporated_amount,
         "pre_split_adjustments": prepared_pre_split_adjustments,
+        "external_shares": prepared_external_shares,
+        "cash_movements": prepared_cash_movements,
         "adjustments": prepared_adjustments,
         "expenses_amount": expenses_amount,
         "pre_split_adjustments_amount": pre_split_adjustments_amount,
@@ -719,9 +3576,168 @@ def prepare_booking_show_payload(request: BookingQuickShowRequest) -> dict:
         "producer_share": producer_share,
         "artist_cash_target": artist_cash_target,
         "producer_cash_target": producer_cash_target,
+        "artist_paid_amount": effective_artist_paid,
+        "producer_received_amount": effective_producer_received,
         "balance_artist": balance_artist,
         "balance_producer": balance_producer,
     }
+
+
+def derive_booking_settlement(
+    request: BookingQuickShowRequest,
+    payload: dict,
+    now: str,
+    *,
+    previous_status: str | None = None,
+    previous_closed_at: str | None = None,
+) -> tuple[str, str | None]:
+    if previous_status == "historico":
+        return "historico", previous_closed_at
+
+    can_close = (
+        request.status == "aprobado"
+        and abs(payload["balance_producer"]) <= 0.01
+        and abs(payload["venue_balance"]) <= 0.01
+    )
+    if can_close:
+        return "cerrado", previous_closed_at or now
+
+    return "pendiente", None
+
+
+def amount_to_ars(amount: float, currency: str, fx_rate: float | None) -> float:
+    if currency == "USD" and fx_rate and fx_rate > 0:
+        return amount * fx_rate
+    return amount
+
+
+def apply_booking_pre_split_recoveries(
+    conn: sqlite3.Connection,
+    show_id: int,
+    request: BookingQuickShowRequest,
+    payload: dict,
+    now: str,
+) -> None:
+    conn.execute(
+        """
+        DELETE FROM finance_recovery_applications
+        WHERE source_type = 'booking_presplit_auto'
+          AND source_id LIKE ?
+        """,
+        (f"{show_id}:pre_split_auto:%",),
+    )
+
+    auto_recoveries = [
+        adjustment
+        for adjustment in payload["pre_split_adjustments"]
+        if adjustment.get("destination") == "producer"
+        and adjustment.get("recovery_auto_apply")
+        and float(adjustment.get("amount") or 0) > 0
+    ]
+    if not auto_recoveries:
+        return
+
+    recovered_rows = conn.execute(
+        """
+        SELECT finance_movement_id, SUM(COALESCE(amount_ars, 0)) AS recovered_ars
+        FROM finance_recovery_applications
+        WHERE artist = ?
+        GROUP BY finance_movement_id
+        """,
+        (payload["artist"],),
+    ).fetchall()
+    recovered_by_movement = {
+        int(row["finance_movement_id"]): float(row["recovered_ars"] or 0)
+        for row in recovered_rows
+    }
+
+    movement_rows = conn.execute(
+        """
+        SELECT
+            id, movement_date, project_name, concept,
+            amount_ars, recoverable_percent, status
+        FROM finance_staging_movements
+        WHERE artist = ?
+          AND recoverable = 1
+          AND status NOT IN ('aplicado', 'anulado')
+        ORDER BY movement_date ASC, id ASC
+        """,
+        (payload["artist"],),
+    ).fetchall()
+
+    open_recoverables: list[dict] = []
+    for row in movement_rows:
+        movement_id = int(row["id"])
+        recoverable_amount = float(row["amount_ars"] or 0) * float(row["recoverable_percent"] or 0) / 100.0
+        open_amount = max(recoverable_amount - recovered_by_movement.get(movement_id, 0.0), 0.0)
+        if open_amount > 0.01:
+            open_recoverables.append({
+                "id": movement_id,
+                "project_name": row["project_name"],
+                "concept": row["concept"],
+                "open_amount": open_amount,
+            })
+
+    requested_ars = sum(
+        amount_to_ars(float(adjustment["amount"]), request.currency, request.fx_rate)
+        for adjustment in auto_recoveries
+    )
+    available_ars = sum(item["open_amount"] for item in open_recoverables)
+    if requested_ars > available_ars + 0.01:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "El recupero pre-split marcado para imputar supera el saldo recuperable abierto "
+                f"del artista. Pedido: {requested_ars:.2f}; abierto: {available_ars:.2f}."
+            ),
+        )
+
+    if not open_recoverables:
+        raise HTTPException(
+            status_code=400,
+            detail="No hay proyectos recuperables abiertos para imputar este recupero.",
+        )
+
+    source_base_label = f"{payload['show_date']} - {payload['venue']}"
+    cursor_index = 0
+    for adjustment_index, adjustment in enumerate(auto_recoveries, start=1):
+        remaining = amount_to_ars(float(adjustment["amount"]), request.currency, request.fx_rate)
+        source_id = f"{show_id}:pre_split_auto:{adjustment_index}"
+        source_label = f"{source_base_label} - {adjustment['concept']}"
+        while remaining > 0.01 and cursor_index < len(open_recoverables):
+            current = open_recoverables[cursor_index]
+            applied = min(remaining, current["open_amount"])
+            if applied <= 0.01:
+                cursor_index += 1
+                continue
+
+            conn.execute(
+                """
+                INSERT INTO finance_recovery_applications (
+                    artist, application_date, finance_movement_id, project_name,
+                    source_type, source_id, source_label, amount_ars,
+                    recovery_method, notes, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    payload["artist"],
+                    payload["show_date"],
+                    current["id"],
+                    current["project_name"],
+                    "booking_presplit_auto",
+                    source_id,
+                    source_label,
+                    applied,
+                    "before_split",
+                    "Aplicacion automatica FIFO desde ajuste antes del split en booking.",
+                    now,
+                ),
+            )
+            current["open_amount"] -= applied
+            remaining -= applied
+            if current["open_amount"] <= 0.01:
+                cursor_index += 1
 
 
 def replace_booking_show_children(
@@ -734,18 +3750,29 @@ def replace_booking_show_children(
     conn.execute("DELETE FROM booking_movements WHERE show_id = ?", (show_id,))
     conn.execute("DELETE FROM booking_show_expenses WHERE show_id = ?", (show_id,))
     conn.execute("DELETE FROM booking_pre_split_adjustments WHERE show_id = ?", (show_id,))
+    conn.execute("DELETE FROM booking_direct_commissions WHERE show_id = ?", (show_id,))
+    conn.execute("DELETE FROM booking_external_shares WHERE show_id = ?", (show_id,))
     conn.execute("DELETE FROM booking_artist_adjustments WHERE show_id = ?", (show_id,))
+    apply_booking_pre_split_recoveries(conn, show_id, request, payload, now)
 
     movement_rows = [
-        ("income", "cachet", request.cachet_amount),
-        ("expense", "artist_payment", request.artist_paid_amount),
-        ("income", "producer_settlement", request.producer_received_amount),
+        ("income", "cachet", payload["effective_cachet_amount"]),
+        ("expense", "artist_payment", payload["artist_paid_amount"]),
+        ("income", "producer_settlement", payload["producer_received_amount"]),
     ]
     for expense in payload["expenses"]:
         movement_rows.append(("expense", f"show_expense:{expense['category']}", expense["amount"]))
 
     if not payload["expenses"]:
         movement_rows.append(("expense", "show_expenses", payload["expenses_amount"]))
+
+    for commission in payload["direct_commissions"]:
+        if commission["destination"] == "salida_directa":
+            movement_rows.append(("expense", "direct_commission:salida_directa", commission["amount"]))
+
+    for share in payload["external_shares"]:
+        if share["cash_handled_by_vpo"]:
+            movement_rows.append(("expense", f"external_share:{share['role']}", share["amount"]))
 
     for movement_type, category, amount in movement_rows:
         if amount <= 0:
@@ -758,6 +3785,30 @@ def replace_booking_show_children(
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (show_id, movement_type, category, amount, request.currency, request.fx_rate, None, now),
+        )
+
+    for movement in payload["cash_movements"]:
+        conn.execute(
+            """
+            INSERT INTO booking_movements (
+                show_id, movement_type, category, amount, currency, fx_rate, notes, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                show_id,
+                "income",
+                f"cash_received:{movement['recipient']}:{movement['payment_method']}",
+                movement["amount"],
+                request.currency,
+                request.fx_rate,
+                json.dumps({
+                    "concept": movement["concept"],
+                    "paid_by": movement["paid_by"],
+                    "notes": movement["notes"],
+                }, ensure_ascii=False),
+                now,
+            ),
         )
 
     for expense in payload["expenses"]:
@@ -780,13 +3831,35 @@ def replace_booking_show_children(
             ),
         )
 
+    for commission in payload["direct_commissions"]:
+        conn.execute(
+            """
+            INSERT INTO booking_direct_commissions (
+                show_id, concept, recipient, destination, amount, currency, fx_rate, notes, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                show_id,
+                commission["concept"],
+                commission["recipient"],
+                commission["destination"],
+                commission["amount"],
+                request.currency,
+                request.fx_rate,
+                commission["notes"],
+                now,
+            ),
+        )
+
     for adjustment in payload["pre_split_adjustments"]:
         conn.execute(
             """
             INSERT INTO booking_pre_split_adjustments (
-                show_id, concept, destination, amount, currency, fx_rate, notes, created_at
+                show_id, concept, destination, amount, currency, fx_rate,
+                recovery_auto_apply, notes, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 show_id,
@@ -795,7 +3868,31 @@ def replace_booking_show_children(
                 adjustment["amount"],
                 request.currency,
                 request.fx_rate,
+                1 if adjustment.get("recovery_auto_apply") else 0,
                 adjustment["notes"],
+                now,
+            ),
+        )
+
+    for share in payload["external_shares"]:
+        conn.execute(
+            """
+            INSERT INTO booking_external_shares (
+                show_id, name, role, percent, amount, currency, fx_rate,
+                cash_handled_by_vpo, notes, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                show_id,
+                share["name"],
+                share["role"],
+                share["percent"],
+                share["amount"],
+                request.currency,
+                request.fx_rate,
+                1 if share["cash_handled_by_vpo"] else 0,
+                share["notes"],
                 now,
             ),
         )
@@ -837,8 +3934,214 @@ def fetch_booking_show_item(conn: sqlite3.Connection, show_id: int) -> dict:
         raise HTTPException(status_code=404, detail="Booking show not found.")
 
     item = attach_booking_expenses(conn, [row_to_booking_show(row)])
+    item = attach_booking_cash_movements(conn, item)
     item = attach_booking_pre_split_adjustments(conn, item)
+    item = attach_booking_direct_commissions(conn, item)
+    item = attach_booking_external_shares(conn, item)
     return attach_booking_adjustments(conn, item)[0]
+
+
+def insert_booking_show_from_request(
+    conn: sqlite3.Connection,
+    request: BookingQuickShowRequest,
+    now: str,
+    *,
+    origin_type: str | None = None,
+    origin_id: int | None = None,
+    settlement_group: str | None = None,
+    validate_artist: bool = True,
+) -> dict:
+    payload = prepare_booking_show_payload(request, validate_artist=validate_artist)
+    settlement_status, settlement_closed_at = derive_booking_settlement(request, payload, now)
+    cursor = conn.execute(
+        """
+        INSERT INTO booking_shows (
+            artist, show_date, venue, city, tour_manager, seller, status,
+            currency, fx_rate, contracted_cachet_amount, venue_collected_amount,
+            venue_balance_amount, venue_payment_status, venue_shortfall_policy,
+            venue_payment_notes,
+            cachet_amount, expenses_amount, net_amount,
+            pre_split_adjustments_amount, split_base_amount,
+            artist_percent, producer_percent, artist_share_amount, producer_share_amount,
+            artist_cash_target_amount, producer_cash_target_amount,
+            artist_paid_amount, producer_received_amount, balance_artist_amount,
+            balance_producer_amount, receipt_refs_json, settlement_status,
+            settlement_group, settlement_closed_at, settlement_notes,
+            origin_type, origin_id, booking_commission_exempt, booking_commission_notes,
+            notes, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            payload["artist"],
+            payload["show_date"],
+            payload["venue"],
+            payload["city"],
+            payload["tour_manager"],
+            payload["seller"],
+            request.status,
+            request.currency,
+            request.fx_rate,
+            payload["contracted_cachet"],
+            payload["venue_collected"],
+            payload["venue_balance"],
+            payload["venue_payment_status"],
+            payload["venue_shortfall_policy"],
+            payload["venue_payment_notes"],
+            payload["effective_cachet_amount"],
+            payload["expenses_amount"],
+            payload["net_amount"],
+            payload["pre_split_adjustments_amount"],
+            payload["split_base_amount"],
+            request.artist_percent,
+            payload["producer_percent"],
+            payload["artist_share"],
+            payload["producer_share"],
+            payload["artist_cash_target"],
+            payload["producer_cash_target"],
+            payload["artist_paid_amount"],
+            payload["producer_received_amount"],
+            payload["balance_artist"],
+            payload["balance_producer"],
+            json.dumps(payload["receipt_refs"], ensure_ascii=False),
+            settlement_status,
+            settlement_group,
+            settlement_closed_at,
+            None,
+            origin_type,
+            origin_id,
+            payload["booking_commission_exempt"],
+            payload["booking_commission_notes"],
+            payload["notes"],
+            now,
+            now,
+        ),
+    )
+    show_id = int(cursor.lastrowid)
+    replace_booking_show_children(conn, show_id, request, payload, now)
+    return fetch_booking_show_item(conn, show_id)
+
+
+def update_booking_show_from_request(
+    conn: sqlite3.Connection,
+    show_id: int,
+    request: BookingQuickShowRequest,
+    now: str,
+    *,
+    validate_artist: bool = True,
+    preserve_origin: bool = True,
+) -> dict:
+    payload = prepare_booking_show_payload(request, validate_artist=validate_artist)
+    existing = conn.execute(
+        """
+        SELECT id, settlement_status, settlement_closed_at, origin_type, origin_id, settlement_group
+        FROM booking_shows
+        WHERE id = ?
+        """,
+        (show_id,),
+    ).fetchone()
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Booking show not found.")
+
+    settlement_status, settlement_closed_at = derive_booking_settlement(
+        request,
+        payload,
+        now,
+        previous_status=existing["settlement_status"],
+        previous_closed_at=existing["settlement_closed_at"],
+    )
+
+    conn.execute(
+        """
+        UPDATE booking_shows
+        SET artist = ?,
+            show_date = ?,
+            venue = ?,
+            city = ?,
+            tour_manager = ?,
+            seller = ?,
+            status = ?,
+            currency = ?,
+            fx_rate = ?,
+            contracted_cachet_amount = ?,
+            venue_collected_amount = ?,
+            venue_balance_amount = ?,
+            venue_payment_status = ?,
+            venue_shortfall_policy = ?,
+            venue_payment_notes = ?,
+            cachet_amount = ?,
+            expenses_amount = ?,
+            net_amount = ?,
+            pre_split_adjustments_amount = ?,
+            split_base_amount = ?,
+            artist_percent = ?,
+            producer_percent = ?,
+            artist_share_amount = ?,
+            producer_share_amount = ?,
+            artist_cash_target_amount = ?,
+            producer_cash_target_amount = ?,
+            artist_paid_amount = ?,
+            producer_received_amount = ?,
+            balance_artist_amount = ?,
+            balance_producer_amount = ?,
+            receipt_refs_json = ?,
+            settlement_status = ?,
+            settlement_group = ?,
+            settlement_closed_at = ?,
+            origin_type = ?,
+            origin_id = ?,
+            booking_commission_exempt = ?,
+            booking_commission_notes = ?,
+            notes = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            payload["artist"],
+            payload["show_date"],
+            payload["venue"],
+            payload["city"],
+            payload["tour_manager"],
+            payload["seller"],
+            request.status,
+            request.currency,
+            request.fx_rate,
+            payload["contracted_cachet"],
+            payload["venue_collected"],
+            payload["venue_balance"],
+            payload["venue_payment_status"],
+            payload["venue_shortfall_policy"],
+            payload["venue_payment_notes"],
+            payload["effective_cachet_amount"],
+            payload["expenses_amount"],
+            payload["net_amount"],
+            payload["pre_split_adjustments_amount"],
+            payload["split_base_amount"],
+            request.artist_percent,
+            payload["producer_percent"],
+            payload["artist_share"],
+            payload["producer_share"],
+            payload["artist_cash_target"],
+            payload["producer_cash_target"],
+            payload["artist_paid_amount"],
+            payload["producer_received_amount"],
+            payload["balance_artist"],
+            payload["balance_producer"],
+            json.dumps(payload["receipt_refs"], ensure_ascii=False),
+            settlement_status,
+            existing["settlement_group"] if preserve_origin else None,
+            settlement_closed_at,
+            existing["origin_type"] if preserve_origin else None,
+            existing["origin_id"] if preserve_origin else None,
+            payload["booking_commission_exempt"],
+            payload["booking_commission_notes"],
+            payload["notes"],
+            now,
+            show_id,
+        ),
+    )
+    replace_booking_show_children(conn, show_id, request, payload, now)
+    return fetch_booking_show_item(conn, show_id)
 
 
 def clean_booking_artist(value: object) -> str | None:
@@ -856,8 +4159,418 @@ def clean_booking_artist(value: object) -> str | None:
     return text
 
 
+def clean_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def finance_amount_ars(amount: float, currency: str, fx_rate: float | None) -> float:
+    if currency == "USD":
+        if not fx_rate:
+            raise HTTPException(status_code=400, detail="Para cargar USD falta tipo de cambio.")
+        return float(amount) * float(fx_rate)
+    return float(amount)
+
+
+def finance_payment_status(amount_ars: float, paid_amount_ars: float, explicit_status: str | None) -> str:
+    if explicit_status:
+        return explicit_status
+    if paid_amount_ars <= 0.01 and amount_ars > 0.01:
+        return "pendiente"
+    if paid_amount_ars + 0.01 < amount_ars:
+        return "parcial"
+    return "pagado"
+
+
+LOCKED_FINANCE_STATUSES = {"aprobado", "aplicado", "anulado"}
+
+
+def finance_movement_is_locked(status: str | None) -> bool:
+    return (status or "").strip().lower() in LOCKED_FINANCE_STATUSES
+
+
+def resolve_finance_project(
+    conn: sqlite3.Connection,
+    request: FinanceMovementRequest,
+    now: str,
+) -> tuple[int | None, str | None]:
+    project_id = request.project_id
+    project_name = clean_optional_text(request.project_name)
+
+    if project_id is not None:
+        row = conn.execute(
+            "SELECT id, name FROM finance_projects WHERE id = ?",
+            (project_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Proyecto financiero no encontrado.")
+        return int(row["id"]), row["name"]
+
+    if not project_name:
+        return None, None
+
+    existing = conn.execute(
+        """
+        SELECT id, name
+        FROM finance_projects
+        WHERE name = ?
+          AND COALESCE(artist, '') = COALESCE(?, '')
+          AND business_area = ?
+        """,
+        (project_name, request.artist, request.business_area),
+    ).fetchone()
+    if existing:
+        return int(existing["id"]), existing["name"]
+
+    cursor = conn.execute(
+        """
+        INSERT INTO finance_projects (
+            name, artist, business_area, status, notes, created_at, updated_at
+        )
+        VALUES (?, ?, ?, 'activo', ?, ?, ?)
+        """,
+        (
+            project_name,
+            request.artist,
+            request.business_area,
+            "Creado automaticamente desde movimiento financiero.",
+            now,
+            now,
+        ),
+    )
+    return int(cursor.lastrowid), project_name
+
+
+def finance_movement_item(row: sqlite3.Row) -> dict:
+    item = dict(row)
+    try:
+        item["proof_refs"] = json.loads(item.pop("proof_refs_json") or "[]")
+    except json.JSONDecodeError:
+        item["proof_refs"] = []
+    return item
+
+
+def finance_ledger_entry(
+    *,
+    entry_id: str,
+    ledger_date: str,
+    artist: str,
+    business_area: str,
+    ledger_type: str,
+    project_name: str | None,
+    concept: str,
+    source_module: str,
+    source_table: str,
+    source_id: str,
+    source_label: str | None = None,
+    amount_ars: float = 0.0,
+    account_delta_ars: float = 0.0,
+    venue_receivable_ars: float = 0.0,
+    investment_ars: float = 0.0,
+    recoverable_origin_ars: float = 0.0,
+    recovered_amount_ars: float = 0.0,
+    recoverable_open_ars: float = 0.0,
+    status: str | None = None,
+    notes: str | None = None,
+) -> dict:
+    return {
+        "id": entry_id,
+        "ledger_date": ledger_date,
+        "artist": artist,
+        "business_area": business_area,
+        "ledger_type": ledger_type,
+        "project_name": project_name,
+        "concept": concept,
+        "source_module": source_module,
+        "source_table": source_table,
+        "source_id": str(source_id),
+        "source_label": source_label,
+        "amount_ars": float(amount_ars or 0),
+        "account_delta_ars": float(account_delta_ars or 0),
+        "venue_receivable_ars": float(venue_receivable_ars or 0),
+        "investment_ars": float(investment_ars or 0),
+        "recoverable_origin_ars": float(recoverable_origin_ars or 0),
+        "recovered_amount_ars": float(recovered_amount_ars or 0),
+        "recoverable_open_ars": float(recoverable_open_ars or 0),
+        "status": status,
+        "notes": notes,
+    }
+
+
+def build_artist_finance_ledger(
+    conn: sqlite3.Connection,
+    selected_artist: str | None,
+    x_vpo_username: str | None = None,
+    module_key: str = "artist_finance",
+) -> dict:
+    entries: list[dict] = []
+    params: list = []
+    where_artist = ""
+    if selected_artist:
+        where_artist = "AND artist = ?"
+        params.append(selected_artist)
+    artist_scope_sql = apply_artist_scope_sql(conn, x_vpo_username, module_key, params)
+
+    booking_rows = conn.execute(
+        f"""
+        SELECT
+            id, artist, show_date, venue,
+            COALESCE(balance_producer_amount, 0) AS indyana_balance,
+            COALESCE(balance_artist_amount, 0) AS artist_balance,
+            COALESCE(venue_balance_amount, 0) AS venue_balance,
+            settlement_status, status, notes
+        FROM booking_shows
+        WHERE status <> 'cancelado'
+          {where_artist}
+          {artist_scope_sql}
+          AND (
+            ABS(COALESCE(balance_producer_amount, 0)) > 0.01
+            OR ABS(COALESCE(balance_artist_amount, 0)) > 0.01
+            OR ABS(COALESCE(venue_balance_amount, 0)) > 0.01
+          )
+        ORDER BY show_date DESC, id DESC
+        """,
+        params,
+    ).fetchall()
+
+    for row in booking_rows:
+        source_label = f"{row['show_date']} - {row['venue']} - Show #{row['id']}"
+        indyana_balance = float(row["indyana_balance"] or 0)
+        artist_balance = float(row["artist_balance"] or 0)
+        venue_balance = float(row["venue_balance"] or 0)
+        status = row["settlement_status"] or row["status"]
+        if abs(indyana_balance) > 0.01:
+            entries.append(
+                finance_ledger_entry(
+                    entry_id=f"booking-show-{row['id']}-indyana",
+                    ledger_date=row["show_date"],
+                    artist=row["artist"],
+                    business_area="booking",
+                    ledger_type="booking_account_current",
+                    project_name=None,
+                    concept=f"{row['venue']} - deben a Indyana",
+                    source_module="booking",
+                    source_table="booking_shows",
+                    source_id=str(row["id"]),
+                    source_label=source_label,
+                    amount_ars=indyana_balance,
+                    account_delta_ars=indyana_balance,
+                    status=status,
+                    notes=row["notes"],
+                )
+            )
+        if abs(artist_balance) > 0.01:
+            entries.append(
+                finance_ledger_entry(
+                    entry_id=f"booking-show-{row['id']}-artist",
+                    ledger_date=row["show_date"],
+                    artist=row["artist"],
+                    business_area="booking",
+                    ledger_type="booking_account_current",
+                    project_name=None,
+                    concept=f"{row['venue']} - Indyana debe artista",
+                    source_module="booking",
+                    source_table="booking_shows",
+                    source_id=str(row["id"]),
+                    source_label=source_label,
+                    amount_ars=artist_balance,
+                    account_delta_ars=-artist_balance,
+                    status=status,
+                    notes=row["notes"],
+                )
+            )
+        if abs(venue_balance) > 0.01:
+            entries.append(
+                finance_ledger_entry(
+                    entry_id=f"booking-show-{row['id']}-venue",
+                    ledger_date=row["show_date"],
+                    artist=row["artist"],
+                    business_area="booking",
+                    ledger_type="booking_venue_receivable",
+                    project_name=None,
+                    concept=f"{row['venue']} - deuda boliche/cliente",
+                    source_module="booking",
+                    source_table="booking_shows",
+                    source_id=str(row["id"]),
+                    source_label=source_label,
+                    amount_ars=venue_balance,
+                    venue_receivable_ars=venue_balance,
+                    status=status,
+                    notes=row["notes"],
+                )
+            )
+
+    finance_params: list = []
+    finance_where = "WHERE 1 = 1"
+    if selected_artist:
+        finance_where += " AND artist = ?"
+        finance_params.append(selected_artist)
+    finance_where += apply_artist_scope_sql(conn, x_vpo_username, module_key, finance_params)
+
+    recovery_rows = conn.execute(
+        f"""
+        SELECT
+            id, artist, application_date, finance_movement_id, project_name,
+            source_type, source_id, source_label, amount_ars,
+            recovery_method, notes, created_at
+        FROM finance_recovery_applications
+        {finance_where}
+        ORDER BY application_date DESC, id DESC
+        """,
+        finance_params,
+    ).fetchall()
+    recovered_by_movement: dict[int, float] = {}
+    for row in recovery_rows:
+        movement_id = int(row["finance_movement_id"] or 0)
+        recovered_by_movement[movement_id] = recovered_by_movement.get(movement_id, 0.0) + float(row["amount_ars"] or 0)
+
+    finance_rows = conn.execute(
+        f"""
+        SELECT
+            id, movement_date, artist, business_area, movement_type, category,
+            project_name, concept, counterparty, paid_by,
+            amount_ars, paid_amount_ars, pending_amount_ars,
+            recoverable, recoverable_percent, recovery_method,
+            artist_percent, producer_percent, account_effect,
+            status, source_type, source_id, notes
+        FROM finance_staging_movements
+        {finance_where}
+        ORDER BY movement_date DESC, id DESC
+        """,
+        finance_params,
+    ).fetchall()
+
+    for row in finance_rows:
+        if row["status"] == "anulado":
+            continue
+        amount_ars = float(row["amount_ars"] or 0)
+        paid_amount_ars = float(row["paid_amount_ars"] or 0)
+        account_effect = row["account_effect"] or "sin_impacto"
+        account_delta = 0.0
+        if account_effect == "artista_debe_indyana":
+            account_delta = amount_ars
+        elif account_effect == "indyana_debe_artista":
+            account_delta = -amount_ars
+
+        is_investment = row["movement_type"] == "gasto" and account_effect in {"inversion_indyana", "sin_impacto"}
+        recoverable_origin = (
+            amount_ars * float(row["recoverable_percent"] or 0) / 100.0
+            if row["recoverable"] and row["status"] not in {"aplicado", "anulado"}
+            else 0.0
+        )
+        recovered_amount = recovered_by_movement.get(int(row["id"] or 0), 0.0)
+        recoverable_open = max(recoverable_origin - recovered_amount, 0.0)
+        ledger_type = "finance_account_current" if account_delta else "finance_investment"
+        if row["movement_type"] == "ingreso":
+            ledger_type = "finance_income"
+        elif row["movement_type"] in {"recupero", "pago", "ajuste"} and not account_delta:
+            ledger_type = "finance_movement"
+
+        entries.append(
+            finance_ledger_entry(
+                entry_id=f"finance-movement-{row['id']}",
+                ledger_date=row["movement_date"],
+                artist=row["artist"],
+                business_area=row["business_area"],
+                ledger_type=ledger_type,
+                project_name=row["project_name"],
+                concept=row["concept"],
+                source_module="finance",
+                source_table="finance_staging_movements",
+                source_id=str(row["id"]),
+                source_label=f"Movimiento financiero #{row['id']}",
+                amount_ars=amount_ars,
+                account_delta_ars=account_delta,
+                investment_ars=paid_amount_ars if is_investment else 0.0,
+                recoverable_origin_ars=recoverable_origin,
+                recovered_amount_ars=recovered_amount,
+                recoverable_open_ars=recoverable_open,
+                status=row["status"],
+                notes=row["notes"],
+            )
+        )
+
+    for row in recovery_rows:
+        amount_ars = float(row["amount_ars"] or 0)
+        entries.append(
+            finance_ledger_entry(
+                entry_id=f"recovery-application-{row['id']}",
+                ledger_date=row["application_date"],
+                artist=row["artist"],
+                business_area="booking",
+                ledger_type="recoverable_application",
+                project_name=row["project_name"],
+                concept=row["source_label"] or f"Recupero aplicado #{row['id']}",
+                source_module="finance",
+                source_table="finance_recovery_applications",
+                source_id=str(row["id"]),
+                source_label=row["source_label"],
+                amount_ars=amount_ars,
+                recovered_amount_ars=amount_ars,
+                status="aplicado",
+                notes=row["notes"],
+            )
+        )
+
+    entries.sort(key=lambda item: (item["ledger_date"] or "", item["id"]), reverse=True)
+    account_positive = sum(max(float(item["account_delta_ars"] or 0), 0.0) for item in entries)
+    account_negative = sum(max(-float(item["account_delta_ars"] or 0), 0.0) for item in entries)
+    recoverable_origin = sum(float(item["recoverable_origin_ars"] or 0) for item in entries if item["source_table"] == "finance_staging_movements")
+    recovered_amount = sum(float(item["amount_ars"] or 0) for item in entries if item["ledger_type"] == "recoverable_application")
+    return {
+        "entries": entries[:500],
+        "summary": {
+            "account_current_net_ars": account_positive - account_negative,
+            "artist_owes_indyana_ars": account_positive,
+            "indyana_owes_artist_ars": account_negative,
+            "venue_receivable_ars": sum(float(item["venue_receivable_ars"] or 0) for item in entries),
+            "investment_ars": sum(float(item["investment_ars"] or 0) for item in entries),
+            "recoverable_origin_ars": recoverable_origin,
+            "recovered_amount_ars": recovered_amount,
+            "recoverable_open_ars": max(recoverable_origin - recovered_amount, 0.0),
+            "rows": len(entries),
+            "official": True,
+            "note": "Ledger v1 canonico de lectura: normaliza booking, movimientos financieros y aplicaciones de recupero sin duplicar la fuente.",
+        },
+    }
+
+
 def booking_artist_options() -> list[str]:
     artists: dict[str, str] = {}
+    use_operational_db = operational_db_settings().driver == "postgres" or VPO_BOOKING_DB_PATH.exists()
+
+    if use_operational_db:
+        init_booking_db()
+        with booking_connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT stage_name
+                FROM booking_artists
+                WHERE active = 1
+                ORDER BY stage_name
+                """
+            ).fetchall()
+        for row in rows:
+            cleaned = clean_booking_artist(row["stage_name"])
+            if cleaned:
+                artists.setdefault(cleaned.casefold(), cleaned)
+
+    if artists:
+        return sorted(artists.values(), key=lambda value: value.casefold())
+
+    if BOOKING_ARTIST_REGISTRY_PATH.exists():
+        try:
+            registry = json.loads(BOOKING_ARTIST_REGISTRY_PATH.read_text(encoding="utf-8-sig"))
+        except json.JSONDecodeError:
+            registry = []
+
+        if isinstance(registry, list):
+            for value in registry:
+                cleaned = clean_booking_artist(value)
+                if cleaned:
+                    artists.setdefault(cleaned.casefold(), cleaned)
 
     for path in [
         BOOKING_RAW_DIR / "booking_raw_artists.parquet",
@@ -883,7 +4596,7 @@ def booking_artist_options() -> list[str]:
                 if cleaned:
                     artists.setdefault(cleaned.casefold(), cleaned)
 
-    if VPO_BOOKING_DB_PATH.exists():
+    if use_operational_db:
         init_booking_db()
         with booking_connect() as conn:
             rows = conn.execute("SELECT DISTINCT artist FROM booking_shows").fetchall()
@@ -1243,7 +4956,7 @@ def create_google_sheet(
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
+def health() -> dict:
     sheets_auth_mode = "oauth_user" if GOOGLE_OAUTH_TOKEN_JSON else "service_account"
     return {
         "status": "ok",
@@ -1254,6 +4967,225 @@ def health() -> dict[str, str]:
         "sheets_auth_mode": sheets_auth_mode,
         "drive_folder_configured": "yes" if GOOGLE_DRIVE_FOLDER_ID else "no",
         "share_email_configured": "yes" if GOOGLE_SHEETS_SHARE_EMAIL else "no",
+        "operational_db": operational_db_healthcheck(),
+    }
+
+
+@app.get("/source-monitor")
+def source_monitor(x_vpo_api_key: str | None = Header(default=None)):
+    require_api_key(x_vpo_api_key)
+    local_marts_available = VPO_LOCAL_MARTS_DIR is not None and VPO_LOCAL_MARTS_DIR.exists()
+    monitor_mart_file = STANDARDIZED_FILE if local_marts_available else STATEMENT_SUMMARY_FILE
+    marts = ensure_marts(refresh_cache=False, filenames=[monitor_mart_file])
+    mart_summary = source_monitor_mart_summary(marts[monitor_mart_file])
+    config_items = load_source_monitor_config()
+
+    configured_keys = {(item.get("source"), item.get("account")) for item in config_items}
+    for source, account in sorted(mart_summary):
+        if (source, account) in configured_keys:
+            continue
+        config_items.append({
+            "id": source_monitor_id(source, account),
+            "source": source,
+            "account": account,
+            "display_name": f"{source} / {account}",
+            "input_path": "",
+            "expected_frequency": "monthly",
+            "max_age_months": 2,
+            "monitoring_active": True,
+            "alert_silenced": False,
+            "portal_url": "",
+            "notes": "",
+        })
+
+    items = []
+    status_counts = {"ok": 0, "attention": 0, "alert": 0, "inactive": 0}
+    today = date.today()
+
+    for config in config_items:
+        source = str(config.get("source") or "")
+        account = str(config.get("account") or "")
+        key = (source, account)
+        raw_info = latest_raw_file_info(str(config.get("input_path") or ""))
+        mart_info = mart_summary.get(key, {})
+
+        last_statement = mart_info.get("last_statement_period")
+        age = month_age(last_statement, today=today)
+        max_age = int(config.get("max_age_months") or 2)
+        monitoring_active = bool(config.get("monitoring_active", True))
+        alert_silenced = bool(config.get("alert_silenced", False))
+        mart_names = set(mart_info.get("mart_file_names") or [])
+        raw_inventory = build_raw_inventory(source, str(config.get("input_path") or ""), mart_names)
+        raw_inventory_summary = raw_inventory["summary"]
+        unprocessed_raw_files = [
+            str(item.get("file_name"))
+            for item in raw_inventory["items"]
+            if item.get("status") == "pending_real"
+        ]
+
+        if not monitoring_active:
+            status = "inactive"
+            alert = False
+            reason = "Monitoreo inactivo: no genera alerta, pero los datos historicos siguen incluidos."
+        elif age is None:
+            status = "alert"
+            alert = not alert_silenced
+            reason = "No se detecto statement cargado."
+        elif age > max_age:
+            status = "alert"
+            alert = not alert_silenced
+            reason = f"Ultimo statement {last_statement}; supera tolerancia de {max_age} meses."
+        elif unprocessed_raw_files:
+            status = "attention"
+            alert = not alert_silenced
+            reason = "Hay archivos raw que no figuran en el mart nuevo."
+        else:
+            status = "ok"
+            alert = False
+            reason = "Dentro de tolerancia."
+
+        if alert_silenced and status in {"alert", "attention"}:
+            reason = f"Alerta silenciada. {reason}"
+
+        status_counts[status] = status_counts.get(status, 0) + 1
+        items.append({
+            "id": config.get("id") or source_monitor_id(source, account),
+            "source": source,
+            "account": account,
+            "display_name": config.get("display_name") or f"{source} / {account}",
+            "input_path": config.get("input_path") or "",
+            "expected_frequency": config.get("expected_frequency") or "monthly",
+            "max_age_months": max_age,
+            "monitoring_active": monitoring_active,
+            "alert_silenced": alert_silenced,
+            "portal_url": config.get("portal_url") or "",
+            "notes": config.get("notes") or "",
+            "last_manual_review_at": config.get("last_manual_review_at") or None,
+            "last_statement_period": last_statement,
+            "statement_age_months": age,
+            "statement_files_in_mart": mart_info.get("statement_files_in_mart", 0),
+            "rows_in_mart": mart_info.get("rows_in_mart", 0),
+            "files_in_mart": len(mart_names),
+            "raw_files": raw_info["raw_files"],
+            "latest_raw_file": raw_info["latest_raw_file"],
+            "latest_raw_modified": raw_info["latest_raw_modified"],
+            "unprocessed_raw_files": unprocessed_raw_files[:20],
+            "unprocessed_raw_count": len(unprocessed_raw_files),
+            "raw_inventory_summary": raw_inventory_summary,
+            "ignored_raw_count": sum(
+                count
+                for status, count in raw_inventory_summary.items()
+                if status.startswith("ignored_")
+            ),
+            "ignored_raw_files": [
+                item for item in raw_inventory["items"]
+                if str(item.get("status") or "").startswith("ignored_")
+            ][:20],
+            "status": status,
+            "alert": alert,
+            "reason": reason,
+        })
+
+    return {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "items": items,
+        "summary": {
+            "total": len(items),
+            "alerts": sum(1 for item in items if item["alert"]),
+            "status_counts": status_counts,
+        },
+    }
+
+
+@app.post("/source-monitor/publish")
+def publish_source_monitor_marts(x_vpo_api_key: str | None = Header(default=None)):
+    require_api_key(x_vpo_api_key)
+    return publish_required_marts_to_gcs()
+
+
+@app.patch("/source-monitor/{monitor_id}")
+def update_source_monitor(
+    monitor_id: str,
+    request: SourceMonitorUpdateRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+):
+    require_api_key(x_vpo_api_key)
+    items = load_source_monitor_config()
+    found = False
+    now = datetime.now().isoformat(timespec="seconds")
+
+    for item in items:
+        if item.get("id") != monitor_id:
+            continue
+        found = True
+        update_data = request.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            if value is not None:
+                item[key] = value
+        item["updated_at"] = now
+        break
+
+    if not found:
+        raise HTTPException(status_code=404, detail="Source monitor item not found.")
+
+    save_source_monitor_config(items)
+    return {"ok": True, "item": next(item for item in items if item.get("id") == monitor_id)}
+
+
+@app.post("/source-monitor/{monitor_id}/process")
+def process_source_monitor(
+    monitor_id: str,
+    x_vpo_api_key: str | None = Header(default=None),
+):
+    require_api_key(x_vpo_api_key)
+    before = get_source_monitor_item(monitor_id)
+    if not before:
+        raise HTTPException(status_code=404, detail="Source monitor item not found.")
+
+    source = before["source"]
+    account = before["account"]
+    pending_files = before["unprocessed_raw_files"]
+    scripts = source_monitor_pipeline_scripts(source)
+    if not scripts:
+        raise HTTPException(status_code=400, detail=f"No hay pipeline nuevo configurado para {source}.")
+
+    script_results = []
+    for script_name in scripts:
+        result = run_pipeline_script(script_name)
+        script_results.append(result)
+        if result["returncode"] != 0:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "message": f"Fallo {script_name}.",
+                    "before": before,
+                    "scripts": script_results,
+                },
+            )
+
+    after = get_source_monitor_item(monitor_id)
+    standardized_after_path = BASE / "warehouse" / "marts" / STANDARDIZED_FILE
+    processed_summary = statement_summary_for_files(
+        standardized_path=standardized_after_path,
+        source=source,
+        account=account,
+        file_names=pending_files,
+    )
+
+    return {
+        "ok": True,
+        "processed_at": datetime.now().isoformat(timespec="seconds"),
+        "display_name": before["display_name"],
+        "source": source,
+        "account": account,
+        "pending_files_before": pending_files,
+        "last_statement_before": before["last_statement_period"],
+        "last_statement_after": after["last_statement_period"] if after else None,
+        "pending_files_after": after["unprocessed_raw_files"] if after else [],
+        "summary": processed_summary,
+        "total_rows": sum(int(row.get("rows") or 0) for row in processed_summary),
+        "total_amount_usd": sum(float(row.get("amount_usd") or 0) for row in processed_summary),
+        "scripts": script_results,
     }
 
 
@@ -1271,7 +5203,8 @@ def keyword_report(
     if not keywords:
         raise HTTPException(status_code=400, detail="At least one keyword is required.")
 
-    marts = ensure_marts(refresh_cache=request.refresh_cache, filenames=[SONG_FILE, STANDARDIZED_FILE])
+    marts = ensure_marts(refresh_cache=request.refresh_cache, filenames=[SONG_FILE, STANDARDIZED_FILE, CATALOG_MASTER_FILE])
+    configure_catalog_report_env(marts)
 
     output_path = build_report(
         keywords=keywords,
@@ -1323,7 +5256,8 @@ def keyword_report_download(
     if not normalized_keywords:
         raise HTTPException(status_code=400, detail="At least one keyword is required.")
 
-    marts = ensure_marts(refresh_cache=refresh_cache, filenames=[SONG_FILE, STANDARDIZED_FILE])
+    marts = ensure_marts(refresh_cache=refresh_cache, filenames=[SONG_FILE, STANDARDIZED_FILE, CATALOG_MASTER_FILE])
+    configure_catalog_report_env(marts)
 
     output_path = build_report(
         keywords=normalized_keywords,
@@ -1350,15 +5284,150 @@ def statement_report(
     x_vpo_api_key: str | None = Header(default=None),
 ) -> FileResponse:
     require_api_key(x_vpo_api_key)
-    marts = ensure_marts(refresh_cache=request.refresh_cache, filenames=[STATEMENT_SUMMARY_FILE, STANDARDIZED_FILE])
+    marts = ensure_marts(refresh_cache=request.refresh_cache, filenames=[STATEMENT_SUMMARY_FILE, STANDARDIZED_FILE, CATALOG_MASTER_FILE])
+    configure_catalog_report_env(marts)
     VPO_API_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = VPO_API_REPORTS_DIR / f"reporte_ingresos_por_statement_marts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    version_suffix = "nuevo" if request.report_version == "new" else "historico"
+    output_path = VPO_API_REPORTS_DIR / f"reporte_ingresos_por_statement_marts_{version_suffix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
 
-    output_path = build_statement_report_from_summary(
-        summary_path=marts[STATEMENT_SUMMARY_FILE],
+    output_path = build_statement_report_from_mart(
+        standardized_path=marts[STANDARDIZED_FILE],
         output_path=output_path,
         min_artist_total_usd=request.min_artist_total_usd,
-        standardized_path=marts[STANDARDIZED_FILE],
+        include_zero_total_artists=request.include_zero_total_artists,
+        report_version=request.report_version,
+    )
+
+    return FileResponse(
+        path=output_path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=output_path.name,
+    )
+
+
+@app.get("/reports/custom/options")
+def custom_report_options(
+    refresh_cache: bool = False,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    marts = ensure_marts(refresh_cache=refresh_cache, filenames=[STANDARDIZED_FILE])
+    try:
+        source_accounts_df = (
+            pl.scan_parquet(marts[STANDARDIZED_FILE])
+            .select(
+                [
+                    pl.col("source").cast(pl.Utf8, strict=False).str.to_lowercase().alias("source"),
+                    pl.col("account").cast(pl.Utf8, strict=False).str.to_lowercase().alias("account"),
+                ]
+            )
+            .drop_nulls()
+            .unique()
+            .sort(["source", "account"])
+            .collect()
+        )
+        source_accounts = source_accounts_df.to_dicts()
+        sources = sorted({row["source"] for row in source_accounts})
+    except Exception:
+        sources = []
+        source_accounts = []
+
+    return {
+        "templates": CUSTOM_REPORT_TEMPLATES,
+        "sources": sources,
+        "source_accounts": source_accounts,
+    }
+
+
+@app.post("/reports/custom/title-list")
+def custom_title_report(
+    request: CustomRoyaltyReportRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> FileResponse:
+    require_api_key(x_vpo_api_key)
+
+    if request.start_month and request.end_month and request.start_month > request.end_month:
+        raise HTTPException(status_code=400, detail="start_month cannot be greater than end_month.")
+
+    if request.template_key == "gusty_fuga_contracts":
+        marts = ensure_marts(refresh_cache=request.refresh_cache, filenames=[STANDARDIZED_FILE, CATALOG_MASTER_FILE])
+        configure_catalog_report_env(marts)
+        output_path = build_fuga_gusty_contract_report(
+            start_month=request.start_month,
+            end_month=request.end_month,
+            raw_path=marts[STANDARDIZED_FILE],
+            output_dir=VPO_API_REPORTS_DIR,
+        )
+        return FileResponse(
+            path=output_path,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=output_path.name,
+        )
+
+    if request.template_key == "la_nueva_sangre":
+        end_month = request.end_month or "2026-03"
+        marts = ensure_marts(
+            refresh_cache=request.refresh_cache,
+            filenames=[
+                STANDARDIZED_ONERPM_FILE,
+                STANDARDIZED_FUGA_FILE,
+                CATALOG_RELEASE_METADATA_FILE,
+                CATALOG_MASTER_FILE,
+            ],
+        )
+        configure_catalog_report_env(marts)
+        la_nueva_sangre_report.STANDARDIZED_ONERPM_PATH = marts[STANDARDIZED_ONERPM_FILE]
+        la_nueva_sangre_report.STANDARDIZED_FUGA_PATH = marts[STANDARDIZED_FUGA_FILE]
+        la_nueva_sangre_report.CATALOG_RELEASE_METADATA_PATH = marts[CATALOG_RELEASE_METADATA_FILE]
+        la_nueva_sangre_report.CATALOG_MASTER_PATH = marts[CATALOG_MASTER_FILE]
+        la_nueva_sangre_report.REPORTS_DIR = VPO_API_REPORTS_DIR
+        rows = la_nueva_sangre_report.classified_rows(end_month)
+        if request.exclude_related_videos:
+            rows = la_nueva_sangre_report.apply_related_video_exclusions(rows)
+        output_path = la_nueva_sangre_report.write_report(
+            rows,
+            end_month,
+            hide_zero_amounts=request.hide_zero_amounts,
+        )
+        return FileResponse(
+            path=output_path,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=output_path.name,
+        )
+
+    if request.template_key == "la_juntada_artistas":
+        marts = ensure_marts(
+            refresh_cache=request.refresh_cache,
+            filenames=[STANDARDIZED_FILE, CATALOG_MASTER_FILE],
+        )
+        la_juntada_report.RAW_ALL_PATH = marts[STANDARDIZED_FILE]
+        la_juntada_report.CATALOG_MASTER_PATH = marts[CATALOG_MASTER_FILE]
+        output_path = la_juntada_report.build_report(
+            output_dir=VPO_API_REPORTS_DIR,
+            end_month=request.end_month or None,
+        )
+        return FileResponse(
+            path=output_path,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            filename=output_path.name,
+        )
+
+    terms = [term.strip() for term in request.terms if str(term or "").strip()]
+    if not terms:
+        raise HTTPException(status_code=400, detail="La lista de busqueda no puede estar vacia.")
+
+    marts = ensure_marts(refresh_cache=request.refresh_cache, filenames=[SONG_FILE, STANDARDIZED_FILE, CATALOG_MASTER_FILE])
+    configure_catalog_report_env(marts)
+    output_path = build_custom_title_report(
+        report_title=request.report_title,
+        terms=terms,
+        start_month=request.start_month,
+        end_month=request.end_month,
+        sources=request.sources or None,
+        source_accounts=request.source_accounts or None,
+        song_path=marts[SONG_FILE],
+        raw_path=marts[STANDARDIZED_FILE],
+        output_dir=VPO_API_REPORTS_DIR,
     )
 
     return FileResponse(
@@ -1382,7 +5451,8 @@ def keyword_google_sheet(
     if not keywords:
         raise HTTPException(status_code=400, detail="At least one keyword is required.")
 
-    marts = ensure_marts(refresh_cache=request.refresh_cache, filenames=[SONG_FILE, STANDARDIZED_FILE])
+    marts = ensure_marts(refresh_cache=request.refresh_cache, filenames=[SONG_FILE, STANDARDIZED_FILE, CATALOG_MASTER_FILE])
+    configure_catalog_report_env(marts)
 
     tables = build_report_tables(
         keywords=keywords,
@@ -1420,10 +5490,13 @@ def distributor_participation(
 ) -> dict:
     require_api_key(x_vpo_api_key)
     marts = ensure_marts(refresh_cache=refresh_cache, filenames=[SONG_FILE])
+    base = pl.scan_parquet(marts[SONG_FILE]).filter(pl.col("transaction_month").is_not_null())
+    schema = set(base.collect_schema().names())
+    if "include_in_statement_view" in schema:
+        base = base.filter(pl.col("include_in_statement_view").cast(pl.Boolean, strict=False).fill_null(True))
 
     month_bounds = (
-        pl.scan_parquet(marts[SONG_FILE])
-        .filter(pl.col("transaction_month").is_not_null())
+        base
         .select([
             pl.min("transaction_month").alias("min_month"),
             pl.max("transaction_month").alias("max_month"),
@@ -1446,9 +5519,10 @@ def distributor_participation(
             "available_end_month": None,
             "total_amount_usd": 0.0,
             "items": [],
+            "account_items": [],
         }
 
-    report_end_month = previous_calendar_month()
+    report_end_month = min(previous_calendar_month(), available_end)
 
     if preset == "custom":
         effective_start = start_month or available_start
@@ -1467,18 +5541,30 @@ def distributor_participation(
         effective_end = report_end_month
 
     effective_start = max(effective_start, available_start)
+    effective_end = min(effective_end, available_end)
 
     if effective_start > effective_end:
         raise HTTPException(status_code=400, detail="start_month cannot be greater than end_month.")
 
-    df = (
-        pl.scan_parquet(marts[SONG_FILE])
-        .filter(pl.col("transaction_month").is_not_null())
+    period_base = (
+        base
         .filter(pl.col("transaction_month") >= effective_start)
         .filter(pl.col("transaction_month") <= effective_end)
+    )
+
+    df = (
+        period_base
         .group_by("source")
         .agg(pl.sum("amount_usd").alias("amount_usd"))
         .sort("amount_usd", descending=True)
+        .collect()
+    )
+
+    account_df = (
+        period_base
+        .group_by(["source", "account"])
+        .agg(pl.sum("amount_usd").alias("amount_usd"))
+        .sort(["source", "amount_usd"], descending=[False, True])
         .collect()
     )
 
@@ -1489,6 +5575,16 @@ def distributor_participation(
         amount = float(row["amount_usd"] or 0)
         items.append({
             "source": row["source"],
+            "amount_usd": amount,
+            "percentage": (amount / total * 100) if total else 0,
+        })
+
+    account_items = []
+    for row in account_df.iter_rows(named=True):
+        amount = float(row["amount_usd"] or 0)
+        account_items.append({
+            "source": row["source"],
+            "account": row["account"],
             "amount_usd": amount,
             "percentage": (amount / total * 100) if total else 0,
         })
@@ -1504,6 +5600,654 @@ def distributor_participation(
         "available_end_month": available_end,
         "total_amount_usd": total,
         "items": items,
+        "account_items": account_items,
+    }
+
+
+@app.get("/config/distributor-overview")
+def distributor_config_overview(
+    x_vpo_api_key: str | None = Header(default=None),
+):
+    require_api_key(x_vpo_api_key)
+    policies = load_config_seed("distributor-account-policies")
+    dictionary = load_config_seed("statement-source-dictionary")
+    cutoffs = load_config_seed("contract-cutoffs")
+    templates = load_config_seed("report-templates")
+    catalog_stats = catalog_stats_by_account(refresh_cache=False)
+    account_impact_stats = account_impact_stats_by_account(refresh_cache=False)
+    rule_previews = account_rule_preview_by_account(cutoffs.get("entries", []), refresh_cache=False)
+
+    dictionary_entries = dictionary.get("entries", [])
+    cutoff_by_id = {
+        item.get("cutoff_id"): item
+        for item in cutoffs.get("entries", [])
+        if item.get("cutoff_id")
+    }
+
+    accounts = []
+    for policy in policies.get("entries", []):
+        source = policy.get("source")
+        account = policy.get("account")
+        related_dictionary = [
+            item for item in dictionary_entries
+            if item.get("source") == source and item.get("account") in {account, "*"}
+        ]
+        contract_cutoff_id = policy.get("contract_cutoff_id")
+        accounts.append({
+            **policy,
+            "statement_dictionary": related_dictionary,
+            "contract_cutoff": cutoff_by_id.get(contract_cutoff_id),
+            "account_impact_stats": account_impact_stats.get((str(source), str(account)), {
+                "rows": 0,
+                "works": 0,
+                "amount_usd": 0.0,
+                "units": 0.0,
+                "first_transaction_month": None,
+                "last_transaction_month": None,
+                "sheet_breakdown": [],
+            }),
+            "rule_preview": rule_previews.get((str(source), str(account)), {
+                "enabled": False,
+                "cutoff_id": contract_cutoff_id,
+                "summary": [],
+                "items": [],
+            }),
+            "catalog_stats": catalog_stats.get((str(source), str(account)), {
+                "works": 0,
+                "active": 0,
+                "inactive": 0,
+                "excluded_from_reports": 0,
+                "release_dates": 0,
+                "missing_release_dates": 0,
+                "labels": 0,
+                "missing_labels": 0,
+                "amount_usd": 0.0,
+                "first_transaction_month": None,
+                "last_transaction_month": None,
+            }),
+        })
+
+    source_counts: dict[str, int] = {}
+    type_counts: dict[str, int] = {}
+    for account in accounts:
+        source_counts[str(account.get("source") or "unknown")] = source_counts.get(str(account.get("source") or "unknown"), 0) + 1
+        type_counts[str(account.get("account_type") or "unknown")] = type_counts.get(str(account.get("account_type") or "unknown"), 0) + 1
+
+    return {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "mode": policies.get("mode", "seed_read_only"),
+        "accounts": accounts,
+        "statement_dictionary": dictionary_entries,
+        "contract_cutoffs": cutoffs.get("entries", []),
+        "report_templates": templates.get("entries", []),
+        "summary": {
+            "accounts": len(accounts),
+            "dictionary_entries": len(dictionary_entries),
+            "contract_cutoffs": len(cutoffs.get("entries", [])),
+            "report_templates": len(templates.get("entries", [])),
+            "sources": source_counts,
+            "account_types": type_counts,
+            "catalog_works": sum(int(item.get("catalog_stats", {}).get("works", 0) or 0) for item in accounts),
+        },
+    }
+
+
+@app.get("/config/{config_name}")
+def config_seed(
+    config_name: Literal[
+        "distributor-account-policies",
+        "statement-source-dictionary",
+        "contract-cutoffs",
+        "report-templates",
+    ],
+    x_vpo_api_key: str | None = Header(default=None),
+):
+    require_api_key(x_vpo_api_key)
+    return load_config_seed(config_name)
+
+
+@app.get("/catalog")
+def catalog_items(
+    source: str | None = None,
+    account: str | None = None,
+    artist: str | None = None,
+    keyword: str | None = None,
+    label: str | None = None,
+    start_month: str | None = None,
+    end_month: str | None = None,
+    status: Literal["active", "inactive", "all"] = "active",
+    limit: int = 50,
+    offset: int = 0,
+    refresh_cache: bool = False,
+    x_vpo_api_key: str | None = Header(default=None),
+):
+    require_api_key(x_vpo_api_key)
+    limit = max(1, min(int(limit or 50), 200))
+    offset = max(0, int(offset or 0))
+
+    marts = ensure_marts(refresh_cache=refresh_cache, filenames=[CATALOG_MASTER_FILE])
+    path = marts[CATALOG_MASTER_FILE]
+    if not path.exists():
+        raise HTTPException(status_code=500, detail=f"No existe catalog master: {path}")
+
+    catalog = pl.read_parquet(path)
+    if "external_label" not in catalog.columns:
+        catalog = catalog.with_columns(pl.lit(None).cast(pl.Utf8).alias("external_label"))
+    if "label_normalized_auto" not in catalog.columns:
+        catalog = catalog.with_columns(
+            normalized_label_expr(pl.col("external_label")).alias("label_normalized_auto")
+        )
+    if "label_normalized" not in catalog.columns:
+        catalog = catalog.with_columns(
+            pl.coalesce(["label_normalized_auto", "external_label"]).alias("label_normalized")
+        )
+    status_df = load_catalog_status()
+    if status_df.is_empty():
+        catalog = catalog.with_columns([
+            pl.lit(True).alias("active"),
+            pl.lit(True).alias("include_in_reports"),
+            pl.lit("vpo_catalog").alias("catalog_business_status"),
+            pl.lit(None).cast(pl.Utf8).alias("status_notes"),
+            pl.lit(None).cast(pl.Utf8).alias("label_normalized_override"),
+            pl.lit(None).cast(pl.Utf8).alias("status_updated_at"),
+        ])
+    else:
+        catalog = (
+            catalog
+            .join(
+                status_df.rename({"updated_at": "status_updated_at"}),
+                on="catalog_key",
+                how="left",
+            )
+            .with_columns([
+                pl.col("active").fill_null(True),
+                (
+                    pl.col("include_in_reports").fill_null(pl.col("active")).fill_null(True)
+                    if "include_in_reports" in status_df.columns
+                    else pl.col("active").fill_null(True)
+                ).alias("include_in_reports"),
+                (
+                    pl.col("catalog_business_status").fill_null("vpo_catalog")
+                    if "catalog_business_status" in status_df.columns
+                    else pl.lit("vpo_catalog")
+                ).alias("catalog_business_status"),
+                pl.col("status_notes").cast(pl.Utf8, strict=False),
+                pl.col("label_normalized_override").cast(pl.Utf8, strict=False),
+                pl.col("status_updated_at").cast(pl.Utf8, strict=False),
+            ])
+        )
+    catalog = catalog.with_columns([
+        pl.when(pl.col("label_normalized_override").str.strip_chars() == "")
+        .then(pl.lit(None).cast(pl.Utf8))
+        .otherwise(pl.col("label_normalized_override").str.strip_chars())
+        .alias("label_normalized_override"),
+    ]).with_columns([
+        pl.coalesce(["label_normalized_override", "label_normalized_auto", "external_label"]).alias("label_normalized"),
+    ])
+
+    def split_values(series_name: str) -> list[str]:
+        values: set[str] = set()
+        if series_name not in catalog.columns:
+            return []
+        for raw in catalog.get_column(series_name).drop_nulls().to_list():
+            for part in str(raw).split(" | "):
+                value = part.strip()
+                if value:
+                    values.add(value)
+        return sorted(values, key=lambda item: item.casefold())
+
+    options = {
+        "sources": split_values("sources"),
+        "accounts": split_values("accounts"),
+        "artists": sorted(
+            [
+                str(value)
+                for value in catalog.get_column("artist_statement").drop_nulls().unique().to_list()
+                if str(value).strip()
+            ],
+            key=lambda item: item.casefold(),
+        ),
+        "labels": sorted(
+            [
+                str(value)
+                for value in catalog.get_column("label_normalized").drop_nulls().unique().to_list()
+                if str(value).strip()
+            ],
+            key=lambda item: item.casefold(),
+        ) if "label_normalized" in catalog.columns else [],
+        "first_month": catalog.get_column("first_transaction_month").drop_nulls().min(),
+        "last_month": catalog.get_column("last_transaction_month").drop_nulls().max(),
+    }
+
+    filtered = catalog.lazy()
+    if source:
+        filtered = filtered.filter(pl.col("sources").fill_null("").str.contains(source, literal=True))
+    if account:
+        filtered = filtered.filter(pl.col("accounts").fill_null("").str.contains(account, literal=True))
+    if artist:
+        needle = artist.strip().casefold()
+        filtered = filtered.filter(
+            pl.col("artist_statement").fill_null("").str.to_lowercase().str.contains(needle, literal=True)
+            | pl.col("artist_variants").fill_null("").str.to_lowercase().str.contains(needle, literal=True)
+        )
+    if keyword:
+        needle = keyword.strip().casefold()
+        if needle:
+            filtered = filtered.filter(
+                pl.col("track_title").fill_null("").str.to_lowercase().str.contains(needle, literal=True)
+                | pl.col("artist_statement").fill_null("").str.to_lowercase().str.contains(needle, literal=True)
+                | pl.col("asset_isrc").fill_null("").str.to_lowercase().str.contains(needle, literal=True)
+                | pl.col("title_variants").fill_null("").str.to_lowercase().str.contains(needle, literal=True)
+                | pl.col("artist_variants").fill_null("").str.to_lowercase().str.contains(needle, literal=True)
+            )
+    if label:
+        clean_label = label.strip()
+        if clean_label == "__missing__":
+            filtered = filtered.filter(
+                pl.col("label_normalized").is_null()
+                | (pl.col("label_normalized").cast(pl.Utf8, strict=False).str.strip_chars() == "")
+            )
+        elif clean_label:
+            filtered = filtered.filter(
+                pl.col("label_normalized").fill_null("").str.strip_chars() == clean_label
+            )
+    if start_month:
+        filtered = filtered.filter(pl.col("last_transaction_month").fill_null("") >= start_month)
+    if end_month:
+        filtered = filtered.filter(pl.col("first_transaction_month").fill_null("") <= end_month)
+    if status == "active":
+        filtered = filtered.filter(pl.col("active") == True)
+    elif status == "inactive":
+        filtered = filtered.filter(pl.col("active") == False)
+
+    total = filtered.select(pl.len().alias("total")).collect()["total"][0]
+    totals = filtered.select([
+        pl.sum("amount_usd").round(2).alias("amount_usd"),
+        pl.sum("units").round(2).alias("units"),
+    ]).collect().to_dicts()[0]
+    items = (
+        filtered
+        .sort("amount_usd", descending=True)
+        .slice(offset, limit)
+        .collect()
+        .to_dicts()
+    )
+
+    return {
+        "items": items,
+        "total": int(total),
+        "limit": limit,
+        "offset": offset,
+        "totals": totals,
+        "options": options,
+    }
+
+
+@app.patch("/catalog/status")
+def update_catalog_status(
+    request: CatalogStatusRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+):
+    require_api_key(x_vpo_api_key)
+    catalog_key = request.catalog_key.strip()
+    if not catalog_key:
+        raise HTTPException(status_code=400, detail="catalog_key vacio.")
+
+    now = datetime.now().isoformat(timespec="seconds")
+    status_df = load_catalog_status()
+    existing_rows = [] if status_df.is_empty() else status_df.filter(pl.col("catalog_key") == catalog_key).to_dicts()
+    existing_row = existing_rows[0] if existing_rows else {}
+    request_fields = getattr(request, "model_fields_set", getattr(request, "__fields_set__", set()))
+    label_override = existing_row.get("label_normalized_override")
+    if "label_normalized_override" in request_fields:
+        label_override = (request.label_normalized_override or "").strip() or None
+    new_row = pl.DataFrame([{
+        "catalog_key": catalog_key,
+        "active": bool(request.active),
+        "include_in_reports": bool(request.active if request.include_in_reports is None else request.include_in_reports),
+        "catalog_business_status": request.business_status,
+        "status_notes": (request.notes or "").strip() or None,
+        "label_normalized_override": label_override,
+        "updated_at": now,
+    }])
+    if status_df.is_empty():
+        final = new_row
+    else:
+        final = pl.concat([
+            status_df.filter(pl.col("catalog_key") != catalog_key),
+            new_row,
+        ], how="diagonal_relaxed")
+    save_catalog_status(final)
+    return {"ok": True, "catalog_key": catalog_key, "active": bool(request.active), "updated_at": now}
+
+
+def build_digital_income_summary_mart(standardized_path: Path, refresh_cache: bool = False) -> Path:
+    if (
+        not refresh_cache
+        and DIGITAL_INCOME_SUMMARY_PATH.exists()
+        and DIGITAL_INCOME_SUMMARY_PATH.stat().st_mtime >= standardized_path.stat().st_mtime
+    ):
+        return DIGITAL_INCOME_SUMMARY_PATH
+
+    lf = pl.scan_parquet(standardized_path)
+    schema = lf.collect_schema()
+    columns = set(schema.names())
+
+    def text_expr(column_name: str) -> pl.Expr:
+        if column_name not in columns:
+            return pl.lit("")
+        return pl.col(column_name).cast(pl.Utf8, strict=False).fill_null("").str.strip_chars()
+
+    def non_empty_text_expr(column_name: str) -> pl.Expr:
+        value = text_expr(column_name)
+        return pl.when(value == "").then(None).otherwise(value)
+
+    def numeric_expr(column_name: str) -> pl.Expr:
+        if column_name not in columns:
+            return pl.lit(None).cast(pl.Float64)
+        return pl.col(column_name).cast(pl.Float64, strict=False)
+
+    amount_candidates = [
+        numeric_expr(column_name)
+        for column_name in ["amount_usd", "net_amount_usd", "net_amount"]
+        if column_name in columns
+    ]
+    amount_usd = pl.coalesce(amount_candidates).fill_null(0.0) if amount_candidates else pl.lit(0.0)
+
+    artist_fields = [
+        "artist_statement_style",
+        "artist_best_available",
+        "artist_name_statement",
+        "track_artist_statement",
+        "product_artist_statement",
+        "asset_artist_statement",
+        "Artist Name",
+        "Track Artist",
+        "TRACK ARTIST",
+        "PRODUCT ARTIST",
+        "Asset Artist",
+        "Product Artist",
+        "artists_raw",
+        "payee",
+        "Payee",
+    ]
+    title_fields = [
+        "track_statement_style",
+        "release_statement_style",
+        "track_title",
+        "Track Title",
+        "TRACK",
+        "Asset Title",
+        "Product Title",
+        "Title",
+        "Video Title",
+        "Album Title",
+    ]
+    search_fields = [field for field in artist_fields + title_fields if field in columns]
+
+    base = lf.with_columns([
+        text_expr("source").alias("source"),
+        text_expr("account").alias("account"),
+        text_expr("statement_period").alias("statement_period"),
+        pl.coalesce([non_empty_text_expr(field) for field in artist_fields if field in columns] or [pl.lit("")]).fill_null("").alias("artist"),
+        pl.coalesce([non_empty_text_expr(field) for field in title_fields if field in columns] or [pl.lit("")]).fill_null("").alias("title"),
+        pl.concat_str([text_expr(field) for field in search_fields] or [pl.lit("")], separator=" ").str.to_lowercase().alias("search_text"),
+        amount_usd.alias("total_usd"),
+        numeric_expr("net_amount_eur").fill_null(0.0).alias("total_eur"),
+        (
+            pl.col("has_share_in_out").cast(pl.Boolean, strict=False).fill_null(False)
+            if "has_share_in_out" in columns
+            else pl.lit(False)
+        ).alias("has_share_in_out"),
+    ]).filter(
+        (pl.col("statement_period") != "")
+        & (pl.col("source") != "")
+        & (pl.col("account") != "")
+    )
+    if "include_in_statement_view" in columns:
+        base = base.filter(pl.col("include_in_statement_view").cast(pl.Boolean, strict=False).fill_null(True))
+
+    compact = (
+        base
+        .with_columns([
+            pl.when(pl.col("artist") == "").then(pl.lit("SIN ARTISTA")).otherwise(pl.col("artist")).alias("artist"),
+            pl.when(pl.col("title") == "").then(pl.lit("SIN TITULO")).otherwise(pl.col("title")).alias("title"),
+        ])
+        .group_by(["statement_period", "source", "account", "artist", "title", "search_text"])
+        .agg([
+            pl.sum("total_usd").round(2).alias("total_usd"),
+            pl.sum("total_eur").round(2).alias("total_eur"),
+            pl.max("has_share_in_out").alias("has_share_in_out"),
+            pl.len().alias("raw_rows"),
+        ])
+        .collect()
+    )
+
+    DIGITAL_INCOME_SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    compact.write_parquet(DIGITAL_INCOME_SUMMARY_PATH)
+    return DIGITAL_INCOME_SUMMARY_PATH
+
+
+@app.get("/digital-income")
+def digital_income(
+    source: str | None = None,
+    account: str | None = None,
+    artist: str | None = None,
+    artist_keyword: str | None = None,
+    start_month: str | None = None,
+    end_month: str | None = None,
+    limit: int = 500,
+    offset: int = 0,
+    refresh_cache: bool = False,
+    x_vpo_api_key: str | None = Header(default=None),
+):
+    require_api_key(x_vpo_api_key)
+    limit = max(1, min(int(limit or 500), 5000))
+    offset = max(0, int(offset or 0))
+
+    if VPO_LOCAL_MARTS_DIR is not None and VPO_LOCAL_MARTS_DIR.exists():
+        marts = ensure_marts(refresh_cache=refresh_cache, filenames=[STANDARDIZED_FILE])
+        standardized_path = marts[STANDARDIZED_FILE]
+        if not standardized_path.exists():
+            raise HTTPException(status_code=500, detail=f"No existe standardized mart: {standardized_path}")
+        summary_path = build_digital_income_summary_mart(standardized_path, refresh_cache=refresh_cache)
+    else:
+        try:
+            summary_marts = ensure_marts(refresh_cache=refresh_cache, filenames=[DIGITAL_INCOME_SUMMARY_FILE])
+            summary_path = summary_marts[DIGITAL_INCOME_SUMMARY_FILE]
+        except HTTPException:
+            marts = ensure_marts(refresh_cache=refresh_cache, filenames=[STANDARDIZED_FILE])
+            standardized_path = marts[STANDARDIZED_FILE]
+            if not standardized_path.exists():
+                raise HTTPException(status_code=500, detail=f"No existe standardized mart: {standardized_path}")
+            summary_path = build_digital_income_summary_mart(standardized_path, refresh_cache=refresh_cache)
+    base = pl.scan_parquet(summary_path)
+
+    source_account_options = (
+        base
+        .select(["source", "account"])
+        .unique()
+        .sort(["source", "account"])
+        .collect()
+    )
+    options = {
+        "sources": source_account_options.get_column("source").unique().sort().to_list(),
+        "accounts": source_account_options.get_column("account").unique().sort().to_list(),
+        "source_accounts": source_account_options.to_dicts(),
+        "artists": [],
+        "first_month": base.select(pl.min("statement_period").alias("first_month")).collect()["first_month"][0],
+        "last_month": base.select(pl.max("statement_period").alias("last_month")).collect()["last_month"][0],
+    }
+
+    filtered = base
+    if source:
+        filtered = filtered.filter(pl.col("source") == source.strip())
+    if account:
+        filtered = filtered.filter(pl.col("account") == account.strip())
+
+    keyword = (artist_keyword or artist or "").strip().casefold()
+    if keyword:
+        for token in [part for part in keyword.split() if part.strip()]:
+            filtered = filtered.filter(pl.col("search_text").str.contains(token, literal=True))
+
+    month_scope = filtered
+    if start_month:
+        month_scope = month_scope.filter(pl.col("statement_period") >= start_month)
+    if end_month:
+        month_scope = month_scope.filter(pl.col("statement_period") <= end_month)
+
+    available_months = (
+        month_scope
+        .select("statement_period")
+        .unique()
+        .sort("statement_period")
+        .collect()
+        .get_column("statement_period")
+        .to_list()
+    )
+    if not available_months:
+        return {
+            "items": [],
+            "monthly": [],
+            "by_source": [],
+            "matrix": [],
+            "matrix_months": [],
+            "total": 0,
+            "limit": limit,
+            "offset": offset,
+            "keyword": keyword,
+            "totals": {
+                "total_usd": 0.0,
+                "total_eur": 0.0,
+                "rows": 0,
+                "months": 0,
+                "sources": 0,
+                "accounts": 0,
+                "first_month": None,
+                "last_month": None,
+            },
+            "options": options,
+        }
+
+    if start_month or end_month:
+        matrix_months = available_months
+    else:
+        matrix_months = available_months[-6:]
+
+    filtered = month_scope.filter(pl.col("statement_period").is_in(matrix_months))
+
+    grouped = filtered
+
+    total_rows = grouped.select(pl.len().alias("rows")).collect()["rows"][0]
+    totals = (
+        grouped
+        .select([
+            pl.sum("total_usd").round(2).alias("total_usd"),
+            pl.sum("total_eur").round(2).alias("total_eur"),
+            pl.len().alias("rows"),
+            pl.col("statement_period").n_unique().alias("months"),
+            pl.col("source").n_unique().alias("sources"),
+            pl.col("account").n_unique().alias("accounts"),
+            pl.min("statement_period").alias("first_month"),
+            pl.max("statement_period").alias("last_month"),
+        ])
+        .collect()
+        .to_dicts()[0]
+    )
+    monthly = (
+        grouped
+        .group_by("statement_period")
+        .agg([
+            pl.sum("total_usd").round(2).alias("total_usd"),
+            pl.sum("total_eur").round(2).alias("total_eur"),
+            pl.len().alias("rows"),
+        ])
+        .sort("statement_period")
+        .collect()
+        .to_dicts()
+    )
+
+    month_aggs = [
+        (
+            pl.when(pl.col("statement_period") == month)
+            .then(pl.col("total_usd"))
+            .otherwise(0.0)
+            .sum()
+            .round(2)
+            .alias(month)
+        )
+        for month in matrix_months
+    ]
+    matrix_df = (
+        grouped
+        .group_by(["source", "account"])
+        .agg([
+            *month_aggs,
+            pl.sum("total_usd").round(2).alias("total_usd"),
+            pl.sum("total_eur").round(2).alias("total_eur"),
+            pl.len().alias("rows"),
+            pl.col("artist").n_unique().alias("artists"),
+            pl.max("has_share_in_out").alias("has_share_in_out"),
+        ])
+        .sort("total_usd", descending=True)
+        .collect()
+    )
+    matrix = []
+    for row in matrix_df.to_dicts():
+        matrix.append({
+            "source": row["source"],
+            "account": row["account"],
+            "months": {month: float(row.get(month) or 0.0) for month in matrix_months},
+            "total_usd": float(row.get("total_usd") or 0.0),
+            "total_eur": float(row.get("total_eur") or 0.0),
+            "rows": int(row.get("rows") or 0),
+            "artists": int(row.get("artists") or 0),
+            "has_share_in_out": bool(row.get("has_share_in_out")),
+        })
+
+    by_source = [
+        {
+            "source": row["source"],
+            "account": row["account"],
+            "total_usd": row["total_usd"],
+            "total_eur": row["total_eur"],
+            "rows": row["rows"],
+            "artists": row["artists"],
+        }
+        for row in matrix
+    ]
+
+    items = (
+        grouped
+        .select([
+            "statement_period",
+            "source",
+            "account",
+            "artist",
+            "title",
+            "total_usd",
+            "total_eur",
+            "has_share_in_out",
+            "raw_rows",
+        ])
+        .sort(["statement_period", "source", "account", "artist"])
+        .slice(offset, limit)
+        .collect()
+        .to_dicts()
+    )
+
+    return {
+        "items": items,
+        "monthly": monthly,
+        "by_source": by_source,
+        "matrix": matrix,
+        "matrix_months": matrix_months,
+        "total": int(total_rows),
+        "limit": limit,
+        "offset": offset,
+        "keyword": keyword,
+        "totals": totals,
+        "options": options,
     }
 
 
@@ -1511,39 +6255,2395 @@ def distributor_participation(
 def booking_shows(
     limit: int = 50,
     x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
 ) -> dict:
     require_api_key(x_vpo_api_key)
     init_booking_db()
-    safe_limit = min(max(limit, 1), 200)
+    safe_limit = min(max(limit, 1), 1000)
 
     with booking_connect() as conn:
+        permission = user_module_permission(conn, x_vpo_username, "booking")
+        if not permission.get("allowed"):
+            raise HTTPException(status_code=403, detail="No tenes permiso para ver Booking Indyana.")
+        if not (permission.get("can_view_history") or permission.get("can_edit") or permission.get("can_approve")):
+            return {
+                "db_driver": operational_db_settings().driver,
+                "items": [],
+            }
+        params: list = []
+        artist_scope_sql = apply_artist_scope_sql(conn, x_vpo_username, "booking", params)
         rows = conn.execute(
-            """
+            f"""
             SELECT *
             FROM booking_shows
+            WHERE 1 = 1
+              {artist_scope_sql}
             ORDER BY show_date DESC, id DESC
             LIMIT ?
             """,
-            (safe_limit,),
+            (*params, safe_limit),
         ).fetchall()
         items = [row_to_booking_show(row) for row in rows]
         items = attach_booking_expenses(conn, items)
+        items = attach_booking_cash_movements(conn, items)
         items = attach_booking_pre_split_adjustments(conn, items)
+        items = attach_booking_direct_commissions(conn, items)
+        items = attach_booking_external_shares(conn, items)
         items = attach_booking_adjustments(conn, items)
 
     return {
-        "db_path": str(VPO_BOOKING_DB_PATH),
+        "db_driver": operational_db_settings().driver,
         "items": items,
+    }
+
+
+@app.get("/booking/summary")
+def booking_summary(
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+
+    with booking_connect() as conn:
+        params: list = []
+        artist_scope_sql = apply_artist_scope_sql(conn, x_vpo_username, "booking_summary", params)
+        rows = conn.execute(
+            f"""
+            SELECT
+                artist,
+                substr(show_date, 1, 7) AS month,
+                COUNT(*) AS shows,
+                SUM(producer_cash_target_amount) AS indyana_total,
+                SUM(CASE WHEN COALESCE(booking_commission_exempt, 0) = 1 THEN 0 ELSE producer_cash_target_amount END) AS commissionable_total,
+                SUM(CASE WHEN COALESCE(booking_commission_exempt, 0) = 1 THEN producer_cash_target_amount ELSE 0 END) AS non_commissionable_total,
+                GROUP_CONCAT(DISTINCT CASE
+                    WHEN COALESCE(booking_commission_exempt, 0) = 1
+                    THEN COALESCE(NULLIF(booking_commission_notes, ''), 'Excluido de comision general')
+                    ELSE NULL
+                END) AS commission_notes
+            FROM booking_shows
+            WHERE status <> 'cancelado'
+              {artist_scope_sql}
+            GROUP BY artist, month
+            ORDER BY artist, month
+            """,
+            params,
+        ).fetchall()
+
+    months = sorted({row["month"] for row in rows if row["month"]})
+    by_artist: dict[str, dict] = {}
+    for row in rows:
+        artist = row["artist"]
+        month = row["month"]
+        if not artist or not month:
+            continue
+
+        item = by_artist.setdefault(
+            artist,
+            {
+                "artist": artist,
+                "shows": 0,
+                "indyana_total": 0.0,
+                "commissionable_total": 0.0,
+                "non_commissionable_total": 0.0,
+                "months": {},
+                "notes": [],
+            },
+        )
+        indyana_total = float(row["indyana_total"] or 0)
+        commissionable_total = float(row["commissionable_total"] or 0)
+        non_commissionable_total = float(row["non_commissionable_total"] or 0)
+        shows = int(row["shows"] or 0)
+        item["shows"] += shows
+        item["indyana_total"] += indyana_total
+        item["commissionable_total"] += commissionable_total
+        item["non_commissionable_total"] += non_commissionable_total
+        item["months"][month] = {
+            "shows": shows,
+            "indyana_total": indyana_total,
+            "commissionable_total": commissionable_total,
+            "non_commissionable_total": non_commissionable_total,
+        }
+        if row["commission_notes"]:
+            for note in str(row["commission_notes"]).split(","):
+                cleaned = note.strip()
+                if cleaned and cleaned not in item["notes"]:
+                    item["notes"].append(cleaned)
+
+    items = sorted(by_artist.values(), key=lambda value: value["indyana_total"], reverse=True)
+    totals = {
+        "shows": sum(item["shows"] for item in items),
+        "indyana_total": sum(item["indyana_total"] for item in items),
+        "commissionable_total": sum(item["commissionable_total"] for item in items),
+        "non_commissionable_total": sum(item["non_commissionable_total"] for item in items),
+    }
+
+    return {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "months": months,
+        "items": items,
+        "totals": totals,
+        "db_path": str(VPO_BOOKING_DB_PATH),
+    }
+
+
+@app.get("/booking/artist-summary")
+def booking_artist_summary(
+    artist: str | None = None,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+
+    selected_artist = clean_optional_text(artist)
+
+    with booking_connect() as conn:
+        artist_scope_params: list = []
+        artist_scope_sql = apply_artist_scope_sql(conn, x_vpo_username, "booking_detail", artist_scope_params)
+        artists = [
+            row["artist"]
+            for row in conn.execute(
+                f"""
+                SELECT DISTINCT artist
+                FROM booking_shows
+                WHERE status <> 'cancelado'
+                  {artist_scope_sql}
+                ORDER BY artist
+                """,
+                artist_scope_params,
+            ).fetchall()
+            if row["artist"]
+        ]
+
+        params: list = []
+        where_artist = ""
+        if selected_artist:
+            where_artist = "AND artist = ?"
+            params.append(selected_artist)
+        artist_scope_sql = apply_artist_scope_sql(conn, x_vpo_username, "booking_detail", params)
+
+        rows = conn.execute(
+            f"""
+            SELECT
+                id,
+                artist,
+                show_date,
+                venue,
+                COALESCE(city, '') AS city,
+                COALESCE(contracted_cachet_amount, cachet_amount, 0) AS cachet_total,
+                artist_cash_target_amount AS artist_income,
+                producer_cash_target_amount AS indyana_income,
+                COALESCE(booking_commission_exempt, 0) AS booking_commission_exempt,
+                CASE WHEN COALESCE(booking_commission_exempt, 0) = 1 THEN 0 ELSE producer_cash_target_amount END AS commissionable_income,
+                CASE WHEN COALESCE(booking_commission_exempt, 0) = 1 THEN producer_cash_target_amount ELSE 0 END AS non_commissionable_income,
+                COALESCE(booking_commission_notes, '') AS commission_notes,
+                settlement_status,
+                origin_type,
+                origin_id
+            FROM booking_shows
+            WHERE status <> 'cancelado'
+              {where_artist}
+              {artist_scope_sql}
+            ORDER BY show_date DESC, id DESC
+            """,
+            params,
+        ).fetchall()
+
+    items = []
+    monthly: dict[str, dict] = {}
+    for row in rows:
+        month = str(row["show_date"] or "")[:7]
+        cachet_total = float(row["cachet_total"] or 0)
+        artist_income = float(row["artist_income"] or 0)
+        indyana_income = float(row["indyana_income"] or 0)
+        commissionable_income = float(row["commissionable_income"] or 0)
+        non_commissionable_income = float(row["non_commissionable_income"] or 0)
+        items.append(
+            {
+                "id": row["id"],
+                "artist": row["artist"],
+                "show_date": row["show_date"],
+                "venue": row["venue"],
+                "city": row["city"],
+                "cachet_total": cachet_total,
+                "artist_income": artist_income,
+                "indyana_income": indyana_income,
+                "is_commissionable": not bool(row["booking_commission_exempt"]),
+                "commissionable_income": commissionable_income,
+                "non_commissionable_income": non_commissionable_income,
+                "commission_notes": row["commission_notes"],
+                "settlement_status": row["settlement_status"],
+                "origin_type": row["origin_type"],
+                "origin_id": row["origin_id"],
+            }
+        )
+        if month:
+            bucket = monthly.setdefault(
+                month,
+                {
+                    "month": month,
+                    "shows": 0,
+                    "cachet_total": 0.0,
+                    "artist_income": 0.0,
+                    "indyana_income": 0.0,
+                    "commissionable_income": 0.0,
+                    "non_commissionable_income": 0.0,
+                },
+            )
+            bucket["shows"] += 1
+            bucket["cachet_total"] += cachet_total
+            bucket["artist_income"] += artist_income
+            bucket["indyana_income"] += indyana_income
+            bucket["commissionable_income"] += commissionable_income
+            bucket["non_commissionable_income"] += non_commissionable_income
+
+    totals = {
+        "shows": len(items),
+        "cachet_total": sum(item["cachet_total"] for item in items),
+        "artist_income": sum(item["artist_income"] for item in items),
+        "indyana_income": sum(item["indyana_income"] for item in items),
+        "commissionable_income": sum(item["commissionable_income"] for item in items),
+        "non_commissionable_income": sum(item["non_commissionable_income"] for item in items),
+    }
+
+    return {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "selected_artist": selected_artist,
+        "artists": artists,
+        "items": items,
+        "months": [monthly[key] for key in sorted(monthly.keys(), reverse=True)],
+        "totals": totals,
+        "db_path": str(VPO_BOOKING_DB_PATH),
+    }
+
+
+@app.get("/artist-finance/summary")
+def artist_finance_summary(
+    artist: str | None = None,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+
+    selected_artist = clean_optional_text(artist)
+
+    with booking_connect() as conn:
+        artist_scope_params: list = []
+        artist_scope_sql = apply_artist_scope_sql(conn, x_vpo_username, "artist_finance", artist_scope_params)
+        artists = [
+            row["artist"]
+            for row in conn.execute(
+                f"""
+                SELECT DISTINCT artist
+                FROM booking_shows
+                WHERE status <> 'cancelado'
+                  {artist_scope_sql}
+                ORDER BY artist
+                """,
+                artist_scope_params,
+            ).fetchall()
+            if row["artist"]
+        ]
+
+        params: list = []
+        where_artist = ""
+        if selected_artist:
+            where_artist = "AND artist = ?"
+            params.append(selected_artist)
+        artist_scope_sql = apply_artist_scope_sql(conn, x_vpo_username, "artist_finance", params)
+
+        booking_totals = conn.execute(
+            f"""
+            SELECT
+                COUNT(*) AS shows,
+                SUM(COALESCE(contracted_cachet_amount, cachet_amount, 0)) AS cachet_total,
+                SUM(COALESCE(expenses_amount, 0)) AS show_expenses,
+                SUM(COALESCE(artist_cash_target_amount, 0)) AS artist_target,
+                SUM(COALESCE(producer_cash_target_amount, 0)) AS indyana_target,
+                SUM(COALESCE(artist_paid_amount, 0)) AS artist_paid,
+                SUM(COALESCE(producer_received_amount, 0)) AS indyana_received,
+                SUM(COALESCE(balance_artist_amount, 0)) AS artist_balance,
+                SUM(COALESCE(balance_producer_amount, 0)) AS indyana_balance,
+                SUM(COALESCE(venue_balance_amount, 0)) AS venue_balance,
+                SUM(CASE WHEN COALESCE(booking_commission_exempt, 0) = 1 THEN 0 ELSE COALESCE(producer_cash_target_amount, 0) END) AS commissionable_indyana,
+                SUM(CASE WHEN COALESCE(booking_commission_exempt, 0) = 1 THEN COALESCE(producer_cash_target_amount, 0) ELSE 0 END) AS non_commissionable_indyana
+            FROM booking_shows
+            WHERE status <> 'cancelado'
+              {where_artist}
+              {artist_scope_sql}
+            """,
+            params,
+        ).fetchone()
+
+        monthly_rows = conn.execute(
+            f"""
+            SELECT
+                substr(show_date, 1, 7) AS month,
+                COUNT(*) AS shows,
+                SUM(COALESCE(producer_cash_target_amount, 0)) AS indyana_target,
+                SUM(COALESCE(balance_producer_amount, 0)) AS indyana_balance,
+                SUM(COALESCE(balance_artist_amount, 0)) AS artist_balance,
+                SUM(COALESCE(venue_balance_amount, 0)) AS venue_balance
+            FROM booking_shows
+            WHERE status <> 'cancelado'
+              {where_artist}
+              {artist_scope_sql}
+            GROUP BY month
+            ORDER BY month DESC
+            """,
+            params,
+        ).fetchall()
+
+        open_show_rows = conn.execute(
+            f"""
+            SELECT
+                id,
+                artist,
+                show_date,
+                venue,
+                COALESCE(balance_producer_amount, 0) AS indyana_balance,
+                COALESCE(balance_artist_amount, 0) AS artist_balance,
+                COALESCE(venue_balance_amount, 0) AS venue_balance,
+                settlement_status,
+                status,
+                notes
+            FROM booking_shows
+            WHERE status <> 'cancelado'
+              {where_artist}
+              {artist_scope_sql}
+              AND (
+                ABS(COALESCE(balance_producer_amount, 0)) > 0.01
+                OR ABS(COALESCE(balance_artist_amount, 0)) > 0.01
+                OR ABS(COALESCE(venue_balance_amount, 0)) > 0.01
+              )
+            ORDER BY show_date DESC, id DESC
+            LIMIT 100
+            """,
+            params,
+        ).fetchall()
+
+        ledger_params: list = []
+        ledger_where = "WHERE 1 = 1"
+        if selected_artist:
+            ledger_where += " AND artist = ?"
+            ledger_params.append(selected_artist)
+        ledger_where += apply_artist_scope_sql(conn, x_vpo_username, "artist_finance", ledger_params)
+
+        legacy_rows = conn.execute(
+            f"""
+            SELECT
+                id,
+                artist,
+                movement_date,
+                movement_type,
+                concept,
+                category,
+                project,
+                amount,
+                recoverable,
+                artist_percent,
+                producer_percent,
+                show_id,
+                notes
+            FROM booking_artist_ledger
+            {ledger_where}
+            ORDER BY movement_date DESC, id DESC
+            LIMIT 100
+            """,
+            ledger_params,
+        ).fetchall()
+
+        finance_params: list = []
+        finance_where = "WHERE 1 = 1"
+        if selected_artist:
+            finance_where += " AND artist = ?"
+            finance_params.append(selected_artist)
+        finance_where += apply_artist_scope_sql(conn, x_vpo_username, "artist_finance", finance_params)
+
+        finance_rows = conn.execute(
+            f"""
+            SELECT
+                id, movement_date, artist, business_area, movement_type, category,
+                project_id, project_name, concept, counterparty, paid_by,
+                amount, currency, fx_rate, amount_ars,
+                paid_amount, paid_amount_ars, pending_amount_ars, payment_status, due_date,
+                recoverable,
+                recoverable_percent, recovery_method, artist_percent, producer_percent,
+                account_effect, status, source_type, source_id,
+                proof_refs_json, notes, created_at, updated_at
+            FROM finance_staging_movements
+            {finance_where}
+            ORDER BY movement_date DESC, id DESC
+            LIMIT 250
+            """,
+            finance_params,
+        ).fetchall()
+
+        recovery_application_rows = conn.execute(
+            f"""
+            SELECT
+                id, artist, application_date, finance_movement_id, project_name,
+                source_type, source_id, source_label, amount_ars,
+                recovery_method, notes, created_at
+            FROM finance_recovery_applications
+            {finance_where}
+            ORDER BY application_date DESC, id DESC
+            """,
+            finance_params,
+        ).fetchall()
+
+        finance_project_rows = conn.execute(
+            f"""
+            SELECT
+                COALESCE(project_name, '(sin proyecto)') AS project_name,
+                business_area,
+                MIN(movement_date) AS first_date,
+                MAX(movement_date) AS last_date,
+                COUNT(*) AS rows,
+                SUM(COALESCE(amount_ars, 0)) AS amount_ars,
+                SUM(COALESCE(paid_amount_ars, 0)) AS paid_amount_ars,
+                SUM(COALESCE(pending_amount_ars, 0)) AS pending_amount_ars,
+                SUM(CASE WHEN recoverable = 1 AND status NOT IN ('aplicado', 'anulado') THEN COALESCE(amount_ars, 0) * COALESCE(recoverable_percent, 0) / 100.0 ELSE 0 END) AS recoverable_amount_ars,
+                SUM(CASE WHEN recoverable = 1 AND status NOT IN ('aplicado', 'anulado') THEN COALESCE(paid_amount_ars, 0) * COALESCE(recoverable_percent, 0) / 100.0 ELSE 0 END) AS recoverable_paid_ars,
+                SUM(CASE WHEN recoverable = 1 AND status NOT IN ('aplicado', 'anulado') AND COALESCE(recovery_method, 'none') = 'none' THEN COALESCE(amount_ars, 0) * COALESCE(recoverable_percent, 0) / 100.0 ELSE 0 END) AS recoverable_pending_criteria_ars,
+                SUM(CASE WHEN recoverable = 1 AND status NOT IN ('aplicado', 'anulado') AND COALESCE(recovery_method, 'none') <> 'none' THEN COALESCE(amount_ars, 0) * COALESCE(recoverable_percent, 0) / 100.0 ELSE 0 END) AS recoverable_defined_ars
+            FROM finance_staging_movements
+            {finance_where}
+            GROUP BY COALESCE(project_name, '(sin proyecto)'), business_area
+            ORDER BY last_date DESC, project_name, business_area
+            """,
+            finance_params,
+        ).fetchall()
+
+        finance_status_rows = conn.execute(
+            f"""
+            SELECT
+                status,
+                COUNT(*) AS rows,
+                SUM(COALESCE(amount_ars, 0)) AS amount_ars,
+                SUM(COALESCE(paid_amount_ars, 0)) AS paid_amount_ars,
+                SUM(COALESCE(pending_amount_ars, 0)) AS pending_amount_ars
+            FROM finance_staging_movements
+            {finance_where}
+            GROUP BY status
+            ORDER BY status
+            """,
+            finance_params,
+        ).fetchall()
+        finance_ledger = build_artist_finance_ledger(conn, selected_artist, x_vpo_username, "artist_finance")
+
+    totals = dict(booking_totals) if booking_totals else {}
+    for key in [
+        "shows",
+        "cachet_total",
+        "show_expenses",
+        "artist_target",
+        "indyana_target",
+        "artist_paid",
+        "indyana_received",
+        "artist_balance",
+        "indyana_balance",
+        "venue_balance",
+        "commissionable_indyana",
+        "non_commissionable_indyana",
+    ]:
+        totals[key] = float(totals.get(key) or 0)
+    totals["shows"] = int(totals["shows"])
+    totals["booking_current_balance_indyana"] = totals["indyana_balance"] - totals["artist_balance"]
+
+    legacy_movements = [dict(row) for row in legacy_rows]
+    legacy_total = sum(float(row.get("amount") or 0) for row in legacy_movements)
+    recoverable_legacy_total = sum(float(row.get("amount") or 0) for row in legacy_movements if row.get("recoverable"))
+    finance_movements = [finance_movement_item(row) for row in finance_rows]
+    recovery_applications = [dict(row) for row in recovery_application_rows]
+    recovered_by_movement: dict[int, float] = {}
+    recovered_by_project: dict[tuple[str, str], float] = {}
+    for row in recovery_applications:
+        amount = float(row.get("amount_ars") or 0)
+        movement_id = int(row.get("finance_movement_id") or 0)
+        recovered_by_movement[movement_id] = recovered_by_movement.get(movement_id, 0.0) + amount
+        project_key = (row.get("project_name") or "(sin proyecto)", "booking")
+        recovered_by_project[project_key] = recovered_by_project.get(project_key, 0.0) + amount
+    for row in finance_movements:
+        recoverable_amount = (
+            float(row.get("amount_ars") or 0)
+            * float(row.get("recoverable_percent") or 0)
+            / 100.0
+            if row.get("recoverable") and row.get("status") not in {"aplicado", "anulado"}
+            else 0.0
+        )
+        recovered_amount = recovered_by_movement.get(int(row.get("id") or 0), 0.0)
+        row["recovered_amount_ars"] = recovered_amount
+        row["recoverable_open_ars"] = max(recoverable_amount - recovered_amount, 0.0)
+    finance_amount_total = sum(float(row.get("amount_ars") or 0) for row in finance_movements)
+    finance_paid_total = sum(float(row.get("paid_amount_ars") or 0) for row in finance_movements)
+    finance_pending_total = sum(float(row.get("pending_amount_ars") or 0) for row in finance_movements)
+    finance_recoverable_total = sum(float(row.get("recoverable_open_ars") or 0) for row in finance_movements)
+    finance_recovered_total = sum(float(row.get("amount_ars") or 0) for row in recovery_applications)
+    finance_recoverable_paid = sum(
+        float(row.get("paid_amount_ars") or 0) * float(row.get("recoverable_percent") or 0) / 100.0
+        for row in finance_movements
+        if row.get("recoverable") and row.get("status") not in {"aplicado", "anulado"}
+    )
+    finance_recoverable_pending_criteria = sum(
+        float(row.get("recoverable_open_ars") or 0)
+        for row in finance_movements
+        if row.get("recoverable")
+        and row.get("status") not in {"aplicado", "anulado"}
+        and (row.get("recovery_method") or "none") == "none"
+    )
+    finance_recoverable_defined_open = sum(
+        float(row.get("recoverable_open_ars") or 0)
+        for row in finance_movements
+        if row.get("recoverable")
+        and row.get("status") not in {"aplicado", "anulado"}
+        and (row.get("recovery_method") or "none") != "none"
+    )
+    finance_project_summary = []
+    for row in finance_project_rows:
+        item = dict(row)
+        key = (item.get("project_name") or "(sin proyecto)", item.get("business_area") or "booking")
+        recovered_amount = recovered_by_project.get(key, 0.0)
+        item["recovered_amount_ars"] = recovered_amount
+        item["recoverable_open_ars"] = max(float(item.get("recoverable_amount_ars") or 0) - recovered_amount, 0.0)
+        item["recoverable_defined_open_ars"] = max(float(item.get("recoverable_defined_ars") or 0) - recovered_amount, 0.0)
+        item["recoverable_pending_criteria_open_ars"] = float(item.get("recoverable_pending_criteria_ars") or 0)
+        finance_project_summary.append(item)
+
+    return {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "selected_artist": selected_artist,
+        "artists": artists,
+        "summary": {
+            "booking": totals,
+            "legacy_ledger": {
+                "rows": len(legacy_movements),
+                "amount_total": legacy_total,
+                "recoverable_amount_total": recoverable_legacy_total,
+                "official": False,
+                "note": "Legacy de booking_artist_ledger: lectura de apoyo, todavia no es ledger financiero oficial.",
+            },
+            "recoverables": {
+                "open_amount": finance_recoverable_total,
+                "paid_basis_amount": finance_recoverable_paid,
+                "recovered_amount": finance_recovered_total,
+                "pending_amount": finance_recoverable_total,
+                "official": True,
+                "note": "Lectura desde ledger financiero v1: origenes recuperables menos aplicaciones trazadas.",
+            },
+            "finance_staging": {
+                "rows": len(finance_movements),
+                "amount_ars": finance_amount_total,
+                "paid_amount_ars": finance_paid_total,
+                "pending_amount_ars": finance_pending_total,
+                "recoverable_amount_ars": sum(float(row.get("recoverable_amount_ars") or 0) for row in finance_project_summary),
+                "recovered_amount_ars": finance_recovered_total,
+                "recoverable_paid_basis_ars": finance_recoverable_paid,
+                "recoverable_pending_basis_ars": finance_recoverable_total,
+                "recoverable_defined_open_ars": finance_recoverable_defined_open,
+                "recoverable_pending_criteria_ars": finance_recoverable_pending_criteria,
+                "by_status": [dict(row) for row in finance_status_rows],
+                "official": False,
+                "note": "Movimientos financieros en staging: gastos, inversiones, recuperos, pagos y ajustes cargados para control.",
+            },
+        },
+        "monthly_booking": [dict(row) for row in monthly_rows],
+        "open_booking_balances": [dict(row) for row in open_show_rows],
+        "finance_ledger": finance_ledger,
+        "legacy_movements": legacy_movements,
+        "finance_project_summary": finance_project_summary,
+        "finance_movements": finance_movements,
+        "recovery_applications": recovery_applications,
+        "db_path": str(VPO_BOOKING_DB_PATH),
+    }
+
+
+@app.get("/finance/projects")
+def finance_projects(
+    artist: str | None = None,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+    selected_artist = clean_optional_text(artist)
+    params: list = []
+    where = ""
+    if selected_artist:
+        where = "WHERE artist = ? OR artist IS NULL"
+        params.append(selected_artist)
+
+    with booking_connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT id, name, artist, business_area, status, notes, created_at, updated_at
+            FROM finance_projects
+            {where}
+            ORDER BY COALESCE(artist, ''), business_area, name
+            """,
+            params,
+        ).fetchall()
+
+    return {
+        "items": [dict(row) for row in rows],
+        "db_path": str(VPO_BOOKING_DB_PATH),
+    }
+
+
+@app.post("/finance/projects")
+def create_finance_project(
+    request: FinanceProjectRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+    now = datetime.now().isoformat(timespec="seconds")
+    name = request.name.strip()
+    artist = clean_optional_text(request.artist)
+
+    with booking_connect() as conn:
+        existing = conn.execute(
+            """
+            SELECT id
+            FROM finance_projects
+            WHERE name = ?
+              AND COALESCE(artist, '') = COALESCE(?, '')
+              AND business_area = ?
+            """,
+            (name, artist, request.business_area),
+        ).fetchone()
+        if existing:
+            raise HTTPException(status_code=409, detail="El proyecto ya existe para ese artista/area.")
+
+        cursor = conn.execute(
+            """
+            INSERT INTO finance_projects (
+                name, artist, business_area, status, notes, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                name,
+                artist,
+                request.business_area,
+                request.status,
+                clean_optional_text(request.notes),
+                now,
+                now,
+            ),
+        )
+        item = conn.execute(
+            """
+            SELECT id, name, artist, business_area, status, notes, created_at, updated_at
+            FROM finance_projects
+            WHERE id = ?
+            """,
+            (int(cursor.lastrowid),),
+        ).fetchone()
+
+    return {"item": dict(item), "db_path": str(VPO_BOOKING_DB_PATH)}
+
+
+@app.get("/finance/movements")
+def finance_movements(
+    artist: str | None = None,
+    project: str | None = None,
+    status: str | None = None,
+    limit: int = 200,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+    selected_artist = clean_optional_text(artist)
+    selected_project = clean_optional_text(project)
+    selected_status = clean_optional_text(status)
+    safe_limit = max(1, min(int(limit or 200), 1000))
+
+    where_parts: list[str] = []
+    params: list = []
+    option_where_parts: list[str] = []
+    option_params: list = []
+    if selected_artist:
+        where_parts.append("artist = ?")
+        params.append(selected_artist)
+        option_where_parts.append("artist = ?")
+        option_params.append(selected_artist)
+    if selected_project:
+        where_parts.append("project_name = ?")
+        params.append(selected_project)
+    if selected_status:
+        where_parts.append("status = ?")
+        params.append(selected_status)
+        option_where_parts.append("status = ?")
+        option_params.append(selected_status)
+    with booking_connect() as conn:
+        scope_sql = apply_artist_scope_sql(conn, x_vpo_username, "finance_movements", params)
+        option_scope_sql = apply_artist_scope_sql(conn, x_vpo_username, "finance_movements", option_params)
+        where = f"WHERE {' AND '.join(where_parts)}" if where_parts else "WHERE 1 = 1"
+        where += scope_sql
+        option_where = f"WHERE {' AND '.join(option_where_parts)}" if option_where_parts else "WHERE 1 = 1"
+        option_where += option_scope_sql
+
+        rows = conn.execute(
+            f"""
+            SELECT
+                id, movement_date, artist, business_area, movement_type, category,
+                project_id, project_name, concept, counterparty, paid_by,
+                amount, currency, fx_rate, amount_ars,
+                paid_amount, paid_amount_ars, pending_amount_ars, payment_status, due_date,
+                recoverable,
+                recoverable_percent, recovery_method, artist_percent, producer_percent,
+                account_effect, status, source_type, source_id,
+                proof_refs_json, notes, created_at, updated_at
+            FROM finance_staging_movements
+            {where}
+            ORDER BY movement_date DESC, id DESC
+            LIMIT ?
+            """,
+            [*params, safe_limit],
+        ).fetchall()
+        summary_rows = conn.execute(
+            f"""
+            SELECT
+                status,
+                COUNT(*) AS rows,
+                SUM(COALESCE(amount_ars, 0)) AS amount_ars,
+                SUM(COALESCE(paid_amount_ars, 0)) AS paid_amount_ars,
+                SUM(COALESCE(pending_amount_ars, 0)) AS pending_amount_ars
+            FROM finance_staging_movements
+            {where}
+            GROUP BY status
+            ORDER BY status
+            """,
+            params,
+        ).fetchall()
+        project_options = conn.execute(
+            f"""
+            SELECT DISTINCT project_name AS name
+            FROM finance_staging_movements
+            {option_where}
+            AND project_name IS NOT NULL
+            AND TRIM(project_name) != ''
+            ORDER BY project_name
+            """,
+            option_params,
+        ).fetchall()
+        project_params: list = []
+        project_scope_sql = apply_artist_scope_sql(conn, x_vpo_username, "finance_movements", project_params)
+        projects = conn.execute(
+            f"""
+            SELECT id, name, artist, business_area, status, notes, created_at, updated_at
+            FROM finance_projects
+            WHERE 1 = 1
+              {project_scope_sql}
+            ORDER BY COALESCE(artist, ''), business_area, name
+            """,
+            project_params,
+        ).fetchall()
+        artists = filter_artists_by_scope(booking_artist_options(), conn, x_vpo_username, "finance_movements")
+
+    return {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "selected_artist": selected_artist,
+        "selected_project": selected_project,
+        "artists": artists,
+        "items": [finance_movement_item(row) for row in rows],
+        "projects": [dict(row) for row in projects],
+        "project_options": [row["name"] for row in project_options],
+        "summary": {
+            "rows": sum(int(row["rows"] or 0) for row in summary_rows),
+            "amount_ars": sum(float(row["amount_ars"] or 0) for row in summary_rows),
+            "paid_amount_ars": sum(float(row["paid_amount_ars"] or 0) for row in summary_rows),
+            "pending_amount_ars": sum(float(row["pending_amount_ars"] or 0) for row in summary_rows),
+            "by_status": [dict(row) for row in summary_rows],
+            "official": False,
+            "note": "Staging financiero: carga y control. Todavia no impacta automaticamente el ledger oficial.",
+        },
+        "db_path": str(VPO_BOOKING_DB_PATH),
+    }
+
+
+@app.post("/finance/movements")
+def create_finance_movement(
+    request: FinanceMovementRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+    now = datetime.now().isoformat(timespec="seconds")
+    amount_ars = finance_amount_ars(request.amount, request.currency, request.fx_rate)
+    paid_amount = request.amount if request.paid_amount is None else request.paid_amount
+    paid_amount_ars = finance_amount_ars(paid_amount, request.currency, request.fx_rate)
+    pending_amount_ars = max(amount_ars - paid_amount_ars, 0.0)
+    payment_status = finance_payment_status(amount_ars, paid_amount_ars, request.payment_status)
+
+    with booking_connect() as conn:
+        movement_artist = clean_booking_artist(request.artist) or request.artist.strip()
+        allowed, scoped_artists = user_artist_scope_for_module(conn, x_vpo_username, "finance_movements")
+        if not allowed or (scoped_artists is not None and movement_artist.casefold() not in scoped_artists):
+            raise HTTPException(status_code=403, detail="No tenes permiso para cargar movimientos de este artista.")
+        project_id, project_name = resolve_finance_project(conn, request, now)
+        cursor = conn.execute(
+            """
+            INSERT INTO finance_staging_movements (
+                movement_date, artist, business_area, movement_type, category,
+                project_id, project_name, concept, counterparty, paid_by,
+                amount, currency, fx_rate, amount_ars,
+                paid_amount, paid_amount_ars, pending_amount_ars, payment_status, due_date,
+                recoverable,
+                recoverable_percent, recovery_method, artist_percent, producer_percent,
+                account_effect, status, source_type, source_id,
+                proof_refs_json, notes, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                request.movement_date,
+                request.artist.strip(),
+                request.business_area,
+                request.movement_type,
+                request.category.strip(),
+                project_id,
+                project_name,
+                request.concept.strip(),
+                clean_optional_text(request.counterparty),
+                request.paid_by,
+                request.amount,
+                request.currency,
+                request.fx_rate,
+                amount_ars,
+                paid_amount,
+                paid_amount_ars,
+                pending_amount_ars,
+                payment_status,
+                clean_optional_text(request.due_date),
+                1 if request.recoverable else 0,
+                request.recoverable_percent,
+                request.recovery_method if request.recoverable else "none",
+                request.artist_percent,
+                request.producer_percent,
+                request.account_effect,
+                request.status,
+                request.source_type,
+                clean_optional_text(request.source_id),
+                json.dumps(request.proof_refs, ensure_ascii=False),
+                clean_optional_text(request.notes),
+                now,
+                now,
+            ),
+        )
+        row = conn.execute(
+            """
+            SELECT *
+            FROM finance_staging_movements
+            WHERE id = ?
+            """,
+            (int(cursor.lastrowid),),
+        ).fetchone()
+
+    return {
+        "item": finance_movement_item(row),
+        "db_path": str(VPO_BOOKING_DB_PATH),
+    }
+
+
+@app.put("/finance/movements/{movement_id}")
+def update_finance_movement(
+    movement_id: int,
+    request: FinanceMovementRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+    now = datetime.now().isoformat(timespec="seconds")
+    amount_ars = finance_amount_ars(request.amount, request.currency, request.fx_rate)
+    paid_amount = request.amount if request.paid_amount is None else request.paid_amount
+    paid_amount_ars = finance_amount_ars(paid_amount, request.currency, request.fx_rate)
+    pending_amount_ars = max(amount_ars - paid_amount_ars, 0.0)
+    payment_status = finance_payment_status(amount_ars, paid_amount_ars, request.payment_status)
+
+    with booking_connect() as conn:
+        existing = conn.execute(
+            "SELECT id, artist, status FROM finance_staging_movements WHERE id = ?",
+            (movement_id,),
+        ).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Movimiento financiero no encontrado.")
+        if finance_movement_is_locked(existing["status"]):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Movimiento financiero bloqueado. "
+                    "Los movimientos aprobados, aplicados o anulados no se editan: "
+                    "se corrigen con un nuevo movimiento."
+                ),
+            )
+
+        movement_artist = clean_booking_artist(request.artist) or request.artist.strip()
+        existing_artist = clean_booking_artist(existing["artist"]) if existing else ""
+        allowed, scoped_artists = user_artist_scope_for_module(conn, x_vpo_username, "finance_movements")
+        if (
+            not allowed
+            or (
+                scoped_artists is not None
+                and (
+                    movement_artist.casefold() not in scoped_artists
+                    or (existing_artist and existing_artist.casefold() not in scoped_artists)
+                )
+            )
+        ):
+            raise HTTPException(status_code=403, detail="No tenes permiso para editar movimientos de este artista.")
+
+        project_id, project_name = resolve_finance_project(conn, request, now)
+        conn.execute(
+            """
+            UPDATE finance_staging_movements
+            SET movement_date = ?,
+                artist = ?,
+                business_area = ?,
+                movement_type = ?,
+                category = ?,
+                project_id = ?,
+                project_name = ?,
+                concept = ?,
+                counterparty = ?,
+                paid_by = ?,
+                amount = ?,
+                currency = ?,
+                fx_rate = ?,
+                amount_ars = ?,
+                paid_amount = ?,
+                paid_amount_ars = ?,
+                pending_amount_ars = ?,
+                payment_status = ?,
+                due_date = ?,
+                recoverable = ?,
+                recoverable_percent = ?,
+                recovery_method = ?,
+                artist_percent = ?,
+                producer_percent = ?,
+                account_effect = ?,
+                status = ?,
+                source_type = ?,
+                source_id = ?,
+                proof_refs_json = ?,
+                notes = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                request.movement_date,
+                request.artist.strip(),
+                request.business_area,
+                request.movement_type,
+                request.category.strip(),
+                project_id,
+                project_name,
+                request.concept.strip(),
+                clean_optional_text(request.counterparty),
+                request.paid_by,
+                request.amount,
+                request.currency,
+                request.fx_rate,
+                amount_ars,
+                paid_amount,
+                paid_amount_ars,
+                pending_amount_ars,
+                payment_status,
+                clean_optional_text(request.due_date),
+                1 if request.recoverable else 0,
+                request.recoverable_percent,
+                request.recovery_method if request.recoverable else "none",
+                request.artist_percent,
+                request.producer_percent,
+                request.account_effect,
+                request.status,
+                request.source_type,
+                clean_optional_text(request.source_id),
+                json.dumps(request.proof_refs, ensure_ascii=False),
+                clean_optional_text(request.notes),
+                now,
+                movement_id,
+            ),
+        )
+        row = conn.execute(
+            "SELECT * FROM finance_staging_movements WHERE id = ?",
+            (movement_id,),
+        ).fetchone()
+
+    return {
+        "item": finance_movement_item(row),
+        "db_path": str(VPO_BOOKING_DB_PATH),
     }
 
 
 @app.get("/booking/artists")
 def booking_artists(
     x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
 ) -> dict:
     require_api_key(x_vpo_api_key)
+    init_booking_db()
+    artists = booking_artist_options()
+    with booking_connect() as conn:
+        artists = filter_artists_by_scope(artists, conn, x_vpo_username, "booking")
     return {
-        "items": booking_artist_options(),
+        "items": artists,
+    }
+
+
+@app.get("/booking/artist-records")
+def booking_artist_records(
+    include_inactive: bool = False,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+
+    where = "" if include_inactive else "WHERE active = 1"
+    with booking_connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM booking_artists
+            {where}
+            ORDER BY active DESC, stage_name
+            """
+        ).fetchall()
+
+    return {
+        "items": [row_to_booking_artist(row) for row in rows],
+        "db_path": str(VPO_BOOKING_DB_PATH),
+    }
+
+
+@app.post("/booking/artist-records")
+def create_booking_artist_record(
+    request: BookingArtistRecordRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+
+    stage_name = clean_booking_artist(request.stage_name)
+    if not stage_name:
+        raise HTTPException(status_code=400, detail="stage_name is required.")
+
+    now = datetime.now().isoformat(timespec="seconds")
+    with booking_connect() as conn:
+        try:
+            cursor = conn.execute(
+                """
+                INSERT INTO booking_artists (
+                    stage_name, legal_name, cuit, phone, email, address,
+                    notes, active, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    stage_name,
+                    clean_optional_text(request.legal_name),
+                    clean_optional_text(request.cuit),
+                    clean_optional_text(request.phone),
+                    clean_optional_text(request.email),
+                    clean_optional_text(request.address),
+                    clean_optional_text(request.notes),
+                    1 if request.active else 0,
+                    now,
+                    now,
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(status_code=409, detail="Artist already exists.") from exc
+
+        row = conn.execute("SELECT * FROM booking_artists WHERE id = ?", (cursor.lastrowid,)).fetchone()
+
+    return {
+        "item": row_to_booking_artist(row),
+        "db_path": str(VPO_BOOKING_DB_PATH),
+    }
+
+
+@app.put("/booking/artist-records/{artist_id}")
+def update_booking_artist_record(
+    artist_id: int,
+    request: BookingArtistRecordRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+
+    stage_name = clean_booking_artist(request.stage_name)
+    if not stage_name:
+        raise HTTPException(status_code=400, detail="stage_name is required.")
+
+    now = datetime.now().isoformat(timespec="seconds")
+    with booking_connect() as conn:
+        existing = conn.execute("SELECT id FROM booking_artists WHERE id = ?", (artist_id,)).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Artist not found.")
+
+        try:
+            conn.execute(
+                """
+                UPDATE booking_artists
+                SET stage_name = ?,
+                    legal_name = ?,
+                    cuit = ?,
+                    phone = ?,
+                    email = ?,
+                    address = ?,
+                    notes = ?,
+                    active = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    stage_name,
+                    clean_optional_text(request.legal_name),
+                    clean_optional_text(request.cuit),
+                    clean_optional_text(request.phone),
+                    clean_optional_text(request.email),
+                    clean_optional_text(request.address),
+                    clean_optional_text(request.notes),
+                    1 if request.active else 0,
+                    now,
+                    artist_id,
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(status_code=409, detail="Artist already exists.") from exc
+
+        row = conn.execute("SELECT * FROM booking_artists WHERE id = ?", (artist_id,)).fetchone()
+
+    return {
+        "item": row_to_booking_artist(row),
+        "db_path": str(VPO_BOOKING_DB_PATH),
+    }
+
+
+@app.delete("/booking/artist-records/{artist_id}")
+def deactivate_booking_artist_record(
+    artist_id: int,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+
+    now = datetime.now().isoformat(timespec="seconds")
+    with booking_connect() as conn:
+        existing = conn.execute("SELECT id FROM booking_artists WHERE id = ?", (artist_id,)).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Artist not found.")
+
+        conn.execute(
+            """
+            UPDATE booking_artists
+            SET active = 0,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (now, artist_id),
+        )
+        row = conn.execute("SELECT * FROM booking_artists WHERE id = ?", (artist_id,)).fetchone()
+
+    return {
+        "item": row_to_booking_artist(row),
+        "db_path": str(VPO_BOOKING_DB_PATH),
+    }
+
+
+@app.get("/employees")
+def employee_records(
+    include_inactive: bool = False,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    if operational_db_settings().driver == "sqlite":
+        init_booking_db()
+
+    where = "" if include_inactive else "WHERE active = ?"
+    params = () if include_inactive else (db_bool(True),)
+    with operational_connect() as conn:
+        rows = conn.execute(
+            db_sql(
+                conn,
+                f"""
+            SELECT *
+            FROM employees
+            {where}
+            ORDER BY active DESC, display_name
+            """,
+            ),
+            params,
+        ).fetchall()
+
+        return {
+            "items": [row_to_employee(conn, row) for row in rows],
+            "function_options": EMPLOYEE_FUNCTION_OPTIONS,
+            "modules": [{"module_key": key, "label": label} for key, label in APP_MODULES],
+            "db_path": str(VPO_BOOKING_DB_PATH) if operational_db_settings().driver == "sqlite" else "",
+            "db_driver": operational_db_settings().driver,
+        }
+
+
+@app.get("/me/permissions")
+def current_user_permissions(
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    if operational_db_settings().driver == "sqlite":
+        init_booking_db()
+
+    username = clean_username(x_vpo_username or "")
+    if not username:
+        raise HTTPException(status_code=401, detail="Usuario requerido.")
+
+    with operational_connect() as conn:
+        user = conn.execute(
+            db_sql(
+                conn,
+                """
+            SELECT u.*, e.id AS employee_ref, e.display_name
+            FROM app_users u
+            LEFT JOIN employees e ON e.id = u.employee_id
+            WHERE lower(u.username) = lower(?)
+              AND u.active = ?
+            """,
+            ),
+            (username, db_bool(True)),
+        ).fetchone()
+        if user is None:
+            raise HTTPException(status_code=401, detail="Usuario no autorizado.")
+
+        if str(user["global_role"] or "").lower() == "admin":
+            permissions = [
+                {
+                    "module_key": key,
+                    "can_access": True,
+                    "can_create": True,
+                    "can_view_history": True,
+                    "can_edit": True,
+                    "can_approve": True,
+                    "scope": [{"scope_type": "all", "scope_ref": "*"}],
+                    "notes": None,
+                }
+                for key, _label in APP_MODULES
+                if key != "home"
+            ]
+        else:
+            employee_id = user["employee_ref"]
+            if employee_id is None:
+                permissions = []
+            else:
+                rows = conn.execute(
+                    db_sql(
+                        conn,
+                        """
+                    SELECT module_key, can_access, can_create, can_view_history,
+                           can_edit, can_approve, scope_json, notes
+                    FROM module_permissions
+                    WHERE employee_id = ?
+                    ORDER BY module_key
+                    """,
+                    ),
+                    (employee_id,),
+                ).fetchall()
+                permissions = [
+                    {
+                        "module_key": row["module_key"],
+                        "can_access": bool(row["can_access"]),
+                        "can_create": bool(row["can_create"]),
+                        "can_view_history": bool(row["can_view_history"]),
+                        "can_edit": bool(row["can_edit"]),
+                        "can_approve": bool(row["can_approve"]),
+                        "scope": parse_scope_payload(row["scope_json"]),
+                        "notes": row["notes"],
+                    }
+                    for row in rows
+                    if bool(row["can_access"])
+                ]
+
+        return {
+            "user": row_to_session_user(user),
+            "employee": {
+                "id": user["employee_ref"],
+                "display_name": user["display_name"],
+            },
+            "permissions": permissions,
+            "modules": [{"module_key": key, "label": label} for key, label in APP_MODULES if key != "home"],
+            "db_driver": operational_db_settings().driver,
+        }
+
+
+@app.post("/auth/login")
+def operational_login(
+    request: AuthLoginRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    if operational_db_settings().driver == "sqlite":
+        init_booking_db()
+    username = clean_username(request.username)
+    if not username:
+        raise HTTPException(status_code=401, detail="Usuario o contrasena incorrectos.")
+
+    with operational_connect() as conn:
+        row = conn.execute(
+            db_sql(
+                conn,
+                """
+            SELECT *
+            FROM app_users
+            WHERE lower(username) = lower(?)
+              AND active = ?
+            """,
+            ),
+            (username, db_bool(True)),
+        ).fetchone()
+        if row is None or not verify_web_password(request.password, row["password_hash"]):
+            raise HTTPException(status_code=401, detail="Usuario o contrasena incorrectos.")
+
+        now = datetime.now().isoformat(timespec="seconds")
+        conn.execute(
+            db_sql(conn, "UPDATE app_users SET last_login_at = ?, updated_at = ? WHERE id = ?"),
+            (now, now, row["id"]),
+        )
+        updated = conn.execute(db_sql(conn, "SELECT * FROM app_users WHERE id = ?"), (row["id"],)).fetchone()
+        return {"ok": True, "user": row_to_session_user(updated)}
+
+
+@app.post("/auth/session")
+def operational_session(
+    request: AuthSessionRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    if operational_db_settings().driver == "sqlite":
+        init_booking_db()
+    username = clean_username(request.username)
+    if not username:
+        raise HTTPException(status_code=401, detail="Sesion invalida.")
+
+    with operational_connect() as conn:
+        row = conn.execute(
+            db_sql(
+                conn,
+                """
+            SELECT *
+            FROM app_users
+            WHERE lower(username) = lower(?)
+              AND active = ?
+            """,
+            ),
+            (username, db_bool(True)),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=401, detail="Sesion invalida.")
+        return {"ok": True, "user": row_to_session_user(row)}
+
+
+@app.post("/auth/change-password")
+def operational_change_password(
+    request: AuthChangePasswordRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    if operational_db_settings().driver == "sqlite":
+        init_booking_db()
+    username = clean_username(request.username)
+    if not username:
+        raise HTTPException(status_code=400, detail="Usuario invalido.")
+    if request.new_password == DEFAULT_WEB_PASSWORD:
+        raise HTTPException(status_code=400, detail="La nueva contrasena no puede ser la clave default.")
+
+    with operational_connect() as conn:
+        row = conn.execute(
+            db_sql(
+                conn,
+                """
+            SELECT *
+            FROM app_users
+            WHERE lower(username) = lower(?)
+              AND active = ?
+            """,
+            ),
+            (username, db_bool(True)),
+        ).fetchone()
+        if row is None or not verify_web_password(request.current_password, row["password_hash"]):
+            raise HTTPException(status_code=401, detail="Contrasena actual incorrecta.")
+
+        now = datetime.now().isoformat(timespec="seconds")
+        conn.execute(
+            db_sql(
+                conn,
+                """
+            UPDATE app_users
+            SET password_hash = ?,
+                must_change_password = 0,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            ),
+            (hash_web_password(request.new_password), now, row["id"]),
+        )
+        updated = conn.execute(db_sql(conn, "SELECT * FROM app_users WHERE id = ?"), (row["id"],)).fetchone()
+        return {"ok": True, "user": row_to_session_user(updated)}
+
+
+@app.post("/employees")
+def create_employee_record(
+    request: EmployeeRecordRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+
+    display_name = clean_optional_text(request.display_name)
+    if not display_name:
+        raise HTTPException(status_code=400, detail="display_name is required.")
+
+    now = datetime.now().isoformat(timespec="seconds")
+    with booking_connect() as conn:
+        try:
+            cursor = conn.execute(
+                """
+                INSERT INTO employees (
+                    display_name, legal_name, cuit, phone, email, address,
+                    notes, active, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    display_name,
+                    clean_optional_text(request.legal_name) or display_name,
+                    clean_optional_text(request.cuit),
+                    clean_optional_text(request.phone),
+                    clean_optional_text(request.email),
+                    clean_optional_text(request.address),
+                    clean_optional_text(request.notes),
+                    1 if request.active else 0,
+                    now,
+                    now,
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(status_code=409, detail="Employee already exists.") from exc
+
+        employee_id = int(cursor.lastrowid)
+        upsert_employee_functions(conn, employee_id, request.functions)
+        upsert_employee_user(conn, employee_id, request.username, request.user_role, request.user_active)
+        if request.permissions is not None:
+            upsert_employee_permissions(conn, employee_id, request.permissions)
+        if display_name.casefold() == "ruben elkowich":
+            grant_employee_all_permissions(conn, employee_id)
+            upsert_employee_user(
+                conn,
+                employee_id,
+                request.username or generated_employee_username(display_name) or "rubene",
+                "admin",
+                True,
+                "operational",
+                request.password,
+                request.must_change_password,
+            )
+        elif request.username:
+            upsert_employee_user(
+                conn,
+                employee_id,
+                request.username,
+                request.user_role,
+                request.user_active,
+                "operational",
+                request.password,
+                request.must_change_password,
+            )
+        row = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
+
+        return {
+            "item": row_to_employee(conn, row),
+            "db_path": str(VPO_BOOKING_DB_PATH),
+        }
+
+
+@app.put("/employees/{employee_id}")
+def update_employee_record(
+    employee_id: int,
+    request: EmployeeRecordRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+
+    display_name = clean_optional_text(request.display_name)
+    if not display_name:
+        raise HTTPException(status_code=400, detail="display_name is required.")
+
+    now = datetime.now().isoformat(timespec="seconds")
+    with booking_connect() as conn:
+        existing = conn.execute("SELECT id FROM employees WHERE id = ?", (employee_id,)).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Employee not found.")
+
+        try:
+            conn.execute(
+                """
+                UPDATE employees
+                SET display_name = ?,
+                    legal_name = ?,
+                    cuit = ?,
+                    phone = ?,
+                    email = ?,
+                    address = ?,
+                    notes = ?,
+                    active = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    display_name,
+                    clean_optional_text(request.legal_name) or display_name,
+                    clean_optional_text(request.cuit),
+                    clean_optional_text(request.phone),
+                    clean_optional_text(request.email),
+                    clean_optional_text(request.address),
+                    clean_optional_text(request.notes),
+                    1 if request.active else 0,
+                    now,
+                    employee_id,
+                ),
+            )
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(status_code=409, detail="Employee already exists.") from exc
+
+        upsert_employee_functions(conn, employee_id, request.functions)
+        upsert_employee_user(conn, employee_id, request.username, request.user_role, request.user_active)
+        if request.permissions is not None:
+            upsert_employee_permissions(conn, employee_id, request.permissions)
+        if display_name.casefold() == "ruben elkowich":
+            grant_employee_all_permissions(conn, employee_id)
+            upsert_employee_user(
+                conn,
+                employee_id,
+                request.username or generated_employee_username(display_name) or "rubene",
+                "admin",
+                True,
+                "operational",
+                request.password,
+                request.must_change_password,
+            )
+        elif request.username:
+            upsert_employee_user(
+                conn,
+                employee_id,
+                request.username,
+                request.user_role,
+                request.user_active,
+                "operational",
+                request.password,
+                request.must_change_password,
+            )
+        row = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
+
+        return {
+            "item": row_to_employee(conn, row),
+            "db_path": str(VPO_BOOKING_DB_PATH),
+        }
+
+
+@app.post("/employees/{employee_id}/password")
+def set_employee_password(
+    employee_id: int,
+    request: EmployeePasswordRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    password = DEFAULT_WEB_PASSWORD if request.use_default else request.password
+    if not password:
+        raise HTTPException(status_code=400, detail="Password is required.")
+    init_booking_db()
+    now = datetime.now().isoformat(timespec="seconds")
+    with booking_connect() as conn:
+        employee = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
+        if employee is None:
+            raise HTTPException(status_code=404, detail="Employee not found.")
+        user = conn.execute(
+            """
+            SELECT *
+            FROM app_users
+            WHERE employee_id = ?
+              AND active = 1
+            ORDER BY username
+            LIMIT 1
+            """,
+            (employee_id,),
+        ).fetchone()
+        if user is None:
+            username = generated_employee_username(employee["display_name"])
+            if not username:
+                raise HTTPException(status_code=400, detail="El empleado no tiene usuario web.")
+            upsert_employee_user(
+                conn,
+                employee_id,
+                username,
+                "admin" if str(employee["display_name"] or "").casefold() == "ruben elkowich" else "viewer",
+                True,
+                "operational",
+                password,
+                request.must_change_password,
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE app_users
+                SET password_hash = ?,
+                    must_change_password = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    hash_web_password(password),
+                    1 if request.must_change_password else 0,
+                    now,
+                    user["id"],
+                ),
+            )
+        row = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
+        return {
+            "item": row_to_employee(conn, row),
+            "db_path": str(VPO_BOOKING_DB_PATH),
+        }
+
+
+@app.delete("/employees/{employee_id}")
+def deactivate_employee_record(
+    employee_id: int,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+
+    now = datetime.now().isoformat(timespec="seconds")
+    with booking_connect() as conn:
+        existing = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Employee not found.")
+        if str(existing["display_name"] or "").casefold() == "ruben elkowich":
+            raise HTTPException(status_code=400, detail="Ruben Elkowich no puede desactivarse.")
+
+        conn.execute(
+            """
+            UPDATE employees
+            SET active = 0,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (now, employee_id),
+        )
+        row = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
+
+        return {
+            "item": row_to_employee(conn, row),
+            "db_path": str(VPO_BOOKING_DB_PATH),
+        }
+
+
+def fetch_caserio_event_item(conn: sqlite3.Connection, event_id: int) -> dict:
+    row = conn.execute("SELECT * FROM caserio_events WHERE id = ?", (event_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Caserio event not found.")
+
+    item = row_to_caserio_event(row)
+    lines = conn.execute(
+        """
+        SELECT *
+        FROM caserio_event_lines
+        WHERE event_id = ?
+        ORDER BY id
+        """,
+        (event_id,),
+    ).fetchall()
+    item["lines"] = [dict(line) for line in lines]
+    return item
+
+
+def row_to_booking_composite_event(row: sqlite3.Row) -> dict:
+    item = dict(row)
+    item["receipt_refs"] = json.loads(item.pop("receipt_refs_json") or "[]")
+    return item
+
+
+def fetch_booking_composite_event_item(conn: sqlite3.Connection, event_id: int) -> dict:
+    row = conn.execute("SELECT * FROM booking_composite_events WHERE id = ?", (event_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Composite booking event not found.")
+
+    item = row_to_booking_composite_event(row)
+    expense_rows = conn.execute(
+        """
+        SELECT *
+        FROM booking_composite_event_expenses
+        WHERE event_id = ?
+        ORDER BY id
+        """,
+        (event_id,),
+    ).fetchall()
+    line_rows = conn.execute(
+        """
+        SELECT *
+        FROM booking_composite_event_lines
+        WHERE event_id = ?
+        ORDER BY id
+        """,
+        (event_id,),
+    ).fetchall()
+    item["expenses"] = [dict(expense) for expense in expense_rows]
+    item["operational_expenses_amount"] = sum(
+        float(expense["amount"] or 0)
+        for expense in expense_rows
+        if not str(expense["category"] or "").startswith("comision")
+    )
+    item["direct_commissions_amount"] = sum(
+        float(expense["amount"] or 0)
+        for expense in expense_rows
+        if str(expense["category"] or "").startswith("comision")
+    )
+    item["artist_base_amount"] = (
+        float(item.get("gross_amount") or 0)
+        - item["operational_expenses_amount"]
+        - item["direct_commissions_amount"]
+    )
+    lines = [dict(line) for line in line_rows]
+    child_show_ids = [
+        int(line["booking_show_id"])
+        for line in lines
+        if line.get("booking_show_id")
+    ]
+    if child_show_ids:
+        placeholders = ",".join("?" for _ in child_show_ids)
+
+        expense_rows = conn.execute(
+            f"""
+            SELECT *
+            FROM booking_show_expenses
+            WHERE show_id IN ({placeholders})
+            ORDER BY id
+            """,
+            child_show_ids,
+        ).fetchall()
+        expenses_by_show: dict[int, list[dict]] = {show_id: [] for show_id in child_show_ids}
+        for expense in expense_rows:
+            expense_data = row_to_booking_expense(expense)
+            expenses_by_show.setdefault(expense_data["show_id"], []).append(expense_data)
+
+        share_rows = conn.execute(
+            f"""
+            SELECT *
+            FROM booking_external_shares
+            WHERE show_id IN ({placeholders})
+            ORDER BY id
+            """,
+            child_show_ids,
+        ).fetchall()
+        shares_by_show: dict[int, list[dict]] = {show_id: [] for show_id in child_show_ids}
+        for share in share_rows:
+            share_data = row_to_booking_external_share(share)
+            shares_by_show.setdefault(share_data["show_id"], []).append(share_data)
+
+        for line in lines:
+            booking_show_id = line.get("booking_show_id")
+            if booking_show_id:
+                line["show_expenses"] = expenses_by_show.get(int(booking_show_id), [])
+                line["external_shares"] = shares_by_show.get(int(booking_show_id), [])
+            else:
+                line["show_expenses"] = []
+                line["external_shares"] = []
+    else:
+        for line in lines:
+            line["show_expenses"] = []
+            line["external_shares"] = []
+
+    item["lines"] = lines
+    return item
+
+
+@app.get("/booking/composite-events")
+def booking_composite_events(
+    limit: int = 100,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+    safe_limit = min(max(limit, 1), 500)
+
+    with booking_connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM booking_composite_events
+            ORDER BY event_date DESC, id DESC
+            LIMIT ?
+            """,
+            (safe_limit,),
+        ).fetchall()
+        items = [fetch_booking_composite_event_item(conn, row["id"]) for row in rows]
+
+    return {
+        "items": items,
+        "db_path": str(VPO_BOOKING_DB_PATH),
+    }
+
+
+@app.post("/booking/composite-events")
+def create_booking_composite_event(
+    request: BookingCompositeEventRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+
+    event_date = validate_iso_date(request.event_date)
+    venue = request.venue.strip()
+    city = clean_optional_text(request.city)
+    responsible = clean_optional_text(request.responsible)
+    notes = clean_optional_text(request.notes)
+    receipt_refs = clean_receipt_refs(request.receipt_refs)
+    now = datetime.now().isoformat(timespec="seconds")
+
+    prepared_expenses = [
+        {
+            "concept": expense.concept.strip(),
+            "category": expense.category.strip() or "general",
+            "amount": expense.amount,
+            "notes": clean_optional_text(expense.notes),
+        }
+        for expense in request.expenses
+        if expense.amount > 0 and expense.concept.strip()
+    ]
+    general_expenses = sum(expense["amount"] for expense in prepared_expenses)
+    allocated_amount = sum(line.amount for line in request.lines)
+    if allocated_amount > request.gross_amount + 0.01:
+        raise HTTPException(status_code=400, detail="Composite event lines cannot exceed gross amount.")
+
+    with booking_connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO booking_composite_events (
+                event_date, venue, city, responsible, status, currency, fx_rate,
+                gross_amount, general_expenses_amount, allocated_amount,
+                producer_expected_amount, received_amount, balance_amount,
+                receipt_refs_json, notes, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?, ?)
+            """,
+            (
+                event_date,
+                venue,
+                city,
+                responsible,
+                request.status,
+                request.currency,
+                request.fx_rate,
+                request.gross_amount,
+                general_expenses,
+                allocated_amount,
+                request.received_amount,
+                json.dumps(receipt_refs, ensure_ascii=False),
+                notes,
+                now,
+                now,
+            ),
+        )
+        event_id = int(cursor.lastrowid)
+        settlement_group = f"booking_composite_{event_id}_{event_date}"
+        producer_expected = 0.0
+
+        for expense in prepared_expenses:
+            conn.execute(
+                """
+                INSERT INTO booking_composite_event_expenses (
+                    event_id, concept, category, amount, notes, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (event_id, expense["concept"], expense["category"], expense["amount"], expense["notes"], now),
+            )
+
+        for line in request.lines:
+            line_artist = clean_optional_text(line.artist)
+            line_notes = clean_optional_text(line.notes)
+            commission_notes = clean_optional_text(line.booking_commission_notes)
+            producer_percent = line.producer_percent
+            if producer_percent is None:
+                producer_percent = max(0.0, 100.0 - line.artist_percent)
+
+            booking_show_id = None
+            if line.line_type == "artista_vpo":
+                if not line_artist:
+                    raise HTTPException(status_code=400, detail="artist is required for artista_vpo lines.")
+
+                show_request = BookingQuickShowRequest(
+                    artist=line_artist,
+                    show_date=event_date,
+                    venue=venue,
+                    city=city,
+                    tour_manager=responsible,
+                    status="realizado",
+                    currency=request.currency,
+                    fx_rate=request.fx_rate,
+                    cachet_amount=line.amount,
+                    show_expenses=line.show_expenses,
+                    external_shares=line.external_shares,
+                    artist_paid_amount=line.artist_paid_amount,
+                    producer_received_amount=line.producer_received_amount,
+                    artist_percent=line.artist_percent,
+                    producer_percent=producer_percent,
+                    booking_commission_exempt=line.booking_commission_exempt,
+                    booking_commission_notes=commission_notes,
+                    notes=f"Liquidacion hija de show madre #{event_id}: {line.description}. {line_notes or ''}".strip(),
+                )
+                show = insert_booking_show_from_request(
+                    conn,
+                    show_request,
+                    now,
+                    origin_type="booking_composite",
+                    origin_id=event_id,
+                    settlement_group=settlement_group,
+                    validate_artist=False,
+                )
+                booking_show_id = show["id"]
+                producer_expected += float(show["producer_cash_target_amount"] or 0)
+
+            conn.execute(
+                """
+                INSERT INTO booking_composite_event_lines (
+                    event_id, line_type, description, artist, amount,
+                    artist_percent, producer_percent, artist_paid_amount,
+                    producer_received_amount, booking_commission_exempt,
+                    booking_commission_notes, booking_show_id, notes, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_id,
+                    line.line_type,
+                    line.description.strip(),
+                    line_artist,
+                    line.amount,
+                    line.artist_percent,
+                    producer_percent,
+                    line.artist_paid_amount,
+                    line.producer_received_amount,
+                    1 if line.booking_commission_exempt else 0,
+                    commission_notes,
+                    booking_show_id,
+                    line_notes,
+                    now,
+                ),
+            )
+
+        balance = producer_expected - request.received_amount
+        conn.execute(
+            """
+            UPDATE booking_composite_events
+            SET producer_expected_amount = ?,
+                balance_amount = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (producer_expected, balance, now, event_id),
+        )
+        item = fetch_booking_composite_event_item(conn, event_id)
+
+    return {
+        "item": item,
+        "db_driver": operational_db_settings().driver,
+    }
+
+
+@app.put("/booking/composite-events/{event_id}")
+def update_booking_composite_event(
+    event_id: int,
+    request: BookingCompositeEventRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+
+    event_date = validate_iso_date(request.event_date)
+    venue = request.venue.strip()
+    city = clean_optional_text(request.city)
+    responsible = clean_optional_text(request.responsible)
+    notes = clean_optional_text(request.notes)
+    receipt_refs = clean_receipt_refs(request.receipt_refs)
+    now = datetime.now().isoformat(timespec="seconds")
+
+    prepared_expenses = [
+        {
+            "concept": expense.concept.strip(),
+            "category": expense.category.strip() or "general",
+            "amount": expense.amount,
+            "notes": clean_optional_text(expense.notes),
+        }
+        for expense in request.expenses
+        if expense.amount > 0 and expense.concept.strip()
+    ]
+    general_expenses = sum(expense["amount"] for expense in prepared_expenses)
+    allocated_amount = sum(line.amount for line in request.lines)
+    if allocated_amount > request.gross_amount + 0.01:
+        raise HTTPException(status_code=400, detail="Composite event lines cannot exceed gross amount.")
+
+    with booking_connect() as conn:
+        existing = conn.execute(
+            "SELECT id FROM booking_composite_events WHERE id = ?",
+            (event_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Composite booking event not found.")
+
+        old_line_show_ids = {
+            int(row["id"]): row["booking_show_id"]
+            for row in conn.execute(
+                """
+                SELECT id, booking_show_id
+                FROM booking_composite_event_lines
+                WHERE event_id = ?
+                """,
+                (event_id,),
+            ).fetchall()
+        }
+
+        conn.execute(
+            """
+            UPDATE booking_composite_events
+            SET event_date = ?,
+                venue = ?,
+                city = ?,
+                responsible = ?,
+                status = ?,
+                currency = ?,
+                fx_rate = ?,
+                gross_amount = ?,
+                general_expenses_amount = ?,
+                allocated_amount = ?,
+                received_amount = ?,
+                receipt_refs_json = ?,
+                notes = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                event_date,
+                venue,
+                city,
+                responsible,
+                request.status,
+                request.currency,
+                request.fx_rate,
+                request.gross_amount,
+                general_expenses,
+                allocated_amount,
+                request.received_amount,
+                json.dumps(receipt_refs, ensure_ascii=False),
+                notes,
+                now,
+                event_id,
+            ),
+        )
+
+        conn.execute("DELETE FROM booking_composite_event_expenses WHERE event_id = ?", (event_id,))
+        conn.execute("DELETE FROM booking_composite_event_lines WHERE event_id = ?", (event_id,))
+
+        for expense in prepared_expenses:
+            conn.execute(
+                """
+                INSERT INTO booking_composite_event_expenses (
+                    event_id, concept, category, amount, notes, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (event_id, expense["concept"], expense["category"], expense["amount"], expense["notes"], now),
+            )
+
+        producer_expected = 0.0
+        for line in request.lines:
+            line_artist = clean_optional_text(line.artist)
+            line_notes = clean_optional_text(line.notes)
+            commission_notes = clean_optional_text(line.booking_commission_notes)
+            producer_percent = line.producer_percent
+            if producer_percent is None:
+                producer_percent = max(0.0, 100.0 - line.artist_percent)
+
+            booking_show_id = old_line_show_ids.get(line.id) if line.id else None
+            if line.line_type == "artista_vpo":
+                if not line_artist:
+                    raise HTTPException(status_code=400, detail="artist is required for artista_vpo lines.")
+                if booking_show_id:
+                    show_row = conn.execute(
+                        """
+                        SELECT settlement_status, settlement_closed_at, receipt_refs_json
+                        FROM booking_shows
+                        WHERE id = ?
+                        """,
+                        (booking_show_id,),
+                    ).fetchone()
+                    if show_row is not None:
+                        if str(show_row["settlement_status"] or "") in {"historico", "cerrado"}:
+                            existing_target = conn.execute(
+                                "SELECT producer_cash_target_amount FROM booking_shows WHERE id = ?",
+                                (booking_show_id,),
+                            ).fetchone()
+                            producer_expected += float(existing_target["producer_cash_target_amount"] or 0)
+                        else:
+                            show_receipts = json.loads(show_row["receipt_refs_json"] or "[]")
+                            show_request = BookingQuickShowRequest(
+                                artist=line_artist,
+                                show_date=event_date,
+                                venue=venue,
+                                city=city,
+                                tour_manager=responsible,
+                                status="aprobado" if request.status == "cerrado" else "realizado",
+                                currency=request.currency,
+                                fx_rate=request.fx_rate,
+                                contracted_cachet_amount=line.amount,
+                                venue_collected_amount=line.amount,
+                                cachet_amount=line.amount,
+                                show_expenses=line.show_expenses,
+                                external_shares=line.external_shares,
+                                artist_paid_amount=line.artist_paid_amount,
+                                producer_received_amount=line.producer_received_amount,
+                                artist_percent=line.artist_percent,
+                                producer_percent=producer_percent,
+                                receipt_refs=show_receipts,
+                                booking_commission_exempt=line.booking_commission_exempt,
+                                booking_commission_notes=commission_notes,
+                                notes=f"Sincronizado desde liquidacion madre #{event_id}: {line.description}. {line_notes or ''}".strip(),
+                            )
+                            synced_show = update_booking_show_from_request(
+                                conn,
+                                int(booking_show_id),
+                                show_request,
+                                now,
+                                validate_artist=False,
+                            )
+                            producer_expected += float(synced_show["producer_cash_target_amount"] or 0)
+                    else:
+                        booking_show_id = None
+                if not booking_show_id:
+                    line_expenses = sum(expense.amount for expense in line.show_expenses)
+                    producer_expected += max(0.0, line.amount - line_expenses) * producer_percent / 100
+
+            conn.execute(
+                """
+                INSERT INTO booking_composite_event_lines (
+                    event_id, line_type, description, artist, amount,
+                    artist_percent, producer_percent, artist_paid_amount,
+                    producer_received_amount, booking_commission_exempt,
+                    booking_commission_notes, booking_show_id, notes, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_id,
+                    line.line_type,
+                    line.description.strip(),
+                    line_artist,
+                    line.amount,
+                    line.artist_percent,
+                    producer_percent,
+                    line.artist_paid_amount,
+                    line.producer_received_amount,
+                    1 if line.booking_commission_exempt else 0,
+                    commission_notes,
+                    booking_show_id,
+                    line_notes,
+                    now,
+                ),
+            )
+
+        balance = producer_expected - request.received_amount
+        conn.execute(
+            """
+            UPDATE booking_composite_events
+            SET producer_expected_amount = ?,
+                balance_amount = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (producer_expected, balance, now, event_id),
+        )
+        item = fetch_booking_composite_event_item(conn, event_id)
+
+    return {
+        "item": item,
+        "db_driver": operational_db_settings().driver,
+    }
+
+
+@app.get("/caserio/events")
+def caserio_events(
+    limit: int = 100,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+    safe_limit = min(max(limit, 1), 500)
+
+    with booking_connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM caserio_events
+            ORDER BY event_date DESC, id DESC
+            LIMIT ?
+            """,
+            (safe_limit,),
+        ).fetchall()
+        items = [fetch_caserio_event_item(conn, row["id"]) for row in rows]
+
+    return {
+        "items": items,
+        "db_path": str(VPO_BOOKING_DB_PATH),
+    }
+
+
+@app.post("/caserio/events")
+def create_caserio_event(
+    request: CaserioEventRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+
+    event_date = validate_iso_date(request.event_date)
+    venue = request.venue.strip()
+    city = clean_optional_text(request.city)
+    responsible = clean_optional_text(request.responsible)
+    notes = clean_optional_text(request.notes)
+    receipt_refs = clean_receipt_refs(request.receipt_refs)
+    now = datetime.now().isoformat(timespec="seconds")
+
+    caserio_lines_amount = sum(line.amount for line in request.lines)
+    caserio_expected = request.gross_amount - caserio_lines_amount
+    producer_expected = 0.0
+    if caserio_expected < 0:
+        raise HTTPException(status_code=400, detail="Caserio lines cannot exceed gross amount.")
+
+    with booking_connect() as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO caserio_events (
+                event_date, venue, city, responsible, status, currency, fx_rate,
+                gross_amount, caserio_expected_amount, producer_expected_amount,
+                total_expected_amount, received_amount, balance_amount,
+                receipt_refs_json, notes, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, 0, ?, ?, ?, ?)
+            """,
+            (
+                event_date,
+                venue,
+                city,
+                responsible,
+                request.status,
+                request.currency,
+                request.fx_rate,
+                request.gross_amount,
+                caserio_expected,
+                request.received_amount,
+                json.dumps(receipt_refs, ensure_ascii=False),
+                notes,
+                now,
+                now,
+            ),
+        )
+        event_id = int(cursor.lastrowid)
+        settlement_group = f"caserio_{event_id}_{event_date}"
+
+        for line in request.lines:
+            line_artist = clean_optional_text(line.artist)
+            booking_show_id = None
+            line_notes = clean_optional_text(line.notes)
+
+            if line.line_type == "artista_vpo":
+                if not line_artist:
+                    raise HTTPException(status_code=400, detail="artist is required for artista_vpo lines.")
+
+                producer_percent = line.producer_percent
+                if producer_percent is None:
+                    producer_percent = max(0.0, 100.0 - line.artist_percent)
+
+                show_request = BookingQuickShowRequest(
+                    artist=line_artist,
+                    show_date=event_date,
+                    venue=venue,
+                    city=city,
+                    tour_manager=responsible,
+                    status="realizado",
+                    currency=request.currency,
+                    fx_rate=request.fx_rate,
+                    cachet_amount=line.amount,
+                    show_expenses=line.show_expenses,
+                    artist_percent=line.artist_percent,
+                    producer_percent=producer_percent,
+                    notes=f"Show interno generado desde evento Caserio #{event_id}. {line_notes or ''}".strip(),
+                )
+                show = insert_booking_show_from_request(
+                    conn,
+                    show_request,
+                    now,
+                    origin_type="caserio",
+                    origin_id=event_id,
+                    settlement_group=settlement_group,
+                    validate_artist=False,
+                )
+                booking_show_id = show["id"]
+                producer_expected += float(show["producer_cash_target_amount"] or 0)
+
+            conn.execute(
+                """
+                INSERT INTO caserio_event_lines (
+                    event_id, line_type, description, artist, amount,
+                    booking_show_id, notes, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_id,
+                    line.line_type,
+                    line.description.strip(),
+                    line_artist,
+                    line.amount,
+                    booking_show_id,
+                    line_notes,
+                    now,
+                ),
+            )
+
+        total_expected = caserio_expected + producer_expected
+        balance = total_expected - request.received_amount
+        conn.execute(
+            """
+            UPDATE caserio_events
+            SET producer_expected_amount = ?,
+                total_expected_amount = ?,
+                balance_amount = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (producer_expected, total_expected, balance, now, event_id),
+        )
+        item = fetch_caserio_event_item(conn, event_id)
+
+    return {
+        "item": item,
+        "db_path": str(VPO_BOOKING_DB_PATH),
     }
 
 
@@ -1551,26 +8651,34 @@ def booking_artists(
 def create_booking_show(
     request: BookingQuickShowRequest,
     x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
 ) -> dict:
     require_api_key(x_vpo_api_key)
     init_booking_db()
 
     payload = prepare_booking_show_payload(request)
     now = datetime.now().isoformat(timespec="seconds")
+    settlement_status, settlement_closed_at = derive_booking_settlement(request, payload, now)
 
     with booking_connect() as conn:
+        require_module_permission(conn, x_vpo_username, "booking", "create", artist=payload["artist"])
         cursor = conn.execute(
             """
             INSERT INTO booking_shows (
                 artist, show_date, venue, city, tour_manager, seller, status,
-                currency, fx_rate, cachet_amount, expenses_amount, net_amount,
+                currency, fx_rate, contracted_cachet_amount, venue_collected_amount,
+                venue_balance_amount, venue_payment_status, venue_shortfall_policy,
+                venue_payment_notes,
+                cachet_amount, expenses_amount, net_amount,
                 pre_split_adjustments_amount, split_base_amount,
                 artist_percent, producer_percent, artist_share_amount, producer_share_amount,
                 artist_cash_target_amount, producer_cash_target_amount,
                 artist_paid_amount, producer_received_amount, balance_artist_amount,
-                balance_producer_amount, receipt_refs_json, notes, created_at, updated_at
+                balance_producer_amount, receipt_refs_json, settlement_status,
+                settlement_closed_at, booking_commission_exempt, booking_commission_notes,
+                notes, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 payload["artist"],
@@ -1582,7 +8690,13 @@ def create_booking_show(
                 request.status,
                 request.currency,
                 request.fx_rate,
-                request.cachet_amount,
+                payload["contracted_cachet"],
+                payload["venue_collected"],
+                payload["venue_balance"],
+                payload["venue_payment_status"],
+                payload["venue_shortfall_policy"],
+                payload["venue_payment_notes"],
+                payload["effective_cachet_amount"],
                 payload["expenses_amount"],
                 payload["net_amount"],
                 payload["pre_split_adjustments_amount"],
@@ -1593,11 +8707,15 @@ def create_booking_show(
                 payload["producer_share"],
                 payload["artist_cash_target"],
                 payload["producer_cash_target"],
-                request.artist_paid_amount,
-                request.producer_received_amount,
+                payload["artist_paid_amount"],
+                payload["producer_received_amount"],
                 payload["balance_artist"],
                 payload["balance_producer"],
                 json.dumps(payload["receipt_refs"], ensure_ascii=False),
+                settlement_status,
+                settlement_closed_at,
+                payload["booking_commission_exempt"],
+                payload["booking_commission_notes"],
                 payload["notes"],
                 now,
                 now,
@@ -1618,85 +8736,60 @@ def update_booking_show(
     show_id: int,
     request: BookingQuickShowRequest,
     x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
 ) -> dict:
     require_api_key(x_vpo_api_key)
     init_booking_db()
 
-    payload = prepare_booking_show_payload(request)
     now = datetime.now().isoformat(timespec="seconds")
 
     with booking_connect() as conn:
-        existing = conn.execute("SELECT id FROM booking_shows WHERE id = ?", (show_id,)).fetchone()
-        if existing is None:
-            raise HTTPException(status_code=404, detail="Booking show not found.")
-
-        conn.execute(
-            """
-            UPDATE booking_shows
-            SET artist = ?,
-                show_date = ?,
-                venue = ?,
-                city = ?,
-                tour_manager = ?,
-                seller = ?,
-                status = ?,
-                currency = ?,
-                fx_rate = ?,
-                cachet_amount = ?,
-                expenses_amount = ?,
-                net_amount = ?,
-                pre_split_adjustments_amount = ?,
-                split_base_amount = ?,
-                artist_percent = ?,
-                producer_percent = ?,
-                artist_share_amount = ?,
-                producer_share_amount = ?,
-                artist_cash_target_amount = ?,
-                producer_cash_target_amount = ?,
-                artist_paid_amount = ?,
-                producer_received_amount = ?,
-                balance_artist_amount = ?,
-                balance_producer_amount = ?,
-                receipt_refs_json = ?,
-                notes = ?,
-                updated_at = ?
-            WHERE id = ?
-            """,
-            (
-                payload["artist"],
-                payload["show_date"],
-                payload["venue"],
-                payload["city"],
-                payload["tour_manager"],
-                payload["seller"],
-                request.status,
-                request.currency,
-                request.fx_rate,
-                request.cachet_amount,
-                payload["expenses_amount"],
-                payload["net_amount"],
-                payload["pre_split_adjustments_amount"],
-                payload["split_base_amount"],
-                request.artist_percent,
-                payload["producer_percent"],
-                payload["artist_share"],
-                payload["producer_share"],
-                payload["artist_cash_target"],
-                payload["producer_cash_target"],
-                request.artist_paid_amount,
-                request.producer_received_amount,
-                payload["balance_artist"],
-                payload["balance_producer"],
-                json.dumps(payload["receipt_refs"], ensure_ascii=False),
-                payload["notes"],
-                now,
-                show_id,
-            ),
+        existing = conn.execute("SELECT artist FROM booking_shows WHERE id = ?", (show_id,)).fetchone()
+        requested_artist = clean_booking_artist(request.artist) or ""
+        existing_artist = clean_booking_artist(existing["artist"]) if existing else ""
+        require_module_permission(
+            conn,
+            x_vpo_username,
+            "booking",
+            "edit",
+            artist=requested_artist,
+            existing_artist=existing_artist,
         )
-        replace_booking_show_children(conn, show_id, request, payload, now)
-        item = fetch_booking_show_item(conn, show_id)
+        item = update_booking_show_from_request(conn, show_id, request, now)
 
     return {
         "item": item,
         "db_path": str(VPO_BOOKING_DB_PATH),
     }
+
+
+@app.delete("/booking/shows/{show_id}")
+def delete_booking_show(
+    show_id: int,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+
+    with booking_connect() as conn:
+        existing = conn.execute("SELECT id, artist FROM booking_shows WHERE id = ?", (show_id,)).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Show no encontrado.")
+        require_module_permission(
+            conn,
+            x_vpo_username,
+            "booking",
+            "approve",
+            existing_artist=clean_booking_artist(existing["artist"]),
+        )
+        conn.execute("DELETE FROM finance_recovery_applications WHERE source_id LIKE ?", (f"{show_id}:pre_split_auto:%",))
+        conn.execute("DELETE FROM booking_movements WHERE show_id = ?", (show_id,))
+        conn.execute("DELETE FROM booking_show_expenses WHERE show_id = ?", (show_id,))
+        conn.execute("DELETE FROM booking_pre_split_adjustments WHERE show_id = ?", (show_id,))
+        conn.execute("DELETE FROM booking_direct_commissions WHERE show_id = ?", (show_id,))
+        conn.execute("DELETE FROM booking_external_shares WHERE show_id = ?", (show_id,))
+        conn.execute("DELETE FROM booking_artist_adjustments WHERE show_id = ?", (show_id,))
+        conn.execute("DELETE FROM booking_shows WHERE id = ?", (show_id,))
+
+    return {"ok": True, "deleted_id": show_id, "db_driver": operational_db_settings().driver}

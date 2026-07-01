@@ -34,7 +34,7 @@ export async function GET() {
   if ("error" in config) return config.error;
 
   const response = await fetch(`${config.apiUrl}/booking/shows?limit=1000`, {
-    headers: { "X-VPO-API-Key": config.apiKey },
+    headers: { "X-VPO-API-Key": config.apiKey, "X-VPO-Username": config.user.username },
     cache: "no-store",
   });
 
@@ -43,7 +43,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const config = await apiConfig("editor");
+  const config = await apiConfig();
   if ("error" in config) return config.error;
 
   const body = await request.json();
@@ -52,6 +52,7 @@ export async function POST(request: NextRequest) {
     headers: {
       "Content-Type": "application/json",
       "X-VPO-API-Key": config.apiKey,
+      "X-VPO-Username": config.user.username,
     },
     body: JSON.stringify(body),
   });
@@ -61,7 +62,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PUT(request: NextRequest) {
-  const config = await apiConfig("editor");
+  const config = await apiConfig();
   if ("error" in config) return config.error;
 
   const id = request.nextUrl.searchParams.get("id");
@@ -75,8 +76,30 @@ export async function PUT(request: NextRequest) {
     headers: {
       "Content-Type": "application/json",
       "X-VPO-API-Key": config.apiKey,
+      "X-VPO-Username": config.user.username,
     },
     body: JSON.stringify(body),
+  });
+
+  if (!response.ok) return apiError(response);
+  return NextResponse.json(await response.json());
+}
+
+export async function DELETE(request: NextRequest) {
+  const config = await apiConfig();
+  if ("error" in config) return config.error;
+
+  const id = request.nextUrl.searchParams.get("id");
+  if (!id) {
+    return NextResponse.json({ error: "Falta id del show." }, { status: 400 });
+  }
+
+  const response = await fetch(`${config.apiUrl}/booking/shows/${id}`, {
+    method: "DELETE",
+    headers: {
+      "X-VPO-API-Key": config.apiKey,
+      "X-VPO-Username": config.user.username,
+    },
   });
 
   if (!response.ok) return apiError(response);

@@ -11,15 +11,22 @@ web/.next
 .env
 .env.*
 !.env.example
+.secrets
 secrets
 
 input_raw
-warehouse
+warehouse/**
+!warehouse/
+!warehouse/registry/
+!warehouse/registry/*.json
 staging
 reports
 exports
 cache
 _cleanup_archive
+backups
+migration_exports
+scripts/_viejos
 
 *.xlsx
 *.xls

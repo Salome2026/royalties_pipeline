@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "crypto";
+import { createHmac, timingSafeEqual } from "crypto";
 
 export const SESSION_COOKIE = "vpo_web_session";
 
@@ -10,14 +10,7 @@ export type VpoSessionUser = {
   username: string;
   role: VpoRole;
   canEdit: boolean;
-};
-
-type VpoConfiguredUser = {
-  username: string;
-  password?: string;
-  password_hash?: string;
-  role?: VpoRole;
-  active?: boolean;
+  mustChangePassword?: boolean;
 };
 
 const ROLE_LEVEL: Record<VpoRole, number> = {
@@ -31,7 +24,7 @@ function normalizeRole(value: unknown): VpoRole {
 }
 
 function sessionSecret() {
-  return process.env.VPO_SESSION_SECRET || process.env.VPO_WEB_PASSWORD || process.env.VPO_API_KEY || "local-dev-session-secret";
+  return process.env.VPO_SESSION_SECRET || process.env.VPO_API_KEY || "local-dev-session-secret";
 }
 
 function toBase64Url(value: Buffer | string) {
@@ -48,88 +41,11 @@ function safeEqual(left: string, right: string) {
   return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
-function parseUsers(): VpoConfiguredUser[] {
-  const users: VpoConfiguredUser[] = [];
-  const rawUsers = process.env.VPO_WEB_USERS_JSON;
-  if (rawUsers) {
-    try {
-      const parsed = JSON.parse(rawUsers);
-      if (Array.isArray(parsed)) {
-        users.push(...parsed
-          .map((item) => ({
-            username: String(item.username || "").trim(),
-            password: item.password ? String(item.password) : undefined,
-            password_hash: item.password_hash ? String(item.password_hash) : undefined,
-            role: normalizeRole(item.role),
-            active: item.active !== false,
-          }))
-          .filter((item) => item.username && (item.password || item.password_hash)));
-      }
-    } catch {
-      return users;
-    }
-  }
-
-  const legacyPassword = process.env.VPO_WEB_PASSWORD;
-  if (legacyPassword && legacyPassword !== "change-me") {
-    const legacyUsers: VpoConfiguredUser[] = [
-      {
-        username: "ruben",
-        password: legacyPassword,
-        role: "admin",
-        active: true,
-      },
-      {
-        username: "admin",
-        password: legacyPassword,
-        role: "admin",
-        active: true,
-      },
-    ];
-
-    const existing = new Set(users.map((item) => item.username.toLowerCase()));
-    users.push(...legacyUsers.filter((item) => !existing.has(item.username.toLowerCase())));
-  }
-
-  return users;
-}
-
-export function hashPassword(password: string) {
-  const salt = randomBytes(16).toString("base64url");
-  const hash = scryptSync(password, salt, 32).toString("base64url");
-  return `scrypt$${salt}$${hash}`;
-}
-
-function verifyPassword(password: string, user: VpoConfiguredUser) {
-  if (user.password_hash) {
-    const [scheme, salt, expectedHash] = user.password_hash.split("$");
-    if (scheme !== "scrypt" || !salt || !expectedHash) return false;
-    const actualHash = scryptSync(password, salt, 32).toString("base64url");
-    return safeEqual(actualHash, expectedHash);
-  }
-
-  return Boolean(user.password) && safeEqual(password, user.password || "");
-}
-
-export function authenticateUser(username: string, password: string): VpoSessionUser | null {
-  const normalizedUsername = String(username || "").trim();
-  if (!normalizedUsername || !password) return null;
-
-  const user = parseUsers().find((item) => item.active !== false && item.username.toLowerCase() === normalizedUsername.toLowerCase());
-  if (!user || !verifyPassword(password, user)) return null;
-
-  const role = normalizeRole(user.role);
-  return {
-    username: user.username,
-    role,
-    canEdit: ROLE_LEVEL[role] >= ROLE_LEVEL.editor,
-  };
-}
-
 export function createSessionToken(user: VpoSessionUser) {
   const payload = toBase64Url(JSON.stringify({
     username: user.username,
     role: user.role,
+    mustChangePassword: Boolean(user.mustChangePassword),
     iat: Math.floor(Date.now() / 1000),
   }));
   return `${payload}.${signPayload(payload)}`;
@@ -137,12 +53,6 @@ export function createSessionToken(user: VpoSessionUser) {
 
 export function parseSessionToken(token: string | undefined): VpoSessionUser | null {
   if (!token) return null;
-
-  if (token === "ok") {
-    const legacyPassword = process.env.VPO_WEB_PASSWORD;
-    if (!legacyPassword || legacyPassword === "change-me") return null;
-    return { username: "ruben", role: "admin", canEdit: true };
-  }
 
   const [payload, signature] = token.split(".");
   if (!payload || !signature || !safeEqual(signature, signPayload(payload))) return null;
@@ -154,6 +64,7 @@ export function parseSessionToken(token: string | undefined): VpoSessionUser | n
       username: String(parsed.username || ""),
       role,
       canEdit: ROLE_LEVEL[role] >= ROLE_LEVEL.editor,
+      mustChangePassword: Boolean(parsed.mustChangePassword),
     };
   } catch {
     return null;

@@ -21,6 +21,7 @@ yarn-error.log*
 .env.*
 !.env.example
 secrets/
+.secrets/
 *.key
 *.pem
 *credentials*.json
@@ -35,6 +36,9 @@ reports/
 exports/
 _cleanup_archive/
 cache/
+backups/
+migration_exports/
+scripts/_viejos/
 
 # Generated spreadsheets / data extracts
 *.xlsx
@@ -44,6 +48,11 @@ cache/
 *.parquet
 *.duckdb
 *.db
+*.sqlite
+
+# Local helper binaries / generated TypeScript cache
+tools/
+web/tsconfig.tsbuildinfo
 
 # Keep docs tracked even if they contain markdown notes.
 !docs/
@@ -59,3 +68,5 @@ desktop.ini
 # Logs
 *.log
 logs/
+
+.vercel/

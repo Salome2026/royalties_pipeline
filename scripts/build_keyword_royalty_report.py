@@ -9,6 +9,11 @@ import polars as pl
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+try:
+    from lib.catalog_report_filter import filter_reportable_catalog
+except ModuleNotFoundError:
+    from scripts.lib.catalog_report_filter import filter_reportable_catalog
+
 
 BASE = Path(r"C:\royalties_pipeline")
 MARTS = BASE / "warehouse" / "marts"
@@ -733,6 +738,7 @@ def build_report_tables(
                 ),
                 standardized_cols,
             )
+            .pipe(lambda frame: filter_reportable_catalog(frame, standardized_cols))
             .filter(raw_filter)
             .filter(exclude_isrc_expr(standardized_cols, excluded_isrcs))
             .select([
@@ -757,8 +763,10 @@ def build_report_tables(
                     "territory",
                     "source_sheet",
                     "revenue_basis",
+                    "catalog_key",
+                    "catalog_business_status",
                 ]
-                if col in standardized_cols or col in {"store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory"}
+                if col in standardized_cols or col in {"store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory", "catalog_key", "catalog_business_status"}
             ])
             .with_columns([
                 pl.lit(None).cast(pl.Utf8).alias("content_type")
@@ -867,6 +875,7 @@ def build_report_tables(
                 ),
                 standardized_cols,
             )
+            .pipe(lambda frame: filter_reportable_catalog(frame, standardized_cols))
             .filter(raw_filter)
             .filter(exclude_isrc_expr(standardized_cols, excluded_isrcs))
             .select([
@@ -894,8 +903,10 @@ def build_report_tables(
                     "source_sheet",
                     "revenue_basis",
                     "match_text",
+                    "catalog_key",
+                    "catalog_business_status",
                 ]
-                if col in standardized_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory"}
+                if col in standardized_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory", "catalog_key", "catalog_business_status"}
             ])
             .with_columns([
                 pl.lit(None).cast(pl.Utf8).alias("content_type")
@@ -927,6 +938,7 @@ def build_report_tables(
                 ),
                 standardized_cols,
             )
+            .pipe(lambda frame: filter_reportable_catalog(frame, standardized_cols))
             .filter(raw_filter)
             .filter(exclude_isrc_expr(standardized_cols, excluded_isrcs))
             .select([
@@ -951,8 +963,10 @@ def build_report_tables(
                     "territory",
                     "statement_file_name",
                     "match_text",
+                    "catalog_key",
+                    "catalog_business_status",
                 ]
-                if col in standardized_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory"}
+                if col in standardized_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory", "catalog_key", "catalog_business_status"}
             ])
             .limit(raw_limit)
         )
@@ -1059,6 +1073,7 @@ def build_report_tables(
                 ),
                 song_cols,
             )
+            .pipe(lambda frame: filter_reportable_catalog(frame, song_cols))
             .filter(song_filter)
             .filter(exclude_isrc_expr(song_cols, excluded_isrcs))
             .with_columns(pl.col(period_column).cast(pl.Utf8).alias("period_month"))
@@ -1161,6 +1176,7 @@ def build_report_tables(
                 ),
                 raw_cols,
             )
+            .pipe(lambda frame: filter_reportable_catalog(frame, raw_cols))
             .filter(raw_filter)
             .filter(exclude_isrc_expr(raw_cols, excluded_isrcs))
         )

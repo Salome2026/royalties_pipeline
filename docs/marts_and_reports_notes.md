@@ -77,7 +77,7 @@ El consolidado incluye `mart_source_file` para saber de que mart individual vino
 
 Script:
 
-- `scripts\build_ingresos_por_statement_from_marts.py`
+- `scripts\build_statement_report_from_mart.py`
 
 Output:
 
@@ -90,6 +90,10 @@ Replica el formato del reporte viejo:
 - Artistas por fila
 - Statement periods por columna
 - TOTAL USD por hoja
+
+La documentacion completa de los criterios viejo/nuevo esta en:
+
+- `docs\statement_report_notes.md`
 
 ## Diferencias conocidas contra reporte viejo
 

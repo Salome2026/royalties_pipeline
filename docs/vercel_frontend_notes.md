@@ -6,57 +6,59 @@ The VPO Corp frontend lives in:
 web/
 ```
 
-It is a Next.js app. The browser never receives the Render API key. Instead:
+Current production flow:
 
 ```text
-Browser -> Vercel API route -> Render API -> Google Cloud Storage -> XLSX
+Browser -> Vercel API route -> Cloud Run API -> Cloud SQL / GCS marts
 ```
 
-For Google Sheets output:
+Vercel must not keep its own user list. Login is delegated to Cloud Run:
 
 ```text
-Browser -> Vercel API route -> Render API -> Google Sheets API -> Google Sheet URL
+Vercel /api/login -> Cloud Run /auth/login -> Cloud SQL app_users
 ```
 
 ## Local Development
 
+Use the project launcher from the repo root:
+
 ```powershell
-cd C:\royalties_pipeline\web
-npm install
-npm run dev
+C:\royalties_pipeline\scripts\start_vpo_local.ps1
 ```
 
-Open:
+That starts:
+
+- local FastAPI on `http://127.0.0.1:8011`
+- local Next.js on `http://localhost:3000`
+- Cloud SQL proxy for operational reads/writes
+
+## Local Web Environment
+
+`web/.env.local` should contain:
 
 ```text
-http://127.0.0.1:3000
+VPO_API_URL=http://127.0.0.1:8011
+VPO_API_KEY=<same local/cloud API key>
+VPO_SESSION_SECRET=<stable local session secret>
 ```
 
-## Local Environment
+Do not use `VPO_WEB_USERS_JSON` or `VPO_WEB_PASSWORD`.
 
-Create `web/.env.local`:
+## Vercel Production Environment
+
+Required:
 
 ```text
-VPO_API_URL=https://vpo-corp-api.onrender.com
-VPO_API_KEY=<render-api-key>
-VPO_WEB_PASSWORD=<web-login-password>
+VPO_API_URL=https://vpo-corp-api-259971998447.us-central1.run.app
+VPO_API_KEY=<same value as Google Secret Manager vpo-api-key>
+VPO_SESSION_SECRET=<stable production session secret>
 ```
 
-`web/.env.local` is ignored by Git.
-
-## Vercel Environment Variables
-
-Set these in Vercel:
-
-```text
-VPO_API_URL=https://vpo-corp-api.onrender.com
-VPO_API_KEY=<render-api-key>
-VPO_WEB_PASSWORD=<web-login-password>
-```
+The web menu is controlled by module/user permissions from the operational
+database. Do not use environment variables to hide cards outside the permission
+model.
 
 ## Vercel Project Settings
-
-When importing the GitHub repo:
 
 ```text
 Framework Preset: Next.js

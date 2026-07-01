@@ -2,6 +2,14 @@ from pathlib import Path
 
 import polars as pl
 
+from lib.identity import (
+    first_valid_isrc_expr,
+    first_valid_upc_expr,
+    first_valid_youtube_channel_id_expr,
+    first_valid_youtube_video_id_expr,
+    optional_text_expr,
+)
+
 
 BASE = Path(r"C:\royalties_pipeline")
 
@@ -10,6 +18,8 @@ OUTPUT_PATH = BASE / "warehouse" / "marts" / "song_level_onerpm.parquet"
 
 
 def optional_col(name: str, dtype=pl.Utf8) -> pl.Expr:
+    if dtype == pl.Utf8:
+        return optional_text_expr(INPUT_COLUMNS, name)
     return pl.col(name).cast(dtype, strict=False) if name in INPUT_COLUMNS else pl.lit(None).cast(dtype)
 
 
@@ -29,13 +39,19 @@ def main():
     df = df.filter(pl.col("amount_usd").is_not_null())
 
     df = df.with_columns([
-        pl.coalesce([
-            optional_col("ISRC"),
-            optional_col("ID"),
-            optional_col("Parent ID"),
-            optional_col("Video ID"),
-            optional_col("Channel ID"),
-        ]).alias("asset_isrc"),
+        first_valid_isrc_expr(INPUT_COLUMNS, ["ISRC", "ID", "Parent ID"]).alias("asset_isrc"),
+
+        pl.when(pl.col("source_sheet") == "Youtube Channels")
+        .then(first_valid_youtube_video_id_expr(INPUT_COLUMNS, ["Video ID"]))
+        .when(pl.col("source_sheet") == "Shares In & Out")
+        .then(first_valid_youtube_video_id_expr(INPUT_COLUMNS, ["ID"]))
+        .otherwise(pl.lit(None).cast(pl.Utf8))
+        .alias("track_id"),
+
+        pl.when(pl.col("source_sheet").is_in(["Youtube Channels", "Shares In & Out"]))
+        .then(first_valid_youtube_channel_id_expr(INPUT_COLUMNS, ["Channel ID", "Parent ID"]))
+        .otherwise(pl.lit(None).cast(pl.Utf8))
+        .alias("channel_id"),
 
         pl.coalesce([
             optional_col("Track Title"),
@@ -44,7 +60,7 @@ def main():
             optional_col("Album Title"),
         ]).alias("track_statement_style"),
 
-        optional_col("UPC").alias("product_upc"),
+        first_valid_upc_expr(INPUT_COLUMNS, ["UPC", "Parent ID"]).alias("product_upc"),
         optional_col("Store").alias("store_name"),
         optional_col("Territory").alias("territory"),
         optional_col("Sale Type").alias("sale_type"),
@@ -65,6 +81,8 @@ def main():
             "include_in_statement_view",
             "possible_internal_transfer",
             "asset_isrc",
+            "track_id",
+            "channel_id",
             "track_statement_style",
             "artist_statement_style",
             "transaction_month",

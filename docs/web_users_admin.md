@@ -1,108 +1,40 @@
 # Usuarios web VPO Corp
 
-Este documento explica como agregar usuarios a la web de VPO Corp sin cambiar codigo.
+## Regla actual
 
-## Modelo actual
+Los usuarios ya no se administran desde variables de entorno web.
 
-La web usa login con usuario y contrasena.
+La web de Vercel y localhost autentican contra la API (`/auth/login`) y la API
+valida contra la base operativa Cloud SQL. No usar `VPO_WEB_USERS_JSON` ni
+`VPO_WEB_PASSWORD`.
 
-Roles disponibles:
+## Variables web vigentes
 
-- `viewer`: puede entrar y ver.
-- `editor`: puede entrar, ver y guardar/editar.
-- `admin`: permisos completos. Por ahora se usa como editor avanzado; el ABM web de usuarios queda para una etapa posterior.
+En Vercel Production deben quedar solo:
 
-Las rutas de lectura aceptan `viewer`.
-Las rutas de escritura piden `editor` o `admin`.
+- `VPO_API_URL`: URL de Cloud Run.
+- `VPO_API_KEY`: misma clave que usa Cloud Run.
+- `VPO_SESSION_SECRET`: secreto estable para firmar cookies web.
 
-## Variable de entorno
+El menu de la web se controla por permisos de modulo/artista desde la base
+operativa. No usar variables de entorno para ocultar tarjetas por fuera de los
+permisos.
 
-Los usuarios se configuran en la variable:
+## Administracion de usuarios
 
-```text
-VPO_WEB_USERS_JSON
-```
+Los usuarios pertenecen al modelo operativo:
 
-Formato:
+- `employees`
+- `app_users`
+- permisos por modulo
+- alcance por artistas cuando corresponda
 
-```json
-[
-  {
-    "username": "jfornasari",
-    "password_hash": "scrypt$...",
-    "role": "viewer",
-    "active": true
-  }
-]
-```
+Crear, desactivar o cambiar permisos desde el ABM de empleados/usuarios. Si se
+necesita una correccion puntual por base, debe hacerse contra Cloud SQL con una
+nota de auditoria.
 
-Importante: si `VPO_WEB_PASSWORD` sigue configurada, el sistema conserva el acceso legacy para `ruben` y `admin` con esa contrasena. Esto evita bloquear a Ruben al agregar usuarios nuevos.
+## Usuarios retirados
 
-## Crear hash de clave
-
-Desde la carpeta web:
-
-```powershell
-cd C:\royalties_pipeline\web
-npm run hash-password -- "clave-del-usuario"
-```
-
-Copiar el resultado completo, incluyendo el prefijo `scrypt$`.
-
-## Usuario creado inicialmente
-
-Juan Manuel Fornasari:
-
-```json
-{
-  "username": "jfornasari",
-  "password_hash": "scrypt$JojA3ThX1Jj3cCS-5VDaCw$b26S6TdytL3EbxXpSEXYzJqEKb6iSa7GjaGTfVYEtyU",
-  "role": "viewer",
-  "active": true
-}
-```
-
-## Como agregar otro usuario
-
-1. Generar hash con `npm run hash-password -- "clave"`.
-2. Agregar un objeto nuevo al array de `VPO_WEB_USERS_JSON`.
-3. Elegir rol: `viewer`, `editor` o `admin`.
-4. Guardar la variable en Vercel.
-5. Redeploy si Vercel no lo hace automaticamente.
-
-Ejemplo con dos usuarios:
-
-```json
-[
-  {
-    "username": "jfornasari",
-    "password_hash": "scrypt$JojA3ThX1Jj3cCS-5VDaCw$b26S6TdytL3EbxXpSEXYzJqEKb6iSa7GjaGTfVYEtyU",
-    "role": "viewer",
-    "active": true
-  },
-  {
-    "username": "otro_usuario",
-    "password_hash": "scrypt$PEGAR_HASH_AQUI",
-    "role": "viewer",
-    "active": true
-  }
-]
-```
-
-## Cambiar permiso
-
-Cambiar solo el campo `role`.
-
-Ejemplo:
-
-```json
-"role": "editor"
-```
-
-## Desactivar usuario
-
-No borrar el usuario si queremos conservar historial administrativo. Cambiar:
-
-```json
-"active": false
-```
+`jfornasari` fue retirado como usuario web. El usuario operativo correcto para
+Juan Manuel Fornasari es `juanf`, con los permisos que tenga asignados en la
+base viva.

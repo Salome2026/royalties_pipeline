@@ -4,9 +4,8 @@
 
 - Vercel: frontend Next.js.
 - Google Cloud Storage: marts publicados.
-- Google Cloud Run: API FastAPI que genera reportes.
-
-Render puede quedar como respaldo mientras probamos Cloud Run.
+- Google Cloud Run: API FastAPI.
+- Cloud SQL Postgres: base operativa viva unica.
 
 ## Configuracion recomendada
 
@@ -31,8 +30,16 @@ Usar los mismos valores que Render:
 - `GOOGLE_SHEETS_SHARE_EMAIL`
 - `GOOGLE_DRIVE_FOLDER_ID`
 - `GOOGLE_OAUTH_TOKEN_JSON`
+- `VPO_OPERATIONAL_DB_DRIVER=postgres`
+- `VPO_POSTGRES_CONNECT_MODE=cloudsql_socket`
+- `VPO_CLOUDSQL_CONNECTION_NAME=vpo-corp-royalties:us-central1:vpo-corp-postgres`
+- `VPO_OPERATIONAL_DB_NAME=vpo_corp`
+- `VPO_OPERATIONAL_DB_USER=postgres`
+- `VPO_OPERATIONAL_DB_PASSWORD` desde Secret Manager.
 
 Para leer Google Cloud Storage en Cloud Run, preferimos usar el service account adjunto al servicio. Ese service account necesita permiso sobre el bucket, por ejemplo `Storage Object Viewer`.
+Para Cloud SQL, el servicio debe tener asociada la instancia con
+`--add-cloudsql-instances`.
 
 ## Deploy inicial desde la raiz del repo
 
@@ -47,6 +54,7 @@ gcloud run deploy vpo-corp-api `
   --concurrency 1 `
   --min-instances 0 `
   --max-instances 1 `
+  --add-cloudsql-instances vpo-corp-royalties:us-central1:vpo-corp-postgres `
   --set-env-vars GCS_BUCKET=vpo-corp-royalties-marts,GCS_PREFIX=marts,VPO_API_CACHE_DIR=/tmp/vpo-corp/gcs_marts,VPO_API_REPORTS_DIR=/tmp/vpo-corp/reports
 ```
 

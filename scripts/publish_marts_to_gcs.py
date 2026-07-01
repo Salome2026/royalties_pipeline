@@ -14,7 +14,9 @@ DEFAULT_FILES = [
     "standardized_raw_all_sources.parquet",
     "song_level_all_sources.parquet",
     "catalog_candidates.parquet",
+    "catalog_master.parquet",
     "statement_summary_all_sources.parquet",
+    "digital_income_statement_summary.parquet",
 ]
 
 

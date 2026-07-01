@@ -16,5 +16,7 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY app ./app
 COPY scripts ./scripts
+RUN mkdir -p warehouse/registry
+COPY warehouse/registry/*.json ./warehouse/registry/
 
 CMD ["sh", "-c", "uvicorn app.vpo_corp_api:app --host 0.0.0.0 --port ${PORT}"]

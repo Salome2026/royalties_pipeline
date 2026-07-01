@@ -14,6 +14,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.append(str(SCRIPT_DIR))
 
 from lib.fx import get_monthly_fx
+from lib.identity import valid_youtube_video_id_expr
 from lib.statement_period import from_fuga_filename, fuga_correction
 
 
@@ -108,6 +109,28 @@ def first_non_empty(cols: set[str], *col_names: str) -> pl.Expr:
             expr = expr.when(condition).then(value)
 
     return expr.otherwise(None)
+
+
+def fuga_youtube_video_id_expr(cols: set[str]) -> pl.Expr:
+    container = valid_youtube_video_id_expr(text_expr("DSP Container ID", cols))
+    product_reference_video = valid_youtube_video_id_expr(
+        text_expr("Product Reference", cols).str.extract(r"^YT-V-([A-Za-z0-9_-]{11})$", 1)
+    )
+    return pl.coalesce([container, product_reference_video])
+
+
+def fuga_youtube_video_id_source_expr(cols: set[str]) -> pl.Expr:
+    container = valid_youtube_video_id_expr(text_expr("DSP Container ID", cols))
+    product_reference_video = valid_youtube_video_id_expr(
+        text_expr("Product Reference", cols).str.extract(r"^YT-V-([A-Za-z0-9_-]{11})$", 1)
+    )
+    return (
+        pl.when(container.is_not_null())
+        .then(pl.lit("DSP Container ID"))
+        .when(product_reference_video.is_not_null())
+        .then(pl.lit("Product Reference"))
+        .otherwise(pl.lit(None).cast(pl.Utf8))
+    )
 
 
 # =========================
@@ -208,6 +231,8 @@ def standardize_fuga_file(
         text_expr("Asset ISRC", cols).alias("asset_isrc"),
         text_expr("Asset Reference", cols).alias("asset_reference"),
         text_expr("Asset/Product", cols).alias("asset_product_type"),
+        fuga_youtube_video_id_expr(cols).alias("video_id"),
+        fuga_youtube_video_id_source_expr(cols).alias("video_id_source"),
 
         # =========================
         # CLAVE LEGACY PARA CERRAR CON PIPELINE ACTUAL

@@ -1,6 +1,8 @@
 from pathlib import Path
 import polars as pl
 
+from lib.identity import first_valid_isrc_expr, first_valid_youtube_video_id_expr
+
 
 BASE = Path(r"C:\royalties_pipeline")
 
@@ -24,6 +26,27 @@ def main():
         pl.col("amount_usd").is_not_null()
     )
 
+    df = df.with_columns([
+        pl.lit("detail").alias("source_sheet"),
+        pl.lit("generation").alias("revenue_basis"),
+        pl.lit(True).alias("include_in_cash_view"),
+        pl.lit(True).alias("include_in_catalog_view"),
+        pl.lit(True).alias("include_in_statement_view"),
+        pl.lit(False).alias("possible_internal_transfer"),
+    ])
+
+    input_columns = set(df.columns)
+
+    df = df.with_columns(
+        first_valid_isrc_expr(input_columns, ["asset_isrc", "ISRC"]).alias("asset_isrc")
+    )
+    df = df.with_columns(
+        pl.when(pl.col("asset_isrc").is_null())
+        .then(first_valid_youtube_video_id_expr(input_columns, ["video_id", "VideoId"]))
+        .otherwise(pl.lit(None).cast(pl.Utf8))
+        .alias("track_id")
+    )
+
     # =========================
     # GROUP BY SONG LEVEL
     # =========================
@@ -33,7 +56,14 @@ def main():
         .group_by([
             "source",
             "account",
+            "source_sheet",
+            "revenue_basis",
+            "include_in_cash_view",
+            "include_in_catalog_view",
+            "include_in_statement_view",
+            "possible_internal_transfer",
             "asset_isrc",
+            "track_id",
             "track_statement_style",
             "artist_statement_style",
             "transaction_month",

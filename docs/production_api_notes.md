@@ -17,7 +17,7 @@ Set these values in `.env` locally or in the hosting provider:
 ```text
 GCS_BUCKET=vpo-corp-royalties-marts
 GCS_PREFIX=marts
-GOOGLE_APPLICATION_CREDENTIALS=C:\royalties_pipeline\secrets\gcs_service_account.json
+GOOGLE_APPLICATION_CREDENTIALS=C:\royalties_pipeline\.secrets\gcs_service_account.json
 VPO_API_KEY=change-me
 VPO_API_CACHE_DIR=C:\royalties_pipeline\cache\gcs_marts
 VPO_API_REPORTS_DIR=C:\royalties_pipeline\reports\api

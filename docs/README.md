@@ -11,14 +11,29 @@
 ## Marts y reportes
 
 - [Marts and reports](marts_and_reports_notes.md)
+- [Reporte por statement](statement_report_notes.md)
+- [Catalogo general core](catalog_core_notes.md)
+- [Normalizacion de identidad](identity_normalization_policy.md)
+- [Configurador distribuidoras fase 1](distributor_catalog_configurator_phase1.md)
+- [Configurador distribuidoras fase 2](distributor_catalog_configurator_phase2_design.md)
+- [Configurador distribuidoras fase 3](distributor_configurator_phase3_validation.md)
+- [Configurador distribuidoras fase 4](distributor_configurator_phase4_policy_integration.md)
 - [Statement period policy](statement_period_policy.md)
 - [Web users admin](web_users_admin.md)
+- [Cloud environment policy](cloud_environment_policy.md)
+- [Cloud operational schema v1](cloud_operational_schema_v1.md)
+- [Cloud migration progress 2026-06-25](cloud_migration_progress_20260625.md)
+- [Secure operational DB connection](secure_operational_db_connection.md)
+- [Control de distribuidoras](source_monitor_notes.md)
 
 ## Booking
 
+- [Finanzas VPO - documento rector](finance_business_master.md)
 - [Booking rules master](booking_rules_master.md)
 - [Booking validation matrix](booking_validation_matrix.md)
 - [Booking go-live workflow](booking_go_live_workflow.md)
+- [Gastos historicos de artistas y proyectos](artist_expense_staging_plan.md)
+- [Finanzas de artista y ledger](artist_finance_ledger_model.md)
 - [Booking system design](booking_system_design.md)
 - [Booking data model](booking_data_model.md)
 - [Booking raw profile](booking_raw_profile.md)
@@ -28,19 +43,14 @@ Antes de modificar la pantalla nueva de booking, backend de booking o guardado d
 
 ## Arquitectura general
 
-El proyecto tiene dos capas:
+El proyecto operativo de regalias trabaja sobre el pipeline nuevo:
 
-1. Pipeline viejo
-   - Escribe en `warehouse\detail\royalties_detail.parquet`
-   - Usa `warehouse\registry\processed_files.parquet`
-   - Alimenta `build_ingresos_por_statement.py`
+- Escribe en `warehouse\marts\standardized_raw_*.parquet`
+- Construye `warehouse\marts\song_level_*.parquet`
+- Construye marts consolidados para reportes nuevos
+- Publica a cloud solo los marts validados
 
-2. Pipeline nuevo
-   - Escribe en `warehouse\marts\standardized_raw_*.parquet`
-   - Construye `warehouse\marts\song_level_*.parquet`
-   - Construye marts consolidados para reportes nuevos
-
-La meta es que el pipeline nuevo pueda reemplazar gradualmente al viejo, pero manteniendo el viejo como control historico hasta que todos los reportes importantes esten replicados y validados.
+El pipeline viejo quedo archivado como referencia historica en `_cleanup_archive\20260517_pipeline_viejo\scripts`. No debe usarse para decidir pendientes, publicar datos ni alimentar la web.
 
 ## Reglas importantes
 
@@ -48,4 +58,7 @@ La meta es que el pipeline nuevo pueda reemplazar gradualmente al viejo, pero ma
 - No inventar artista/tema cuando la fuente no lo trae.
 - Conservar columnas originales siempre que sea razonable.
 - Usar `scripts\lib\fx.py` para conversion FX.
-- Validar contra el pipeline viejo cuando exista comparable.
+- Validar contra marts nuevos y contra reportes exportados cuando exista comparable.
+- No pisar identificadores originales: si una fila nueva viene sin ISRC pero con
+  UPC, la resolucion a ISRC pertenece al catalogo/reportes y debe seguir
+  `identity_normalization_policy.md`.

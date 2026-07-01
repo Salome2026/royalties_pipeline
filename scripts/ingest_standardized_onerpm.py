@@ -34,6 +34,12 @@ ACCOUNTS = {
         "load_shares_as_rows": False,
         "use_shares_as_flags": True,
     },
+    "la_nueva_sangre": {
+        "load_masters": True,
+        "load_youtube_channels": True,
+        "load_shares_as_rows": False,
+        "use_shares_as_flags": True,
+    },
     "mawzrecords": {
         "load_masters": True,
         "load_youtube_channels": True,
@@ -381,13 +387,14 @@ def add_view_flags(df: pl.DataFrame, account: str, source_sheet: str) -> pl.Data
     is_master = source_sheet == SHEET_MASTERS
     is_share = source_sheet == SHEET_SHARES
     is_youtube_channel = source_sheet == SHEET_YOUTUBE_CHANNELS
+    is_external_account = account in {"gusty_dj", "la_nueva_sangre"}
 
     include_in_statement_view = account in ["henry_remix", "mawzrecords"]
     include_in_cash_view = account in ["henry_remix", "mawzrecords"]
     include_in_catalog_view = is_master or is_youtube_channel
     possible_internal_transfer = account == "mawzrecords" and is_share
 
-    if account == "gusty_dj":
+    if is_external_account:
         revenue_basis = "youtube_channel_earning_external_account" if is_youtube_channel else "master_earning_external_account"
     elif is_youtube_channel:
         revenue_basis = "youtube_channel_earning"

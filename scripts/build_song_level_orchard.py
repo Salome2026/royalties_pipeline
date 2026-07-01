@@ -20,12 +20,33 @@ def main():
 
     df = df.filter(pl.col("amount_usd").is_not_null())
 
+    df = df.with_columns([
+        pl.when(pl.col("statement_type") == ALTAFONTE_STATEMENT_TYPE)
+        .then(pl.lit("legacy_altafonte"))
+        .otherwise(pl.lit("revenue_detail"))
+        .alias("source_sheet"),
+        pl.when(pl.col("statement_type") == ALTAFONTE_STATEMENT_TYPE)
+        .then(pl.lit("legacy_generation"))
+        .otherwise(pl.lit("generation"))
+        .alias("revenue_basis"),
+        pl.lit(True).alias("include_in_cash_view"),
+        pl.lit(True).alias("include_in_catalog_view"),
+        pl.lit(True).alias("include_in_statement_view"),
+        pl.lit(False).alias("possible_internal_transfer"),
+    ])
+
     song_level = (
         df
         .group_by([
             "source",
             "account",
             "statement_type",
+            "source_sheet",
+            "revenue_basis",
+            "include_in_cash_view",
+            "include_in_catalog_view",
+            "include_in_statement_view",
+            "possible_internal_transfer",
             "asset_isrc",
             "track_statement_style",
             "artist_statement_style",

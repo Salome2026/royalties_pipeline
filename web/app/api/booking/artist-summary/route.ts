@@ -115,12 +115,14 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const artist = url.searchParams.get("artist") || null;
 
-  const response = await fetch(`${config.apiUrl}/booking/shows?limit=200`, {
-    headers: { "X-VPO-API-Key": config.apiKey },
+  const params = new URLSearchParams();
+  if (artist) params.set("artist", artist);
+
+  const response = await fetch(`${config.apiUrl}/booking/artist-summary?${params.toString()}`, {
+    headers: { "X-VPO-API-Key": config.apiKey, "X-VPO-Username": config.user.username },
     cache: "no-store",
   });
 
   if (!response.ok) return apiError(response);
-  const payload = await response.json();
-  return NextResponse.json(buildSummary(payload.items || [], artist));
+  return NextResponse.json(await response.json());
 }
