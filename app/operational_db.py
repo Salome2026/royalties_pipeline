@@ -58,7 +58,7 @@ def operational_db_settings() -> OperationalDbSettings:
     }:
         raise OperationalDbConfigError(
             "SQLite operational mode is frozen/legacy. Set "
-            "VPO_ALLOW_LEGACY_SQLITE_OPERATIONAL=1 only for controlled historical recovery."
+            "VPO_ALLOW_LEGACY_SQLITE_OPERATIONAL=1 only for controlled historical access/audit."
         )
 
     sqlite_path = Path(os.environ.get("VPO_BOOKING_DB_PATH", DEFAULT_SQLITE_PATH)).expanduser()

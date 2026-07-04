@@ -25,6 +25,7 @@
 - [Cloud migration progress 2026-06-25](cloud_migration_progress_20260625.md)
 - [Secure operational DB connection](secure_operational_db_connection.md)
 - [Control de distribuidoras](source_monitor_notes.md)
+- [UI period control policy](ui_period_control_policy.md)
 
 ## Booking
 

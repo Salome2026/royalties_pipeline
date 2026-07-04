@@ -289,6 +289,21 @@ class EmployeePasswordRequest(BaseModel):
     must_change_password: bool = True
 
 
+class BookingCommissionRuleRequest(BaseModel):
+    artist: str = Field(..., min_length=1, max_length=160)
+    percent: float = Field(default=0.0, ge=0.0, le=100.0)
+    base: Literal["commissionable", "total"] = "commissionable"
+    start_month: str | None = Field(default=None, max_length=7)
+    end_month: str | None = Field(default=None, max_length=7)
+    active: bool = True
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class BookingCommissionRulesRequest(BaseModel):
+    employee_id: int = Field(..., gt=0)
+    rules: list[BookingCommissionRuleRequest] = Field(default_factory=list, max_length=500)
+
+
 class BookingArtistAdjustmentRequest(BaseModel):
     concept: str = Field(..., min_length=1, max_length=180)
     amount: float = Field(default=0.0, ge=0.0)
@@ -2423,7 +2438,7 @@ APP_MODULES = [
     ("booking_lab", "Carga de Shows laboratorio"),
     ("booking_detail", "Detalle Booking"),
     ("booking_summary", "Resumen Booking"),
-    ("booking_commissions", "Resumen Booking Comisiones"),
+    ("booking_commissions", "Comisiones"),
     ("composite_booking", "Liquidaciones compuestas"),
     ("caserio", "El Caserio"),
     ("finance_movements", "Movimientos financieros"),
@@ -2479,8 +2494,11 @@ def seed_app_modules(conn: sqlite3.Connection) -> None:
     for module_key, label in APP_MODULES:
         conn.execute(
             """
-            INSERT OR IGNORE INTO app_modules (module_key, label, active, created_at)
+            INSERT INTO app_modules (module_key, label, active, created_at)
             VALUES (?, ?, 1, ?)
+            ON CONFLICT(module_key) DO UPDATE SET
+                label = excluded.label,
+                active = 1
             """,
             (module_key, label, now),
         )
@@ -2589,6 +2607,73 @@ def upsert_employee_user(
             """,
             (*params, now, existing["id"]),
         )
+
+
+def ensure_booking_commission_rules_table(conn: sqlite3.Connection) -> None:
+    if not is_postgres_connection(conn):
+        raise HTTPException(
+            status_code=500,
+            detail="Las reglas de comisiones usan la base operacional Postgres. SQLite queda solo como historico.",
+        )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS booking_commission_rules (
+            id bigserial PRIMARY KEY,
+            employee_id bigint NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+            artist text NOT NULL,
+            percentage numeric(9, 4) NOT NULL DEFAULT 0,
+            calculation_base text NOT NULL DEFAULT 'commissionable',
+            active_from_month text,
+            active_to_month text,
+            active boolean NOT NULL DEFAULT true,
+            notes text,
+            created_by text,
+            updated_by text,
+            created_at timestamptz NOT NULL DEFAULT now(),
+            updated_at timestamptz NOT NULL DEFAULT now(),
+            UNIQUE(employee_id, artist),
+            CONSTRAINT booking_commission_rules_base_chk
+                CHECK (calculation_base IN ('commissionable', 'total'))
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_booking_commission_rules_employee ON booking_commission_rules(employee_id)"
+    )
+
+
+def clean_commission_rule_month(value: str | None) -> str | None:
+    cleaned = clean_optional_text(value)
+    if not cleaned:
+        return None
+    if len(cleaned) != 7 or cleaned[4] != "-":
+        raise HTTPException(status_code=400, detail="Mes invalido. Usar YYYY-MM.")
+    try:
+        year = int(cleaned[:4])
+        month = int(cleaned[5:])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Mes invalido. Usar YYYY-MM.") from exc
+    if year < 2000 or month < 1 or month > 12:
+        raise HTTPException(status_code=400, detail="Mes invalido. Usar YYYY-MM.")
+    return cleaned
+
+
+def row_to_booking_commission_rule(row) -> dict:
+    return {
+        "id": int(row["id"]),
+        "employee_id": int(row["employee_id"]),
+        "artist": row["artist"],
+        "percent": float(row["percentage"] or 0),
+        "base": row["calculation_base"] or "commissionable",
+        "start_month": row["active_from_month"],
+        "end_month": row["active_to_month"],
+        "active": bool(row["active"]),
+        "notes": row["notes"] or "",
+        "created_by": row["created_by"],
+        "updated_by": row["updated_by"],
+        "created_at": str(row["created_at"]),
+        "updated_at": str(row["updated_at"]),
+    }
 
 
 def upsert_employee_permissions(
@@ -6036,6 +6121,7 @@ def digital_income(
     artist_keyword: str | None = None,
     start_month: str | None = None,
     end_month: str | None = None,
+    period_mode: Literal["last_6_months", "last_12_months", "all", "single_month", "closed_range"] = "last_6_months",
     limit: int = 500,
     offset: int = 0,
     refresh_cache: bool = False,
@@ -6129,8 +6215,10 @@ def digital_income(
             "options": options,
         }
 
-    if start_month or end_month:
+    if start_month or end_month or period_mode in {"single_month", "closed_range", "all"}:
         matrix_months = available_months
+    elif period_mode == "last_12_months":
+        matrix_months = available_months[-12:]
     else:
         matrix_months = available_months[-6:]
 
@@ -6297,17 +6385,10 @@ def booking_shows(
     }
 
 
-@app.get("/booking/summary")
-def booking_summary(
-    x_vpo_api_key: str | None = Header(default=None),
-    x_vpo_username: str | None = Header(default=None),
-) -> dict:
-    require_api_key(x_vpo_api_key)
-    init_booking_db()
-
+def booking_summary_for_module(module_key: str, x_vpo_username: str | None) -> dict:
     with booking_connect() as conn:
         params: list = []
-        artist_scope_sql = apply_artist_scope_sql(conn, x_vpo_username, "booking_summary", params)
+        artist_scope_sql = apply_artist_scope_sql(conn, x_vpo_username, module_key, params)
         rows = conn.execute(
             f"""
             SELECT
@@ -6384,8 +6465,184 @@ def booking_summary(
         "months": months,
         "items": items,
         "totals": totals,
-        "db_path": str(VPO_BOOKING_DB_PATH),
+        "db_driver": operational_db_settings().driver,
+        "db_path": str(VPO_BOOKING_DB_PATH) if operational_db_settings().driver == "sqlite" else "",
     }
+
+
+@app.get("/booking/summary")
+def booking_summary(
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+    return booking_summary_for_module("booking_summary", x_vpo_username)
+
+
+@app.get("/booking/commissions-summary")
+def booking_commissions_summary(
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+    return booking_summary_for_module("booking_commissions", x_vpo_username)
+
+
+@app.get("/booking/commission-rules")
+def booking_commission_rules(
+    employee_id: int,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+    with booking_connect() as conn:
+        require_module_permission(conn, x_vpo_username, "booking_commissions", "access")
+        ensure_booking_commission_rules_table(conn)
+        employee = conn.execute("SELECT id, display_name FROM employees WHERE id = ?", (employee_id,)).fetchone()
+        if employee is None:
+            raise HTTPException(status_code=404, detail="Empleado no encontrado.")
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM booking_commission_rules
+            WHERE employee_id = ?
+            ORDER BY artist
+            """,
+            (employee_id,),
+        ).fetchall()
+        return {
+            "employee": {"id": int(employee["id"]), "display_name": employee["display_name"]},
+            "rules": [row_to_booking_commission_rule(row) for row in rows],
+        }
+
+
+@app.put("/booking/commission-rules")
+def save_booking_commission_rules(
+    request: BookingCommissionRulesRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+    actor_username = clean_username(x_vpo_username or "")
+    now = datetime.now().isoformat(timespec="seconds")
+    with booking_connect() as conn:
+        actor_permission = require_module_permission(conn, actor_username, "booking_commissions", "edit")
+        ensure_booking_commission_rules_table(conn)
+        employee = conn.execute(
+            "SELECT id, display_name FROM employees WHERE id = ? AND active = 1",
+            (request.employee_id,),
+        ).fetchone()
+        if employee is None:
+            raise HTTPException(status_code=404, detail="Empleado no encontrado.")
+
+        selected_permission = conn.execute(
+            """
+            SELECT can_access, scope_json
+            FROM module_permissions
+            WHERE employee_id = ?
+              AND module_key = 'booking_commissions'
+            """,
+            (request.employee_id,),
+        ).fetchone()
+        if selected_permission is None or not bool(selected_permission["can_access"]):
+            raise HTTPException(status_code=400, detail="El empleado no tiene activo el modulo Comisiones.")
+
+        selected_scope_items = parse_permission_scope(selected_permission["scope_json"])
+        if not selected_scope_items or any(item["scope_type"] == "all" and item["scope_ref"] == "*" for item in selected_scope_items):
+            selected_scoped_artists: set[str] | None = None
+        else:
+            selected_scoped_artists = {
+                cleaned.casefold()
+                for item in selected_scope_items
+                if item["scope_type"] == "artist"
+                for cleaned in [clean_booking_artist(item["scope_ref"])]
+                if cleaned
+            }
+
+        actor_scoped_artists = actor_permission.get("scope")
+        prepared_rules: list[dict] = []
+        seen_artists: set[str] = set()
+        for rule in request.rules:
+            artist = clean_booking_artist(rule.artist)
+            if not artist:
+                continue
+            artist_key = artist.casefold()
+            if artist_key in seen_artists:
+                continue
+            if selected_scoped_artists is not None and artist_key not in selected_scoped_artists:
+                raise HTTPException(status_code=400, detail=f"{artist} no esta asignado al empleado seleccionado.")
+            if actor_scoped_artists is not None and artist_key not in actor_scoped_artists:
+                raise HTTPException(status_code=403, detail=f"No tenes permiso para configurar {artist}.")
+
+            start_month = clean_commission_rule_month(rule.start_month)
+            end_month = clean_commission_rule_month(rule.end_month)
+            if start_month and end_month and start_month > end_month:
+                raise HTTPException(status_code=400, detail=f"Rango de meses invalido para {artist}.")
+
+            prepared_rules.append({
+                "artist": artist,
+                "percentage": float(rule.percent),
+                "calculation_base": rule.base,
+                "active_from_month": start_month,
+                "active_to_month": end_month,
+                "active": 1 if rule.active else 0,
+                "notes": clean_optional_text(rule.notes),
+            })
+            seen_artists.add(artist_key)
+
+        for rule in prepared_rules:
+            conn.execute(
+                """
+                INSERT INTO booking_commission_rules (
+                    employee_id, artist, percentage, calculation_base, active_from_month,
+                    active_to_month, active, notes, created_by, updated_by, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(employee_id, artist) DO UPDATE SET
+                    percentage = excluded.percentage,
+                    calculation_base = excluded.calculation_base,
+                    active_from_month = excluded.active_from_month,
+                    active_to_month = excluded.active_to_month,
+                    active = excluded.active,
+                    notes = excluded.notes,
+                    updated_by = excluded.updated_by,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    request.employee_id,
+                    rule["artist"],
+                    rule["percentage"],
+                    rule["calculation_base"],
+                    rule["active_from_month"],
+                    rule["active_to_month"],
+                    rule["active"],
+                    rule["notes"],
+                    actor_username or None,
+                    actor_username or None,
+                    now,
+                    now,
+                ),
+            )
+
+        rows = conn.execute(
+            """
+            SELECT *
+            FROM booking_commission_rules
+            WHERE employee_id = ?
+            ORDER BY artist
+            """,
+            (request.employee_id,),
+        ).fetchall()
+        return {
+            "ok": True,
+            "employee": {"id": int(employee["id"]), "display_name": employee["display_name"]},
+            "saved": len(prepared_rules),
+            "rules": [row_to_booking_commission_rule(row) for row in rows],
+        }
 
 
 @app.get("/booking/artist-summary")
@@ -7488,6 +7745,92 @@ def employee_records(
             "function_options": EMPLOYEE_FUNCTION_OPTIONS,
             "modules": [{"module_key": key, "label": label} for key, label in APP_MODULES],
             "db_path": str(VPO_BOOKING_DB_PATH) if operational_db_settings().driver == "sqlite" else "",
+            "db_driver": operational_db_settings().driver,
+        }
+
+
+@app.get("/employees/commission-options")
+def employee_commission_options(
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+
+    with booking_connect() as conn:
+        permission = require_module_permission(conn, x_vpo_username, "booking_commissions", "access")
+        employee_filter_sql = ""
+        params: list = []
+        if not (permission.get("is_admin") or permission.get("can_edit") or permission.get("can_approve")):
+            username = clean_username(x_vpo_username or "")
+            user = conn.execute(
+                """
+                SELECT employee_id
+                FROM app_users
+                WHERE lower(username) = lower(?)
+                  AND active = 1
+                """,
+                (username,),
+            ).fetchone()
+            if user is None or user["employee_id"] is None:
+                return {"items": [], "db_driver": operational_db_settings().driver}
+            employee_filter_sql = " AND id = ?"
+            params.append(user["employee_id"])
+        rows = conn.execute(
+            f"""
+            SELECT id, display_name, active, created_at, updated_at
+            FROM employees
+            WHERE active = 1
+              {employee_filter_sql}
+            ORDER BY display_name
+            """,
+            params,
+        ).fetchall()
+        items = []
+        for row in rows:
+            functions = conn.execute(
+                """
+                SELECT function_code
+                FROM employee_functions
+                WHERE employee_id = ?
+                ORDER BY function_code
+                """,
+                (row["id"],),
+            ).fetchall()
+            permission = conn.execute(
+                """
+                SELECT module_key, can_access, can_create, can_view_history,
+                       can_edit, can_approve, scope_json, notes
+                FROM module_permissions
+                WHERE employee_id = ?
+                  AND module_key = 'booking_commissions'
+                """,
+                (row["id"],),
+            ).fetchone()
+            permissions = []
+            if permission is not None:
+                permissions.append({
+                    "module_key": permission["module_key"],
+                    "can_access": bool(permission["can_access"]),
+                    "can_create": bool(permission["can_create"]),
+                    "can_view_history": bool(permission["can_view_history"]),
+                    "can_edit": bool(permission["can_edit"]),
+                    "can_approve": bool(permission["can_approve"]),
+                    "scope": parse_scope_payload(permission["scope_json"]),
+                    "notes": permission["notes"],
+                })
+            items.append({
+                "id": int(row["id"]),
+                "display_name": row["display_name"],
+                "active": bool(row["active"]),
+                "functions": [item["function_code"] for item in functions],
+                "permissions": permissions,
+                "created_at": str(row["created_at"]),
+                "updated_at": str(row["updated_at"]),
+            })
+
+        return {
+            "items": items,
             "db_driver": operational_db_settings().driver,
         }
 

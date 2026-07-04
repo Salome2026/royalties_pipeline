@@ -1,6 +1,15 @@
 "use client";
 
 import { FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
+import { PeriodControl } from "./components/PeriodControl";
+import {
+  isResolvedPeriodInvalid,
+  resolvePeriod,
+  selectionFromMonths,
+  selectionFromUntil,
+  type PeriodProfile,
+  type PeriodSelection,
+} from "./lib/period";
 
 type Message = {
   type: "ok" | "error";
@@ -14,7 +23,7 @@ type WebUser = {
   mustChangePassword?: boolean;
 };
 
-type View = "menu" | "statement" | "royalties" | "custom-reports" | "participation" | "digital-income" | "source-monitor" | "catalog" | "distributor-config" | "booking" | "booking-lab" | "booking-summary" | "booking-artist-summary" | "artist-finance" | "finance-movements" | "artists" | "employees" | "caserio" | "composite-booking";
+type View = "menu" | "statement" | "royalties" | "custom-reports" | "participation" | "digital-income" | "source-monitor" | "catalog" | "distributor-config" | "booking" | "booking-lab" | "booking-summary" | "commissions" | "booking-artist-summary" | "artist-finance" | "finance-movements" | "artists" | "employees" | "caserio" | "composite-booking";
 
 const VIEW_MODULE_KEYS: Partial<Record<View, string>> = {
   statement: "statement_reports",
@@ -27,6 +36,7 @@ const VIEW_MODULE_KEYS: Partial<Record<View, string>> = {
   booking: "booking",
   "booking-lab": "booking_lab",
   "booking-summary": "booking_summary",
+  commissions: "booking_commissions",
   "booking-artist-summary": "booking_detail",
   "artist-finance": "artist_finance",
   "finance-movements": "finance_movements",
@@ -314,6 +324,16 @@ type EmployeeRecord = {
   updated_at: string;
 };
 
+type CommissionEmployeeRecord = {
+  id: number;
+  display_name: string;
+  active: boolean;
+  functions: string[];
+  permissions: EmployeePermission[];
+  created_at?: string;
+  updated_at?: string;
+};
+
 type EmployeeModule = {
   module_key: string;
   label: string;
@@ -341,6 +361,7 @@ const ARTIST_SCOPED_MODULES = new Set([
   "booking",
   "booking_detail",
   "booking_summary",
+  "booking_commissions",
   "artist_finance",
   "finance_movements",
 ]);
@@ -1379,20 +1400,6 @@ const BOOKING_EXPENSE_CATEGORIES = [
   { value: "comision_externa", label: "Comision externa" },
   { value: "varios", label: "Varios" },
 ];
-const MONTH_NAMES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
-const MONTH_OPTIONS = Array.from({ length: 11 }, (_, yearIndex) => 2020 + yearIndex)
-  .flatMap((year) => MONTH_NAMES.map((month, monthIndex) => {
-    const value = `${year}-${String(monthIndex + 1).padStart(2, "0")}`;
-    return { value, label: `${month} ${year}` };
-  }));
-
-type MonthSelectProps = {
-  id: string;
-  value: string;
-  min?: string | null;
-  onChange: (value: string) => void;
-};
-
 function filenameFromDisposition(disposition: string | null, fallback: string) {
   if (!disposition) return fallback;
   const match = disposition.match(/filename="?([^"]+)"?/i);
@@ -1439,6 +1446,29 @@ function pct(value: number) {
 function ars(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
 }
+
+type CommissionRuleDraft = {
+  employee: string;
+  artist: string;
+  percent: number;
+  base: "commissionable" | "total";
+  startMonth: string;
+  endMonth: string;
+  active: boolean;
+  notes: string;
+};
+
+type CommissionRuleDraftState = Omit<CommissionRuleDraft, "employee" | "artist">;
+
+type StoredCommissionRule = {
+  artist: string;
+  percent: number;
+  base: "commissionable" | "total";
+  start_month?: string | null;
+  end_month?: string | null;
+  active: boolean;
+  notes?: string | null;
+};
 
 const SOURCE_MONITOR_STATUS_LABELS: Record<string, string> = {
   loaded_to_mart: "Cargados",
@@ -1830,17 +1860,15 @@ function initialFinanceMovementForm(): FinanceMovementForm {
   };
 }
 
-function MonthSelect({ id, value, min, onChange }: MonthSelectProps) {
-  const options = MONTH_OPTIONS.filter((option) => !min || option.value >= min);
-
-  return (
-    <select id={id} value={value} onChange={(event) => onChange(event.target.value)}>
-      <option value="">Sin limite</option>
-      {options.map((option) => (
-        <option key={option.value} value={option.value}>{option.label}</option>
-      ))}
-    </select>
-  );
+function applyResolvedPeriod(
+  selection: PeriodSelection,
+  profile: PeriodProfile,
+  setStartMonth: (value: string) => void,
+  setEndMonth: (value: string) => void,
+) {
+  const resolved = resolvePeriod(selection, profile);
+  setStartMonth(resolved.startMonth || "");
+  setEndMonth(resolved.endMonth || "");
 }
 
 export default function Home() {
@@ -1911,8 +1939,7 @@ export default function Home() {
   const [digitalIncomeArtistKeyword, setDigitalIncomeArtistKeyword] = useState("");
   const [digitalIncomeSource, setDigitalIncomeSource] = useState("");
   const [digitalIncomeAccount, setDigitalIncomeAccount] = useState("");
-  const [digitalIncomeStartMonth, setDigitalIncomeStartMonth] = useState("");
-  const [digitalIncomeEndMonth, setDigitalIncomeEndMonth] = useState("");
+  const [digitalIncomePeriod, setDigitalIncomePeriod] = useState<PeriodSelection>({ mode: "last_6_months" });
   const digitalIncomeLimit = 500;
   const [distributorConfig, setDistributorConfig] = useState<DistributorConfigData | null>(null);
   const [distributorConfigLoading, setDistributorConfigLoading] = useState(false);
@@ -1925,6 +1952,19 @@ export default function Home() {
   const [bookingArtists, setBookingArtists] = useState<string[]>([]);
   const [bookingSummary, setBookingSummary] = useState<BookingSummary | null>(null);
   const [bookingSummaryLoading, setBookingSummaryLoading] = useState(false);
+  const [commissionSummary, setCommissionSummary] = useState<BookingSummary | null>(null);
+  const [commissionSummaryLoading, setCommissionSummaryLoading] = useState(false);
+  const [commissionsEmployee, setCommissionsEmployee] = useState("");
+  const [commissionsTab, setCommissionsTab] = useState<"settlement" | "config">("settlement");
+  const [commissionEmployeeRecords, setCommissionEmployeeRecords] = useState<CommissionEmployeeRecord[]>([]);
+  const [commissionEmployeesLoading, setCommissionEmployeesLoading] = useState(false);
+  const [commissionRuleDrafts, setCommissionRuleDrafts] = useState<Record<string, CommissionRuleDraftState>>({});
+  const [commissionRulesLoading, setCommissionRulesLoading] = useState(false);
+  const [commissionRulesSaving, setCommissionRulesSaving] = useState(false);
+  const [commissionDirtyEmployees, setCommissionDirtyEmployees] = useState<Record<string, boolean>>({});
+  const [commissionStartMonth, setCommissionStartMonth] = useState("");
+  const [commissionEndMonth, setCommissionEndMonth] = useState("");
+  const [commissionSettlementSearch, setCommissionSettlementSearch] = useState("");
   const [bookingArtistSummary, setBookingArtistSummary] = useState<BookingArtistSummary | null>(null);
   const [bookingArtistSummaryArtist, setBookingArtistSummaryArtist] = useState("");
   const [bookingArtistSummaryLoading, setBookingArtistSummaryLoading] = useState(false);
@@ -2175,6 +2215,20 @@ export default function Home() {
   }, [authenticated, view]);
 
   useEffect(() => {
+    if (authenticated && view === "commissions") {
+      loadCommissionEmployeeRecords();
+      loadBookingArtists();
+      loadCommissionsSummary();
+    }
+  }, [authenticated, view]);
+
+  useEffect(() => {
+    if (authenticated && view === "commissions" && commissionsEmployee) {
+      loadCommissionRules(commissionsEmployee);
+    }
+  }, [authenticated, view, commissionsEmployee]);
+
+  useEffect(() => {
     if (authenticated && view === "booking-artist-summary") {
       loadBookingArtistSummary();
     }
@@ -2409,6 +2463,147 @@ export default function Home() {
   const visibleBookingItems = useMemo(() => {
     return filteredBookingItems.slice(0, bookingVisibleCount);
   }, [filteredBookingItems, bookingVisibleCount]);
+
+  const selectedCommissionEmployee = useMemo(() => {
+    return commissionEmployeeRecords.find((item) => String(item.id) === commissionsEmployee) || null;
+  }, [commissionEmployeeRecords, commissionsEmployee]);
+
+  const selectedCommissionPermission = useMemo(() => {
+    return selectedCommissionEmployee?.permissions.find((permission) => permission.module_key === "booking_commissions") || null;
+  }, [selectedCommissionEmployee]);
+
+  const commissionAvailableArtists = useMemo(() => {
+    if (!selectedCommissionPermission?.can_access) return [];
+    const summaryArtists = (commissionSummary?.items || []).map((item) => item.artist);
+    const baseArtists = summaryArtists.length ? summaryArtists : bookingArtists;
+    const uniqueArtists = Array.from(new Set(baseArtists.filter(Boolean))).sort((a, b) => a.localeCompare(b));
+    if (permissionHasAllArtists(selectedCommissionPermission)) {
+      return uniqueArtists;
+    }
+    const scoped = new Set(permissionArtistNames(selectedCommissionPermission).map(artistScopeKey));
+    return uniqueArtists.filter((artist) => scoped.has(artistScopeKey(artist)));
+  }, [selectedCommissionPermission, commissionSummary, bookingArtists]);
+
+  function commissionRuleKey(employeeId: string, artist: string) {
+    return `${employeeId}::${artist}`;
+  }
+
+  function defaultCommissionRule(): CommissionRuleDraftState {
+    return {
+      percent: 0,
+      base: "commissionable",
+      startMonth: "",
+      endMonth: "",
+      active: true,
+      notes: "",
+    };
+  }
+
+  function storedCommissionRuleToDraft(rule: StoredCommissionRule): CommissionRuleDraftState {
+    return {
+      percent: Number(rule.percent || 0),
+      base: rule.base === "total" ? "total" : "commissionable",
+      startMonth: rule.start_month || "",
+      endMonth: rule.end_month || "",
+      active: Boolean(rule.active),
+      notes: rule.notes || "",
+    };
+  }
+
+  function commissionRuleForArtist(artist: string) {
+    return commissionRuleDrafts[commissionRuleKey(commissionsEmployee, artist)] || defaultCommissionRule();
+  }
+
+  const commissionRulesForEmployee = useMemo(() => {
+    if (!commissionsEmployee || !selectedCommissionPermission?.can_access) return [];
+    return commissionAvailableArtists.map((artist) => ({
+      employee: selectedCommissionEmployee?.display_name || "",
+      artist,
+      ...commissionRuleForArtist(artist),
+    }));
+  }, [commissionsEmployee, selectedCommissionEmployee, selectedCommissionPermission, commissionAvailableArtists, commissionRuleDrafts]);
+
+  const commissionResolvedPeriod = useMemo(
+    () => resolvePeriod(selectionFromMonths(commissionStartMonth, commissionEndMonth), "commission_period"),
+    [commissionStartMonth, commissionEndMonth],
+  );
+
+  const commissionSettlementRows = useMemo(() => {
+    if (!commissionsEmployee || !selectedCommissionPermission?.can_access) return [];
+    const allowedArtists = new Set(commissionAvailableArtists);
+    return (commissionSummary?.items || [])
+      .filter((item) => allowedArtists.has(item.artist))
+      .flatMap((item) => Object.entries(item.months)
+      .filter(([month]) => {
+        if (commissionResolvedPeriod.startMonth && month < commissionResolvedPeriod.startMonth) return false;
+        if (commissionResolvedPeriod.endMonth && month > commissionResolvedPeriod.endMonth) return false;
+        return true;
+      })
+      .map(([month, monthItem]) => {
+        const rule = commissionRuleForArtist(item.artist);
+        const baseAmount = rule.base === "total" ? monthItem.indyana_total : monthItem.commissionable_total;
+        const ruleInPeriod = (!rule.startMonth || month >= rule.startMonth) && (!rule.endMonth || month <= rule.endMonth);
+        const percent = rule.active && ruleInPeriod ? Number(rule.percent || 0) : 0;
+        return {
+          month,
+          artist: item.artist,
+          shows: monthItem.shows,
+          indyanaTotal: monthItem.indyana_total,
+          commissionableBase: monthItem.commissionable_total,
+          nonCommissionable: monthItem.non_commissionable_total,
+          percent,
+          baseAmount: percent > 0 ? baseAmount : 0,
+          commissionAmount: percent > 0 ? baseAmount * percent / 100 : 0,
+          notes: item.notes.length ? item.notes.join(" / ") : "Comisiona normal",
+          ruleNotes: !rule.active
+            ? "Regla inactiva."
+            : !ruleInPeriod
+              ? "Fuera de vigencia."
+              : rule.notes || (percent > 0 ? "Regla guardada." : "Sin porcentaje configurado."),
+        };
+      }))
+      .sort((a, b) => b.month.localeCompare(a.month) || a.artist.localeCompare(b.artist));
+  }, [commissionSummary, commissionsEmployee, selectedCommissionPermission, commissionAvailableArtists, commissionRuleDrafts, commissionResolvedPeriod]);
+
+  const visibleCommissionSettlementRows = useMemo(() => {
+    const query = commissionSettlementSearch.trim().toLowerCase();
+    if (!query) return commissionSettlementRows;
+    return commissionSettlementRows.filter((item) => [
+      item.month,
+      item.artist,
+      item.notes,
+      item.ruleNotes,
+    ].some((value) => String(value || "").toLowerCase().includes(query)));
+  }, [commissionSettlementRows, commissionSettlementSearch]);
+
+  const commissionTotals = useMemo(() => {
+    return visibleCommissionSettlementRows.reduce(
+      (totals, item) => ({
+        shows: totals.shows + item.shows,
+        indyanaTotal: totals.indyanaTotal + item.indyanaTotal,
+        baseAmount: totals.baseAmount + item.baseAmount,
+        nonCommissionable: totals.nonCommissionable + item.nonCommissionable,
+        commissionAmount: totals.commissionAmount + item.commissionAmount,
+      }),
+      { shows: 0, indyanaTotal: 0, baseAmount: 0, nonCommissionable: 0, commissionAmount: 0 },
+    );
+  }, [visibleCommissionSettlementRows]);
+
+  const commissionPeriodLabel = commissionResolvedPeriod.label === "Todo" ? "Todos los meses" : commissionResolvedPeriod.label;
+
+  function updateCommissionRuleDraft(artist: string, patch: Partial<CommissionRuleDraftState>) {
+    if (!commissionsEmployee) return;
+    const key = commissionRuleKey(commissionsEmployee, artist);
+    setCommissionRuleDrafts((current) => ({
+      ...current,
+      [key]: {
+        ...defaultCommissionRule(),
+        ...current[key],
+        ...patch,
+      },
+    }));
+    setCommissionDirtyEmployees((current) => ({ ...current, [commissionsEmployee]: true }));
+  }
 
   const visibleBookingArtistSummaryItems = useMemo(() => {
     const items = bookingArtistSummary?.items || [];
@@ -2846,10 +3041,11 @@ export default function Home() {
   }
 
   function buildPayload(output: "excel" | "google_sheet") {
+    const period = resolvePeriod(selectionFromMonths(startMonth, endMonth), "monthly_report");
     return {
       keywords: keywords.split(/[;,]/).map((item) => item.trim()).filter(Boolean),
-      start_month: startMonth || null,
-      end_month: endMonth || null,
+      start_month: period.startMonth,
+      end_month: period.endMonth,
       period_basis: periodBasis,
       mode,
       raw_limit: Number(rawLimit) || 0,
@@ -2859,7 +3055,8 @@ export default function Home() {
   }
 
   function validatePeriod() {
-    if (startMonth && endMonth && startMonth > endMonth) {
+    const period = resolvePeriod(selectionFromMonths(startMonth, endMonth), "monthly_report");
+    if (isResolvedPeriodInvalid(period)) {
       setMessage({ type: "error", text: "El periodo desde no puede ser mayor que hasta." });
       return false;
     }
@@ -3110,7 +3307,11 @@ export default function Home() {
     setMessage(null);
     setLastFile("");
 
-    if (customReportSupportsStartMonth() && customReportStartMonth && customReportEndMonth && customReportStartMonth > customReportEndMonth) {
+    const customReportPeriod = customReportSupportsStartMonth()
+      ? resolvePeriod(selectionFromMonths(customReportStartMonth, customReportEndMonth), "custom_report")
+      : resolvePeriod(selectionFromUntil(customReportEndMonth), "custom_report");
+
+    if (customReportSupportsStartMonth() && isResolvedPeriodInvalid(customReportPeriod)) {
       setMessage({ type: "error", text: "El periodo desde no puede ser mayor que hasta." });
       return;
     }
@@ -3134,8 +3335,8 @@ export default function Home() {
         template_key: customReportTemplateKey,
         report_title: customReportTitle || "Regalias Los Anormales",
         terms,
-        start_month: customReportSupportsStartMonth() ? (customReportStartMonth || null) : null,
-        end_month: customReportEndMonth || null,
+        start_month: customReportSupportsStartMonth() ? customReportPeriod.startMonth : null,
+        end_month: customReportPeriod.endMonth,
         sources: Array.from(new Set(selectedAccounts.map((item) => item.source))),
         source_accounts: selectedAccounts,
         refresh_cache: false,
@@ -3161,12 +3362,14 @@ export default function Home() {
 
   async function loadParticipation(refresh: boolean) {
     setMessage(null);
+    const participationPeriod = resolvePeriod(
+      selectionFromMonths(participationStartMonth, participationEndMonth),
+      "preset_or_range",
+    );
 
     if (
       participationPreset === "custom"
-      && participationStartMonth
-      && participationEndMonth
-      && participationStartMonth > participationEndMonth
+      && isResolvedPeriodInvalid(participationPeriod)
     ) {
       setMessage({ type: "error", text: "El periodo desde no puede ser mayor que hasta." });
       return;
@@ -3180,8 +3383,8 @@ export default function Home() {
     });
 
     if (participationPreset === "custom") {
-      if (participationStartMonth) params.set("start_month", participationStartMonth);
-      if (participationEndMonth) params.set("end_month", participationEndMonth);
+      if (participationPeriod.startMonth) params.set("start_month", participationPeriod.startMonth);
+      if (participationPeriod.endMonth) params.set("end_month", participationPeriod.endMonth);
     }
 
     const response = await fetch(`/api/participation?${params.toString()}`, { cache: "no-store" });
@@ -3459,14 +3662,15 @@ export default function Home() {
   async function loadCatalog(nextOffset = catalogOffset) {
     setCatalogLoading(true);
     try {
+      const catalogPeriod = resolvePeriod(selectionFromMonths(catalogStartMonth, catalogEndMonth), "activity_window");
       const params = new URLSearchParams();
       if (catalogSource) params.set("source", catalogSource);
       if (catalogAccount) params.set("account", catalogAccount);
       if (catalogArtist) params.set("artist", catalogArtist);
       if (catalogKeyword.trim()) params.set("keyword", catalogKeyword.trim());
       if (catalogLabel.trim()) params.set("label", catalogLabel.trim());
-      if (catalogStartMonth) params.set("start_month", catalogStartMonth);
-      if (catalogEndMonth) params.set("end_month", catalogEndMonth);
+      if (catalogPeriod.startMonth) params.set("start_month", catalogPeriod.startMonth);
+      if (catalogPeriod.endMonth) params.set("end_month", catalogPeriod.endMonth);
       params.set("status", catalogStatus);
       params.set("limit", String(catalogLimit));
       params.set("offset", String(nextOffset));
@@ -3490,12 +3694,14 @@ export default function Home() {
   async function loadDigitalIncome() {
     setDigitalIncomeLoading(true);
     try {
+      const digitalPeriod = resolvePeriod(digitalIncomePeriod, "dashboard_period");
       const params = new URLSearchParams();
       if (digitalIncomeArtistKeyword.trim()) params.set("artist_keyword", digitalIncomeArtistKeyword.trim());
       if (digitalIncomeSource) params.set("source", digitalIncomeSource);
       if (digitalIncomeAccount) params.set("account", digitalIncomeAccount);
-      if (digitalIncomeStartMonth) params.set("start_month", digitalIncomeStartMonth);
-      if (digitalIncomeEndMonth) params.set("end_month", digitalIncomeEndMonth);
+      if (digitalPeriod.startMonth) params.set("start_month", digitalPeriod.startMonth);
+      if (digitalPeriod.endMonth) params.set("end_month", digitalPeriod.endMonth);
+      params.set("period_mode", digitalPeriod.mode);
       params.set("limit", String(digitalIncomeLimit));
 
       const response = await fetch(`/api/digital-income?${params.toString()}`, { cache: "no-store" });
@@ -3667,6 +3873,86 @@ export default function Home() {
       setBookingSummary(data);
     }
     setBookingSummaryLoading(false);
+  }
+
+  async function loadCommissionsSummary() {
+    setCommissionSummaryLoading(true);
+    const response = await fetch("/api/booking/commissions-summary", { cache: "no-store" });
+    if (response.ok) {
+      const data = await response.json();
+      setCommissionSummary(data);
+    } else {
+      setCommissionSummary(null);
+      const data = await response.json().catch(() => ({}));
+      setMessage({ type: "error", text: data.error || "No se pudo cargar la liquidacion de comisiones." });
+    }
+    setCommissionSummaryLoading(false);
+  }
+
+  async function loadCommissionRules(employeeId: string) {
+    setCommissionRulesLoading(true);
+    const response = await fetch(`/api/booking/commission-rules?employee_id=${encodeURIComponent(employeeId)}`, { cache: "no-store" });
+    if (response.ok) {
+      const data = await response.json();
+      const rules = (data.rules || []) as StoredCommissionRule[];
+      setCommissionRuleDrafts((current) => {
+        const prefix = `${employeeId}::`;
+        const next = Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith(prefix)));
+        rules.forEach((rule) => {
+          next[commissionRuleKey(employeeId, rule.artist)] = storedCommissionRuleToDraft(rule);
+        });
+        return next;
+      });
+      setCommissionDirtyEmployees((current) => ({ ...current, [employeeId]: false }));
+    } else {
+      const data = await response.json().catch(() => ({}));
+      setMessage({ type: "error", text: data.error || "No se pudieron cargar las reglas de comision." });
+    }
+    setCommissionRulesLoading(false);
+  }
+
+  async function saveCommissionRules() {
+    if (!commissionsEmployee || !selectedCommissionPermission?.can_access) return;
+    if (!canEditModule("booking_commissions")) {
+      setMessage({ type: "error", text: "No tenes permiso para editar Comisiones." });
+      return;
+    }
+    setCommissionRulesSaving(true);
+    const payload = {
+      employee_id: Number(commissionsEmployee),
+      rules: commissionRulesForEmployee.map((rule) => ({
+        artist: rule.artist,
+        percent: Number(rule.percent || 0),
+        base: rule.base,
+        start_month: rule.startMonth || null,
+        end_month: rule.endMonth || null,
+        active: Boolean(rule.active),
+        notes: rule.notes || null,
+      })),
+    };
+    const response = await fetch("/api/booking/commission-rules", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (response.ok) {
+      const data = await response.json();
+      const rules = (data.rules || []) as StoredCommissionRule[];
+      setCommissionRuleDrafts((current) => {
+        const prefix = `${commissionsEmployee}::`;
+        const next = Object.fromEntries(Object.entries(current).filter(([key]) => !key.startsWith(prefix)));
+        rules.forEach((rule) => {
+          next[commissionRuleKey(commissionsEmployee, rule.artist)] = storedCommissionRuleToDraft(rule);
+        });
+        return next;
+      });
+      setCommissionDirtyEmployees((current) => ({ ...current, [commissionsEmployee]: false }));
+      setMessage({ type: "ok", text: "Reglas de comision guardadas." });
+    } else {
+      const data = await response.json().catch(() => ({}));
+      setMessage({ type: "error", text: data.error || "No se pudieron guardar las reglas de comision." });
+    }
+    setCommissionRulesSaving(false);
   }
 
   async function loadBookingArtistSummary() {
@@ -4022,6 +4308,20 @@ export default function Home() {
         })),
       });
     }
+  }
+
+  async function loadCommissionEmployeeRecords() {
+    setCommissionEmployeesLoading(true);
+    const response = await fetch("/api/employees/commission-options", { cache: "no-store" });
+    if (response.ok) {
+      const data = await response.json();
+      setCommissionEmployeeRecords(data.items || []);
+    } else {
+      const data = await response.json().catch(() => ({}));
+      setCommissionEmployeeRecords([]);
+      setMessage({ type: "error", text: data.error || "No se pudieron cargar los empleados para comisiones." });
+    }
+    setCommissionEmployeesLoading(false);
   }
 
   async function loadCurrentUserPermissions() {
@@ -4983,6 +5283,14 @@ export default function Home() {
       .map((item) => item.scope_ref);
   }
 
+  function artistScopeKey(value: string) {
+    return String(value || "")
+      .trim()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+  }
+
   function normalizeEmployeePermissionForSave(permission: EmployeePermission) {
     if (!permission.can_access || !permissionUsesArtistScope(permission)) {
       return permission;
@@ -5830,48 +6138,53 @@ export default function Home() {
                     <strong>Resumen booking</strong>
                     <span>Indyana por artista y mes, separando base comisionable y excepciones.</span>
                   </button>
+                  <button type="button" className={`menu-card ${canShowMenuView("commissions") ? "" : "menu-card-hidden"}`} onClick={() => openView("commissions")}>
+                    <span className="card-index">10</span>
+                    <strong>Comisiones</strong>
+                    <span>Configuracion por empleado y liquidacion sobre base comisionable.</span>
+                  </button>
               <button type="button" className={`menu-card ${canShowMenuView("booking-artist-summary") ? "" : "menu-card-hidden"}`} onClick={() => openView("booking-artist-summary")}>
-                <span className="card-index">10</span>
+                <span className="card-index">11</span>
                 <strong>Detalle Booking</strong>
                 <span>Shows por fecha y venue, con cachet, ingreso artista e Indyana.</span>
               </button>
               <button type="button" className={`menu-card ${canShowMenuView("catalog") ? "" : "menu-card-hidden"}`} onClick={() => openView("catalog")}>
-                <span className="card-index">11</span>
+                <span className="card-index">12</span>
                 <strong>Catalogo General</strong>
                 <span>Base de temas, ISRC, artistas, distribuidoras y estado activo/inactivo.</span>
               </button>
                   <button type="button" className={`menu-card ${canShowMenuView("artist-finance") ? "" : "menu-card-hidden"}`} onClick={() => openView("artist-finance")}>
-                    <span className="card-index">12</span>
+                    <span className="card-index">13</span>
                     <strong>Finanzas Artista</strong>
                     <span>Vista de lectura: cuenta corriente, booking, inversiones y recuperables.</span>
                   </button>
                   <button type="button" className={`menu-card ${canShowMenuView("finance-movements") ? "" : "menu-card-hidden"}`} onClick={() => openView("finance-movements")}>
-                    <span className="card-index">13</span>
+                    <span className="card-index">14</span>
                     <strong>Movimientos financieros</strong>
                     <span>Carga staging de gastos, inversiones, recuperos y ajustes por artista.</span>
                   </button>
                   <button type="button" className={`menu-card ${canShowMenuView("artists") ? "" : "menu-card-hidden"}`} onClick={() => openView("artists")}>
-                    <span className="card-index">14</span>
+                    <span className="card-index">15</span>
                     <strong>ABM de artistas</strong>
                     <span>Ficha legal, contacto y datos base para booking.</span>
                   </button>
                   <button type="button" className={`menu-card ${canShowMenuView("employees") ? "" : "menu-card-hidden"}`} onClick={() => openView("employees")}>
-                    <span className="card-index">15</span>
+                    <span className="card-index">16</span>
                     <strong>ABM de empleados</strong>
                     <span>Equipo VPO, funciones y base para permisos por modulo.</span>
                   </button>
                   <button type="button" className={`menu-card ${canShowMenuView("caserio") ? "" : "menu-card-hidden"}`} onClick={() => openView("caserio")}>
-                    <span className="card-index">16</span>
+                    <span className="card-index">17</span>
                     <strong>El Caserio</strong>
                     <span>Eventos sociedad, artistas externos y shows VPO vinculados.</span>
                   </button>
                   <button type="button" className={`menu-card ${canShowMenuView("booking-lab") ? "" : "menu-card-hidden"}`} onClick={() => openView("booking-lab")}>
-                    <span className="card-index">17</span>
+                    <span className="card-index">18</span>
                     <strong>Carga de Shows laboratorio</strong>
                     <span>Flujo dinamico sin guardar: simple, reglas especiales y eventos con varios artistas.</span>
                   </button>
                   <button type="button" className={`menu-card ${canShowMenuView("composite-booking") ? "" : "menu-card-hidden"}`} onClick={() => openView("composite-booking")}>
-                    <span className="card-index">18</span>
+                    <span className="card-index">19</span>
                     <strong>Liquidaciones compuestas</strong>
                     <span>Pantalla actual con guardado de madres/hijas. Usar solo para cargas ya validadas.</span>
                   </button>
@@ -5930,16 +6243,14 @@ export default function Home() {
               <label htmlFor="keywords">Palabras clave</label>
               <input id="keywords" value={keywords} onChange={(event) => setKeywords(event.target.value)} placeholder="gusty dj, juli savioli" required />
 
-              <div className="row">
-                <div>
-                  <label htmlFor="start_month">Desde</label>
-                  <MonthSelect id="start_month" value={startMonth} onChange={setStartMonth} />
-                </div>
-                <div>
-                  <label htmlFor="end_month">Hasta</label>
-                  <MonthSelect id="end_month" value={endMonth} onChange={setEndMonth} />
-                </div>
-              </div>
+              <PeriodControl
+                id="royalty_period"
+                label="Periodo"
+                profile="monthly_report"
+                selection={selectionFromMonths(startMonth, endMonth)}
+                onChange={(selection) => applyResolvedPeriod(selection, "monthly_report", setStartMonth, setEndMonth)}
+                helperText="Un mes solo incluye ese mes completo. Un rango incluye ambos meses completos."
+              />
 
               <label htmlFor="period_basis">Criterio de periodo</label>
               <select id="period_basis" value={periodBasis} onChange={(event) => setPeriodBasis(event.target.value)}>
@@ -6027,18 +6338,30 @@ export default function Home() {
                 onChange={(event) => setCustomReportTitle(event.target.value)}
               />
 
-              <div className="row">
-                {customReportSupportsStartMonth() && (
-                  <div>
-                    <label htmlFor="custom_start_month">Statement desde</label>
-                    <MonthSelect id="custom_start_month" value={customReportStartMonth} onChange={setCustomReportStartMonth} />
-                  </div>
-                )}
-                <div>
-                  <label htmlFor="custom_end_month">Statement hasta</label>
-                  <MonthSelect id="custom_end_month" value={customReportEndMonth} onChange={setCustomReportEndMonth} />
-                </div>
-              </div>
+              {customReportSupportsStartMonth() ? (
+                <PeriodControl
+                  id="custom_report_period"
+                  label="Statement"
+                  profile="custom_report"
+                  selection={selectionFromMonths(customReportStartMonth, customReportEndMonth)}
+                  onChange={(selection) => applyResolvedPeriod(selection, "custom_report", setCustomReportStartMonth, setCustomReportEndMonth)}
+                  helperText="Un mes solo incluye ese statement completo."
+                />
+              ) : (
+                <PeriodControl
+                  id="custom_report_until"
+                  label="Acumulado hasta"
+                  profile="custom_report"
+                  variant="until"
+                  selection={selectionFromUntil(customReportEndMonth)}
+                  onChange={(selection) => {
+                    const period = resolvePeriod(selection, "custom_report");
+                    setCustomReportStartMonth("");
+                    setCustomReportEndMonth(period.endMonth || "");
+                  }}
+                  helperText="Este template es acumulado: se informa hasta el statement elegido."
+                />
+              )}
 
               {(currentCustomReportTemplate()?.options || []).length > 0 && (
                 <div className="custom-report-options">
@@ -6167,26 +6490,14 @@ export default function Home() {
               </div>
 
               {participationPreset === "custom" && (
-                <>
-                  <div>
-                    <label htmlFor="participation_start">Desde</label>
-                    <MonthSelect
-                      id="participation_start"
-                      value={participationStartMonth}
-                      min={participation?.available_start_month || undefined}
-                      onChange={setParticipationStartMonth}
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="participation_end">Hasta</label>
-                    <MonthSelect
-                      id="participation_end"
-                      value={participationEndMonth}
-                      min={participation?.available_start_month || undefined}
-                      onChange={setParticipationEndMonth}
-                    />
-                  </div>
-                </>
+                <PeriodControl
+                  id="participation_period"
+                  label="Rango custom"
+                  profile="preset_or_range"
+                  selection={selectionFromMonths(participationStartMonth, participationEndMonth)}
+                  minMonth={participation?.available_start_month || undefined}
+                  onChange={(selection) => applyResolvedPeriod(selection, "preset_or_range", setParticipationStartMonth, setParticipationEndMonth)}
+                />
               )}
 
               <button type="button" onClick={() => loadParticipation(false)} disabled={participationLoading}>
@@ -6301,14 +6612,15 @@ export default function Home() {
                   ))}
                 </select>
               </div>
-              <div>
-                <label htmlFor="digital_income_start">Desde</label>
-                <MonthSelect id="digital_income_start" value={digitalIncomeStartMonth} onChange={setDigitalIncomeStartMonth} />
-              </div>
-              <div>
-                <label htmlFor="digital_income_end">Hasta</label>
-                <MonthSelect id="digital_income_end" value={digitalIncomeEndMonth} onChange={setDigitalIncomeEndMonth} />
-              </div>
+              <PeriodControl
+                id="digital_income_period"
+                label="Periodo"
+                profile="dashboard_period"
+                selection={digitalIncomePeriod}
+                presets={["last_6_months", "last_12_months", "all"]}
+                onChange={setDigitalIncomePeriod}
+                helperText="Por defecto muestra ultimos 6 meses. Todo carga el historico disponible."
+              />
               <button type="button" onClick={loadDigitalIncome} disabled={digitalIncomeLoading}>
                 Buscar
               </button>
@@ -6778,14 +7090,14 @@ export default function Home() {
                   ))}
                 </select>
               </div>
-              <div>
-                <label htmlFor="catalog_start">Desde</label>
-                <MonthSelect id="catalog_start" value={catalogStartMonth} onChange={setCatalogStartMonth} />
-              </div>
-              <div>
-                <label htmlFor="catalog_end">Hasta</label>
-                <MonthSelect id="catalog_end" value={catalogEndMonth} onChange={setCatalogEndMonth} />
-              </div>
+              <PeriodControl
+                id="catalog_period"
+                label="Actividad"
+                profile="activity_window"
+                selection={selectionFromMonths(catalogStartMonth, catalogEndMonth)}
+                onChange={(selection) => applyResolvedPeriod(selection, "activity_window", setCatalogStartMonth, setCatalogEndMonth)}
+                helperText="Filtra obras con actividad en el mes o rango elegido."
+              />
               <div>
                 <label htmlFor="catalog_status">Estado</label>
                 <select
@@ -7632,6 +7944,319 @@ export default function Home() {
                 </tbody>
               </table>
             </div>
+          </section>
+        )}
+
+        {view === "commissions" && (
+          <section className="panel wide-panel">
+            <div className="section-heading">
+              <div>
+                <h1>Comisiones</h1>
+                <p>Configura porcentajes por empleado y revisa la liquidacion sobre la base comisionable de booking.</p>
+              </div>
+              <button
+                type="button"
+                onClick={saveCommissionRules}
+                disabled={
+                  !commissionsEmployee
+                  || !selectedCommissionPermission?.can_access
+                  || !canEditModule("booking_commissions")
+                  || !commissionDirtyEmployees[commissionsEmployee]
+                  || commissionRulesLoading
+                  || commissionRulesSaving
+                }
+              >
+                {commissionRulesSaving ? "Guardando..." : "Guardar configuracion"}
+              </button>
+            </div>
+
+            <div className="row three">
+              <div>
+                <label htmlFor="commission_employee">Empleado</label>
+                <select
+                  id="commission_employee"
+                  value={commissionsEmployee}
+                  disabled={commissionEmployeesLoading}
+                  onChange={(event) => {
+                    setCommissionsEmployee(event.target.value);
+                    setCommissionSettlementSearch("");
+                  }}
+                >
+                  <option value="">{commissionEmployeesLoading ? "Cargando empleados..." : "Seleccionar empleado"}</option>
+                  {commissionEmployeeRecords
+                    .filter((employee) => employee.active)
+                    .map((employee) => (
+                    <option key={employee.id} value={String(employee.id)}>{employee.display_name}</option>
+                  ))}
+                </select>
+                <p className="field-help">
+                  La lista viene de empleados activos. Los artistas salen del permiso del modulo Comisiones.
+                </p>
+              </div>
+              <PeriodControl
+                id="commission_period"
+                label="Periodo"
+                profile="commission_period"
+                selection={selectionFromMonths(commissionStartMonth, commissionEndMonth)}
+                onChange={(selection) => applyResolvedPeriod(selection, "commission_period", setCommissionStartMonth, setCommissionEndMonth)}
+                helperText="Un mes solo muestra ese mes. Todo muestra todos los meses."
+              />
+            </div>
+
+            <div className="finance-tabs" role="tablist" aria-label="Vistas de comisiones">
+              <button
+                type="button"
+                className={commissionsTab === "settlement" ? "active" : ""}
+                onClick={() => setCommissionsTab("settlement")}
+              >
+                Liquidacion
+              </button>
+              <button
+                type="button"
+                className={commissionsTab === "config" ? "active" : ""}
+                onClick={() => setCommissionsTab("config")}
+              >
+                Configuracion
+              </button>
+            </div>
+
+            {commissionsTab === "settlement" && (
+              <>
+                {!selectedCommissionEmployee && (
+                  <p className="field-help">Selecciona un empleado para ver su liquidacion de comisiones.</p>
+                )}
+                {selectedCommissionEmployee && !selectedCommissionPermission?.can_access && (
+                  <p className="field-help amount-warn">
+                    Este empleado no tiene acceso al modulo Comisiones. Configuralo primero en ABM Empleados.
+                  </p>
+                )}
+                {selectedCommissionEmployee && selectedCommissionPermission?.can_access && commissionSummaryLoading && (
+                  <p className="field-help">Cargando liquidacion de comisiones...</p>
+                )}
+                {selectedCommissionEmployee && selectedCommissionPermission?.can_access && commissionAvailableArtists.length === 0 && (
+                  <p className="field-help">El empleado tiene acceso a Comisiones, pero no tiene artistas asignados.</p>
+                )}
+                {selectedCommissionEmployee && selectedCommissionPermission?.can_access && (
+                  <>
+                <div className="control-dashboard compact-dashboard">
+                  <div>
+                    <span>Empleado</span>
+                    <strong>{selectedCommissionEmployee.display_name}</strong>
+                  </div>
+                  <div>
+                    <span>Periodo</span>
+                    <strong>{commissionPeriodLabel}</strong>
+                  </div>
+                  <div>
+                    <span>Shows incluidos</span>
+                    <strong>{commissionTotals.shows}</strong>
+                  </div>
+                  <div>
+                    <span>Indyana total</span>
+                    <strong>{ars(commissionTotals.indyanaTotal)}</strong>
+                  </div>
+                  <div>
+                    <span>Base comisionable</span>
+                    <strong>{ars(commissionTotals.baseAmount)}</strong>
+                  </div>
+                  <div className={commissionTotals.nonCommissionable > 0 ? "warn" : ""}>
+                    <span>No comisionable</span>
+                    <strong>{ars(commissionTotals.nonCommissionable)}</strong>
+                  </div>
+                  <div>
+                    <span>Comision calculada</span>
+                    <strong>{ars(commissionTotals.commissionAmount)}</strong>
+                  </div>
+                </div>
+
+                <div className="row">
+                  <div>
+                    <label htmlFor="commission_settlement_search">Buscar en liquidacion</label>
+                    <input
+                      id="commission_settlement_search"
+                      value={commissionSettlementSearch}
+                      onChange={(event) => setCommissionSettlementSearch(event.target.value)}
+                      placeholder="Gusty DJ, 2026-06, nota..."
+                    />
+                    <p className="field-help">
+                      Mostrando {visibleCommissionSettlementRows.length} de {commissionSettlementRows.length} filas.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="summary-table-wrap">
+                  <table className="summary-table">
+                    <thead>
+                      <tr>
+                        <th>Mes</th>
+                        <th>Artista</th>
+                        <th>Shows</th>
+                        <th>Indyana total</th>
+                        <th>Base comision</th>
+                        <th>No comisionable</th>
+                        <th>% empleado</th>
+                        <th>Comision</th>
+                        <th>Notas</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleCommissionSettlementRows.map((item) => (
+                        <tr key={`${item.month}-${item.artist}`}>
+                          <td>{item.month}</td>
+                          <td><strong>{item.artist}</strong></td>
+                          <td>{item.shows}</td>
+                          <td>{ars(item.indyanaTotal)}</td>
+                          <td>{ars(item.baseAmount)}</td>
+                          <td className={item.nonCommissionable > 0 ? "amount-warn" : ""}>{ars(item.nonCommissionable)}</td>
+                          <td>{pct(item.percent)}</td>
+                          <td><strong>{ars(item.commissionAmount)}</strong></td>
+                          <td>
+                            {item.notes}
+                            <span className="cell-note">{item.ruleNotes}</span>
+                          </td>
+                        </tr>
+                      ))}
+                      {visibleCommissionSettlementRows.length === 0 && (
+                        <tr>
+                          <td colSpan={9}>Sin movimientos para los artistas asignados.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                  </>
+                )}
+              </>
+            )}
+
+            {commissionsTab === "config" && (
+              <>
+                {!selectedCommissionEmployee && (
+                  <p className="field-help">Selecciona un empleado para configurar sus porcentajes por artista.</p>
+                )}
+                {selectedCommissionEmployee && !selectedCommissionPermission?.can_access && (
+                  <p className="field-help amount-warn">
+                    Para configurar comisiones, primero activa el modulo Comisiones para este empleado en ABM Empleados.
+                  </p>
+                )}
+                {selectedCommissionEmployee && selectedCommissionPermission?.can_access && (
+                  <>
+                <div className="control-dashboard compact-dashboard">
+                  <div>
+                    <span>Reglas activas</span>
+                    <strong>{commissionRulesForEmployee.filter((item) => item.active && Number(item.percent || 0) > 0).length}</strong>
+                  </div>
+                  <div>
+                    <span>Base default</span>
+                    <strong>Indyana comisionable</strong>
+                  </div>
+                  <div>
+                    <span>Vigencia</span>
+                    <strong>Por mes</strong>
+                  </div>
+                  <div>
+                    <span>Persistencia</span>
+                    <strong>{commissionDirtyEmployees[commissionsEmployee] ? "Cambios sin guardar" : "Base operacional"}</strong>
+                  </div>
+                </div>
+                {commissionRulesLoading && (
+                  <p className="field-help">Cargando reglas guardadas...</p>
+                )}
+
+                <div className="summary-table-wrap">
+                  <table className="summary-table commission-config-table">
+                    <thead>
+                      <tr>
+                        <th>Artista</th>
+                        <th>% comision</th>
+                        <th>Base de calculo</th>
+                        <th>Desde</th>
+                        <th>Hasta</th>
+                        <th>Activo</th>
+                        <th>Notas</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {commissionRulesForEmployee.map((item) => (
+                        <tr key={`${item.employee}-${item.artist}`}>
+                          <td><strong>{item.artist}</strong></td>
+                          <td>
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              step="0.1"
+                              value={item.percent}
+                              disabled={!canEditModule("booking_commissions") || commissionRulesLoading || commissionRulesSaving}
+                              onChange={(event) => updateCommissionRuleDraft(item.artist, { percent: Number(event.target.value || 0) })}
+                            />
+                          </td>
+                          <td>
+                            <select
+                              value={item.base}
+                              disabled={!canEditModule("booking_commissions") || commissionRulesLoading || commissionRulesSaving}
+                              onChange={(event) => updateCommissionRuleDraft(item.artist, { base: event.target.value as CommissionRuleDraftState["base"] })}
+                            >
+                              <option value="commissionable">Ingreso Indyana comisionable</option>
+                              <option value="total">Ingreso Indyana total</option>
+                            </select>
+                          </td>
+                          <td>
+                            <input
+                              type="month"
+                              value={item.startMonth}
+                              disabled={!canEditModule("booking_commissions") || commissionRulesLoading || commissionRulesSaving}
+                              onChange={(event) => updateCommissionRuleDraft(item.artist, { startMonth: event.target.value })}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              type="month"
+                              value={item.endMonth}
+                              disabled={!canEditModule("booking_commissions") || commissionRulesLoading || commissionRulesSaving}
+                              onChange={(event) => updateCommissionRuleDraft(item.artist, { endMonth: event.target.value })}
+                            />
+                          </td>
+                          <td>
+                            <label className="inline-check">
+                              <input
+                                type="checkbox"
+                                checked={item.active}
+                                disabled={!canEditModule("booking_commissions") || commissionRulesLoading || commissionRulesSaving}
+                                onChange={(event) => updateCommissionRuleDraft(item.artist, { active: event.target.checked })}
+                              />
+                              Si
+                            </label>
+                          </td>
+                          <td>
+                            <input
+                              type="text"
+                              value={item.notes}
+                              disabled={!canEditModule("booking_commissions") || commissionRulesLoading || commissionRulesSaving}
+                              onChange={(event) => updateCommissionRuleDraft(item.artist, { notes: event.target.value })}
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                      {commissionRulesForEmployee.length === 0 && (
+                        <tr>
+                          <td colSpan={7}>Sin artistas asignados para este empleado.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <p className="field-help">
+                  Las reglas viven por empleado y artista, sin modificar los shows. La liquidacion toma esos porcentajes contra el ingreso Indyana comisionable.
+                </p>
+                {!canEditModule("booking_commissions") && (
+                  <p className="field-help amount-warn">Tu usuario puede ver Comisiones, pero no editar reglas.</p>
+                )}
+                  </>
+                )}
+              </>
+            )}
           </section>
         )}
 

@@ -246,6 +246,26 @@ CREATE TABLE IF NOT EXISTS booking_shows (
 CREATE INDEX IF NOT EXISTS idx_booking_shows_artist_date ON booking_shows(artist, show_date DESC);
 CREATE INDEX IF NOT EXISTS idx_booking_shows_origin ON booking_shows(origin_type, origin_id);
 
+CREATE TABLE IF NOT EXISTS booking_commission_rules (
+    id bigserial PRIMARY KEY,
+    employee_id bigint NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+    artist text NOT NULL,
+    percentage numeric(9, 4) NOT NULL DEFAULT 0,
+    calculation_base text NOT NULL DEFAULT 'commissionable',
+    active_from_month text,
+    active_to_month text,
+    active boolean NOT NULL DEFAULT true,
+    notes text,
+    created_by text,
+    updated_by text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE(employee_id, artist),
+    CONSTRAINT booking_commission_rules_base_chk CHECK (calculation_base IN ('commissionable', 'total'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_booking_commission_rules_employee ON booking_commission_rules(employee_id);
+
 CREATE TABLE IF NOT EXISTS booking_show_expenses (
     id bigserial PRIMARY KEY,
     show_id bigint NOT NULL REFERENCES booking_shows(id) ON DELETE CASCADE,

@@ -440,6 +440,153 @@ textarea:focus {
   box-shadow: 0 0 0 3px rgba(15, 118, 110, .14);
 }
 
+.period-control {
+  position: relative;
+  min-width: 0;
+}
+
+.period-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  box-shadow: none;
+  text-align: left;
+}
+
+.period-trigger:hover {
+  border-color: var(--line-strong);
+  background: var(--panel-soft);
+  transform: none;
+  box-shadow: none;
+}
+
+.period-trigger strong {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.period-trigger::after {
+  display: block;
+  width: 0;
+  height: 0;
+  flex: 0 0 auto;
+  border-right: 4px solid transparent;
+  border-left: 4px solid transparent;
+  border-top: 5px solid var(--muted);
+  content: "";
+}
+
+.period-popover {
+  position: absolute;
+  top: calc(100% + 7px);
+  left: 0;
+  z-index: 50;
+  width: min(340px, calc(100vw - 36px));
+  padding: 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 18px 38px rgba(16, 32, 51, .18);
+}
+
+.period-popover button {
+  width: auto;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  box-shadow: none;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.period-popover button:hover {
+  border-color: var(--line-strong);
+  background: var(--panel-soft);
+  transform: none;
+  box-shadow: none;
+}
+
+.period-popover button.active {
+  border-color: rgba(15, 118, 110, .42);
+  background: rgba(15, 118, 110, .09);
+  color: var(--accent-dark);
+}
+
+.period-quick-row,
+.period-mode-row,
+.period-bound-row,
+.period-year-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.period-quick-row,
+.period-mode-row {
+  flex-wrap: wrap;
+}
+
+.period-bound-row button {
+  flex: 1;
+  text-align: left;
+}
+
+.period-bound-row strong {
+  display: block;
+  margin-top: 3px;
+}
+
+.period-year-row {
+  align-items: center;
+}
+
+.period-year-row button {
+  width: 38px;
+}
+
+.period-year-row select {
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+.period-month-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.period-month-grid button {
+  width: 100%;
+  padding: 9px 0;
+  text-align: center;
+}
+
+.period-month-grid button:disabled {
+  cursor: not-allowed;
+  opacity: .42;
+}
+
 textarea {
   min-height: 92px;
   resize: vertical;
@@ -745,6 +892,15 @@ button:disabled:hover {
   width: auto;
   min-width: 110px;
   margin-top: 0;
+}
+
+.period-controls .period-trigger {
+  width: 100%;
+  min-width: 0;
+}
+
+.period-controls .period-popover button {
+  min-width: 0;
 }
 
 .catalog-controls {
@@ -1629,6 +1785,44 @@ button:disabled:hover {
 .rule-alert-table th,
 .rule-alert-table td {
   white-space: normal;
+}
+
+.commission-config-table {
+  min-width: 1160px;
+}
+
+.commission-config-table input,
+.commission-config-table select {
+  min-height: 34px;
+  margin: 0;
+  padding: 7px 9px;
+  font-size: 12px;
+}
+
+.commission-config-table input[type="number"] {
+  width: 94px;
+}
+
+.commission-config-table input[type="month"] {
+  width: 132px;
+}
+
+.commission-config-table td:last-child input {
+  min-width: 260px;
+}
+
+.inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.inline-check input {
+  width: auto;
+  min-height: 0;
 }
 
 .decision-rule-list {
