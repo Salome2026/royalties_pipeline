@@ -299,12 +299,22 @@ function bookingOpenTargetBalance(item: BookingShow, target: BookingAccountTarge
   return item.open_venue_balance_amount ?? item.venue_balance_amount ?? 0;
 }
 
+function bookingCurrentAccountNet(producerBalance: number, artistBalance: number) {
+  const producer = producerBalance || 0;
+  const artist = artistBalance || 0;
+  if (Math.abs(producer) <= 0.01) return Math.abs(artist) <= 0.01 ? 0 : -artist;
+  if (Math.abs(artist) <= 0.01) return producer;
+  if (producer * artist < 0) return Math.abs(producer) >= Math.abs(artist) ? producer : -artist;
+  return producer - artist;
+}
+
 function bookingOpenBalanceAmount(item: BookingShow) {
-  return (
-    Math.abs(bookingOpenTargetBalance(item, "producer"))
-    + Math.abs(bookingOpenTargetBalance(item, "artist"))
-    + Math.max(0, bookingOpenTargetBalance(item, "venue"))
-  );
+  return Math.abs(
+    bookingCurrentAccountNet(
+      bookingOpenTargetBalance(item, "producer"),
+      bookingOpenTargetBalance(item, "artist"),
+    )
+  ) + Math.max(0, bookingOpenTargetBalance(item, "venue"));
 }
 
 type BookingArtistRecord = {

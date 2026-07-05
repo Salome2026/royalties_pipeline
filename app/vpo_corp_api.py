@@ -3154,11 +3154,12 @@ def row_to_booking_show(row: sqlite3.Row) -> dict:
     data["open_balance_artist_amount"] = float(data.get("balance_artist_amount") or 0)
     data["open_balance_producer_amount"] = float(data.get("balance_producer_amount") or 0)
     data["open_venue_balance_amount"] = float(data.get("venue_balance_amount") or 0)
-    data["account_open_balance_amount"] = (
-        abs(data["open_balance_artist_amount"])
-        + abs(data["open_balance_producer_amount"])
-        + max(0.0, data["open_venue_balance_amount"])
-    )
+    data["account_open_balance_amount"] = abs(
+        booking_current_account_net(
+            data["open_balance_producer_amount"],
+            data["open_balance_artist_amount"],
+        )
+    ) + max(0.0, data["open_venue_balance_amount"])
     data["account_status"] = "settled" if data["account_open_balance_amount"] <= 0.01 else "open"
     return data
 
@@ -3417,11 +3418,12 @@ def apply_booking_account_fields(show: dict, applications: list[dict]) -> dict:
     show["open_balance_artist_amount"] = booking_open_balance_for_target(show, applications, "artist")
     show["open_balance_producer_amount"] = booking_open_balance_for_target(show, applications, "producer")
     show["open_venue_balance_amount"] = booking_open_balance_for_target(show, applications, "venue")
-    show["account_open_balance_amount"] = (
-        abs(show["open_balance_artist_amount"])
-        + abs(show["open_balance_producer_amount"])
-        + max(0.0, show["open_venue_balance_amount"])
-    )
+    show["account_open_balance_amount"] = abs(
+        booking_current_account_net(
+            show["open_balance_producer_amount"],
+            show["open_balance_artist_amount"],
+        )
+    ) + max(0.0, show["open_venue_balance_amount"])
     show["account_status"] = "settled" if show["account_open_balance_amount"] <= 0.01 else "open"
     return show
 
@@ -3463,6 +3465,27 @@ def booking_application_effect(current_balance: float, amount: float, target_bal
     if abs(abs(current_balance) - amount) <= 0.01:
         return -current_balance
     return -amount if current_balance > 0 else amount
+
+
+def booking_same_show_counterpart_effect(
+    show: dict,
+    applications: list[dict],
+    target_balance: str,
+    effect_amount: float,
+) -> tuple[str | None, float | None]:
+    if target_balance not in {"artist", "producer"}:
+        return None, None
+    counterpart_target = "producer" if target_balance == "artist" else "artist"
+    current_balance = booking_open_balance_for_target(show, applications, target_balance)
+    counterpart_balance = booking_open_balance_for_target(show, applications, counterpart_target)
+    if abs(counterpart_balance) <= 0.01 or current_balance * counterpart_balance >= 0:
+        return None, None
+    counterpart_effect = -effect_amount
+    if abs(counterpart_effect) > abs(counterpart_balance) + 0.01:
+        return None, None
+    if abs(abs(counterpart_balance) - abs(counterpart_effect)) <= 0.01:
+        counterpart_effect = -counterpart_balance
+    return counterpart_target, counterpart_effect
 
 
 def update_booking_settlement_from_account(
@@ -9497,7 +9520,15 @@ def create_booking_show_account_application(
         current_balance = booking_open_balance_for_target(show, previous_applications, request.target_balance)
         effect_amount = booking_application_effect(current_balance, request.amount, request.target_balance)
         applied_amount = abs(effect_amount)
+        counterpart_target, counterpart_effect = booking_same_show_counterpart_effect(
+            show,
+            previous_applications,
+            request.target_balance,
+            effect_amount,
+        )
         linked_effect_amount = None
+        linked_counterpart_target = None
+        linked_counterpart_effect = None
         if request.application_type == "compensation" and linked_existing is not None:
             if request.target_balance == "venue":
                 raise HTTPException(status_code=400, detail="La deuda de boliche se salda como pago, no como compensacion entre shows.")
@@ -9523,6 +9554,12 @@ def create_booking_show_account_application(
                 raise HTTPException(status_code=400, detail="La compensacion supera el saldo abierto del show vinculado.")
             if abs(abs(linked_balance) - abs(linked_effect_amount)) <= 0.01:
                 linked_effect_amount = -linked_balance
+            linked_counterpart_target, linked_counterpart_effect = booking_same_show_counterpart_effect(
+                linked_show,
+                linked_applications,
+                request.target_balance,
+                linked_effect_amount,
+            )
         notes = (request.notes or "").strip() or None
         counterparty = (request.counterparty or "").strip() or None
         conn.execute(
@@ -9550,6 +9587,35 @@ def create_booking_show_account_application(
                 now,
             ),
         )
+        if counterpart_target is not None and counterpart_effect is not None:
+            counterpart_notes_parts = [f"Contrapartida contable automatica de aplicacion en {request.target_balance}"]
+            if notes:
+                counterpart_notes_parts.append(notes)
+            conn.execute(
+                """
+                INSERT INTO booking_account_applications (
+                    show_id, application_date, target_balance, application_type,
+                    amount, effect_amount, payment_method, counterparty, linked_show_id,
+                    proof_refs_json, notes, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    show_id,
+                    application_date,
+                    counterpart_target,
+                    "adjustment",
+                    abs(counterpart_effect),
+                    counterpart_effect,
+                    "ajuste",
+                    counterparty,
+                    request.linked_show_id,
+                    booking_application_json_value(conn, request.proof_refs),
+                    " | ".join(counterpart_notes_parts),
+                    now,
+                    now,
+                ),
+            )
         item = fetch_booking_show_item(conn, show_id)
         item = update_booking_settlement_from_account(conn, show_id, item, request.application_type, now)
         linked_item = None
@@ -9582,6 +9648,35 @@ def create_booking_show_account_application(
                     now,
                 ),
             )
+            if linked_counterpart_target is not None and linked_counterpart_effect is not None:
+                linked_counterpart_notes_parts = [f"Contrapartida contable automatica de compensacion desde show #{show_id}"]
+                if notes:
+                    linked_counterpart_notes_parts.append(notes)
+                conn.execute(
+                    """
+                    INSERT INTO booking_account_applications (
+                        show_id, application_date, target_balance, application_type,
+                        amount, effect_amount, payment_method, counterparty, linked_show_id,
+                        proof_refs_json, notes, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        request.linked_show_id,
+                        application_date,
+                        linked_counterpart_target,
+                        "adjustment",
+                        abs(linked_counterpart_effect),
+                        linked_counterpart_effect,
+                        "ajuste",
+                        counterparty,
+                        show_id,
+                        booking_application_json_value(conn, request.proof_refs),
+                        " | ".join(linked_counterpart_notes_parts),
+                        now,
+                        now,
+                    ),
+                )
             linked_item = fetch_booking_show_item(conn, request.linked_show_id)
             linked_item = update_booking_settlement_from_account(
                 conn,

@@ -122,6 +122,13 @@ La etiqueta explica como cerro. La alerta viva desaparece porque ya no hay deuda
 En la base operacional, estas aplicaciones viven en `booking_account_applications` y
 se suman al saldo original del show para calcular el saldo vivo.
 
+Cuando `balance_artist_amount` y `balance_producer_amount` representan el mismo
+desvio visto desde ambos lados de la liquidacion, no se deben sumar como dos deudas.
+El saldo vivo de cuenta corriente se lee neto. Una aplicacion posterior cargada sobre
+uno de esos lados genera automaticamente la contrapartida contable del mismo show,
+para que el pago o compensacion cierre el hecho completo sin reescribir la caja
+original.
+
 ## Shows Administrados Por Terceros
 
 Caso tipo Aneley:
