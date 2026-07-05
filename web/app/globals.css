@@ -1586,6 +1586,7 @@ button:disabled:hover {
 .booking-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
   margin-top: 12px;
 }
 
@@ -1593,6 +1594,73 @@ button:disabled:hover {
   min-height: 34px;
   padding: 0 14px;
   font-size: 13px;
+}
+
+.booking-account-panel {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  background: #fff;
+}
+
+.compact-heading {
+  margin-bottom: 10px;
+}
+
+.compact-heading h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+
+.compact-heading p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.booking-account-balances {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.booking-account-balances button {
+  min-height: 54px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  color: var(--ink);
+  text-align: left;
+  padding: 8px 10px;
+  box-shadow: none;
+}
+
+.booking-account-balances button.active {
+  border-color: var(--brand);
+  background: #eef7f4;
+}
+
+.booking-account-balances button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.booking-account-balances span,
+.booking-account-balances strong {
+  display: block;
+}
+
+.booking-account-balances span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.booking-account-balances strong {
+  color: var(--ink);
+  font-size: 14px;
+  margin-top: 2px;
 }
 
 .wide-panel {

@@ -43,6 +43,10 @@ Para cada caso se revisa:
 | Gasto propio artista | Linea artista, categoria, concepto, importe | Baja base de esa linea | Salida si VPO lo pago | Artista/Indyana segun regla | No | Reduce Indyana de esa linea | Reduce o no base comisionable segun regla | Cierra con linea | Shows, artista |
 | Gasto artista recuperable | Artista, proyecto, monto, recuperable, porcentaje artista/Indyana | Genera cuenta corriente recuperable | Salida inicial VPO; recuperos posteriores | Cuenta artista | No | No es show, pero afecta cuenta | Normalmente no comisionable | Cierra cuando se recupera o se condona | Cuenta artista, recuperos |
 | Recupero aplicado en show | Linea artista, gasto recuperable origen, importe, tipo de recupero | Baja saldo recuperable; segun tipo puede afectar base antes del split o solo deuda artista | Puede entrar como recupero a caja Indyana | Saldo recuperable artista/Indyana | No | No debe mezclarse con Indyana booking salvo tipo antes del split | Normalmente no comisionable | Show puede cerrar si recupero queda trazado | Cuenta artista, recuperos, caja |
+| Pago posterior de deuda de boliche | Show con deuda abierta, fecha de cobro, importe, metodo, comprobante | Aplica cobro contra deuda de boliche sin recalcular show | Entra caja real posterior | Baja `venue_balance_amount` o entrada operativa equivalente | No | No cambia Indyana ganado original | No cambia base comisionable original salvo regla aprobada | Cierra deuda si queda en 0 | Cuenta booking del show, finanzas artista |
+| Reintegro de artista por cobro de mas | Show con saldo a favor de Indyana, fecha, importe, metodo, comprobante | Aplica reintegro contra saldo del artista sin modificar pago original | Entra caja real posterior | Baja saldo a favor de Indyana | No | No cambia resultado del show | No cambia base comisionable | Cierra cuenta si queda en 0 | Cuenta corriente artista, cuenta booking del show |
+| Pago posterior al artista | Show con saldo a favor del artista, fecha, importe, metodo, comprobante | Aplica pago contra saldo a favor del artista sin modificar liquidacion original | Sale caja real posterior | Baja deuda de Indyana al artista | No | No cambia resultado del show | No cambia base comisionable | Cierra cuenta si queda en 0 | Cuenta corriente artista, cuenta booking del show |
+| Compensacion entre shows | Dos saldos abiertos del mismo artista/tercero, importe, nota | Aplica un saldo contra otro con trazabilidad doble | Sin caja nueva si es compensacion pura | Baja ambos saldos segun direccion | No | No cambia resultados originales | No cambia base comisionable | Cierra o deja parcial segun importe | Cuenta corriente, auditoria |
 
 ## Reglas de aceptacion por caso
 
@@ -104,6 +108,37 @@ Un evento o show no debe mostrarse simplemente como cerrado si tiene cuenta corr
 
 No usar un unico "cerrado" para todo si hay varias capas.
 
+### Regla B.1 - Pagos posteriores no reescriben shows
+
+Si un saldo se salda despues del show, el sistema debe registrar una aplicacion o
+movimiento de cuenta corriente. No debe editar silenciosamente la caja original del
+show porque se perderia la historia de lo que paso en el evento.
+
+Ejemplos:
+
+- boliche pago la deuda dias despues;
+- artista reintegro plata cobrada de mas;
+- Indyana pago una diferencia pendiente al artista;
+- un show compenso el saldo de otro show.
+
+El show puede pasar a `cerrado` o `cerrado con cuenta corriente saldada`, pero la
+liquidacion original debe seguir auditable.
+
+### Regla B.2 - Verde significa sin saldo vivo
+
+Un show con saldo abierto no debe verse verde aunque su liquidacion este clara.
+
+Un show puede verse verde despues de haber tenido saldo si existe una aplicacion
+posterior que lo salda:
+
+- pago posterior;
+- reintegro;
+- compensacion con otro show;
+- ajuste aprobado.
+
+La historia del cierre debe quedar visible como etiqueta o detalle, pero no debe
+mantener alerta si la cuenta corriente quedo en cero.
+
 ### Regla C - Indyana ganado vs base comisionable
 
 Toda linea que genere Indyana debe responder:
@@ -133,6 +168,9 @@ Splits raros y 0/0 del historico se conservan, pero no se usan para disenar regl
 - Exactitud de cierre: la caja debe cerrar exacta; redondeo solo visual, no operativo.
 - Como visualizar cuenta corriente abierta aunque el show este cerrado.
 - Como marcar "historico revisado" vs "historico pendiente".
+- Implementar la tabla operativa `booking_current_account_entries` como destino de
+  saldos nuevos al aprobar/cerrar shows, manteniendo saldos derivados solo como
+  transicion/auditoria.
 
 ## Regla E - Sin tolerancia automatica por redondeo
 

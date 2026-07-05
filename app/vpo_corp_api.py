@@ -358,6 +358,25 @@ class BookingCashMovementRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=1000)
 
 
+class BookingAccountApplicationRequest(BaseModel):
+    application_date: str = Field(..., min_length=10, max_length=10)
+    target_balance: Literal["artist", "producer", "venue"] = "artist"
+    application_type: Literal[
+        "artist_payment",
+        "artist_reimbursement",
+        "producer_reimbursement",
+        "venue_payment",
+        "compensation",
+        "adjustment",
+    ] = "compensation"
+    amount: float = Field(..., gt=0.0)
+    payment_method: Literal["transferencia", "efectivo", "compensacion", "ajuste", "otro"] = "transferencia"
+    counterparty: str | None = Field(default=None, max_length=180)
+    linked_show_id: int | None = Field(default=None, ge=1)
+    proof_refs: list[str] = Field(default_factory=list, max_length=30)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
 class FinanceProjectRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=180)
     artist: str | None = Field(default=None, max_length=160)
@@ -1810,6 +1829,10 @@ def booking_connect():
     return conn
 
 
+def legacy_booking_db_path_for_response() -> str:
+    return str(VPO_BOOKING_DB_PATH) if operational_db_settings().driver == "sqlite" else ""
+
+
 def init_booking_db() -> None:
     if operational_db_settings().driver == "postgres":
         return
@@ -2086,6 +2109,29 @@ def init_booking_db() -> None:
                 created_at TEXT NOT NULL
             )
             """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS booking_account_applications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                show_id INTEGER NOT NULL REFERENCES booking_shows(id) ON DELETE CASCADE,
+                application_date TEXT NOT NULL,
+                target_balance TEXT NOT NULL,
+                application_type TEXT NOT NULL,
+                amount REAL NOT NULL DEFAULT 0,
+                effect_amount REAL NOT NULL DEFAULT 0,
+                payment_method TEXT NOT NULL DEFAULT 'transferencia',
+                counterparty TEXT,
+                linked_show_id INTEGER REFERENCES booking_shows(id) ON DELETE SET NULL,
+                proof_refs_json TEXT NOT NULL DEFAULT '[]',
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_booking_account_app_show ON booking_account_applications(show_id, application_date)"
         )
         conn.execute(
             """
@@ -3104,6 +3150,16 @@ def row_to_booking_show(row: sqlite3.Row) -> dict:
     data["direct_commissions"] = []
     data["external_shares"] = []
     data["artist_adjustments"] = []
+    data["account_applications"] = []
+    data["open_balance_artist_amount"] = float(data.get("balance_artist_amount") or 0)
+    data["open_balance_producer_amount"] = float(data.get("balance_producer_amount") or 0)
+    data["open_venue_balance_amount"] = float(data.get("venue_balance_amount") or 0)
+    data["account_open_balance_amount"] = (
+        abs(data["open_balance_artist_amount"])
+        + abs(data["open_balance_producer_amount"])
+        + max(0.0, data["open_venue_balance_amount"])
+    )
+    data["account_status"] = "settled" if data["account_open_balance_amount"] <= 0.01 else "open"
     return data
 
 
@@ -3254,6 +3310,182 @@ def row_to_booking_cash_movement(row: sqlite3.Row) -> dict:
     data["paid_by"] = metadata.get("paid_by")
     data["notes"] = metadata.get("notes")
     return data
+
+
+def parse_json_list(value) -> list:
+    if isinstance(value, list):
+        return value
+    if value in (None, ""):
+        return []
+    try:
+        parsed = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def row_to_booking_account_application(row: sqlite3.Row) -> dict:
+    data = dict(row)
+    data["proof_refs"] = parse_json_list(data.pop("proof_refs_json", "[]"))
+    data["amount"] = float(data.get("amount") or 0)
+    data["effect_amount"] = float(data.get("effect_amount") or 0)
+    return data
+
+
+def ensure_booking_account_applications_table(conn: sqlite3.Connection) -> None:
+    if is_postgres_connection(conn):
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS booking_account_applications (
+                id bigserial PRIMARY KEY,
+                show_id bigint NOT NULL REFERENCES booking_shows(id) ON DELETE CASCADE,
+                application_date date NOT NULL,
+                target_balance text NOT NULL,
+                application_type text NOT NULL,
+                amount numeric(18, 6) NOT NULL DEFAULT 0,
+                effect_amount numeric(18, 6) NOT NULL DEFAULT 0,
+                payment_method text NOT NULL DEFAULT 'transferencia',
+                counterparty text,
+                linked_show_id bigint REFERENCES booking_shows(id) ON DELETE SET NULL,
+                proof_refs_json jsonb NOT NULL DEFAULT '[]'::jsonb,
+                notes text,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                updated_at timestamptz NOT NULL DEFAULT now(),
+                CONSTRAINT booking_account_app_target_chk CHECK (target_balance IN ('artist', 'producer', 'venue')),
+                CONSTRAINT booking_account_app_type_chk CHECK (application_type IN ('artist_payment', 'artist_reimbursement', 'producer_reimbursement', 'venue_payment', 'compensation', 'adjustment')),
+                CONSTRAINT booking_account_app_method_chk CHECK (payment_method IN ('transferencia', 'efectivo', 'compensacion', 'ajuste', 'otro'))
+            )
+            """
+        )
+    else:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS booking_account_applications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                show_id INTEGER NOT NULL REFERENCES booking_shows(id) ON DELETE CASCADE,
+                application_date TEXT NOT NULL,
+                target_balance TEXT NOT NULL,
+                application_type TEXT NOT NULL,
+                amount REAL NOT NULL DEFAULT 0,
+                effect_amount REAL NOT NULL DEFAULT 0,
+                payment_method TEXT NOT NULL DEFAULT 'transferencia',
+                counterparty TEXT,
+                linked_show_id INTEGER REFERENCES booking_shows(id) ON DELETE SET NULL,
+                proof_refs_json TEXT NOT NULL DEFAULT '[]',
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_booking_account_app_show ON booking_account_applications(show_id, application_date)"
+    )
+
+
+def booking_application_json_value(conn: sqlite3.Connection, values: list[str]):
+    cleaned = clean_receipt_refs(values)
+    if is_postgres_connection(conn):
+        from psycopg.types.json import Jsonb
+
+        return Jsonb(cleaned)
+    return json.dumps(cleaned, ensure_ascii=False)
+
+
+def booking_target_original_balance(show: dict, target_balance: str) -> float:
+    if target_balance == "artist":
+        return float(show.get("balance_artist_amount") or 0)
+    if target_balance == "producer":
+        return float(show.get("balance_producer_amount") or 0)
+    if target_balance == "venue":
+        return float(show.get("venue_balance_amount") or 0)
+    raise HTTPException(status_code=400, detail="Saldo destino invalido.")
+
+
+def booking_open_balance_for_target(show: dict, applications: list[dict], target_balance: str) -> float:
+    value = booking_target_original_balance(show, target_balance)
+    value += sum(
+        float(application.get("effect_amount") or 0)
+        for application in applications
+        if application.get("target_balance") == target_balance
+    )
+    return 0.0 if abs(value) <= 0.01 else value
+
+
+def apply_booking_account_fields(show: dict, applications: list[dict]) -> dict:
+    show["account_applications"] = applications
+    show["open_balance_artist_amount"] = booking_open_balance_for_target(show, applications, "artist")
+    show["open_balance_producer_amount"] = booking_open_balance_for_target(show, applications, "producer")
+    show["open_venue_balance_amount"] = booking_open_balance_for_target(show, applications, "venue")
+    show["account_open_balance_amount"] = (
+        abs(show["open_balance_artist_amount"])
+        + abs(show["open_balance_producer_amount"])
+        + max(0.0, show["open_venue_balance_amount"])
+    )
+    show["account_status"] = "settled" if show["account_open_balance_amount"] <= 0.01 else "open"
+    return show
+
+
+def attach_booking_account_applications(conn: sqlite3.Connection, shows: list[dict]) -> list[dict]:
+    if not shows:
+        return shows
+
+    ensure_booking_account_applications_table(conn)
+    show_ids = [show["id"] for show in shows]
+    placeholders = ",".join("?" for _ in show_ids)
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM booking_account_applications
+        WHERE show_id IN ({placeholders})
+        ORDER BY application_date, id
+        """,
+        show_ids,
+    ).fetchall()
+
+    by_show: dict[int, list[dict]] = {show_id: [] for show_id in show_ids}
+    for row in rows:
+        application = row_to_booking_account_application(row)
+        by_show.setdefault(application["show_id"], []).append(application)
+
+    for show in shows:
+        apply_booking_account_fields(show, by_show.get(show["id"], []))
+    return shows
+
+
+def booking_application_effect(current_balance: float, amount: float, target_balance: str) -> float:
+    if abs(current_balance) <= 0.01:
+        raise HTTPException(status_code=400, detail="Ese saldo ya esta saldado.")
+    if target_balance == "venue" and current_balance < -0.01:
+        raise HTTPException(status_code=400, detail="La deuda de boliche no puede aplicarse con saldo negativo.")
+    if amount > abs(current_balance) + 0.01:
+        raise HTTPException(status_code=400, detail="El importe supera el saldo abierto del show.")
+    if abs(abs(current_balance) - amount) <= 0.01:
+        return -current_balance
+    return -amount if current_balance > 0 else amount
+
+
+def update_booking_settlement_from_account(
+    conn: sqlite3.Connection,
+    show_id: int,
+    item: dict,
+    application_type: str,
+    now: str,
+) -> dict:
+    if item.get("account_open_balance_amount", 0) > 0.01 or (item.get("settlement_status") or "") == "historico":
+        return item
+    settled_status = "cerrado_compensado" if application_type == "compensation" else "cerrado_con_pago_posterior"
+    conn.execute(
+        """
+        UPDATE booking_shows
+        SET settlement_status = ?,
+            settlement_closed_at = COALESCE(settlement_closed_at, ?),
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (settled_status, now, now, show_id),
+    )
+    return fetch_booking_show_item(conn, show_id)
 
 
 def attach_booking_expenses(conn: sqlite3.Connection, shows: list[dict]) -> list[dict]:
@@ -3682,6 +3914,7 @@ def derive_booking_settlement(
     can_close = (
         request.status == "aprobado"
         and abs(payload["balance_producer"]) <= 0.01
+        and abs(payload["balance_artist"]) <= 0.01
         and abs(payload["venue_balance"]) <= 0.01
     )
     if can_close:
@@ -4023,7 +4256,8 @@ def fetch_booking_show_item(conn: sqlite3.Connection, show_id: int) -> dict:
     item = attach_booking_pre_split_adjustments(conn, item)
     item = attach_booking_direct_commissions(conn, item)
     item = attach_booking_external_shares(conn, item)
-    return attach_booking_adjustments(conn, item)[0]
+    item = attach_booking_adjustments(conn, item)
+    return attach_booking_account_applications(conn, item)[0]
 
 
 def insert_booking_show_from_request(
@@ -4384,6 +4618,19 @@ def finance_ledger_entry(
     }
 
 
+def booking_current_account_net(indyana_balance: float, artist_balance: float) -> float:
+    """Net booking account balance without double-counting mirrored show balances."""
+    indyana = float(indyana_balance or 0)
+    artist = float(artist_balance or 0)
+    if abs(indyana) <= 0.01:
+        return 0.0 if abs(artist) <= 0.01 else -artist
+    if abs(artist) <= 0.01:
+        return indyana
+    if indyana * artist < 0:
+        return indyana if abs(indyana) >= abs(artist) else -artist
+    return indyana - artist
+
+
 def build_artist_finance_ledger(
     conn: sqlite3.Connection,
     selected_artist: str | None,
@@ -4397,23 +4644,37 @@ def build_artist_finance_ledger(
         where_artist = "AND artist = ?"
         params.append(selected_artist)
     artist_scope_sql = apply_artist_scope_sql(conn, x_vpo_username, module_key, params)
+    ensure_booking_account_applications_table(conn)
 
     booking_rows = conn.execute(
         f"""
+        WITH account_applications AS (
+            SELECT
+                show_id,
+                SUM(CASE WHEN target_balance = 'producer' THEN effect_amount ELSE 0 END) AS producer_effect,
+                SUM(CASE WHEN target_balance = 'artist' THEN effect_amount ELSE 0 END) AS artist_effect,
+                SUM(CASE WHEN target_balance = 'venue' THEN effect_amount ELSE 0 END) AS venue_effect
+            FROM booking_account_applications
+            GROUP BY show_id
+        )
         SELECT
-            id, artist, show_date, venue,
-            COALESCE(balance_producer_amount, 0) AS indyana_balance,
-            COALESCE(balance_artist_amount, 0) AS artist_balance,
-            COALESCE(venue_balance_amount, 0) AS venue_balance,
+            booking_shows.id,
+            artist,
+            show_date,
+            venue,
+            COALESCE(balance_producer_amount, 0) + COALESCE(account_applications.producer_effect, 0) AS indyana_balance,
+            COALESCE(balance_artist_amount, 0) + COALESCE(account_applications.artist_effect, 0) AS artist_balance,
+            COALESCE(venue_balance_amount, 0) + COALESCE(account_applications.venue_effect, 0) AS venue_balance,
             settlement_status, status, notes
         FROM booking_shows
+        LEFT JOIN account_applications ON account_applications.show_id = booking_shows.id
         WHERE status <> 'cancelado'
           {where_artist}
           {artist_scope_sql}
           AND (
-            ABS(COALESCE(balance_producer_amount, 0)) > 0.01
-            OR ABS(COALESCE(balance_artist_amount, 0)) > 0.01
-            OR ABS(COALESCE(venue_balance_amount, 0)) > 0.01
+            ABS(COALESCE(balance_producer_amount, 0) + COALESCE(account_applications.producer_effect, 0)) > 0.01
+            OR ABS(COALESCE(balance_artist_amount, 0) + COALESCE(account_applications.artist_effect, 0)) > 0.01
+            OR ABS(COALESCE(venue_balance_amount, 0) + COALESCE(account_applications.venue_effect, 0)) > 0.01
           )
         ORDER BY show_date DESC, id DESC
         """,
@@ -4426,42 +4687,24 @@ def build_artist_finance_ledger(
         artist_balance = float(row["artist_balance"] or 0)
         venue_balance = float(row["venue_balance"] or 0)
         status = row["settlement_status"] or row["status"]
-        if abs(indyana_balance) > 0.01:
+        account_balance = booking_current_account_net(indyana_balance, artist_balance)
+        if abs(account_balance) > 0.01:
+            account_concept = "saldo a favor de Indyana" if account_balance > 0 else "saldo a favor del artista"
             entries.append(
                 finance_ledger_entry(
-                    entry_id=f"booking-show-{row['id']}-indyana",
+                    entry_id=f"booking-show-{row['id']}-account",
                     ledger_date=row["show_date"],
                     artist=row["artist"],
                     business_area="booking",
                     ledger_type="booking_account_current",
                     project_name=None,
-                    concept=f"{row['venue']} - deben a Indyana",
+                    concept=f"{row['venue']} - {account_concept}",
                     source_module="booking",
                     source_table="booking_shows",
                     source_id=str(row["id"]),
                     source_label=source_label,
-                    amount_ars=indyana_balance,
-                    account_delta_ars=indyana_balance,
-                    status=status,
-                    notes=row["notes"],
-                )
-            )
-        if abs(artist_balance) > 0.01:
-            entries.append(
-                finance_ledger_entry(
-                    entry_id=f"booking-show-{row['id']}-artist",
-                    ledger_date=row["show_date"],
-                    artist=row["artist"],
-                    business_area="booking",
-                    ledger_type="booking_account_current",
-                    project_name=None,
-                    concept=f"{row['venue']} - Indyana debe artista",
-                    source_module="booking",
-                    source_table="booking_shows",
-                    source_id=str(row["id"]),
-                    source_label=source_label,
-                    amount_ars=artist_balance,
-                    account_delta_ars=-artist_balance,
+                    amount_ars=account_balance,
+                    account_delta_ars=account_balance,
                     status=status,
                     notes=row["notes"],
                 )
@@ -6378,6 +6621,7 @@ def booking_shows(
         items = attach_booking_direct_commissions(conn, items)
         items = attach_booking_external_shares(conn, items)
         items = attach_booking_adjustments(conn, items)
+        items = attach_booking_account_applications(conn, items)
 
     return {
         "db_driver": operational_db_settings().driver,
@@ -6466,7 +6710,7 @@ def booking_summary_for_module(module_key: str, x_vpo_username: str | None) -> d
         "items": items,
         "totals": totals,
         "db_driver": operational_db_settings().driver,
-        "db_path": str(VPO_BOOKING_DB_PATH) if operational_db_settings().driver == "sqlite" else "",
+        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -6772,7 +7016,7 @@ def booking_artist_summary(
         "items": items,
         "months": [monthly[key] for key in sorted(monthly.keys(), reverse=True)],
         "totals": totals,
-        "db_path": str(VPO_BOOKING_DB_PATH),
+        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -6811,9 +7055,19 @@ def artist_finance_summary(
             where_artist = "AND artist = ?"
             params.append(selected_artist)
         artist_scope_sql = apply_artist_scope_sql(conn, x_vpo_username, "artist_finance", params)
+        ensure_booking_account_applications_table(conn)
 
         booking_totals = conn.execute(
             f"""
+            WITH account_applications AS (
+                SELECT
+                    show_id,
+                    SUM(CASE WHEN target_balance = 'producer' THEN effect_amount ELSE 0 END) AS producer_effect,
+                    SUM(CASE WHEN target_balance = 'artist' THEN effect_amount ELSE 0 END) AS artist_effect,
+                    SUM(CASE WHEN target_balance = 'venue' THEN effect_amount ELSE 0 END) AS venue_effect
+                FROM booking_account_applications
+                GROUP BY show_id
+            )
             SELECT
                 COUNT(*) AS shows,
                 SUM(COALESCE(contracted_cachet_amount, cachet_amount, 0)) AS cachet_total,
@@ -6822,12 +7076,13 @@ def artist_finance_summary(
                 SUM(COALESCE(producer_cash_target_amount, 0)) AS indyana_target,
                 SUM(COALESCE(artist_paid_amount, 0)) AS artist_paid,
                 SUM(COALESCE(producer_received_amount, 0)) AS indyana_received,
-                SUM(COALESCE(balance_artist_amount, 0)) AS artist_balance,
-                SUM(COALESCE(balance_producer_amount, 0)) AS indyana_balance,
-                SUM(COALESCE(venue_balance_amount, 0)) AS venue_balance,
+                SUM(COALESCE(balance_artist_amount, 0) + COALESCE(account_applications.artist_effect, 0)) AS artist_balance,
+                SUM(COALESCE(balance_producer_amount, 0) + COALESCE(account_applications.producer_effect, 0)) AS indyana_balance,
+                SUM(COALESCE(venue_balance_amount, 0) + COALESCE(account_applications.venue_effect, 0)) AS venue_balance,
                 SUM(CASE WHEN COALESCE(booking_commission_exempt, 0) = 1 THEN 0 ELSE COALESCE(producer_cash_target_amount, 0) END) AS commissionable_indyana,
                 SUM(CASE WHEN COALESCE(booking_commission_exempt, 0) = 1 THEN COALESCE(producer_cash_target_amount, 0) ELSE 0 END) AS non_commissionable_indyana
             FROM booking_shows
+            LEFT JOIN account_applications ON account_applications.show_id = booking_shows.id
             WHERE status <> 'cancelado'
               {where_artist}
               {artist_scope_sql}
@@ -6837,14 +7092,24 @@ def artist_finance_summary(
 
         monthly_rows = conn.execute(
             f"""
+            WITH account_applications AS (
+                SELECT
+                    show_id,
+                    SUM(CASE WHEN target_balance = 'producer' THEN effect_amount ELSE 0 END) AS producer_effect,
+                    SUM(CASE WHEN target_balance = 'artist' THEN effect_amount ELSE 0 END) AS artist_effect,
+                    SUM(CASE WHEN target_balance = 'venue' THEN effect_amount ELSE 0 END) AS venue_effect
+                FROM booking_account_applications
+                GROUP BY show_id
+            )
             SELECT
                 substr(show_date, 1, 7) AS month,
                 COUNT(*) AS shows,
                 SUM(COALESCE(producer_cash_target_amount, 0)) AS indyana_target,
-                SUM(COALESCE(balance_producer_amount, 0)) AS indyana_balance,
-                SUM(COALESCE(balance_artist_amount, 0)) AS artist_balance,
-                SUM(COALESCE(venue_balance_amount, 0)) AS venue_balance
+                SUM(COALESCE(balance_producer_amount, 0) + COALESCE(account_applications.producer_effect, 0)) AS indyana_balance,
+                SUM(COALESCE(balance_artist_amount, 0) + COALESCE(account_applications.artist_effect, 0)) AS artist_balance,
+                SUM(COALESCE(venue_balance_amount, 0) + COALESCE(account_applications.venue_effect, 0)) AS venue_balance
             FROM booking_shows
+            LEFT JOIN account_applications ON account_applications.show_id = booking_shows.id
             WHERE status <> 'cancelado'
               {where_artist}
               {artist_scope_sql}
@@ -6856,28 +7121,65 @@ def artist_finance_summary(
 
         open_show_rows = conn.execute(
             f"""
+            WITH account_applications AS (
+                SELECT
+                    show_id,
+                    SUM(CASE WHEN target_balance = 'producer' THEN effect_amount ELSE 0 END) AS producer_effect,
+                    SUM(CASE WHEN target_balance = 'artist' THEN effect_amount ELSE 0 END) AS artist_effect,
+                    SUM(CASE WHEN target_balance = 'venue' THEN effect_amount ELSE 0 END) AS venue_effect
+                FROM booking_account_applications
+                GROUP BY show_id
+            )
             SELECT
-                id,
+                booking_shows.id,
                 artist,
                 show_date,
                 venue,
-                COALESCE(balance_producer_amount, 0) AS indyana_balance,
-                COALESCE(balance_artist_amount, 0) AS artist_balance,
-                COALESCE(venue_balance_amount, 0) AS venue_balance,
+                COALESCE(balance_producer_amount, 0) + COALESCE(account_applications.producer_effect, 0) AS indyana_balance,
+                COALESCE(balance_artist_amount, 0) + COALESCE(account_applications.artist_effect, 0) AS artist_balance,
+                COALESCE(venue_balance_amount, 0) + COALESCE(account_applications.venue_effect, 0) AS venue_balance,
                 settlement_status,
                 status,
                 notes
             FROM booking_shows
+            LEFT JOIN account_applications ON account_applications.show_id = booking_shows.id
             WHERE status <> 'cancelado'
               {where_artist}
               {artist_scope_sql}
               AND (
-                ABS(COALESCE(balance_producer_amount, 0)) > 0.01
-                OR ABS(COALESCE(balance_artist_amount, 0)) > 0.01
-                OR ABS(COALESCE(venue_balance_amount, 0)) > 0.01
+                ABS(COALESCE(balance_producer_amount, 0) + COALESCE(account_applications.producer_effect, 0)) > 0.01
+                OR ABS(COALESCE(balance_artist_amount, 0) + COALESCE(account_applications.artist_effect, 0)) > 0.01
+                OR ABS(COALESCE(venue_balance_amount, 0) + COALESCE(account_applications.venue_effect, 0)) > 0.01
               )
             ORDER BY show_date DESC, id DESC
             LIMIT 100
+            """,
+            params,
+        ).fetchall()
+
+        account_balance_rows = conn.execute(
+            f"""
+            WITH account_applications AS (
+                SELECT
+                    show_id,
+                    SUM(CASE WHEN target_balance = 'producer' THEN effect_amount ELSE 0 END) AS producer_effect,
+                    SUM(CASE WHEN target_balance = 'artist' THEN effect_amount ELSE 0 END) AS artist_effect,
+                    SUM(CASE WHEN target_balance = 'venue' THEN effect_amount ELSE 0 END) AS venue_effect
+                FROM booking_account_applications
+                GROUP BY show_id
+            )
+            SELECT
+                COALESCE(balance_producer_amount, 0) + COALESCE(account_applications.producer_effect, 0) AS indyana_balance,
+                COALESCE(balance_artist_amount, 0) + COALESCE(account_applications.artist_effect, 0) AS artist_balance
+            FROM booking_shows
+            LEFT JOIN account_applications ON account_applications.show_id = booking_shows.id
+            WHERE status <> 'cancelado'
+              {where_artist}
+              {artist_scope_sql}
+              AND (
+                ABS(COALESCE(balance_producer_amount, 0) + COALESCE(account_applications.producer_effect, 0)) > 0.01
+                OR ABS(COALESCE(balance_artist_amount, 0) + COALESCE(account_applications.artist_effect, 0)) > 0.01
+              )
             """,
             params,
         ).fetchall()
@@ -7009,7 +7311,10 @@ def artist_finance_summary(
     ]:
         totals[key] = float(totals.get(key) or 0)
     totals["shows"] = int(totals["shows"])
-    totals["booking_current_balance_indyana"] = totals["indyana_balance"] - totals["artist_balance"]
+    totals["booking_current_balance_indyana"] = sum(
+        booking_current_account_net(row["indyana_balance"], row["artist_balance"])
+        for row in account_balance_rows
+    )
 
     legacy_movements = [dict(row) for row in legacy_rows]
     legacy_total = sum(float(row.get("amount") or 0) for row in legacy_movements)
@@ -7114,7 +7419,7 @@ def artist_finance_summary(
         "finance_project_summary": finance_project_summary,
         "finance_movements": finance_movements,
         "recovery_applications": recovery_applications,
-        "db_path": str(VPO_BOOKING_DB_PATH),
+        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -7145,7 +7450,7 @@ def finance_projects(
 
     return {
         "items": [dict(row) for row in rows],
-        "db_path": str(VPO_BOOKING_DB_PATH),
+        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -7200,7 +7505,7 @@ def create_finance_project(
             (int(cursor.lastrowid),),
         ).fetchone()
 
-    return {"item": dict(item), "db_path": str(VPO_BOOKING_DB_PATH)}
+    return {"item": dict(item), "db_path": legacy_booking_db_path_for_response()}
 
 
 @app.get("/finance/movements")
@@ -7319,7 +7624,7 @@ def finance_movements(
             "official": False,
             "note": "Staging financiero: carga y control. Todavia no impacta automaticamente el ledger oficial.",
         },
-        "db_path": str(VPO_BOOKING_DB_PATH),
+        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -7404,7 +7709,7 @@ def create_finance_movement(
 
     return {
         "item": finance_movement_item(row),
-        "db_path": str(VPO_BOOKING_DB_PATH),
+        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -7535,7 +7840,7 @@ def update_finance_movement(
 
     return {
         "item": finance_movement_item(row),
-        "db_path": str(VPO_BOOKING_DB_PATH),
+        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -7575,7 +7880,7 @@ def booking_artist_records(
 
     return {
         "items": [row_to_booking_artist(row) for row in rows],
-        "db_path": str(VPO_BOOKING_DB_PATH),
+        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -7622,7 +7927,7 @@ def create_booking_artist_record(
 
     return {
         "item": row_to_booking_artist(row),
-        "db_path": str(VPO_BOOKING_DB_PATH),
+        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -7680,7 +7985,7 @@ def update_booking_artist_record(
 
     return {
         "item": row_to_booking_artist(row),
-        "db_path": str(VPO_BOOKING_DB_PATH),
+        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -7711,7 +8016,7 @@ def deactivate_booking_artist_record(
 
     return {
         "item": row_to_booking_artist(row),
-        "db_path": str(VPO_BOOKING_DB_PATH),
+        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -7744,7 +8049,7 @@ def employee_records(
             "items": [row_to_employee(conn, row) for row in rows],
             "function_options": EMPLOYEE_FUNCTION_OPTIONS,
             "modules": [{"module_key": key, "label": label} for key, label in APP_MODULES],
-            "db_path": str(VPO_BOOKING_DB_PATH) if operational_db_settings().driver == "sqlite" else "",
+            "db_path": legacy_booking_db_path_for_response(),
             "db_driver": operational_db_settings().driver,
         }
 
@@ -8111,7 +8416,7 @@ def create_employee_record(
 
         return {
             "item": row_to_employee(conn, row),
-            "db_path": str(VPO_BOOKING_DB_PATH),
+            "db_path": legacy_booking_db_path_for_response(),
         }
 
 
@@ -8196,7 +8501,7 @@ def update_employee_record(
 
         return {
             "item": row_to_employee(conn, row),
-            "db_path": str(VPO_BOOKING_DB_PATH),
+            "db_path": legacy_booking_db_path_for_response(),
         }
 
 
@@ -8260,7 +8565,7 @@ def set_employee_password(
         row = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
         return {
             "item": row_to_employee(conn, row),
-            "db_path": str(VPO_BOOKING_DB_PATH),
+            "db_path": legacy_booking_db_path_for_response(),
         }
 
 
@@ -8293,7 +8598,7 @@ def deactivate_employee_record(
 
         return {
             "item": row_to_employee(conn, row),
-            "db_path": str(VPO_BOOKING_DB_PATH),
+            "db_path": legacy_booking_db_path_for_response(),
         }
 
 
@@ -8439,7 +8744,7 @@ def booking_composite_events(
 
     return {
         "items": items,
-        "db_path": str(VPO_BOOKING_DB_PATH),
+        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -8852,7 +9157,7 @@ def caserio_events(
 
     return {
         "items": items,
-        "db_path": str(VPO_BOOKING_DB_PATH),
+        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -8986,7 +9291,7 @@ def create_caserio_event(
 
     return {
         "item": item,
-        "db_path": str(VPO_BOOKING_DB_PATH),
+        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -9070,7 +9375,7 @@ def create_booking_show(
 
     return {
         "item": item,
-        "db_path": str(VPO_BOOKING_DB_PATH),
+        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -9102,7 +9407,194 @@ def update_booking_show(
 
     return {
         "item": item,
-        "db_path": str(VPO_BOOKING_DB_PATH),
+        "db_path": legacy_booking_db_path_for_response(),
+    }
+
+
+@app.get("/booking/shows/{show_id}/account")
+def booking_show_account(
+    show_id: int,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+
+    with booking_connect() as conn:
+        existing = conn.execute("SELECT id, artist FROM booking_shows WHERE id = ?", (show_id,)).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Show no encontrado.")
+        require_module_permission(
+            conn,
+            x_vpo_username,
+            "booking",
+            "access",
+            existing_artist=clean_booking_artist(existing["artist"]),
+        )
+        item = fetch_booking_show_item(conn, show_id)
+
+    return {
+        "item": item,
+        "applications": item.get("account_applications", []),
+        "open_balances": {
+            "artist": item.get("open_balance_artist_amount", 0),
+            "producer": item.get("open_balance_producer_amount", 0),
+            "venue": item.get("open_venue_balance_amount", 0),
+            "total": item.get("account_open_balance_amount", 0),
+        },
+        "db_driver": operational_db_settings().driver,
+    }
+
+
+@app.post("/booking/shows/{show_id}/account/applications")
+def create_booking_show_account_application(
+    show_id: int,
+    request: BookingAccountApplicationRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+    application_date = validate_iso_date(request.application_date)
+    now = datetime.now().isoformat(timespec="seconds")
+
+    with booking_connect() as conn:
+        existing = conn.execute("SELECT * FROM booking_shows WHERE id = ?", (show_id,)).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="Show no encontrado.")
+        require_module_permission(
+            conn,
+            x_vpo_username,
+            "booking",
+            "edit",
+            existing_artist=clean_booking_artist(existing["artist"]),
+        )
+        linked_existing = None
+        if request.linked_show_id is not None:
+            linked_existing = conn.execute("SELECT * FROM booking_shows WHERE id = ?", (request.linked_show_id,)).fetchone()
+            if linked_existing is None:
+                raise HTTPException(status_code=400, detail="El show vinculado no existe.")
+            require_module_permission(
+                conn,
+                x_vpo_username,
+                "booking",
+                "edit",
+                existing_artist=clean_booking_artist(linked_existing["artist"]),
+            )
+
+        ensure_booking_account_applications_table(conn)
+        show = row_to_booking_show(existing)
+        previous_rows = conn.execute(
+            """
+            SELECT *
+            FROM booking_account_applications
+            WHERE show_id = ?
+            ORDER BY application_date, id
+            """,
+            (show_id,),
+        ).fetchall()
+        previous_applications = [row_to_booking_account_application(row) for row in previous_rows]
+        current_balance = booking_open_balance_for_target(show, previous_applications, request.target_balance)
+        effect_amount = booking_application_effect(current_balance, request.amount, request.target_balance)
+        applied_amount = abs(effect_amount)
+        linked_effect_amount = None
+        if request.application_type == "compensation" and linked_existing is not None:
+            if request.target_balance == "venue":
+                raise HTTPException(status_code=400, detail="La deuda de boliche se salda como pago, no como compensacion entre shows.")
+            linked_show = row_to_booking_show(linked_existing)
+            linked_rows = conn.execute(
+                """
+                SELECT *
+                FROM booking_account_applications
+                WHERE show_id = ?
+                ORDER BY application_date, id
+                """,
+                (request.linked_show_id,),
+            ).fetchall()
+            linked_applications = [row_to_booking_account_application(row) for row in linked_rows]
+            linked_balance = booking_open_balance_for_target(linked_show, linked_applications, request.target_balance)
+            if abs(linked_balance) <= 0.01 or current_balance * linked_balance >= 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="El show vinculado debe tener saldo abierto del mismo tipo y signo contrario.",
+                )
+            linked_effect_amount = -effect_amount
+            if abs(linked_effect_amount) > abs(linked_balance) + 0.01:
+                raise HTTPException(status_code=400, detail="La compensacion supera el saldo abierto del show vinculado.")
+            if abs(abs(linked_balance) - abs(linked_effect_amount)) <= 0.01:
+                linked_effect_amount = -linked_balance
+        notes = (request.notes or "").strip() or None
+        counterparty = (request.counterparty or "").strip() or None
+        conn.execute(
+            """
+            INSERT INTO booking_account_applications (
+                show_id, application_date, target_balance, application_type,
+                amount, effect_amount, payment_method, counterparty, linked_show_id,
+                proof_refs_json, notes, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                show_id,
+                application_date,
+                request.target_balance,
+                request.application_type,
+                applied_amount,
+                effect_amount,
+                request.payment_method,
+                counterparty,
+                request.linked_show_id,
+                booking_application_json_value(conn, request.proof_refs),
+                notes,
+                now,
+                now,
+            ),
+        )
+        item = fetch_booking_show_item(conn, show_id)
+        item = update_booking_settlement_from_account(conn, show_id, item, request.application_type, now)
+        linked_item = None
+        if linked_existing is not None and linked_effect_amount is not None:
+            mirror_notes_parts = [f"Compensacion espejo desde show #{show_id}"]
+            if notes:
+                mirror_notes_parts.append(notes)
+            conn.execute(
+                """
+                INSERT INTO booking_account_applications (
+                    show_id, application_date, target_balance, application_type,
+                    amount, effect_amount, payment_method, counterparty, linked_show_id,
+                    proof_refs_json, notes, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    request.linked_show_id,
+                    application_date,
+                    request.target_balance,
+                    "compensation",
+                    abs(linked_effect_amount),
+                    linked_effect_amount,
+                    "compensacion",
+                    counterparty,
+                    show_id,
+                    booking_application_json_value(conn, request.proof_refs),
+                    " | ".join(mirror_notes_parts),
+                    now,
+                    now,
+                ),
+            )
+            linked_item = fetch_booking_show_item(conn, request.linked_show_id)
+            linked_item = update_booking_settlement_from_account(
+                conn,
+                request.linked_show_id,
+                linked_item,
+                "compensation",
+                now,
+            )
+
+    return {
+        "item": item,
+        "linked_item": linked_item,
+        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -9127,6 +9619,8 @@ def delete_booking_show(
             existing_artist=clean_booking_artist(existing["artist"]),
         )
         conn.execute("DELETE FROM finance_recovery_applications WHERE source_id LIKE ?", (f"{show_id}:pre_split_auto:%",))
+        ensure_booking_account_applications_table(conn)
+        conn.execute("DELETE FROM booking_account_applications WHERE show_id = ?", (show_id,))
         conn.execute("DELETE FROM booking_movements WHERE show_id = ?", (show_id,))
         conn.execute("DELETE FROM booking_show_expenses WHERE show_id = ?", (show_id,))
         conn.execute("DELETE FROM booking_pre_split_adjustments WHERE show_id = ?", (show_id,))

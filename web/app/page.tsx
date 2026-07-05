@@ -209,6 +209,23 @@ type BookingCashMovement = {
   notes: string | null;
 };
 
+type BookingAccountTarget = "artist" | "producer" | "venue";
+
+type BookingAccountApplication = {
+  id: number;
+  show_id: number;
+  application_date: string;
+  target_balance: BookingAccountTarget;
+  application_type: "artist_payment" | "artist_reimbursement" | "producer_reimbursement" | "venue_payment" | "compensation" | "adjustment";
+  amount: number;
+  effect_amount: number;
+  payment_method: "transferencia" | "efectivo" | "compensacion" | "ajuste" | "otro";
+  counterparty: string | null;
+  linked_show_id: number | null;
+  proof_refs: string[];
+  notes: string | null;
+};
+
 type BookingShow = {
   id: number;
   artist: string;
@@ -241,6 +258,11 @@ type BookingShow = {
   producer_received_amount: number;
   balance_artist_amount: number;
   balance_producer_amount: number;
+  open_balance_artist_amount?: number;
+  open_balance_producer_amount?: number;
+  open_venue_balance_amount?: number;
+  account_open_balance_amount?: number;
+  account_status?: string;
   settlement_status: string | null;
   settlement_group: string | null;
   settlement_closed_at: string | null;
@@ -253,9 +275,37 @@ type BookingShow = {
   direct_commissions: BookingDirectCommission[];
   external_shares: BookingExternalShare[];
   artist_adjustments: BookingAdjustment[];
+  account_applications?: BookingAccountApplication[];
   receipt_refs: string[];
   notes: string | null;
 };
+
+const BOOKING_CLOSED_SETTLEMENT_STATUSES = new Set([
+  "cerrado",
+  "cerrado_con_pago_posterior",
+  "cerrado_compensado",
+  "cerrado_con_cuenta_corriente",
+  "cerrado_con_cuenta_corriente_saldada",
+  "cerrado_cc",
+]);
+
+function bookingSettlementIsClosed(status: string | null | undefined) {
+  return BOOKING_CLOSED_SETTLEMENT_STATUSES.has(status || "");
+}
+
+function bookingOpenTargetBalance(item: BookingShow, target: BookingAccountTarget) {
+  if (target === "artist") return item.open_balance_artist_amount ?? item.balance_artist_amount ?? 0;
+  if (target === "producer") return item.open_balance_producer_amount ?? item.balance_producer_amount ?? 0;
+  return item.open_venue_balance_amount ?? item.venue_balance_amount ?? 0;
+}
+
+function bookingOpenBalanceAmount(item: BookingShow) {
+  return (
+    Math.abs(bookingOpenTargetBalance(item, "producer"))
+    + Math.abs(bookingOpenTargetBalance(item, "artist"))
+    + Math.max(0, bookingOpenTargetBalance(item, "venue"))
+  );
+}
 
 type BookingArtistRecord = {
   id: number;
@@ -1353,6 +1403,18 @@ type BookingCashMovementForm = {
   notes: string;
 };
 
+type BookingAccountApplicationForm = {
+  targetBalance: BookingAccountTarget;
+  applicationType: "artist_payment" | "artist_reimbursement" | "producer_reimbursement" | "venue_payment" | "compensation" | "adjustment";
+  applicationDate: string;
+  amount: string;
+  paymentMethod: "transferencia" | "efectivo" | "compensacion" | "ajuste" | "otro";
+  counterparty: string;
+  linkedShowId: string;
+  proofRefs: string;
+  notes: string;
+};
+
 type BookingForm = {
   artist: string;
   showDate: string;
@@ -1710,6 +1772,44 @@ function newBookingCashMovement(recipient: "producer" | "artist" = "producer"): 
   };
 }
 
+function initialBookingAccountApplicationForm(): BookingAccountApplicationForm {
+  return {
+    targetBalance: "artist",
+    applicationType: "compensation",
+    applicationDate: new Date().toISOString().slice(0, 10),
+    amount: "",
+    paymentMethod: "transferencia",
+    counterparty: "",
+    linkedShowId: "",
+    proofRefs: "",
+    notes: "",
+  };
+}
+
+function bookingDefaultAccountTarget(item: BookingShow): BookingAccountTarget {
+  if (Math.abs(bookingOpenTargetBalance(item, "artist")) > 0.01) return "artist";
+  if (Math.abs(bookingOpenTargetBalance(item, "producer")) > 0.01) return "producer";
+  return "venue";
+}
+
+function bookingAccountTargetLabel(item: BookingShow, target: BookingAccountTarget) {
+  const balance = bookingOpenTargetBalance(item, target);
+  if (target === "artist") {
+    return balance >= 0 ? "Indyana debe artista" : "Artista debe Indyana";
+  }
+  if (target === "producer") {
+    return balance >= 0 ? "Falta rendir a Indyana" : "Indyana cobro de mas";
+  }
+  return "Boliche debe Indyana";
+}
+
+function bookingSuggestedApplicationType(item: BookingShow, target: BookingAccountTarget): BookingAccountApplicationForm["applicationType"] {
+  const balance = bookingOpenTargetBalance(item, target);
+  if (target === "venue") return "venue_payment";
+  if (target === "artist") return balance >= 0 ? "artist_payment" : "artist_reimbursement";
+  return balance >= 0 ? "producer_reimbursement" : "adjustment";
+}
+
 function normalizeCashPaymentMethod(value: string | null | undefined): BookingCashMovementForm["paymentMethod"] {
   if (!value) return "seña";
   if (value === "transferencia" || value === "efectivo" || value === "otro") return value;
@@ -1950,6 +2050,8 @@ export default function Home() {
   const [bookingSearch, setBookingSearch] = useState("");
   const [bookingVisibleCount, setBookingVisibleCount] = useState(5);
   const [bookingArtists, setBookingArtists] = useState<string[]>([]);
+  const [bookingAccountShowId, setBookingAccountShowId] = useState<number | null>(null);
+  const [bookingAccountForm, setBookingAccountForm] = useState<BookingAccountApplicationForm>(() => initialBookingAccountApplicationForm());
   const [bookingSummary, setBookingSummary] = useState<BookingSummary | null>(null);
   const [bookingSummaryLoading, setBookingSummaryLoading] = useState(false);
   const [commissionSummary, setCommissionSummary] = useState<BookingSummary | null>(null);
@@ -2420,12 +2522,15 @@ export default function Home() {
   const bookingControl = useMemo(() => {
     const pending = bookingItems.filter((item) => {
       const status = item.settlement_status || "pendiente";
-      const venueStatus = item.venue_payment_status || "cobrado";
-      return status === "pendiente" || status === "parcial" || venueStatus === "parcial" || venueStatus === "no_cobrado" || Math.abs(item.venue_balance_amount || 0) > 0.01;
+      if (status === "historico") return false;
+      return (
+        !bookingSettlementIsClosed(status)
+        || bookingOpenBalanceAmount(item) > 0.01
+      );
     });
     const closed = bookingItems.filter((item) => {
       const status = item.settlement_status || "pendiente";
-      return status === "cerrado" && Math.abs(item.balance_producer_amount || 0) <= 0.01;
+      return bookingSettlementIsClosed(status) && bookingOpenBalanceAmount(item) <= 0.01;
     });
     const historical = bookingItems.filter((item) => (item.settlement_status || "") === "historico");
 
@@ -2434,8 +2539,8 @@ export default function Home() {
       closedShows: closed.length,
       historicalShows: historical.length,
       pendingShows: pending.length,
-      pendingAmount: pending.reduce((total, item) => total + Math.max(0, item.balance_producer_amount || 0) + Math.max(0, item.venue_balance_amount || 0), 0),
-      venueDebtAmount: bookingItems.reduce((total, item) => total + Math.max(0, item.venue_balance_amount || 0), 0),
+      pendingAmount: pending.reduce((total, item) => total + bookingOpenBalanceAmount(item), 0),
+      venueDebtAmount: bookingItems.reduce((total, item) => total + Math.max(0, bookingOpenTargetBalance(item, "venue")), 0),
       pending: pending.slice(0, 12),
     };
   }, [bookingItems]);
@@ -5654,6 +5759,85 @@ export default function Home() {
     setMessage({ type: "ok", text: `Editando show #${item.id}. Guardar actualiza la carga existente.` });
   }
 
+  function openBookingAccountApplication(item: BookingShow) {
+    if (!canEditModule("booking")) {
+      setMessage({ type: "error", text: "No tenes permiso para aplicar saldos de Booking." });
+      return;
+    }
+    const target = bookingDefaultAccountTarget(item);
+    setBookingAccountShowId(item.id);
+    setBookingAccountForm({
+      ...initialBookingAccountApplicationForm(),
+      targetBalance: target,
+      applicationType: bookingSuggestedApplicationType(item, target),
+      amount: amountToInput(Math.abs(bookingOpenTargetBalance(item, target))),
+      counterparty: target === "venue" ? item.venue : item.artist,
+      notes: "",
+    });
+  }
+
+  function updateBookingAccountField<K extends keyof BookingAccountApplicationForm>(key: K, value: BookingAccountApplicationForm[K]) {
+    setBookingAccountForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateBookingAccountTarget(item: BookingShow, target: BookingAccountTarget) {
+    setBookingAccountForm((current) => ({
+      ...current,
+      targetBalance: target,
+      applicationType: bookingSuggestedApplicationType(item, target),
+      amount: amountToInput(Math.abs(bookingOpenTargetBalance(item, target))),
+      counterparty: target === "venue" ? item.venue : item.artist,
+    }));
+  }
+
+  async function submitBookingAccountApplication(item: BookingShow) {
+    if (!canEditModule("booking")) {
+      setMessage({ type: "error", text: "No tenes permiso para aplicar saldos de Booking." });
+      return;
+    }
+    const amount = parseMoneyInput(bookingAccountForm.amount);
+    if (amount <= 0) {
+      setMessage({ type: "error", text: "CargÃ¡ un importe para aplicar al saldo." });
+      return;
+    }
+    setBookingLoading(true);
+    setMessage(null);
+    const proofRefs = bookingAccountForm.proofRefs
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const response = await fetch(`/api/booking/${item.id}/account`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        application_date: bookingAccountForm.applicationDate,
+        target_balance: bookingAccountForm.targetBalance,
+        application_type: bookingAccountForm.applicationType,
+        amount,
+        payment_method: bookingAccountForm.paymentMethod,
+        counterparty: bookingAccountForm.counterparty.trim() || null,
+        linked_show_id: bookingAccountForm.linkedShowId ? Number(bookingAccountForm.linkedShowId) : null,
+        proof_refs: proofRefs,
+        notes: bookingAccountForm.notes || null,
+      }),
+    });
+    setBookingLoading(false);
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({ error: "No se pudo aplicar el saldo." }));
+      setMessage({ type: "error", text: payload.error || "No se pudo aplicar el saldo." });
+      return;
+    }
+    const data = await response.json();
+    setBookingItems((current) => current.map((show) => {
+      if (show.id === data.item.id) return data.item;
+      if (data.linked_item && show.id === data.linked_item.id) return data.linked_item;
+      return show;
+    }));
+    setBookingAccountShowId(null);
+    setBookingAccountForm(initialBookingAccountApplicationForm());
+    setMessage({ type: "ok", text: `Saldo aplicado en show #${item.id}.` });
+  }
+
   async function submitBooking(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage(null);
@@ -8467,7 +8651,7 @@ export default function Home() {
               </div>
               <div className="finance-kpi">
                 <span>Booking pendiente</span>
-                <strong>{ars((artistFinanceBookingSummary?.indyana_balance || 0) - (artistFinanceBookingSummary?.artist_balance || 0))}</strong>
+                <strong>{ars(artistFinanceBookingSummary?.booking_current_balance_indyana || 0)}</strong>
                 <small>shows con saldo abierto</small>
               </div>
               <div className="finance-kpi">
@@ -12129,8 +12313,8 @@ export default function Home() {
                     <div className="control-alert" key={`pending-${item.id}`}>
                       <strong>{item.artist} - {item.venue}</strong>
                       <span>{item.show_date}</span>
-                      <span>{item.venue_payment_status !== "cobrado" ? `Boliche ${item.venue_payment_status}` : item.settlement_status || "pendiente"}</span>
-                      <span>{ars(Math.max(0, item.balance_producer_amount || 0) + Math.max(0, item.venue_balance_amount || 0))}</span>
+                      <span>{bookingOpenTargetBalance(item, "venue") > 0.01 ? "Deuda boliche" : item.settlement_status || "pendiente"}</span>
+                      <span>{ars(bookingOpenBalanceAmount(item))}</span>
                     </div>
                   ))}
                 </div>
@@ -12171,23 +12355,115 @@ export default function Home() {
                     </div>
                     <div className="booking-status">
                       <span>{item.status}</span>
-                      <span className={(item.settlement_status || "pendiente") === "cerrado" ? "status-ok" : "status-warn"}>
+                      <span className={bookingSettlementIsClosed(item.settlement_status) && bookingOpenBalanceAmount(item) <= 0.01 ? "status-ok" : "status-warn"}>
                         Cierre: {item.settlement_status || "pendiente"}
                       </span>
-                      {Math.abs(item.balance_producer_amount || 0) > 0.01 && (
-                        <span className="status-danger">Saldo VPO {ars(item.balance_producer_amount)}</span>
+                      {Math.abs(bookingOpenTargetBalance(item, "producer")) > 0.01 && (
+                        <span className="status-danger">
+                          {bookingOpenTargetBalance(item, "producer") > 0 ? "Saldo VPO" : "VPO cobro de mas"} {ars(Math.abs(bookingOpenTargetBalance(item, "producer")))}
+                        </span>
                       )}
-                      {Math.abs(item.venue_balance_amount || 0) > 0.01 && (
-                        <span className="status-danger">Deuda boliche {ars(item.venue_balance_amount)}</span>
+                      {Math.abs(bookingOpenTargetBalance(item, "artist")) > 0.01 && (
+                        <span className="status-danger">
+                          {bookingOpenTargetBalance(item, "artist") > 0 ? "Saldo artista" : "Artista cobro de mas"} {ars(Math.abs(bookingOpenTargetBalance(item, "artist")))}
+                        </span>
+                      )}
+                      {Math.abs(bookingOpenTargetBalance(item, "venue")) > 0.01 && (
+                        <span className="status-danger">Deuda boliche {ars(bookingOpenTargetBalance(item, "venue"))}</span>
                       )}
                       {item.show_expenses.length > 0 && <span>{item.show_expenses.length} gasto(s)</span>}
                       {item.pre_split_adjustments.length > 0 && <span>{item.pre_split_adjustments.length} ajuste(s) pre split</span>}
                       {(item.external_shares || []).length > 0 && <span>{item.external_shares.length} tercero(s)</span>}
                       {item.receipt_refs.length > 0 && <span>{item.receipt_refs.length} comprobante(s)</span>}
                       {item.artist_adjustments.length > 0 && <span>{item.artist_adjustments.length} ajuste(s)</span>}
+                      {(item.account_applications || []).length > 0 && <span>{item.account_applications?.length} aplicacion(es) cuenta</span>}
                     </div>
+                    {bookingAccountShowId === item.id && (
+                      <div className="booking-account-panel">
+                        <div className="section-heading compact-heading">
+                          <div>
+                            <h3>Aplicar saldo de cuenta</h3>
+                            <p>Registra pagos, reintegros o compensaciones posteriores sin reescribir la liquidacion.</p>
+                          </div>
+                          <button type="button" className="secondary-danger" onClick={() => setBookingAccountShowId(null)}>
+                            Cerrar
+                          </button>
+                        </div>
+                        <div className="booking-account-balances">
+                          {(["artist", "producer", "venue"] as BookingAccountTarget[]).map((target) => (
+                            <button
+                              type="button"
+                              key={`${item.id}-${target}`}
+                              className={bookingAccountForm.targetBalance === target ? "active" : ""}
+                              onClick={() => updateBookingAccountTarget(item, target)}
+                              disabled={Math.abs(bookingOpenTargetBalance(item, target)) <= 0.01}
+                            >
+                              <span>{bookingAccountTargetLabel(item, target)}</span>
+                              <strong>{ars(Math.abs(bookingOpenTargetBalance(item, target)))}</strong>
+                            </button>
+                          ))}
+                        </div>
+                        <div className="row four">
+                          <div>
+                            <label htmlFor={`booking_account_date_${item.id}`}>Fecha</label>
+                            <input id={`booking_account_date_${item.id}`} type="date" value={bookingAccountForm.applicationDate} onChange={(event) => updateBookingAccountField("applicationDate", event.target.value)} />
+                          </div>
+                          <div>
+                            <label htmlFor={`booking_account_type_${item.id}`}>Tipo</label>
+                            <select id={`booking_account_type_${item.id}`} value={bookingAccountForm.applicationType} onChange={(event) => updateBookingAccountField("applicationType", event.target.value as BookingAccountApplicationForm["applicationType"])}>
+                              <option value="artist_payment">Pago a artista</option>
+                              <option value="artist_reimbursement">Reintegro artista</option>
+                              <option value="producer_reimbursement">Rendicion a Indyana</option>
+                              <option value="venue_payment">Pago boliche</option>
+                              <option value="compensation">Compensacion</option>
+                              <option value="adjustment">Ajuste</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label htmlFor={`booking_account_amount_${item.id}`}>Importe</label>
+                            <input id={`booking_account_amount_${item.id}`} inputMode="decimal" value={bookingAccountForm.amount} onChange={(event) => updateBookingAccountField("amount", event.target.value)} />
+                          </div>
+                          <div>
+                            <label htmlFor={`booking_account_method_${item.id}`}>Metodo</label>
+                            <select id={`booking_account_method_${item.id}`} value={bookingAccountForm.paymentMethod} onChange={(event) => updateBookingAccountField("paymentMethod", event.target.value as BookingAccountApplicationForm["paymentMethod"])}>
+                              <option value="transferencia">Transferencia</option>
+                              <option value="efectivo">Efectivo</option>
+                              <option value="compensacion">Compensacion</option>
+                              <option value="ajuste">Ajuste</option>
+                              <option value="otro">Otro</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div className="row three">
+                          <div>
+                            <label htmlFor={`booking_account_counterparty_${item.id}`}>Contraparte</label>
+                            <input id={`booking_account_counterparty_${item.id}`} value={bookingAccountForm.counterparty} onChange={(event) => updateBookingAccountField("counterparty", event.target.value)} />
+                          </div>
+                          <div>
+                            <label htmlFor={`booking_account_linked_${item.id}`}>Show compensado</label>
+                            <input id={`booking_account_linked_${item.id}`} inputMode="numeric" value={bookingAccountForm.linkedShowId} onChange={(event) => updateBookingAccountField("linkedShowId", event.target.value)} placeholder="ID opcional" />
+                          </div>
+                          <div>
+                            <label htmlFor={`booking_account_proofs_${item.id}`}>Comprobantes</label>
+                            <input id={`booking_account_proofs_${item.id}`} value={bookingAccountForm.proofRefs} onChange={(event) => updateBookingAccountField("proofRefs", event.target.value)} placeholder="Link o ruta" />
+                          </div>
+                        </div>
+                        <label htmlFor={`booking_account_notes_${item.id}`}>Nota</label>
+                        <textarea id={`booking_account_notes_${item.id}`} value={bookingAccountForm.notes} onChange={(event) => updateBookingAccountField("notes", event.target.value)} />
+                        <div className="booking-actions">
+                          <button type="button" onClick={() => submitBookingAccountApplication(item)} disabled={bookingLoading}>
+                            Aplicar saldo
+                          </button>
+                        </div>
+                      </div>
+                    )}
                     <div className="booking-actions">
                       {canEditModule("booking") && <button type="button" onClick={() => editBookingShow(item)}>Editar</button>}
+                      {canEditModule("booking") && bookingOpenBalanceAmount(item) > 0.01 && (
+                        <button type="button" onClick={() => openBookingAccountApplication(item)}>
+                          Saldar / aplicar
+                        </button>
+                      )}
                       {canApproveModule("booking") && (
                         <button type="button" className="secondary-danger" onClick={() => deleteBookingShow(item)}>
                           Eliminar

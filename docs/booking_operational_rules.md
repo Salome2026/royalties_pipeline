@@ -73,6 +73,55 @@ Debe separar como minimo:
 Pagos a personas internas como Salome, Carolina o Indyana se consideran pagos recibidos
 por el equipo/VPO cuando correspondan a rendiciones del artista o su responsable.
 
+La cuenta corriente no debe duplicarse por modulo. Booking, Movimientos Financieros y
+Regalias deben alimentar una misma lectura financiera, siempre con origen trazable.
+
+Para saldos nacidos en Booking:
+
+- el origen es `booking`;
+- la fuente es el show o show hijo;
+- el saldo puede ser a favor de Indyana, a favor del artista o deuda del boliche;
+- un pago posterior no reescribe el show;
+- un reintegro posterior no reescribe el show;
+- una compensacion con otro show debe quedar como aplicacion trazada.
+
+Ejemplo:
+
+- Candu debia cobrar 1.000.000 y cobro 1.200.000.
+- El show conserva que Candu cobro 1.200.000.
+- La cuenta corriente muestra 200.000 a favor de Indyana con origen booking.
+- Cuando Candu reintegra 200.000, se carga una aplicacion contra ese saldo.
+- El show queda historicamente correcto y la cuenta corriente queda saldada.
+
+Movimientos Financieros se usa para hechos financieros no representados por la carga
+del show: gastos de proyecto, inversiones, adelantos, prestamos, gastos de oficina,
+salarios, pagos manuales o recuperos externos. No debe usarse para duplicar una
+liquidacion de booking ya cargada.
+
+### Estado verde de un show
+
+Un show debe verse como cerrado/verde solo cuando no quedan saldos vivos.
+
+Saldos que impiden verde:
+
+- deuda de boliche/cliente;
+- Indyana debe cobrar algo;
+- Indyana cobro de mas y debe devolver o reconocer;
+- artista debe cobrar algo;
+- artista cobro de mas y debe reintegrar o compensar;
+- tercero asociado al show tiene saldo abierto.
+
+Si el saldo se paga o compensa despues, no se edita el show original para borrar la
+diferencia. Se agrega una aplicacion posterior trazada. Cuando esa aplicacion deja el
+saldo en cero, el show puede volver a verse verde con etiqueta historica:
+
+- `cerrado_con_pago_posterior`;
+- `cerrado_compensado`.
+
+La etiqueta explica como cerro. La alerta viva desaparece porque ya no hay deuda.
+En la base operacional, estas aplicaciones viven en `booking_account_applications` y
+se suman al saldo original del show para calcular el saldo vivo.
+
 ## Shows Administrados Por Terceros
 
 Caso tipo Aneley:
@@ -171,6 +220,32 @@ Debe permitir:
 
 El sistema debe sugerir importes segun regla, pero el usuario debe poder ingresar caja
 real. Si hay diferencia, queda balance.
+
+### Cuenta booking del show
+
+La pantalla de Booking debe permitir abrir una vista de cuenta del show desde el
+buscador, las ultimas cargas o una alerta. Esa vista sirve para cerrar saldos nacidos
+en booking sin editar la liquidacion original.
+
+Debe mostrar:
+
+- liquidacion esperada;
+- caja real;
+- saldos vivos;
+- movimientos posteriores aplicados;
+- recuperos aplicados;
+- comprobantes y notas.
+
+Debe permitir, cuando el flujo este implementado:
+
+- cobrar deuda de boliche;
+- pagar saldo al artista;
+- registrar reintegro del artista;
+- compensar contra otro show;
+- aplicar recupero contra un proyecto.
+
+Cada accion genera un movimiento nuevo. Ninguna accion debe cambiar de forma silenciosa
+cachet, gastos, split, pago original o rendicion original.
 
 ## Reportes De Control
 

@@ -30,8 +30,10 @@
 ## Booking
 
 - [Finanzas VPO - documento rector](finance_business_master.md)
+- [Modelo financiero operativo VPO v2](finance_operational_model_v2.md)
 - [Booking rules master](booking_rules_master.md)
 - [Booking validation matrix](booking_validation_matrix.md)
+- [Booking unified validation matrix](booking_unified_validation_matrix.md)
 - [Booking go-live workflow](booking_go_live_workflow.md)
 - [Gastos historicos de artistas y proyectos](artist_expense_staging_plan.md)
 - [Finanzas de artista y ledger](artist_finance_ledger_model.md)
@@ -40,7 +42,10 @@
 - [Booking raw profile](booking_raw_profile.md)
 - [Booking operational rules](booking_operational_rules.md)
 
-Antes de modificar la pantalla nueva de booking, backend de booking o guardado de shows, leer primero `booking_rules_master.md` y validar el cambio contra `booking_validation_matrix.md`.
+Antes de modificar Booking, Finanzas Artista, Movimientos Financieros o cualquier
+flujo que afecte caja/cuenta corriente de shows, leer primero
+`booking_rules_master.md`, `finance_operational_model_v2.md` y validar el cambio
+contra `booking_unified_validation_matrix.md`.
 
 ## Arquitectura general
 

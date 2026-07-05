@@ -100,6 +100,27 @@ VPO_OPERATIONAL_DB_PASSWORD=<secret>
 - Cloud Run validado con `/health`, `/booking/artists`, `/booking/shows` y
   `/artist-finance/summary`.
 
+## Regla para codigo legado
+
+El hecho de que exista codigo con nombres historicos como `booking_connect`,
+`sqlite3`, `VPO_BOOKING_DB_PATH` o compatibilidad SQLite no significa que SQLite sea
+operacion viva.
+
+Regla actual:
+
+- La base viva es Cloud SQL Postgres.
+- `booking_connect()` debe entrar a Postgres cuando
+  `VPO_OPERATIONAL_DB_DRIVER=postgres`.
+- El adaptador de compatibilidad existe para no reescribir todas las rutas de golpe.
+- No se debe crear funcionalidad nueva que dependa de SQLite.
+- No se debe devolver `booking_live.sqlite` como ruta operativa cuando el driver es
+  Postgres.
+- No se debe borrar el soporte SQLite hasta que todas las rutas vivas esten
+  migradas a repositorios/queries nativas de la base operativa.
+
+SQLite queda permitido solo como foto historica o recuperacion controlada con
+`VPO_ALLOW_LEGACY_SQLITE_OPERATIONAL=1`.
+
 ## Proximo paso
 
 Mantener el servicio cloud real con:

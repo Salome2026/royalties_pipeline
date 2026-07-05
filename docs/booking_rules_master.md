@@ -93,6 +93,46 @@ Como minimo, todo movimiento futuro de cuenta corriente debe poder responder:
 
 Un show puede estar cerrado operativamente y aun tener cuenta corriente viva. En ese caso no es simplemente `cerrado`; es `cerrado con cuenta corriente`.
 
+### Cuenta corriente unica con origen
+
+No debe existir una cuenta corriente aislada de Booking y otra distinta de Finanzas. Debe existir una sola lectura financiera de cuenta corriente, con origen trazable.
+
+Origenes minimos:
+
+- `booking`: saldos nacidos por shows, senas, rendiciones, deuda de boliche, pagos de mas o pagos de menos;
+- `finance`: gastos, inversiones, adelantos, prestamos, pagos manuales y ajustes financieros;
+- `royalties`: futuro origen para regalias, adelantos digitales o recuperos contra ingresos digitales;
+- `manual_adjustment`: correccion aprobada y observada.
+
+Booking es fuente de verdad del show. Finanzas Artista es la vista consolidada. Movimientos Financieros carga hechos financieros que no son el show en si.
+
+Reglas obligatorias:
+
+- Si un show quedo con saldo, no se reescribe el show para saldarlo despues.
+- El show conserva liquidacion, caja cargada y saldo original.
+- Un pago posterior, reintegro o compensacion debe ser un movimiento nuevo aplicado al saldo.
+- El movimiento aplicado debe guardar `source_module`, `source_table`, `source_id` y nota/comprobante.
+- La cuenta corriente debe poder filtrarse por artista, por show, por proyecto y por origen.
+
+### Estado tecnico actual
+
+Hoy Booking todavia lee la cuenta corriente derivada desde saldos del show:
+
+- `balance_producer_amount`: saldo a favor/en contra de Indyana;
+- `balance_artist_amount`: saldo a favor/en contra del artista;
+- `venue_balance_amount`: deuda de boliche/cliente.
+
+Ese modelo sirve para visualizar saldos, pero no alcanza como cuenta corriente operativa completa porque no registra pagos posteriores sin tocar el show.
+
+El esquema Postgres ya tiene `booking_current_account_entries`. El paso correcto no es inventar otra tabla ni duplicar Movimientos Financieros, sino pasar metodicamente de saldos derivados a entradas operativas:
+
+1. Al aprobar/cerrar un show con saldo, generar entradas de cuenta corriente con origen `booking`.
+2. Registrar pagos posteriores como aplicaciones contra esas entradas.
+3. Permitir compensaciones entre shows sin modificar la liquidacion original.
+4. Hacer que Finanzas Artista lea la cuenta operativa cuando exista y use los saldos derivados solo como transicion/auditoria.
+
+`booking_artist_ledger` queda solo como auditoria historica. No debe usarse para recuperos nuevos ni como ledger oficial.
+
 ## Estados por capas
 
 No alcanza un unico estado.
@@ -113,11 +153,47 @@ Estados sugeridos:
 - `rendido`;
 - `aprobado`;
 - `cerrado`;
-- `cerrado_con_cuenta_corriente`;
+- `cerrado_con_pago_posterior`;
+- `cerrado_compensado`;
+- `cerrado_con_cuenta_corriente_abierta`;
 - `observado`;
 - `historico`;
 - `cancelado`;
 - `no_cobrado`.
+
+### Verde operativo vs historia del cierre
+
+El color verde de un show no significa que nunca tuvo diferencias. Significa que hoy
+no tiene saldos vivos.
+
+Un show esta verde cuando:
+
+- no hay deuda viva de boliche/cliente;
+- no hay saldo vivo a favor de Indyana;
+- no hay saldo vivo a favor del artista;
+- no hay saldo vivo con terceros asociados al show;
+- si hubo diferencia, existe movimiento posterior, pago o compensacion trazada que la salda.
+
+Por eso:
+
+- `cerrado`: no tuvo diferencias vivas al cierre;
+- `cerrado_con_pago_posterior`: tuvo saldo, pero se saldo despues con caja real;
+- `cerrado_compensado`: tuvo saldo, pero se saldo aplicando otro show/movimiento;
+- `cerrado_con_cuenta_corriente_abierta`: el show esta liquidado, pero todavia hay saldo vivo y por lo tanto debe mantener alerta;
+- `pendiente`: falta rendicion, pago, cobro, compensacion o criterio;
+- `observado`: hay una diferencia detectada que no se debe cerrar sin revision.
+
+No se deben dejar alertas eternas si el saldo fue saldado. Tampoco se debe borrar la
+historia para apagar una alerta.
+
+Ejemplo:
+
+1. Show A: Candu cobro 200.000 de mas. Queda saldo a favor de Indyana.
+2. Show B: Candu debia cobrar 900.000, pero se le pagan 700.000 y se aplican 200.000 contra Show A.
+3. Show A queda `cerrado_compensado`.
+4. Show B queda `cerrado_compensado`.
+5. La cuenta corriente de Candu queda en 0.
+6. La auditoria conserva que Show B compenso Show A.
 
 ## Gasto general vs gasto propio de linea
 
@@ -293,6 +369,38 @@ El responsable del show/tour manager solo deberia rendir lo que efectivamente pa
 - monto que queda por cerrar en el evento;
 - pagos/rendiciones del evento;
 - cuenta corriente generada.
+
+## Cuenta booking del show
+
+La cuenta booking del show no es un modulo separado ni una segunda contabilidad. Es una vista operativa dentro de Booking Indyana, filtrada por show.
+
+Debe poder abrirse desde:
+
+- el buscador de shows;
+- las ultimas cargas;
+- las alertas de cierre o deuda.
+
+Debe mostrar, sin permitir confusiones:
+
+- liquidacion esperada original;
+- caja real cargada;
+- deuda de boliche;
+- saldo a favor de Indyana;
+- saldo a favor del artista;
+- recuperos aplicados;
+- movimientos posteriores que saldan o compensan;
+- estado actual del saldo.
+
+Acciones futuras de esa vista:
+
+- registrar cobro de deuda de boliche;
+- registrar pago al artista;
+- registrar reintegro del artista;
+- aplicar compensacion con otro show;
+- aplicar recupero contra proyecto;
+- marcar observado con nota.
+
+Estas acciones crean movimientos trazables. No deben modificar silenciosamente cachet, gastos, split, pagos originales ni rendiciones originales del show.
 
 ## Recuperos
 

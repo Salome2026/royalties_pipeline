@@ -451,6 +451,27 @@ CREATE TABLE IF NOT EXISTS booking_current_account_entries (
 CREATE INDEX IF NOT EXISTS idx_booking_ca_artist_date ON booking_current_account_entries(artist, entry_date);
 CREATE INDEX IF NOT EXISTS idx_booking_ca_origin ON booking_current_account_entries(origin_type, origin_id);
 
+CREATE TABLE IF NOT EXISTS booking_account_applications (
+    id bigserial PRIMARY KEY,
+    show_id bigint NOT NULL REFERENCES booking_shows(id) ON DELETE CASCADE,
+    application_date date NOT NULL,
+    target_balance text NOT NULL,
+    application_type text NOT NULL,
+    amount numeric(18, 6) NOT NULL DEFAULT 0,
+    effect_amount numeric(18, 6) NOT NULL DEFAULT 0,
+    payment_method text NOT NULL DEFAULT 'transferencia',
+    counterparty text,
+    linked_show_id bigint REFERENCES booking_shows(id) ON DELETE SET NULL,
+    proof_refs_json jsonb NOT NULL DEFAULT '[]'::jsonb,
+    notes text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT booking_account_app_target_chk CHECK (target_balance IN ('artist', 'producer', 'venue')),
+    CONSTRAINT booking_account_app_type_chk CHECK (application_type IN ('artist_payment', 'artist_reimbursement', 'producer_reimbursement', 'venue_payment', 'compensation', 'adjustment')),
+    CONSTRAINT booking_account_app_method_chk CHECK (payment_method IN ('transferencia', 'efectivo', 'compensacion', 'ajuste', 'otro'))
+);
+CREATE INDEX IF NOT EXISTS idx_booking_account_app_show ON booking_account_applications(show_id, application_date);
+
 -- =========================================================
 -- Caserio
 -- =========================================================
