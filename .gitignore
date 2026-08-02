@@ -40,8 +40,11 @@ exports/
 _cleanup_archive/
 cache/
 backups/
+_backups/
 migration_exports/
 scripts/_viejos/
+output/
+tmp/
 
 # Generated spreadsheets / data extracts
 *.xlsx

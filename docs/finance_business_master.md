@@ -440,7 +440,7 @@ Debe mostrar:
 
 - terceros/socios externos;
 - Indyana ganado;
-- no comisionable cuando corresponda;
+- exclusion de comision general cuando corresponda;
 - cuenta corriente solo si hay saldo real.
 
 ### Show simple

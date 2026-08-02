@@ -401,7 +401,7 @@ INSERT INTO vpo.modules (module_key, label) VALUES
     ('booking', 'Booking Indyana'),
     ('booking_detail', 'Detalle Booking'),
     ('booking_summary', 'Resumen Booking'),
-    ('booking_commissions', 'Resumen Booking Comisiones'),
+    ('booking_commissions', 'Comisiones'),
     ('caserio', 'Caserio'),
     ('finance_movements', 'Movimientos financieros'),
     ('artist_finance', 'Finanzas Artista'),

@@ -207,7 +207,7 @@ Mostrar siempre:
 - Pago sugerido artista.
 - Indyana sugerido.
 - Terceros sugeridos.
-- Base comisionable.
+- Marca de exclusion de comision general, si aplica.
 - Diferencia artista.
 - Diferencia Indyana.
 
@@ -315,8 +315,8 @@ Panel fijo con:
 - Total asignado a lineas.
 - Diferencia no asignada.
 - Indyana ganado total.
-- Base comisionable total.
-- No comisionable total.
+- Comisiones aplicables estimadas.
+- Neto Indyana despues de comisiones.
 - Caja Indyana esperada.
 - Caja Indyana recibida.
 - Saldo Indyana.
@@ -387,7 +387,7 @@ Mostrar:
 - Artista pagado no coincide con sugerido.
 - Hay tercero con caja VPO pendiente.
 - Hay tercero externo no caja VPO.
-- La linea no es comisionable.
+- La linea excluye comision general.
 - La madre esta cerrada pero hay hijas pendientes.
 - La hija fue editada despues de la madre.
 - Hay historico pendiente de revision.
@@ -428,7 +428,7 @@ Debe:
 
 - Permitir Facha como comision/gasto de linea.
 - Permitir Fede como tercero externo.
-- Marcar Indyana como no comisionable si aplica.
+- Marcar exclusion de comision general si aplica.
 
 ### 5. Candu + G Sony
 
@@ -475,4 +475,4 @@ Fase 3:
 
 Fase 4:
 
-- Reportes de Indyana ganado vs base comisionable.
+- Reportes de Indyana bruto, comisiones aplicables y neto Indyana.

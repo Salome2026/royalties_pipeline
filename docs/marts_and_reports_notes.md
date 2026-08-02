@@ -8,7 +8,10 @@ El pipeline nuevo sigue esta forma:
 input_raw
   -> standardized_raw_*
   -> song_level_*
-  -> consolidated marts / reports
+  -> consolidated marts
+  -> statement/digital summaries
+  -> catalog_master
+  -> reports
 ```
 
 ## Standardized marts
@@ -73,6 +76,26 @@ Outputs:
 
 El consolidado incluye `mart_source_file` para saber de que mart individual vino cada fila.
 
+## Catalogo master
+
+Script:
+
+- `scripts\build_catalog_master.py`
+
+Output:
+
+- `warehouse\marts\catalog_master.parquet`
+
+El catalogo master es parte obligatoria del cierre analitico. No es un cache
+decorativo: resuelve identidad de obras, actividad por transaction month,
+estado activo/inactivo, labels normalizados, release dates y gobierno de
+reportes.
+
+Despues de reconstruir consolidated/song-level marts, tambien debe
+reconstruirse `catalog_master.parquet`. Si los marts de ingresos llegan a un mes
+posterior al catalogo, el paquete queda inconsistente y no debe publicarse como
+vigente.
+
 ## Reporte por statement desde marts
 
 Script:
@@ -116,6 +139,12 @@ Despues de regenerar marts, correr:
 ```powershell
 python C:\royalties_pipeline\scripts\audit_marts_general.py
 python C:\royalties_pipeline\scripts\audit_consolidated_marts.py
+```
+
+Y reconstruir catalogo:
+
+```powershell
+python C:\royalties_pipeline\scripts\build_catalog_master.py
 ```
 
 Para SoundOn:

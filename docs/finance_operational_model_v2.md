@@ -1,8 +1,9 @@
-# Modelo financiero operativo VPO - borrador rector v2
+# Modelo financiero operativo VPO - rector v2
 
-Fecha: 2026-07-05
+Fecha: 2026-07-06
 
-Estado: borrador para validar con Ruben.
+Estado: rector operativo validado para guiar cambios de Finanzas,
+Movimientos Financieros, Finanzas Artista, empleados/sueldos y proyecciones.
 
 Este documento busca ordenar la parte financiera de VPO sin forzar la realidad
 operativa a una pantalla contable incomoda. La regla principal es simple:
@@ -10,9 +11,9 @@ operativa a una pantalla contable incomoda. La regla principal es simple:
 > El usuario carga hechos del negocio. El sistema traduce esos hechos a caja,
 > cuenta corriente, proyectos, recuperables, resultado y proyeccion.
 
-No reemplaza todavia a `finance_business_master.md` ni a
-`artist_finance_ledger_model.md`. Si Ruben lo valida, debe pasar a ser el
-documento rector de finanzas y esos documentos quedan como soporte tecnico.
+Este documento manda sobre `finance_business_master.md` y
+`artist_finance_ledger_model.md` cuando haya conflicto de criterio. Esos
+documentos quedan como soporte visual/tecnico e historial de decisiones.
 
 ## Problema que queremos resolver
 
@@ -48,6 +49,32 @@ El sistema debe evitar dos errores:
 
 1. Mostrar todos los campos posibles y hacer que nadie entienda la pantalla.
 2. Esconder tanta logica que despues nadie pueda auditar por que dio un saldo.
+
+## Decision clave 2026-07-06
+
+`Recuperable` no es una respuesta principal a `Que estas cargando?`.
+
+`Recuperable` es un tratamiento financiero que puede aplicarse a un gasto,
+inversion, adelanto o proyecto.
+
+Ejemplo:
+
+- hecho cargado: gasto / inversion;
+- concepto: DJ set Virrshi;
+- pagado por: Indyana;
+- tratamiento financiero: recuperable 100% contra booking;
+- proyecto: Mix RKT #3;
+- estado: pendiente de control o aprobado.
+
+Esto evita que el usuario piense primero en contabilidad. El usuario carga el
+hecho real; el sistema decide, segun el tratamiento, como impacta en caja,
+cuenta corriente, proyecto, recuperables, resultado y BI.
+
+Regla practica:
+
+- `Que estas cargando?` describe el hecho.
+- `Tratamiento financiero` describe como se interpreta ese hecho.
+- `Aplicacion` describe como se cierra, recupera o compensa despues.
 
 ## Las cinco lecturas financieras
 
@@ -190,6 +217,21 @@ Debe ser visible solo para admin/administracion con permiso explicito. Un
 empleado no deberia ver sueldos de otros empleados por tener acceso a
 Movimientos Financieros.
 
+Permiso operativo:
+
+- `Movimientos financieros` habilita la carga general de hechos financieros;
+- `Sueldos y compensaciones` habilita especificamente ver/cargar/editar pagos
+  de sueldo o comision interna;
+- `ABM Empleados` administra la ficha del empleado, funciones, usuario,
+  permisos y salario pactado, pero no debe ser usado como permiso indirecto
+  para cargar pagos salariales;
+- para cargar un sueldo real se requieren ambos permisos: crear en
+  `Movimientos financieros` y crear en `Sueldos y compensaciones`;
+- para editar un movimiento salarial se requieren ambos permisos: editar en
+  `Movimientos financieros` y editar en `Sueldos y compensaciones`;
+- el selector de empleados dentro de Movimientos Financieros debe usar una
+  lista minima de empleados autorizados para finanzas, no el ABM completo.
+
 ## Pantalla de Movimientos Financieros
 
 La pantalla debe conservar lo que ya tiene de bueno:
@@ -222,13 +264,11 @@ Pero no debe mostrar todo junto.
 Opciones iniciales:
 
 1. Gasto / inversion en artista o proyecto.
-2. Gasto recuperable.
-3. Adelanto o prestamo.
-4. Pago o cobro de cuenta corriente.
-5. Recupero aplicado.
-6. Gasto de oficina / estructura.
-7. Salario / compensacion.
-8. Ingreso o ajuste manual.
+2. Adelanto o prestamo.
+3. Pago o cobro de cuenta corriente.
+4. Gasto de oficina / estructura.
+5. Salario / compensacion.
+6. Ingreso o ajuste manual.
 
 ### Paso 2 - Datos basicos
 
@@ -250,6 +290,24 @@ Siempre visibles:
 ### Paso 3 - Bloque dinamico
 
 Segun el tipo elegido, se abre solo el bloque necesario.
+
+### Paso 4 - Tratamiento financiero
+
+Despues de cargar el hecho, el sistema muestra solo si corresponde un bloque de
+tratamiento financiero.
+
+Opciones de tratamiento:
+
+- pendiente de criterio;
+- inversion Indyana;
+- recuperable total o parcial;
+- cuenta corriente directa;
+- compromiso pendiente a proveedor;
+- imputacion de estructura;
+- ajuste aprobado.
+
+Este bloque no debe estar siempre abierto. En carga rapida de operador puede
+quedar como `pendiente de control` y ser completado por administracion.
 
 ## Tipos de movimiento
 
@@ -282,31 +340,16 @@ Impacto:
 - no genera cuenta corriente salvo que lo pague un tercero y se reconozca deuda;
 - no es recuperable salvo que se marque como tal.
 
-### 2. Gasto recuperable
+Tratamientos posibles:
 
-Uso:
+- inversion Indyana no recuperable;
+- recuperable contra booking;
+- recuperable contra regalias;
+- recuperable manual;
+- credito a favor de quien pago si lo pago un tercero;
+- pendiente de criterio.
 
-- DJ set recuperable;
-- produccion recuperable;
-- adelanto recuperable por contrato;
-- gasto que se recuperara desde booking/regalias/manual.
-
-Muestra:
-
-- porcentaje recuperable;
-- forma de recupero;
-- costo economico artista/Indyana;
-- fuente esperada de recupero;
-- proyecto origen;
-- saldo recuperable.
-
-Impacto:
-
-- crea un saldo recuperable;
-- no mueve cuenta corriente automaticamente;
-- cada recupero futuro debe aplicarse contra este saldo.
-
-### 3. Adelanto o prestamo
+### 2. Adelanto o prestamo
 
 Uso:
 
@@ -327,7 +370,14 @@ Impacto:
 - genera cuenta corriente;
 - puede recuperarse por booking, regalias o pago manual.
 
-### 4. Pago o cobro de cuenta corriente
+Tratamientos posibles:
+
+- cuenta corriente directa;
+- recuperable contra booking;
+- recuperable contra regalias;
+- recuperable mixto.
+
+### 3. Pago o cobro de cuenta corriente
 
 Uso:
 
@@ -349,27 +399,7 @@ Impacto:
 - baja o cierra cuenta corriente;
 - no modifica el show/proyecto original.
 
-### 5. Recupero aplicado
-
-Uso:
-
-- desde booking se recupera una parte de un DJ set;
-- desde regalias se recupera un adelanto;
-- se aplica un pago manual a un recuperable.
-
-Muestra:
-
-- recuperable abierto;
-- origen del dinero;
-- monto aplicado;
-- saldo pendiente.
-
-Impacto:
-
-- baja el saldo recuperable;
-- no cambia la historia del show ni del gasto original.
-
-### 6. Gasto de oficina / estructura
+### 4. Gasto de oficina / estructura
 
 Uso:
 
@@ -393,7 +423,14 @@ Impacto:
 - gasto de estructura;
 - no pertenece a un artista salvo que se impute explicitamente.
 
-### 7. Salario / compensacion
+Tratamientos posibles:
+
+- gasto estructura Indyana;
+- imputacion parcial por area/proyecto;
+- compromiso mensual;
+- pendiente proveedor.
+
+### 5. Salario / compensacion
 
 Uso:
 
@@ -421,7 +458,16 @@ Impacto:
 - puede alimentar proyeccion mensual;
 - no debe mezclarse con comisiones variables de booking.
 
-### 8. Ingreso o ajuste manual
+Tratamientos posibles:
+
+- pagado completo;
+- pago parcial;
+- deuda pendiente;
+- financiacion mixta;
+- imputacion por area/proyecto;
+- proyeccion mensual.
+
+### 6. Ingreso o ajuste manual
 
 Uso:
 
@@ -429,16 +475,62 @@ Uso:
 - ingreso no nacido de booking ni regalias;
 - ajuste excepcional.
 
-Muestra:
-
-- motivo obligatorio;
-- aprobador;
-- referencia.
-
 Impacto:
 
 - depende del subtipo;
 - debe quedar auditado.
+
+## Recuperables como tratamiento
+
+Un recuperable nace cuando un gasto, inversion o adelanto queda marcado como
+recuperable.
+
+No debe nacer como movimiento suelto sin gasto/proyecto origen.
+
+Muestra:
+
+- porcentaje recuperable;
+- fuente esperada: booking, regalias, manual o mixto;
+- metodo: antes del split, despues del split, cuenta corriente directa,
+  royalties o manual;
+- costo economico artista/Indyana;
+- proyecto origen;
+- saldo recuperable.
+
+Impacto:
+
+- crea un saldo recuperable;
+- no mueve cuenta corriente automaticamente;
+- cada recupero futuro debe aplicarse contra este saldo;
+- no cambia la historia del gasto original.
+
+## Aplicaciones de recupero
+
+Una aplicacion de recupero no es el gasto original.
+
+Es el hecho posterior que baja el saldo recuperable.
+
+Puede venir de:
+
+- booking;
+- regalias;
+- pago manual;
+- compensacion aprobada.
+
+La aplicacion debe indicar:
+
+- recuperable abierto afectado;
+- origen del dinero;
+- monto aplicado;
+- saldo anterior;
+- saldo pendiente;
+- comprobante o nota si corresponde.
+
+Regla:
+
+- un show puede estar cerrado aunque el recuperable siga abierto;
+- un recuperable puede cerrarse por varias aplicaciones;
+- no se debe ocultar un recupero como gasto comun.
 
 ## Distribucion interna
 
@@ -518,6 +610,69 @@ Esto permite:
 - proyectar egresos futuros;
 - registrar pagos reales;
 - auditar diferencias entre pactado y pagado.
+
+### Primer corte implementado
+
+El empleado puede tener una condicion de compensacion:
+
+- sin compensacion fija;
+- salario mensual;
+- salario mensual + comision de booking;
+- solo comision de booking.
+
+Regla:
+
+- el salario configurado en el ABM no mueve caja;
+- la comision de booking se configura en el modulo de Comisiones;
+- el pago real de sueldo, anticipo o deuda salarial se carga en Movimientos
+  Financieros como `Salario / compensacion`;
+- los gastos de oficina o estructura se cargan como movimientos financieros de
+  area `Administracion` o `Estructura`;
+- mientras el modelo operativo siga usando `artist` como campo obligatorio en
+  movimientos financieros, oficina y sueldos se registran bajo la unidad interna
+  `VPO Corp / estructura`; esa unidad no es artista de booking;
+- mas adelante, estos datos alimentan proyeccion y BI sin cambiar el hecho
+  original.
+
+Esto mantiene separados:
+
+- condicion pactada del empleado;
+- pago real;
+- comision variable;
+- estructura/oficina.
+
+### Distribucion economica de un pago
+
+Un movimiento financiero tiene dos lecturas:
+
+- caja real: cuanto entro o salio de Indyana;
+- imputacion economica: que parte es costo real de Indyana y que parte queda a
+  cobrar o imputar a otra parte.
+
+Ejemplo:
+
+- salario Pablo pactado: USD 1.000;
+- Indyana paga: USD 1.000;
+- Indyana asume economicamente: USD 500;
+- productora externa asume: USD 500.
+
+La carga correcta es:
+
+- movimiento principal: `Salario / compensacion`, pagado real USD 1.000 por
+  Indyana;
+- distribucion economica:
+  - `Costo Indyana`: USD 500;
+  - `Cuenta por cobrar a tercero`: USD 500.
+
+Regla:
+
+- si no se carga distribucion, el sistema asume 100% costo Indyana;
+- si se carga distribucion, la suma debe cerrar contra el compromiso total del
+  movimiento;
+- la cuenta por cobrar a tercero no aumenta el costo de oficina, aunque haya
+  salido de caja;
+- cuando el tercero pague, se carga otro movimiento de cobro y se aplica contra
+  esa cuenta por cobrar.
 
 ## Proyeccion y BI
 
@@ -678,6 +833,76 @@ Propuesta:
 5. Finanzas Artista debe leer la cuenta operativa cuando exista, no recalcular
    todo desde cero.
 
+### Movimiento padre de cuenta corriente booking
+
+Para pagos, cobros o compensaciones que resuelven mas de un show, no alcanza con
+aplicar saldo show por show como accion aislada.
+
+Debe existir un movimiento padre de cuenta corriente booking.
+
+Ese movimiento padre representa el hecho financiero real o la decision operativa:
+
+- Aneley transfiere 2.800.000 para saldar shows pendientes;
+- Indyana transfiere 900.000 al artista por saldos acumulados;
+- un artista no cobra un show nuevo porque ese saldo se aplica contra deuda vieja;
+- se aprueba un ajuste administrativo por una diferencia incobrable o perdonada.
+
+El movimiento padre debe guardar:
+
+- fecha;
+- artista o tercero;
+- tipo de movimiento;
+- si hubo caja real o si fue compensacion sin caja nueva;
+- importe total;
+- metodo de pago si corresponde;
+- comprobante o referencia;
+- notas;
+- usuario que lo cargo;
+- aplicaciones hijas contra shows concretos.
+
+Las aplicaciones hijas indican como se distribuye el importe:
+
+- show destino;
+- saldo afectado: artista, Indyana/productora o boliche;
+- importe aplicado;
+- saldo anterior;
+- saldo posterior;
+- si el show queda cerrado o sigue abierto.
+
+El usuario debe poder elegir aplicacion manual. El sistema puede ofrecer un helper
+para sugerir aplicacion por antiguedad, pero la sugerencia no debe guardar nada sin
+confirmacion.
+
+Reglas:
+
+- no aplicar mas que el importe disponible del movimiento padre;
+- no aplicar mas que el saldo abierto de cada show;
+- si el importe no alcanza, el ultimo show queda parcialmente abierto;
+- si sobra importe, el sobrante queda como saldo no aplicado o cuenta corriente a
+  favor, pero no se inventa un ingreso de show;
+- la aplicacion no cambia cachet, split, gastos ni caja original del show;
+- si un saldo queda en cero, el show puede pasar a verde con etiqueta historica;
+- si queda saldo vivo, el show mantiene alerta.
+
+Tipos minimos de movimiento padre:
+
+- `cobro_deuda_booking`: entra plata real a Indyana para saldar saldos a favor de
+  Indyana.
+- `pago_saldo_artista`: sale plata real de Indyana para saldar saldos a favor del
+  artista.
+- `compensacion_booking`: no entra ni sale plata nueva; se cruza una deuda contra
+  otro saldo.
+- `pago_deuda_boliche`: entra plata real de cliente/boliche contra deuda de cachet.
+- `ajuste_booking`: decision administrativa aprobada, con nota obligatoria.
+
+Ubicacion de pantalla recomendada:
+
+`Finanzas Artista > Cuenta Booking > Registrar movimiento`
+
+Esta pantalla debe convivir con `Saldar / aplicar` desde un show. La accion desde
+el show sirve para casos puntuales. El movimiento padre sirve para pagos grandes,
+pagos acumulados o compensaciones contra varios shows.
+
 ## Relacion con Regalias
 
 Regalias sigue siendo fuente de verdad de ingresos digitales.
@@ -794,9 +1019,15 @@ Debe poder:
 
 ## Implementacion propuesta
 
-### Etapa 1 - Validar este documento
+### Etapa 1 - Rector validado
 
-No tocar codigo hasta validar lenguaje, tipos y reglas.
+Este documento queda como guia para los cambios siguientes. Cualquier cambio de
+Finanzas, Movimientos Financieros o Finanzas Artista debe respetar:
+
+- hecho primero;
+- tratamiento despues;
+- aplicacion/cierre por separado;
+- permisos por modulo, artista/proyecto y sensibilidad.
 
 ### Etapa 2 - Auditoria de pantalla actual
 
@@ -807,6 +1038,7 @@ Revisar Movimientos Financieros actual:
 - campos que deben depender del tipo;
 - campos que deben esconderse por permiso;
 - campos que necesitan lista/selector.
+- campos tecnicos que no deben mostrarse al operador.
 
 ### Etapa 3 - Reordenar UI sin cambiar datos
 

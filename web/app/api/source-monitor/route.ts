@@ -13,9 +13,24 @@ async function apiError(response: Response) {
   return NextResponse.json({ error: detail }, { status: response.status });
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const config = await apiConfig();
   if ("error" in config) return config.error;
+
+  const action = request.nextUrl.searchParams.get("action");
+  if (action === "publish-status") {
+    const jobId = request.nextUrl.searchParams.get("job_id");
+    if (!jobId) {
+      return NextResponse.json({ error: "Falta job_id de publicacion." }, { status: 400 });
+    }
+    const response = await fetch(`${config.apiUrl}/source-monitor/publish/${encodeURIComponent(jobId)}`, {
+      headers: { "X-VPO-API-Key": config.apiKey },
+      cache: "no-store",
+    });
+
+    if (!response.ok) return apiError(response);
+    return NextResponse.json(await response.json());
+  }
 
   const response = await fetch(`${config.apiUrl}/source-monitor`, {
     headers: { "X-VPO-API-Key": config.apiKey },

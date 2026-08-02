@@ -27,51 +27,13 @@ async function apiError(response: Response) {
   return NextResponse.json({ error: detail }, { status: response.status });
 }
 
-export async function GET(request: NextRequest) {
-  const config = await apiConfig();
-  if ("error" in config) return config.error;
-
-  const params = request.nextUrl.searchParams.toString();
-  const response = await fetch(`${config.apiUrl}/finance/movements${params ? `?${params}` : ""}`, {
-    headers: { "X-VPO-API-Key": config.apiKey, "X-VPO-Username": config.user.username },
-    cache: "no-store",
-  });
-
-  if (!response.ok) return apiError(response);
-  return NextResponse.json(await response.json());
-}
-
 export async function POST(request: NextRequest) {
-  const config = await apiConfig();
+  const config = await apiConfig("editor");
   if ("error" in config) return config.error;
-
   const body = await request.json();
-  const response = await fetch(`${config.apiUrl}/finance/movements`, {
+
+  const response = await fetch(`${config.apiUrl}/booking/account-movements`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-VPO-API-Key": config.apiKey,
-      "X-VPO-Username": config.user.username,
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) return apiError(response);
-  return NextResponse.json(await response.json());
-}
-
-export async function PUT(request: NextRequest) {
-  const config = await apiConfig();
-  if ("error" in config) return config.error;
-
-  const id = request.nextUrl.searchParams.get("id");
-  if (!id) {
-    return NextResponse.json({ error: "Falta id del movimiento." }, { status: 400 });
-  }
-
-  const body = await request.json();
-  const response = await fetch(`${config.apiUrl}/finance/movements/${id}`, {
-    method: "PUT",
     headers: {
       "Content-Type": "application/json",
       "X-VPO-API-Key": config.apiKey,

@@ -81,7 +81,7 @@ Campos importantes:
 6. Usar `Procesar nuevos`.
 7. Revisar el resumen visual de statements, filas e importes USD.
 8. Volver a abrir la pantalla y confirmar que bajo la alerta.
-9. Si todo esta validado y no hay pendientes reales, usar `Publicar marts a cloud`.
+9. Si todo esta validado y no hay pendientes reales, usar `Publicar datos analiticos`.
 10. Si la fuente ya no se usa, marcar `No monitorear`.
 
 ## Procesar nuevos
@@ -92,6 +92,11 @@ El boton `Procesar nuevos` corre el pipeline nuevo de la fuente:
 - `build_song_level_*`
 - `build_consolidated_marts.py`
 - `build_statement_summary_mart.py`
+- `build_catalog_master.py`
+
+El resumen de Ingresos Digitales tambien forma parte del paquete publicado. Si
+se reconstruye desde la API, debe quedar actualizado antes de publicar. No debe
+quedar mas viejo que los marts de ingreso que alimentan esa pantalla.
 
 Para ONErpm, el script procesa las subcuentas configuradas juntas porque comparten el mismo mart `standardized_raw_onerpm.parquet`. El resumen visual se filtra por la cuenta elegida, por ejemplo `henry_remix`.
 
@@ -104,19 +109,30 @@ Despues de procesar, revisar:
 - pendientes restantes;
 - filas por statement;
 - total USD por statement.
+- rango de actividad del catalogo reconstruido.
 
 No publicar a cloud si ese resumen no tiene sentido.
 
-## Publicar marts a cloud
+## Publicar datos analiticos
 
-El boton `Publicar marts a cloud` sube los marts requeridos desde `warehouse/marts` al bucket configurado:
+El boton `Publicar datos analiticos` sube el paquete validado desde
+`warehouse/marts` al bucket configurado. No es solo una publicacion de ingresos:
+incluye tambien el catalogo que gobierna identidad, activo/inactivo y
+reportabilidad.
 
 - `song_level_all_sources.parquet`
 - `standardized_raw_all_sources.parquet`
 - `catalog_candidates.parquet`
+- `catalog_master.parquet`
 - `statement_summary_all_sources.parquet`
+- `digital_income_statement_summary.parquet`
 
 La publicacion queda bloqueada si hay archivos `pending_real`. Los archivos ignorados por regla no bloquean.
+
+Antes de publicar, el sistema debe validar que `catalog_master.parquet` este
+reconstruido contra los marts actuales. Si `song_level_all_sources.parquet` tiene
+actividad posterior a `catalog_master.parquet`, el paquete no esta cerrado y no
+debe considerarse publicable.
 
 ## Pendiente futuro
 

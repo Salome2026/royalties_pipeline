@@ -195,9 +195,11 @@ Reglas de comisiones comerciales o especiales.
 | artist_id | string | no | Si aplica a un artista especifico | artist_virrshi |
 | base | string | si | gross_revenue, net_after_show_expenses, producer_share, event_profit, manual_amount | producer_share |
 | percentage | float | no | Porcentaje | 0.2 |
+| include_booking_fee_paid_shows | boolean | no | Si la regla cobra tambien sobre shows marcados como `Excluye comision general` | false |
+| priority_order | int | no | Orden de cobro en cascada, obligatorio si la regla esta activa y con porcentaje; unico por artista entre reglas activas | 1 |
 | fixed_amount | float | no | Monto fijo |  |
 | currency | string | no | Moneda monto fijo | ARS |
-| priority_order | int | si | Orden de calculo | 30 |
+| legacy_priority_order | int | no | Campo historico de orden si se migra desde modelos viejos | 30 |
 | active_from | date | no | Vigencia desde | 2025-08-01 |
 | active_to | date | no | Vigencia hasta |  |
 | notes | string | no | Comentarios | Comision Colo |

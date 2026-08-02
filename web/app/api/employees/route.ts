@@ -19,11 +19,14 @@ async function apiError(response: Response) {
 }
 
 export async function GET() {
-  const config = await apiConfig("admin");
+  const config = await apiConfig();
   if ("error" in config) return config.error;
 
   const response = await fetch(`${config.apiUrl}/employees?include_inactive=true`, {
-    headers: { "X-VPO-API-Key": config.apiKey },
+    headers: {
+      "X-VPO-API-Key": config.apiKey,
+      "X-VPO-Username": config.user.username,
+    },
     cache: "no-store",
   });
 

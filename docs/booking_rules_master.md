@@ -111,6 +111,9 @@ Reglas obligatorias:
 - Si un show quedo con saldo, no se reescribe el show para saldarlo despues.
 - El show conserva liquidacion, caja cargada y saldo original.
 - Un pago posterior, reintegro o compensacion debe ser un movimiento nuevo aplicado al saldo.
+- Si un pago, cobro o compensacion cubre varios shows, debe existir un movimiento
+  padre con aplicaciones hijas por show. No se debe cargar como ingreso/gasto
+  comun ni duplicar resultado de booking.
 - El movimiento aplicado debe guardar `source_module`, `source_table`, `source_id` y nota/comprobante.
 - La cuenta corriente debe poder filtrarse por artista, por show, por proyecto y por origen.
 
@@ -254,21 +257,43 @@ Ejemplo G Sony:
 - Fede participa del split.
 - Si G Sony 50%, Indyana 25%, Fede 25%, Fede se carga como tercero/socio externo de la linea.
 
-## Indyana ganado vs base comisionable
-
-No son lo mismo.
+## Indyana ganado y comisiones internas
 
 Indyana ganado es la ganancia economica de Indyana por un show o linea.
 
-Base comisionable es la parte de Indyana ganado que corresponde usar para pagar comisiones internas de booking.
+La comision interna no se define por una unica base global. Se calcula show por
+show contra las reglas vigentes de cada empleado y artista.
+
+La marca `Excluye comision general` significa solamente que el show no entra en
+la comision general automatica. No significa que el ingreso desaparezca, ni que
+exista una deuda de comision. La comision solo existe si una regla aplicable la
+genera.
+
+Regla operativa:
+
+- si el show no excluye comision general, aplican las reglas activas del artista;
+- si el show excluye comision general, no aplica ninguna regla salvo que esa
+  regla particular tenga habilitado cobrar shows con booking ya pagado;
+- una regla bloqueada por la exclusion suma cero y no genera deuda pendiente;
+- las reglas aplicables se calculan en cascada por `orden` del 1 al 5;
+- cada comision calculada reduce la base disponible para la siguiente regla;
+- el orden se debe elegir cuando la regla esta activa y tiene porcentaje mayor
+  a cero; una regla sin porcentaje puede quedar sin orden;
+- no puede haber dos reglas activas con porcentaje mayor a cero usando el mismo
+  orden para el mismo artista;
+- Resumen Booking muestra Indyana bruto, comisiones aplicables e Indyana neto;
+- Comisiones explica empleado por empleado que regla genero cada importe.
 
 Ejemplos:
 
-- show comun: puede ser igual;
-- G Sony con regla especial: Indyana gana, pero puede no ser comisionable porque la comision ya se resolvio por otra regla;
-- historico importado: puede quedar marcado como historico/no definido.
+- Gusty DJ sin exclusion: si Marce tiene 20% y David 10%, el resumen resta 30%
+  solo si ambos cobran sobre el bruto. Con cascada, Marce orden 1 cobra sobre el
+  bruto y David orden 2 cobra sobre lo que queda.
+- Virrshi con exclusion general: Marce no cobra si respeta la exclusion; David
+  cobra solo si su regla particular lo habilita.
 
-Nunca usar automaticamente Indyana ganado como base comisionable sin mirar la regla.
+Nunca usar automaticamente Indyana ganado como base de pago sin mirar la regla
+del show y la regla particular del empleado.
 
 ## Show simple
 
@@ -476,7 +501,8 @@ Antes de guardar, el sistema debe mostrar:
 - caja real por linea;
 - saldos;
 - cuenta corriente sugerida;
-- base comisionable;
+- comisiones aplicables;
+- neto Indyana despues de comisiones;
 - alertas.
 
 No se conecta guardado de la pantalla nueva hasta que los casos de validacion pasen.

@@ -85,8 +85,9 @@ if (-not $env:VPO_API_KEY) {
 $env:VPO_LOCAL_MARTS_DIR = Join-Path $root "warehouse\marts"
 $env:VPO_API_CACHE_DIR = Join-Path $root "cache\local_api"
 $env:VPO_API_REPORTS_DIR = Join-Path $root "reports\api_local"
-$env:GCS_BUCKET = ""
-$env:GCS_PREFIX = "marts"
+if (-not $env:GCS_PREFIX) {
+    $env:GCS_PREFIX = "marts"
+}
 $env:VPO_OPERATIONAL_DB_DRIVER = "postgres"
 $env:VPO_POSTGRES_CONNECT_MODE = "local_proxy"
 $env:VPO_OPERATIONAL_DB_NAME = $cloudSql["CLOUDSQL_DATABASE"]

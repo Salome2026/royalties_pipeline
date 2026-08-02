@@ -29,8 +29,9 @@
 
 ## Booking
 
-- [Finanzas VPO - documento rector](finance_business_master.md)
-- [Modelo financiero operativo VPO v2](finance_operational_model_v2.md)
+- [Modelo financiero operativo VPO v2 - rector vigente](finance_operational_model_v2.md)
+- [Finanzas VPO - maqueta de carga dinamica](finanzas_carga_dinamica_maqueta.md)
+- [Finanzas VPO - soporte visual/tecnico](finance_business_master.md)
 - [Booking rules master](booking_rules_master.md)
 - [Booking validation matrix](booking_validation_matrix.md)
 - [Booking unified validation matrix](booking_unified_validation_matrix.md)
@@ -44,7 +45,7 @@
 
 Antes de modificar Booking, Finanzas Artista, Movimientos Financieros o cualquier
 flujo que afecte caja/cuenta corriente de shows, leer primero
-`booking_rules_master.md`, `finance_operational_model_v2.md` y validar el cambio
+`finance_operational_model_v2.md`, `booking_rules_master.md` y validar el cambio
 contra `booking_unified_validation_matrix.md`.
 
 ## Arquitectura general

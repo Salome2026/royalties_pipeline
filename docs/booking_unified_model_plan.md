@@ -106,25 +106,40 @@ Es la ganancia economica de Indyana/productora por el show o por una linea del s
 
 Ejemplo: si una linea genera 1.000.000 netos y el split es 70/30, Indyana ganado es 300.000.
 
-### Base comisionable
+### Comisiones aplicables
 
-Es la parte de Indyana ganado sobre la cual corresponde pagar comisiones internas de booking.
+Las comisiones internas de booking no se leen desde una unica base global.
+Se calculan show por show con las reglas vigentes de cada empleado y artista.
 
-No siempre coincide con Indyana ganado.
+La marca `Excluye comision general` bloquea la comision general automatica, pero
+no elimina el ingreso de Indyana ni genera una deuda. Una comision solo existe si
+una regla aplicable la genera.
+
+Las reglas aplicables se ordenan por prioridad del 1 al 5. El orden 1 cobra
+primero sobre el ingreso Indyana disponible. Su comision se descuenta y la regla
+de orden 2 cobra sobre la base restante. El proceso continua hasta el ultimo
+orden aplicable.
+
+Para evitar errores de carga, no puede repetirse el mismo orden para el mismo
+artista entre reglas activas con porcentaje mayor a cero.
 
 Ejemplos:
 
-- Show normal Virrshi 70/30: Indyana ganado probablemente tambien sea base comisionable.
-- G Sony con regla especial: Indyana puede ganar, pero la linea puede ser no comisionable porque la comision ya se resolvio por Facha/Marce.
-- Historico importado: puede quedar como no definido o historico hasta revision.
+- Show normal Virrshi 70/30: aplican las reglas activas del artista.
+- G Sony con regla especial: puede excluir comision general porque la comision ya
+  se resolvio por Facha/Marce.
+- Si David debe cobrar igual en un show excluido, su regla particular debe tener
+  habilitado cobrar shows con booking ya pagado.
 
 Campos objetivo:
 
 - `indyana_amount`
-- `commissionable_amount`
-- `commissionable_flag`
-- `commission_rule`
-- `commission_notes`
+- `booking_commission_exempt`
+- `booking_commission_notes`
+- `commission_priority_order`
+- `commission_rules_applied`
+- `commission_amount`
+- `indyana_net_amount`
 
 ## Casos reales detectados
 
@@ -261,12 +276,12 @@ Modelo:
   - Base propia.
   - Gastos propios si hay.
   - Split Candu/Indyana.
-  - Comisionable segun regla.
+  - Exclusion de comision general si corresponde.
 - Linea G Sony:
   - Base propia + ajuste incorporado.
   - Comision Facha.
   - Split G Sony / Indyana / tercero externo.
-  - Habitualmente no comisionable si la comision ya fue resuelta por regla especial.
+  - Habitualmente excluye comision general si la comision ya fue resuelta por regla especial.
 
 ### Caserio
 
@@ -440,7 +455,8 @@ El sistema debe sugerir:
 - Indyana esperado.
 - Terceros esperados.
 - Caja esperada.
-- Base comisionable.
+- Comisiones aplicables.
+- Neto Indyana.
 - Diferencia boliche.
 - Diferencia artista.
 - Diferencia Indyana.
@@ -452,7 +468,7 @@ Alertas:
 - Falta pagar artista.
 - Falta rendir Indyana.
 - La suma de splits supera 100%.
-- Hay ingreso Indyana no comisionable.
+- Hay ingreso Indyana con exclusion de comision general.
 - Hay historico/revision pendiente.
 
 ## Reglas de cierre
@@ -545,7 +561,8 @@ Fases:
    - Shows por artista.
    - Resumen booking.
    - Indyana ganado.
-   - Base comisionable.
+   - Comisiones aplicables.
+   - Neto Indyana.
    - Saldos por artista/manager.
 6. Recién despues, decidir si se reemplazan las pantallas actuales.
 
@@ -553,7 +570,8 @@ Fases:
 
 - No perder historico.
 - No borrar shows 0/0.
-- No mezclar Indyana ganado con base comisionable.
+- No mezclar Indyana ganado con comisiones aplicables.
+- No generar deuda de comision cuando una regla queda bloqueada por exclusion general.
 - No esconder terceros dentro de gastos genericos si afectan liquidacion.
 - No depender de Excel externo para calcular: el sistema calcula y el Excel se usa como dato de entrada/referencia.
 - Toda modificacion grande debe tener backup previo.

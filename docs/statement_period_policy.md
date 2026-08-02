@@ -57,6 +57,12 @@ Agregar estas columnas no cambia importes ni FX. Para que aparezcan en los marts
 
 1. Ejecutar los standardized ingests.
 2. Rebuild de song-level/consolidated/summary marts.
-3. Publicar marts a GCS.
+3. Reconstruir `catalog_master.parquet`.
+4. Validar que el catalogo no quede atrasado contra `song_level_all_sources.parquet`.
+5. Publicar datos analiticos a GCS.
 
 Antes de usar liquidaciones definitivas, validar que no existan `statement_period` nulos o `unknown`.
+
+Importante: `statement_period` gobierna liquidaciones, pero el Catalogo General
+usa actividad por `transaction_month`. Por eso el catalogo debe reconstruirse
+despues de cada reingesta aunque el cambio parezca solamente de statements.

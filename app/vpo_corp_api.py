@@ -9,6 +9,8 @@ import secrets
 import sqlite3
 import subprocess
 import sys
+import threading
+import uuid
 from calendar import monthrange
 from datetime import date
 from datetime import datetime
@@ -139,12 +141,6 @@ VPO_LOCAL_MARTS_DIR_RAW = os.environ.get("VPO_LOCAL_MARTS_DIR", "").strip()
 VPO_LOCAL_MARTS_DIR = Path(VPO_LOCAL_MARTS_DIR_RAW).expanduser() if VPO_LOCAL_MARTS_DIR_RAW else None
 VPO_API_CACHE_DIR = Path(os.environ.get("VPO_API_CACHE_DIR", BASE / "cache" / "gcs_marts"))
 VPO_API_REPORTS_DIR = Path(os.environ.get("VPO_API_REPORTS_DIR", BASE / "reports" / "api"))
-VPO_BOOKING_DB_PATH = Path(os.environ.get("VPO_BOOKING_DB_PATH", BASE / "warehouse" / "booking" / "live" / "booking_live.sqlite"))
-VPO_BOOKING_GCS_OBJECT = os.environ.get("VPO_BOOKING_GCS_OBJECT", "").strip("/")
-VPO_BOOKING_READONLY_GCS = os.environ.get("VPO_BOOKING_READONLY_GCS", "").strip().lower() in {"1", "true", "yes", "on"}
-VPO_BOOKING_REFRESH_ON_REQUEST = os.environ.get("VPO_BOOKING_REFRESH_ON_REQUEST", "").strip().lower() in {"1", "true", "yes", "on"}
-BOOKING_RAW_DIR = BASE / "warehouse" / "booking" / "raw"
-BOOKING_STANDARDIZED_PATH = BASE / "warehouse" / "booking" / "standardized" / "standardized_booking_movements.parquet"
 BOOKING_ARTIST_REGISTRY_PATH = BASE / "warehouse" / "booking" / "registry" / "booking_artists.json"
 SOURCE_MONITOR_CONFIG_PATH = BASE / "warehouse" / "registry" / "source_monitor_config.json"
 GOOGLE_SHEETS_SHARE_EMAIL = os.environ.get("GOOGLE_SHEETS_SHARE_EMAIL", "").strip()
@@ -160,7 +156,14 @@ CATALOG_RELEASE_METADATA_FILE = "catalog_release_metadata.parquet"
 STATEMENT_SUMMARY_FILE = "statement_summary_all_sources.parquet"
 DIGITAL_INCOME_SUMMARY_FILE = "digital_income_statement_summary.parquet"
 DIGITAL_INCOME_SUMMARY_PATH = BASE / "warehouse" / "marts" / "digital_income_statement_summary.parquet"
-REQUIRED_MART_FILES = [SONG_FILE, STANDARDIZED_FILE, CATALOG_FILE, CATALOG_MASTER_FILE, STATEMENT_SUMMARY_FILE, DIGITAL_INCOME_SUMMARY_FILE]
+REQUIRED_MART_FILES = [
+    STANDARDIZED_FILE,
+    SONG_FILE,
+    STATEMENT_SUMMARY_FILE,
+    DIGITAL_INCOME_SUMMARY_FILE,
+    CATALOG_FILE,
+    CATALOG_MASTER_FILE,
+]
 CATALOG_STATUS_PATH = BASE / "warehouse" / "registry" / "catalog_status.parquet"
 CONFIG_REGISTRY_DIR = BASE / "warehouse" / "registry"
 CONFIG_SEED_FILES = {
@@ -174,6 +177,8 @@ VPO_CATALOG_STATUS_SYNC_GCS = (
     os.environ.get("VPO_CATALOG_STATUS_SYNC_GCS", "1").strip().lower()
     in {"1", "true", "yes", "on"}
 )
+PUBLISH_JOBS: dict[str, dict] = {}
+PUBLISH_JOBS_LOCK = threading.Lock()
 
 
 class KeywordReportRequest(BaseModel):
@@ -258,6 +263,16 @@ class EmployeeRecordRequest(BaseModel):
     email: str | None = Field(default=None, max_length=180)
     address: str | None = Field(default=None, max_length=300)
     functions: list[str] = Field(default_factory=list, max_length=20)
+    compensation_type: Literal[
+        "none",
+        "salary",
+        "salary_plus_booking_commission",
+        "booking_commission_only",
+    ] = "none"
+    salary_amount: float = Field(default=0.0, ge=0.0)
+    salary_currency: Literal["ARS", "USD"] = "ARS"
+    salary_frequency: Literal["monthly"] = "monthly"
+    salary_notes: str | None = Field(default=None, max_length=1000)
     username: str | None = Field(default=None, max_length=80)
     password: str | None = Field(default=None, max_length=200)
     must_change_password: bool | None = None
@@ -293,6 +308,8 @@ class BookingCommissionRuleRequest(BaseModel):
     artist: str = Field(..., min_length=1, max_length=160)
     percent: float = Field(default=0.0, ge=0.0, le=100.0)
     base: Literal["commissionable", "total"] = "commissionable"
+    include_booking_fee_paid_shows: bool = False
+    priority_order: int | None = Field(default=None, ge=1, le=5)
     start_month: str | None = Field(default=None, max_length=7)
     end_month: str | None = Field(default=None, max_length=7)
     active: bool = True
@@ -377,19 +394,69 @@ class BookingAccountApplicationRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=2000)
 
 
+class BookingAccountParentApplicationRequest(BaseModel):
+    show_id: int = Field(..., ge=1)
+    target_balance: Literal["artist", "producer", "venue"]
+    amount: float = Field(..., gt=0.0)
+
+
+class BookingAccountParentMovementRequest(BaseModel):
+    movement_date: str = Field(..., min_length=10, max_length=10)
+    artist: str = Field(..., min_length=1, max_length=160)
+    movement_type: Literal[
+        "cobro_deuda_booking",
+        "pago_saldo_artista",
+        "compensacion_booking",
+        "pago_deuda_boliche",
+        "ajuste_booking",
+    ]
+    amount: float = Field(..., gt=0.0)
+    payment_method: Literal["transferencia", "efectivo", "compensacion", "ajuste", "otro"] = "transferencia"
+    counterparty: str | None = Field(default=None, max_length=180)
+    proof_refs: list[str] = Field(default_factory=list, max_length=30)
+    notes: str | None = Field(default=None, max_length=2000)
+    applications: list[BookingAccountParentApplicationRequest] = Field(..., min_length=1, max_length=200)
+
+
+class BookingAccountBlockSettlementRequest(BaseModel):
+    settlement_date: str = Field(..., min_length=10, max_length=10)
+    artist: str = Field(..., min_length=1, max_length=160)
+    amount: float = Field(..., gt=0.0)
+    payment_method: Literal["transferencia", "efectivo", "compensacion", "ajuste", "otro"] = "transferencia"
+    counterparty: str | None = Field(default=None, max_length=180)
+    show_ids: list[int] = Field(..., min_length=1, max_length=200)
+    proof_refs: list[str] = Field(default_factory=list, max_length=30)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
 class FinanceProjectRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=180)
     artist: str | None = Field(default=None, max_length=160)
-    business_area: Literal["booking", "label", "marketing", "digitales", "general"] = "general"
+    business_area: Literal["booking", "label", "marketing", "digitales", "management", "administracion", "estructura", "general"] = "general"
     status: Literal["activo", "cerrado", "pausado"] = "activo"
+    notes: str | None = Field(default=None, max_length=1000)
+
+
+class FinanceMovementAllocationRequest(BaseModel):
+    allocation_type: Literal[
+        "indyana_cost",
+        "third_party_receivable",
+        "artist_current_account",
+        "other",
+    ] = "indyana_cost"
+    target_name: str = Field(..., min_length=1, max_length=180)
+    business_area: Literal["booking", "label", "marketing", "digitales", "management", "administracion", "estructura", "general"] | None = None
+    amount: float = Field(..., ge=0.0)
+    currency: Literal["ARS", "USD"] | None = None
+    fx_rate: float | None = Field(default=None, gt=0)
     notes: str | None = Field(default=None, max_length=1000)
 
 
 class FinanceMovementRequest(BaseModel):
     movement_date: str = Field(..., min_length=10, max_length=10)
     artist: str = Field(..., min_length=1, max_length=160)
-    business_area: Literal["booking", "label", "marketing", "digitales", "general"] = "general"
-    movement_type: Literal["gasto", "ingreso", "recupero", "adelanto", "prestamo", "ajuste", "pago"] = "gasto"
+    business_area: Literal["booking", "label", "marketing", "digitales", "management", "administracion", "estructura", "general"] = "general"
+    movement_type: Literal["gasto", "ingreso", "recupero", "adelanto", "prestamo", "ajuste", "pago", "salario"] = "gasto"
     category: str = Field(..., min_length=1, max_length=100)
     project_id: int | None = None
     project_name: str | None = Field(default=None, max_length=180)
@@ -425,6 +492,7 @@ class FinanceMovementRequest(BaseModel):
     source_id: str | None = Field(default=None, max_length=120)
     proof_refs: list[str] = Field(default_factory=list, max_length=30)
     notes: str | None = Field(default=None, max_length=2000)
+    allocation_lines: list[FinanceMovementAllocationRequest] = Field(default_factory=list, max_length=20)
 
 
 
@@ -1268,35 +1336,6 @@ def configure_catalog_report_env(marts: dict[str, Path] | None = None) -> None:
     os.environ["VPO_CATALOG_STATUS_PATH"] = str(CATALOG_STATUS_PATH)
 
 
-def ensure_booking_db_from_gcs(refresh: bool = False) -> None:
-    if not VPO_BOOKING_READONLY_GCS:
-        return
-
-    if not VPO_BOOKING_GCS_OBJECT:
-        raise HTTPException(status_code=500, detail="VPO_BOOKING_GCS_OBJECT is not configured.")
-
-    if not GCS_BUCKET:
-        raise HTTPException(status_code=500, detail="GCS_BUCKET is not configured.")
-
-    if VPO_BOOKING_DB_PATH.exists() and not refresh:
-        return
-
-    VPO_BOOKING_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    client = gcs_client()
-    bucket = client.bucket(GCS_BUCKET)
-    blob = bucket.blob(VPO_BOOKING_GCS_OBJECT)
-
-    if not blob.exists(client):
-        raise HTTPException(
-            status_code=500,
-            detail=f"GCS booking DB not found: gs://{GCS_BUCKET}/{VPO_BOOKING_GCS_OBJECT}",
-        )
-
-    tmp_path = VPO_BOOKING_DB_PATH.with_suffix(".download")
-    blob.download_to_filename(str(tmp_path))
-    tmp_path.replace(VPO_BOOKING_DB_PATH)
-
-
 def shift_month(month: str, delta: int) -> str:
     year, month_number = (int(part) for part in month.split("-", 1))
     month_index = year * 12 + month_number - 1 + delta
@@ -1682,6 +1721,9 @@ def publish_required_marts_to_gcs() -> dict:
     if not GCS_BUCKET:
         raise HTTPException(status_code=500, detail="GCS_BUCKET no esta configurado.")
 
+    preparation = prepare_analytics_package_for_publish()
+    validation = validate_analytics_package_for_publish()
+
     client = gcs_client()
     bucket = client.bucket(GCS_BUCKET)
     prefix = GCS_PREFIX.strip("/")
@@ -1707,7 +1749,223 @@ def publish_required_marts_to_gcs() -> dict:
         "published_at": datetime.now().isoformat(timespec="seconds"),
         "bucket": GCS_BUCKET,
         "prefix": prefix,
+        "preparation": preparation,
+        "validation": validation,
         "uploaded": uploaded,
+    }
+
+
+def public_publish_job(job: dict) -> dict:
+    visible = dict(job)
+    visible.pop("thread", None)
+    return visible
+
+
+def latest_running_publish_job() -> dict | None:
+    with PUBLISH_JOBS_LOCK:
+        running = [
+            job for job in PUBLISH_JOBS.values()
+            if job.get("status") in {"queued", "running"}
+        ]
+        if not running:
+            return None
+        return public_publish_job(sorted(running, key=lambda item: item.get("created_at") or "")[-1])
+
+
+def update_publish_job(job_id: str, **updates: object) -> None:
+    with PUBLISH_JOBS_LOCK:
+        job = PUBLISH_JOBS.get(job_id)
+        if not job:
+            return
+        job.update(updates)
+
+
+def run_publish_job(job_id: str) -> None:
+    update_publish_job(
+        job_id,
+        status="running",
+        stage="cerrando_paquete",
+        started_at=datetime.now().isoformat(timespec="seconds"),
+    )
+    try:
+        result = publish_required_marts_to_gcs()
+        update_publish_job(
+            job_id,
+            status="completed",
+            stage="terminado",
+            finished_at=datetime.now().isoformat(timespec="seconds"),
+            result=result,
+        )
+    except HTTPException as exc:
+        update_publish_job(
+            job_id,
+            status="failed",
+            stage="error",
+            finished_at=datetime.now().isoformat(timespec="seconds"),
+            error=exc.detail,
+        )
+    except Exception as exc:
+        update_publish_job(
+            job_id,
+            status="failed",
+            stage="error",
+            finished_at=datetime.now().isoformat(timespec="seconds"),
+            error=str(exc),
+        )
+
+
+def start_publish_job() -> dict:
+    running = latest_running_publish_job()
+    if running:
+        return running
+
+    job_id = uuid.uuid4().hex
+    now = datetime.now().isoformat(timespec="seconds")
+    job = {
+        "job_id": job_id,
+        "status": "queued",
+        "stage": "en_cola",
+        "created_at": now,
+        "started_at": None,
+        "finished_at": None,
+        "result": None,
+        "error": None,
+    }
+    thread = threading.Thread(target=run_publish_job, args=(job_id,), daemon=True)
+    job["thread"] = thread
+    with PUBLISH_JOBS_LOCK:
+        PUBLISH_JOBS[job_id] = job
+    thread.start()
+    return public_publish_job(job)
+
+
+def get_publish_job(job_id: str) -> dict:
+    with PUBLISH_JOBS_LOCK:
+        job = PUBLISH_JOBS.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Publish job not found.")
+        return public_publish_job(job)
+
+
+def mart_path(filename: str) -> Path:
+    return BASE / "warehouse" / "marts" / filename
+
+
+def parquet_summary(path: Path, period_columns: list[str]) -> dict:
+    summary: dict[str, object] = {
+        "path": str(path),
+        "exists": path.exists(),
+        "mtime": datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds") if path.exists() else None,
+        "size_mb": round(path.stat().st_size / 1024 / 1024, 2) if path.exists() else None,
+    }
+    if not path.exists():
+        return summary
+    try:
+        frame = pl.scan_parquet(path)
+        columns = set(frame.collect_schema().names())
+        expressions: list[pl.Expr] = [pl.len().alias("rows")]
+        for column in period_columns:
+            if column in columns:
+                expressions.extend([
+                    pl.min(column).alias(f"first_{column}"),
+                    pl.max(column).alias(f"last_{column}"),
+                ])
+        values = frame.select(expressions).collect().to_dicts()[0]
+        summary.update(values)
+    except Exception as exc:
+        summary["error"] = str(exc)
+    return summary
+
+
+def run_publish_preparation_script(script_name: str) -> dict:
+    result = run_pipeline_script(script_name)
+    if result["returncode"] != 0:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": f"Fallo cierre analitico antes de publicar: {script_name}.",
+                "script": result,
+            },
+        )
+    return result
+
+
+def prepare_analytics_package_for_publish() -> dict:
+    standardized_path = mart_path(STANDARDIZED_FILE)
+    song_path = mart_path(SONG_FILE)
+    if not standardized_path.exists():
+        raise HTTPException(status_code=500, detail=f"No existe mart requerido: {standardized_path}")
+    if not song_path.exists():
+        raise HTTPException(status_code=500, detail=f"No existe mart requerido: {song_path}")
+
+    scripts = [
+        run_publish_preparation_script("build_statement_summary_mart.py"),
+        run_publish_preparation_script("build_catalog_master.py"),
+    ]
+    digital_summary_path = build_digital_income_summary_mart(standardized_path, refresh_cache=True)
+
+    return {
+        "closed_at": datetime.now().isoformat(timespec="seconds"),
+        "scripts": scripts,
+        "digital_income_summary": parquet_summary(digital_summary_path, ["statement_period"]),
+    }
+
+
+def validate_analytics_package_for_publish() -> dict:
+    summaries = {
+        SONG_FILE: parquet_summary(mart_path(SONG_FILE), ["transaction_month"]),
+        STANDARDIZED_FILE: parquet_summary(mart_path(STANDARDIZED_FILE), ["statement_period", "transaction_month"]),
+        CATALOG_FILE: parquet_summary(mart_path(CATALOG_FILE), []),
+        CATALOG_MASTER_FILE: parquet_summary(mart_path(CATALOG_MASTER_FILE), ["first_transaction_month", "last_transaction_month"]),
+        STATEMENT_SUMMARY_FILE: parquet_summary(mart_path(STATEMENT_SUMMARY_FILE), ["statement_period"]),
+        DIGITAL_INCOME_SUMMARY_FILE: parquet_summary(mart_path(DIGITAL_INCOME_SUMMARY_FILE), ["statement_period"]),
+    }
+    missing = [filename for filename, summary in summaries.items() if not summary.get("exists")]
+    if missing:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "No se puede publicar: faltan marts requeridos.",
+                "missing": missing,
+                "summaries": summaries,
+            },
+        )
+
+    stale = []
+    standardized_mtime = mart_path(STANDARDIZED_FILE).stat().st_mtime
+    song_mtime = mart_path(SONG_FILE).stat().st_mtime
+    dependency_mtime = max(standardized_mtime, song_mtime)
+    for filename in [CATALOG_MASTER_FILE, STATEMENT_SUMMARY_FILE, DIGITAL_INCOME_SUMMARY_FILE]:
+        if mart_path(filename).stat().st_mtime + 0.001 < dependency_mtime:
+            stale.append(filename)
+
+    song_last_tx = summaries[SONG_FILE].get("last_transaction_month")
+    catalog_last_tx = summaries[CATALOG_MASTER_FILE].get("last_last_transaction_month")
+    if song_last_tx and catalog_last_tx and str(catalog_last_tx) < str(song_last_tx):
+        stale.append(f"{CATALOG_MASTER_FILE}: activity {catalog_last_tx} < song_level {song_last_tx}")
+
+    standardized_last_statement = summaries[STANDARDIZED_FILE].get("last_statement_period")
+    statement_summary_last = summaries[STATEMENT_SUMMARY_FILE].get("last_statement_period")
+    digital_summary_last = summaries[DIGITAL_INCOME_SUMMARY_FILE].get("last_statement_period")
+    if standardized_last_statement and statement_summary_last and str(statement_summary_last) < str(standardized_last_statement):
+        stale.append(f"{STATEMENT_SUMMARY_FILE}: statement {statement_summary_last} < standardized {standardized_last_statement}")
+    if standardized_last_statement and digital_summary_last and str(digital_summary_last) < str(standardized_last_statement):
+        stale.append(f"{DIGITAL_INCOME_SUMMARY_FILE}: statement {digital_summary_last} < standardized {standardized_last_statement}")
+
+    if stale:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": "No se puede publicar: el paquete analitico no esta cerrado.",
+                "stale": stale,
+                "summaries": summaries,
+            },
+        )
+
+    return {
+        "ok": True,
+        "validated_at": datetime.now().isoformat(timespec="seconds"),
+        "summaries": summaries,
     }
 
 
@@ -1726,6 +1984,7 @@ def source_monitor_pipeline_scripts(source: str) -> list[str]:
         *scripts,
         "build_consolidated_marts.py",
         "build_statement_summary_mart.py",
+        "build_catalog_master.py",
     ]
 
 
@@ -1819,18 +2078,7 @@ def last_business_day(month: str) -> str:
 
 
 def booking_connect():
-    if operational_db_settings().driver == "postgres":
-        return operational_sqlite_compatible_connect()
-    ensure_booking_db_from_gcs(refresh=VPO_BOOKING_REFRESH_ON_REQUEST)
-    VPO_BOOKING_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(VPO_BOOKING_DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
-
-
-def legacy_booking_db_path_for_response() -> str:
-    return str(VPO_BOOKING_DB_PATH) if operational_db_settings().driver == "sqlite" else ""
+    return operational_sqlite_compatible_connect()
 
 
 def init_booking_db() -> None:
@@ -1864,6 +2112,11 @@ def init_booking_db() -> None:
                 phone TEXT,
                 email TEXT,
                 address TEXT,
+                compensation_type TEXT NOT NULL DEFAULT 'none',
+                salary_amount REAL NOT NULL DEFAULT 0,
+                salary_currency TEXT NOT NULL DEFAULT 'ARS',
+                salary_frequency TEXT NOT NULL DEFAULT 'monthly',
+                salary_notes TEXT,
                 notes TEXT,
                 active INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
@@ -1871,6 +2124,11 @@ def init_booking_db() -> None:
             )
             """
         )
+        ensure_sqlite_column(conn, "employees", "compensation_type", "TEXT NOT NULL DEFAULT 'none'")
+        ensure_sqlite_column(conn, "employees", "salary_amount", "REAL NOT NULL DEFAULT 0")
+        ensure_sqlite_column(conn, "employees", "salary_currency", "TEXT NOT NULL DEFAULT 'ARS'")
+        ensure_sqlite_column(conn, "employees", "salary_frequency", "TEXT NOT NULL DEFAULT 'monthly'")
+        ensure_sqlite_column(conn, "employees", "salary_notes", "TEXT")
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS employee_functions (
@@ -2313,6 +2571,24 @@ def init_booking_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS finance_movement_allocations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                movement_id INTEGER NOT NULL REFERENCES finance_staging_movements(id) ON DELETE CASCADE,
+                allocation_type TEXT NOT NULL DEFAULT 'indyana_cost',
+                target_name TEXT NOT NULL,
+                business_area TEXT,
+                amount REAL NOT NULL DEFAULT 0,
+                currency TEXT NOT NULL DEFAULT 'ARS',
+                fx_rate REAL,
+                amount_ars REAL NOT NULL DEFAULT 0,
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
         ensure_sqlite_column(conn, "finance_staging_movements", "paid_amount", "REAL NOT NULL DEFAULT 0")
         ensure_sqlite_column(conn, "finance_staging_movements", "paid_amount_ars", "REAL NOT NULL DEFAULT 0")
         ensure_sqlite_column(conn, "finance_staging_movements", "pending_amount_ars", "REAL NOT NULL DEFAULT 0")
@@ -2399,6 +2675,22 @@ def ensure_sqlite_column(conn: sqlite3.Connection, table_name: str, column_name:
     }
     if column_name not in columns:
         conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+
+def ensure_employee_compensation_columns(conn: sqlite3.Connection) -> None:
+    if is_postgres_connection(conn):
+        conn.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS compensation_type text NOT NULL DEFAULT 'none'")
+        conn.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS salary_amount numeric(18,6) NOT NULL DEFAULT 0")
+        conn.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS salary_currency text NOT NULL DEFAULT 'ARS'")
+        conn.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS salary_frequency text NOT NULL DEFAULT 'monthly'")
+        conn.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS salary_notes text")
+        return
+
+    ensure_sqlite_column(conn, "employees", "compensation_type", "TEXT NOT NULL DEFAULT 'none'")
+    ensure_sqlite_column(conn, "employees", "salary_amount", "REAL NOT NULL DEFAULT 0")
+    ensure_sqlite_column(conn, "employees", "salary_currency", "TEXT NOT NULL DEFAULT 'ARS'")
+    ensure_sqlite_column(conn, "employees", "salary_frequency", "TEXT NOT NULL DEFAULT 'monthly'")
+    ensure_sqlite_column(conn, "employees", "salary_notes", "TEXT")
 
 
 DEFAULT_WEB_PASSWORD = "Indyana2026!"
@@ -2488,6 +2780,7 @@ APP_MODULES = [
     ("composite_booking", "Liquidaciones compuestas"),
     ("caserio", "El Caserio"),
     ("finance_movements", "Movimientos financieros"),
+    ("payroll_compensation", "Sueldos y compensaciones"),
     ("artist_finance", "Finanzas Artista"),
     ("artists", "ABM Artistas"),
     ("employees", "ABM Empleados"),
@@ -2539,29 +2832,35 @@ def seed_app_modules(conn: sqlite3.Connection) -> None:
     now = datetime.now().isoformat(timespec="seconds")
     for module_key, label in APP_MODULES:
         conn.execute(
-            """
+            db_sql(
+                conn,
+                """
             INSERT INTO app_modules (module_key, label, active, created_at)
-            VALUES (?, ?, 1, ?)
+            VALUES (?, ?, ?, ?)
             ON CONFLICT(module_key) DO UPDATE SET
                 label = excluded.label,
-                active = 1
+                active = excluded.active
             """,
-            (module_key, label, now),
+            ),
+            (module_key, label, db_bool(True), now),
         )
 
 
 def upsert_employee_functions(conn: sqlite3.Connection, employee_id: int, functions: list[str]) -> None:
     now = datetime.now().isoformat(timespec="seconds")
     cleaned_functions = clean_employee_functions(functions)
-    conn.execute("DELETE FROM employee_functions WHERE employee_id = ?", (employee_id,))
+    conn.execute(db_sql(conn, "DELETE FROM employee_functions WHERE employee_id = ?"), (employee_id,))
     for function_code in cleaned_functions:
         if is_postgres_connection(conn):
             conn.execute(
-                """
+                db_sql(
+                    conn,
+                    """
                 INSERT INTO employee_functions (employee_id, function_code, created_at)
                 VALUES (?, ?, ?)
                 ON CONFLICT(employee_id, function_code) DO NOTHING
                 """,
+                ),
                 (employee_id, function_code, now),
             )
         else:
@@ -2600,26 +2899,29 @@ def upsert_employee_user(
 
     now = datetime.now().isoformat(timespec="seconds")
     existing = conn.execute(
-        "SELECT id, password_hash FROM app_users WHERE lower(username) = lower(?)",
+        db_sql(conn, "SELECT id, password_hash FROM app_users WHERE lower(username) = lower(?)"),
         (clean_user,),
     ).fetchone()
     password_hash = hash_web_password(password) if password else None
     if existing is None:
         conn.execute(
-            """
+            db_sql(
+                conn,
+                """
             INSERT INTO app_users (
                 employee_id, username, password_hash, must_change_password, global_role, active,
                 auth_source, notes, created_at, updated_at
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
+            ),
             (
                 employee_id,
                 clean_user,
                 password_hash,
-                1 if must_change_password else 0,
+                db_bool(bool(must_change_password)),
                 role,
-                1 if active else 0,
+                db_bool(active),
                 auth_source,
                 "Usuario operativo cloud/local.",
                 now,
@@ -2631,7 +2933,7 @@ def upsert_employee_user(
         params: list[object] = [
             employee_id,
             role,
-            1 if active else 0,
+            db_bool(active),
             auth_source,
         ]
         if password_hash:
@@ -2639,9 +2941,11 @@ def upsert_employee_user(
                 password_hash = ?,
                 must_change_password = ?,
             """
-            params.extend([password_hash, 1 if must_change_password else 0])
+            params.extend([password_hash, db_bool(bool(must_change_password))])
         conn.execute(
-            f"""
+            db_sql(
+                conn,
+                f"""
             UPDATE app_users
             SET employee_id = ?,
                 global_role = ?,
@@ -2651,6 +2955,7 @@ def upsert_employee_user(
                 updated_at = ?
             WHERE id = ?
             """,
+            ),
             (*params, now, existing["id"]),
         )
 
@@ -2669,6 +2974,8 @@ def ensure_booking_commission_rules_table(conn: sqlite3.Connection) -> None:
             artist text NOT NULL,
             percentage numeric(9, 4) NOT NULL DEFAULT 0,
             calculation_base text NOT NULL DEFAULT 'commissionable',
+            include_booking_fee_paid_shows boolean NOT NULL DEFAULT false,
+            priority_order integer,
             active_from_month text,
             active_to_month text,
             active boolean NOT NULL DEFAULT true,
@@ -2685,6 +2992,24 @@ def ensure_booking_commission_rules_table(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_booking_commission_rules_employee ON booking_commission_rules(employee_id)"
+    )
+    conn.execute(
+        "ALTER TABLE booking_commission_rules ADD COLUMN IF NOT EXISTS include_booking_fee_paid_shows boolean NOT NULL DEFAULT false"
+    )
+    conn.execute(
+        "ALTER TABLE booking_commission_rules ADD COLUMN IF NOT EXISTS priority_order integer"
+    )
+    conn.execute(
+        "ALTER TABLE booking_commission_rules ALTER COLUMN priority_order DROP NOT NULL"
+    )
+    conn.execute(
+        "ALTER TABLE booking_commission_rules ALTER COLUMN priority_order DROP DEFAULT"
+    )
+    conn.execute(
+        "ALTER TABLE booking_commission_rules DROP CONSTRAINT IF EXISTS booking_commission_rules_priority_chk"
+    )
+    conn.execute(
+        "ALTER TABLE booking_commission_rules ADD CONSTRAINT booking_commission_rules_priority_chk CHECK (priority_order BETWEEN 1 AND 5)"
     )
 
 
@@ -2711,6 +3036,8 @@ def row_to_booking_commission_rule(row) -> dict:
         "artist": row["artist"],
         "percent": float(row["percentage"] or 0),
         "base": row["calculation_base"] or "commissionable",
+        "include_booking_fee_paid_shows": bool(row["include_booking_fee_paid_shows"]),
+        "priority_order": int(row["priority_order"]) if row["priority_order"] is not None else None,
         "start_month": row["active_from_month"],
         "end_month": row["active_to_month"],
         "active": bool(row["active"]),
@@ -2739,7 +3066,9 @@ def upsert_employee_permissions(
         else:
             scope_payload = json.dumps(permission.scope, ensure_ascii=False)
         conn.execute(
-            """
+            db_sql(
+                conn,
+                """
             INSERT INTO module_permissions (
                 employee_id, module_key, can_access, can_create, can_view_history,
                 can_edit, can_approve, scope_json, notes, created_at, updated_at
@@ -2755,14 +3084,15 @@ def upsert_employee_permissions(
                 notes = excluded.notes,
                 updated_at = excluded.updated_at
             """,
+            ),
             (
                 employee_id,
                 permission.module_key,
-                1 if permission.can_access else 0,
-                1 if permission.can_create else 0,
-                1 if permission.can_view_history else 0,
-                1 if permission.can_edit else 0,
-                1 if permission.can_approve else 0,
+                db_bool(permission.can_access),
+                db_bool(permission.can_create),
+                db_bool(permission.can_view_history),
+                db_bool(permission.can_edit),
+                db_bool(permission.can_approve),
                 scope_payload,
                 clean_optional_text(permission.notes),
                 now,
@@ -2813,14 +3143,17 @@ def user_module_permission(
         }
 
     user = conn.execute(
-        """
+        db_sql(
+            conn,
+            """
         SELECT u.*, e.id AS employee_ref
         FROM app_users u
         LEFT JOIN employees e ON e.id = u.employee_id
         WHERE lower(u.username) = lower(?)
-          AND u.active = 1
+          AND u.active = ?
         """,
-        (username,),
+        ),
+        (username, db_bool(True)),
     ).fetchone()
     if user is None:
         return {"allowed": False, "is_admin": False, "scope": set()}
@@ -2842,12 +3175,15 @@ def user_module_permission(
         return {"allowed": False, "is_admin": False, "scope": set()}
 
     permission = conn.execute(
-        """
+        db_sql(
+            conn,
+            """
         SELECT can_access, can_create, can_view_history, can_edit, can_approve, scope_json
         FROM module_permissions
         WHERE employee_id = ?
           AND module_key = ?
         """,
+        ),
         (employee_id, module_key),
     ).fetchone()
     if permission is None or not bool(permission["can_access"]):
@@ -2906,6 +3242,23 @@ def require_module_permission(
             if cleaned and cleaned.casefold() not in scoped_artists:
                 raise HTTPException(status_code=403, detail="No tenes permiso para operar este artista.")
     return permission
+
+
+def is_payroll_compensation_movement(
+    business_area: str | None,
+    category: str | None,
+    movement_type: str | None = None,
+) -> bool:
+    normalized_area = (business_area or "").strip().lower()
+    normalized_category = (category or "").strip().lower()
+    normalized_type = (movement_type or "").strip().lower()
+    return (
+        normalized_area == "estructura"
+        and (
+            normalized_type == "salario"
+            or normalized_category in {"salario", "comision_interna"}
+        )
+    )
 
 
 def user_artist_scope_for_module(
@@ -3333,6 +3686,65 @@ def row_to_booking_account_application(row: sqlite3.Row) -> dict:
     return data
 
 
+def row_to_booking_account_movement(row: sqlite3.Row) -> dict:
+    data = dict(row)
+    data["proof_refs"] = parse_json_list(data.pop("proof_refs_json", "[]"))
+    data["amount"] = float(data.get("amount") or 0)
+    data["applied_amount"] = float(data.get("applied_amount") or 0)
+    data["unapplied_amount"] = float(data.get("unapplied_amount") or 0)
+    return data
+
+
+def ensure_booking_account_movements_table(conn: sqlite3.Connection) -> None:
+    if is_postgres_connection(conn):
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS booking_account_movements (
+                id bigserial PRIMARY KEY,
+                movement_date date NOT NULL,
+                artist text NOT NULL,
+                movement_type text NOT NULL,
+                amount numeric(18, 6) NOT NULL DEFAULT 0,
+                applied_amount numeric(18, 6) NOT NULL DEFAULT 0,
+                unapplied_amount numeric(18, 6) NOT NULL DEFAULT 0,
+                payment_method text NOT NULL DEFAULT 'transferencia',
+                counterparty text,
+                proof_refs_json jsonb NOT NULL DEFAULT '[]'::jsonb,
+                notes text,
+                created_by text,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                updated_at timestamptz NOT NULL DEFAULT now(),
+                CONSTRAINT booking_account_mov_type_chk CHECK (movement_type IN ('cobro_deuda_booking', 'pago_saldo_artista', 'compensacion_booking', 'pago_deuda_boliche', 'ajuste_booking')),
+                CONSTRAINT booking_account_mov_method_chk CHECK (payment_method IN ('transferencia', 'efectivo', 'compensacion', 'ajuste', 'otro'))
+            )
+            """
+        )
+    else:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS booking_account_movements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                movement_date TEXT NOT NULL,
+                artist TEXT NOT NULL,
+                movement_type TEXT NOT NULL,
+                amount REAL NOT NULL DEFAULT 0,
+                applied_amount REAL NOT NULL DEFAULT 0,
+                unapplied_amount REAL NOT NULL DEFAULT 0,
+                payment_method TEXT NOT NULL DEFAULT 'transferencia',
+                counterparty TEXT,
+                proof_refs_json TEXT NOT NULL DEFAULT '[]',
+                notes TEXT,
+                created_by TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_booking_account_mov_artist ON booking_account_movements(artist, movement_date)"
+    )
+
+
 def ensure_booking_account_applications_table(conn: sqlite3.Connection) -> None:
     if is_postgres_connection(conn):
         conn.execute(
@@ -3348,6 +3760,7 @@ def ensure_booking_account_applications_table(conn: sqlite3.Connection) -> None:
                 payment_method text NOT NULL DEFAULT 'transferencia',
                 counterparty text,
                 linked_show_id bigint REFERENCES booking_shows(id) ON DELETE SET NULL,
+                movement_id bigint,
                 proof_refs_json jsonb NOT NULL DEFAULT '[]'::jsonb,
                 notes text,
                 created_at timestamptz NOT NULL DEFAULT now(),
@@ -3372,6 +3785,7 @@ def ensure_booking_account_applications_table(conn: sqlite3.Connection) -> None:
                 payment_method TEXT NOT NULL DEFAULT 'transferencia',
                 counterparty TEXT,
                 linked_show_id INTEGER REFERENCES booking_shows(id) ON DELETE SET NULL,
+                movement_id INTEGER,
                 proof_refs_json TEXT NOT NULL DEFAULT '[]',
                 notes TEXT,
                 created_at TEXT NOT NULL,
@@ -3381,6 +3795,19 @@ def ensure_booking_account_applications_table(conn: sqlite3.Connection) -> None:
         )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_booking_account_app_show ON booking_account_applications(show_id, application_date)"
+    )
+    ensure_booking_account_movements_table(conn)
+    if is_postgres_connection(conn):
+        conn.execute(
+            """
+            ALTER TABLE booking_account_applications
+            ADD COLUMN IF NOT EXISTS movement_id bigint REFERENCES booking_account_movements(id) ON DELETE SET NULL
+            """
+        )
+    else:
+        ensure_sqlite_column(conn, "booking_account_applications", "movement_id", "INTEGER")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_booking_account_app_movement ON booking_account_applications(movement_id)"
     )
 
 
@@ -3486,6 +3913,43 @@ def booking_same_show_counterpart_effect(
     if abs(abs(counterpart_balance) - abs(counterpart_effect)) <= 0.01:
         counterpart_effect = -counterpart_balance
     return counterpart_target, counterpart_effect
+
+
+def booking_parent_application_type(
+    movement_type: str,
+    target_balance: str,
+    current_balance: float,
+) -> str:
+    if movement_type == "pago_deuda_boliche":
+        if target_balance != "venue":
+            raise HTTPException(status_code=400, detail="El pago de boliche solo puede aplicarse a deuda de boliche.")
+        return "venue_payment"
+    if movement_type == "pago_saldo_artista":
+        return "artist_payment" if target_balance == "artist" else "adjustment"
+    if movement_type == "cobro_deuda_booking":
+        if target_balance == "artist":
+            return "artist_reimbursement" if current_balance < -0.01 else "artist_payment"
+        if target_balance == "producer":
+            return "producer_reimbursement"
+    if movement_type == "compensacion_booking":
+        if target_balance == "venue":
+            raise HTTPException(status_code=400, detail="La deuda de boliche se salda como pago, no como compensacion.")
+        return "compensation"
+    return "adjustment"
+
+
+def booking_block_application_type(target_balance: str, current_balance: float, aggregate_net: float) -> str:
+    if target_balance == "venue":
+        return "venue_payment"
+    if target_balance == "artist":
+        if current_balance > 0.01:
+            return "artist_payment" if aggregate_net < -0.01 else "compensation"
+        return "artist_reimbursement" if aggregate_net > 0.01 else "compensation"
+    if target_balance == "producer":
+        if current_balance < -0.01:
+            return "producer_reimbursement" if aggregate_net > 0.01 else "compensation"
+        return "compensation"
+    return "adjustment"
 
 
 def update_booking_settlement_from_account(
@@ -4591,7 +5055,167 @@ def finance_movement_item(row: sqlite3.Row) -> dict:
         item["proof_refs"] = json.loads(item.pop("proof_refs_json") or "[]")
     except json.JSONDecodeError:
         item["proof_refs"] = []
+    item["allocation_lines"] = item.get("allocation_lines", [])
     return item
+
+
+def ensure_finance_movement_allocations_table(conn: sqlite3.Connection) -> None:
+    if is_postgres_connection(conn):
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS finance_movement_allocations (
+                id bigserial PRIMARY KEY,
+                movement_id bigint NOT NULL REFERENCES finance_staging_movements(id) ON DELETE CASCADE,
+                allocation_type text NOT NULL DEFAULT 'indyana_cost',
+                target_name text NOT NULL,
+                business_area text,
+                amount numeric(18, 6) NOT NULL DEFAULT 0,
+                currency text NOT NULL DEFAULT 'ARS',
+                fx_rate numeric(18, 6),
+                amount_ars numeric(18, 6) NOT NULL DEFAULT 0,
+                notes text,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                updated_at timestamptz NOT NULL DEFAULT now()
+            )
+            """
+        )
+    else:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS finance_movement_allocations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                movement_id INTEGER NOT NULL REFERENCES finance_staging_movements(id) ON DELETE CASCADE,
+                allocation_type TEXT NOT NULL DEFAULT 'indyana_cost',
+                target_name TEXT NOT NULL,
+                business_area TEXT,
+                amount REAL NOT NULL DEFAULT 0,
+                currency TEXT NOT NULL DEFAULT 'ARS',
+                fx_rate REAL,
+                amount_ars REAL NOT NULL DEFAULT 0,
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_finance_allocations_movement ON finance_movement_allocations(movement_id)"
+    )
+
+
+def finance_allocation_item(row: sqlite3.Row) -> dict:
+    data = dict(row)
+    for key in ("amount", "fx_rate", "amount_ars"):
+        if key in data:
+            data[key] = float(data.get(key) or 0)
+    return data
+
+
+def finance_allocation_rows_for_ids(conn: sqlite3.Connection, movement_ids: list[int]) -> dict[int, list[dict]]:
+    if not movement_ids:
+        return {}
+    ensure_finance_movement_allocations_table(conn)
+    placeholders = ",".join("?" for _ in movement_ids)
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM finance_movement_allocations
+        WHERE movement_id IN ({placeholders})
+        ORDER BY movement_id, id
+        """,
+        movement_ids,
+    ).fetchall()
+    grouped: dict[int, list[dict]] = {}
+    for row in rows:
+        item = finance_allocation_item(row)
+        grouped.setdefault(int(item["movement_id"]), []).append(item)
+    return grouped
+
+
+def finance_normalized_allocations(
+    request: FinanceMovementRequest,
+    movement_amount_ars: float,
+) -> list[dict]:
+    if not request.allocation_lines:
+        return [
+            {
+                "allocation_type": "indyana_cost",
+                "target_name": "Indyana",
+                "business_area": request.business_area,
+                "amount": request.amount,
+                "currency": request.currency,
+                "fx_rate": request.fx_rate,
+                "amount_ars": movement_amount_ars,
+                "notes": None,
+            }
+        ]
+
+    normalized: list[dict] = []
+    total_ars = 0.0
+    for line in request.allocation_lines:
+        currency = line.currency or request.currency
+        fx_rate = line.fx_rate if currency == "USD" else None
+        if currency == "USD" and not fx_rate:
+            fx_rate = request.fx_rate
+        amount_ars = finance_amount_ars(line.amount, currency, fx_rate)
+        normalized.append(
+            {
+                "allocation_type": line.allocation_type,
+                "target_name": line.target_name.strip(),
+                "business_area": line.business_area or request.business_area,
+                "amount": line.amount,
+                "currency": currency,
+                "fx_rate": fx_rate,
+                "amount_ars": amount_ars,
+                "notes": clean_optional_text(line.notes),
+            }
+        )
+        total_ars += amount_ars
+
+    if abs(total_ars - movement_amount_ars) > 0.05:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "La distribucion economica debe cerrar con el compromiso total "
+                f"del movimiento. Distribuido: {round(total_ars, 2)} / Movimiento: {round(movement_amount_ars, 2)}."
+            ),
+        )
+    return normalized
+
+
+def replace_finance_movement_allocations(
+    conn: sqlite3.Connection,
+    movement_id: int,
+    request: FinanceMovementRequest,
+    movement_amount_ars: float,
+    now: str,
+) -> None:
+    ensure_finance_movement_allocations_table(conn)
+    allocations = finance_normalized_allocations(request, movement_amount_ars)
+    conn.execute("DELETE FROM finance_movement_allocations WHERE movement_id = ?", (movement_id,))
+    for line in allocations:
+        conn.execute(
+            """
+            INSERT INTO finance_movement_allocations (
+                movement_id, allocation_type, target_name, business_area,
+                amount, currency, fx_rate, amount_ars, notes, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                movement_id,
+                line["allocation_type"],
+                line["target_name"],
+                line["business_area"],
+                line["amount"],
+                line["currency"],
+                line["fx_rate"],
+                line["amount_ars"],
+                line["notes"],
+                now,
+                now,
+            ),
+        )
 
 
 def finance_ledger_entry(
@@ -4890,71 +5514,26 @@ def build_artist_finance_ledger(
 
 def booking_artist_options() -> list[str]:
     artists: dict[str, str] = {}
-    use_operational_db = operational_db_settings().driver == "postgres" or VPO_BOOKING_DB_PATH.exists()
+    init_booking_db()
+    with booking_connect() as conn:
+        artist_rows = conn.execute(
+            """
+            SELECT stage_name
+            FROM booking_artists
+            WHERE active = 1
+            ORDER BY stage_name
+            """
+        ).fetchall()
+        show_rows = conn.execute("SELECT DISTINCT artist FROM booking_shows").fetchall()
 
-    if use_operational_db:
-        init_booking_db()
-        with booking_connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT stage_name
-                FROM booking_artists
-                WHERE active = 1
-                ORDER BY stage_name
-                """
-            ).fetchall()
-        for row in rows:
-            cleaned = clean_booking_artist(row["stage_name"])
-            if cleaned:
-                artists.setdefault(cleaned.casefold(), cleaned)
-
-    if artists:
-        return sorted(artists.values(), key=lambda value: value.casefold())
-
-    if BOOKING_ARTIST_REGISTRY_PATH.exists():
-        try:
-            registry = json.loads(BOOKING_ARTIST_REGISTRY_PATH.read_text(encoding="utf-8-sig"))
-        except json.JSONDecodeError:
-            registry = []
-
-        if isinstance(registry, list):
-            for value in registry:
-                cleaned = clean_booking_artist(value)
-                if cleaned:
-                    artists.setdefault(cleaned.casefold(), cleaned)
-
-    for path in [
-        BOOKING_RAW_DIR / "booking_raw_artists.parquet",
-        BOOKING_RAW_DIR / "booking_raw_pm_artists.parquet",
-    ]:
-        if not path.exists():
-            continue
-
-        df = pl.read_parquet(path)
-        if "Nombre" not in df.columns:
-            continue
-
-        for value in df.get_column("Nombre").to_list():
-            cleaned = clean_booking_artist(value)
-            if cleaned:
-                artists.setdefault(cleaned.casefold(), cleaned)
-
-    if BOOKING_STANDARDIZED_PATH.exists():
-        df = pl.read_parquet(BOOKING_STANDARDIZED_PATH)
-        if "artist_statement" in df.columns:
-            for value in df.get_column("artist_statement").drop_nulls().unique().to_list():
-                cleaned = clean_booking_artist(value)
-                if cleaned:
-                    artists.setdefault(cleaned.casefold(), cleaned)
-
-    if use_operational_db:
-        init_booking_db()
-        with booking_connect() as conn:
-            rows = conn.execute("SELECT DISTINCT artist FROM booking_shows").fetchall()
-        for row in rows:
-            cleaned = clean_booking_artist(row["artist"])
-            if cleaned:
-                artists.setdefault(cleaned.casefold(), cleaned)
+    for row in artist_rows:
+        cleaned = clean_booking_artist(row["stage_name"])
+        if cleaned:
+            artists.setdefault(cleaned.casefold(), cleaned)
+    for row in show_rows:
+        cleaned = clean_booking_artist(row["artist"])
+        if cleaned:
+            artists.setdefault(cleaned.casefold(), cleaned)
 
     return sorted(artists.values(), key=lambda value: value.casefold())
 
@@ -5451,7 +6030,16 @@ def source_monitor(x_vpo_api_key: str | None = Header(default=None)):
 @app.post("/source-monitor/publish")
 def publish_source_monitor_marts(x_vpo_api_key: str | None = Header(default=None)):
     require_api_key(x_vpo_api_key)
-    return publish_required_marts_to_gcs()
+    return start_publish_job()
+
+
+@app.get("/source-monitor/publish/{job_id}")
+def source_monitor_publish_status(
+    job_id: str,
+    x_vpo_api_key: str | None = Header(default=None),
+):
+    require_api_key(x_vpo_api_key)
+    return get_publish_job(job_id)
 
 
 @app.patch("/source-monitor/{monitor_id}")
@@ -6654,6 +7242,7 @@ def booking_shows(
 
 def booking_summary_for_module(module_key: str, x_vpo_username: str | None) -> dict:
     with booking_connect() as conn:
+        ensure_booking_commission_rules_table(conn)
         params: list = []
         artist_scope_sql = apply_artist_scope_sql(conn, x_vpo_username, module_key, params)
         rows = conn.execute(
@@ -6661,25 +7250,58 @@ def booking_summary_for_module(module_key: str, x_vpo_username: str | None) -> d
             SELECT
                 artist,
                 substr(show_date, 1, 7) AS month,
-                COUNT(*) AS shows,
-                SUM(producer_cash_target_amount) AS indyana_total,
-                SUM(CASE WHEN COALESCE(booking_commission_exempt, 0) = 1 THEN 0 ELSE producer_cash_target_amount END) AS commissionable_total,
-                SUM(CASE WHEN COALESCE(booking_commission_exempt, 0) = 1 THEN producer_cash_target_amount ELSE 0 END) AS non_commissionable_total,
-                GROUP_CONCAT(DISTINCT CASE
-                    WHEN COALESCE(booking_commission_exempt, 0) = 1
-                    THEN COALESCE(NULLIF(booking_commission_notes, ''), 'Excluido de comision general')
-                    ELSE NULL
-                END) AS commission_notes
+                COALESCE(producer_cash_target_amount, 0) AS indyana_total,
+                COALESCE(booking_commission_exempt, 0) AS booking_commission_exempt,
+                COALESCE(booking_commission_notes, '') AS commission_notes
             FROM booking_shows
             WHERE status <> 'cancelado'
               {artist_scope_sql}
-            GROUP BY artist, month
             ORDER BY artist, month
             """,
             params,
         ).fetchall()
+        rule_rows = conn.execute(
+            """
+            SELECT
+                booking_commission_rules.artist,
+                booking_commission_rules.percentage,
+                booking_commission_rules.calculation_base,
+                booking_commission_rules.include_booking_fee_paid_shows,
+                booking_commission_rules.priority_order,
+                booking_commission_rules.active_from_month,
+                booking_commission_rules.active_to_month,
+                booking_commission_rules.active,
+                booking_commission_rules.employee_id,
+                COALESCE(employees.display_name, '') AS employee_name
+            FROM booking_commission_rules
+            JOIN employees ON employees.id = booking_commission_rules.employee_id
+            WHERE booking_commission_rules.active = true
+              AND employees.active = true
+            """
+        ).fetchall()
 
     months = sorted({row["month"] for row in rows if row["month"]})
+    rules_by_artist: dict[str, list[dict]] = {}
+    for row in rule_rows:
+        artist = clean_booking_artist(row["artist"])
+        if not artist:
+            continue
+        rules_by_artist.setdefault(artist.casefold(), []).append(
+            {
+                "artist": artist,
+                "employee_name": row["employee_name"] or "",
+                "employee_id": int(row["employee_id"]),
+                "percentage": float(row["percentage"] or 0),
+                "calculation_base": row["calculation_base"] or "commissionable",
+                "include_booking_fee_paid_shows": bool(row["include_booking_fee_paid_shows"]),
+                "priority_order": int(row["priority_order"]) if row["priority_order"] is not None else 1,
+                "stored_priority_order": int(row["priority_order"]) if row["priority_order"] is not None else None,
+                "active_from_month": row["active_from_month"],
+                "active_to_month": row["active_to_month"],
+                "active": bool(row["active"]),
+            }
+        )
+
     by_artist: dict[str, dict] = {}
     for row in rows:
         artist = row["artist"]
@@ -6695,29 +7317,96 @@ def booking_summary_for_module(module_key: str, x_vpo_username: str | None) -> d
                 "indyana_total": 0.0,
                 "commissionable_total": 0.0,
                 "non_commissionable_total": 0.0,
+                "commission_total": 0.0,
+                "indyana_net_total": 0.0,
+                "commission_details": [],
                 "months": {},
                 "notes": [],
             },
         )
         indyana_total = float(row["indyana_total"] or 0)
-        commissionable_total = float(row["commissionable_total"] or 0)
-        non_commissionable_total = float(row["non_commissionable_total"] or 0)
-        shows = int(row["shows"] or 0)
-        item["shows"] += shows
+        show_excludes_general = bool(row["booking_commission_exempt"])
+        commissionable_total = 0.0 if show_excludes_general else indyana_total
+        non_commissionable_total = indyana_total if show_excludes_general else 0.0
+        commission_total = 0.0
+        applied_excluded_rule = False
+        applicable_rules = []
+        for rule in rules_by_artist.get(clean_booking_artist(artist).casefold(), []):
+            if not rule["active"] or rule["percentage"] <= 0:
+                continue
+            if rule["active_from_month"] and month < rule["active_from_month"]:
+                continue
+            if rule["active_to_month"] and month > rule["active_to_month"]:
+                continue
+            if show_excludes_general and not rule["include_booking_fee_paid_shows"]:
+                continue
+            applicable_rules.append(rule)
+
+        cascade_base = indyana_total
+        show_commission_details = []
+        rules_by_priority: dict[int, list[dict]] = {}
+        for rule in applicable_rules:
+            rules_by_priority.setdefault(rule["priority_order"], []).append(rule)
+        for priority_order in sorted(rules_by_priority):
+            base_amount = max(cascade_base, 0.0)
+            priority_commission_total = 0.0
+            for rule in sorted(rules_by_priority[priority_order], key=lambda value: (value["employee_name"], value["employee_id"])):
+                commission_amount = base_amount * rule["percentage"] / 100
+                priority_commission_total += commission_amount
+                commission_total += commission_amount
+                show_commission_details.append(
+                    {
+                        "employee_id": rule["employee_id"],
+                        "employee_name": rule["employee_name"],
+                        "artist": artist,
+                        "month": month,
+                        "priority_order": rule["priority_order"],
+                        "percent": rule["percentage"],
+                        "base_amount": base_amount,
+                        "commission_amount": commission_amount,
+                        "show_excludes_general": show_excludes_general,
+                        "include_booking_fee_paid_shows": rule["include_booking_fee_paid_shows"],
+                    }
+                )
+                if show_excludes_general:
+                    applied_excluded_rule = True
+            cascade_base -= priority_commission_total
+
+        item["shows"] += 1
         item["indyana_total"] += indyana_total
         item["commissionable_total"] += commissionable_total
         item["non_commissionable_total"] += non_commissionable_total
-        item["months"][month] = {
-            "shows": shows,
-            "indyana_total": indyana_total,
-            "commissionable_total": commissionable_total,
-            "non_commissionable_total": non_commissionable_total,
-        }
-        if row["commission_notes"]:
-            for note in str(row["commission_notes"]).split(","):
-                cleaned = note.strip()
-                if cleaned and cleaned not in item["notes"]:
-                    item["notes"].append(cleaned)
+        item["commission_total"] += commission_total
+        item["indyana_net_total"] += indyana_total - commission_total
+        item["commission_details"].extend(show_commission_details)
+        month_bucket = item["months"].setdefault(
+            month,
+            {
+                "shows": 0,
+                "indyana_total": 0.0,
+                "commissionable_total": 0.0,
+                "non_commissionable_total": 0.0,
+                "commission_total": 0.0,
+                "indyana_net_total": 0.0,
+                "commission_details": [],
+            },
+        )
+        month_bucket["shows"] += 1
+        month_bucket["indyana_total"] += indyana_total
+        month_bucket["commissionable_total"] += commissionable_total
+        month_bucket["non_commissionable_total"] += non_commissionable_total
+        month_bucket["commission_total"] += commission_total
+        month_bucket["indyana_net_total"] += indyana_total - commission_total
+        month_bucket["commission_details"].extend(show_commission_details)
+
+        if show_excludes_general:
+            note = clean_optional_text(row["commission_notes"]) or "Excluye comision general"
+            if note not in item["notes"]:
+                item["notes"].append(note)
+            if applied_excluded_rule:
+                applied_note = "Tiene comision particular sobre shows excluidos"
+                if applied_note not in item["notes"]:
+                    item["notes"].append(applied_note)
 
     items = sorted(by_artist.values(), key=lambda value: value["indyana_total"], reverse=True)
     totals = {
@@ -6725,15 +7414,33 @@ def booking_summary_for_module(module_key: str, x_vpo_username: str | None) -> d
         "indyana_total": sum(item["indyana_total"] for item in items),
         "commissionable_total": sum(item["commissionable_total"] for item in items),
         "non_commissionable_total": sum(item["non_commissionable_total"] for item in items),
+        "commission_total": sum(item["commission_total"] for item in items),
+        "indyana_net_total": sum(item["indyana_net_total"] for item in items),
     }
+    commission_rules = [
+        {
+            "employee_id": rule["employee_id"],
+            "employee_name": rule["employee_name"],
+            "artist": rule["artist"],
+            "percent": rule["percentage"],
+            "base": rule["calculation_base"],
+            "include_booking_fee_paid_shows": rule["include_booking_fee_paid_shows"],
+            "priority_order": rule["stored_priority_order"],
+            "start_month": rule["active_from_month"],
+            "end_month": rule["active_to_month"],
+            "active": rule["active"],
+        }
+        for rules in rules_by_artist.values()
+        for rule in rules
+    ]
 
     return {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "months": months,
         "items": items,
         "totals": totals,
+        "commission_rules": commission_rules,
         "db_driver": operational_db_settings().driver,
-        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -6849,11 +7556,16 @@ def save_booking_commission_rules(
             end_month = clean_commission_rule_month(rule.end_month)
             if start_month and end_month and start_month > end_month:
                 raise HTTPException(status_code=400, detail=f"Rango de meses invalido para {artist}.")
+            priority_order = int(rule.priority_order) if rule.priority_order is not None else None
+            if rule.active and float(rule.percent) > 0 and priority_order is None:
+                raise HTTPException(status_code=400, detail=f"Elegi orden de cobro para {artist}.")
 
             prepared_rules.append({
                 "artist": artist,
                 "percentage": float(rule.percent),
                 "calculation_base": rule.base,
+                "include_booking_fee_paid_shows": bool(rule.include_booking_fee_paid_shows),
+                "priority_order": priority_order,
                 "active_from_month": start_month,
                 "active_to_month": end_month,
                 "active": 1 if rule.active else 0,
@@ -6862,16 +7574,43 @@ def save_booking_commission_rules(
             seen_artists.add(artist_key)
 
         for rule in prepared_rules:
+            if not rule["active"] or rule["percentage"] <= 0:
+                continue
+            conflict = conn.execute(
+                """
+                SELECT booking_commission_rules.artist, employees.display_name
+                FROM booking_commission_rules
+                JOIN employees ON employees.id = booking_commission_rules.employee_id
+                WHERE lower(booking_commission_rules.artist) = lower(?)
+                  AND booking_commission_rules.employee_id <> ?
+                  AND booking_commission_rules.active = true
+                  AND employees.active = true
+                  AND COALESCE(booking_commission_rules.percentage, 0) > 0
+                  AND booking_commission_rules.priority_order IS NOT NULL
+                  AND booking_commission_rules.priority_order = ?
+                LIMIT 1
+                """,
+                (rule["artist"], request.employee_id, rule["priority_order"]),
+            ).fetchone()
+            if conflict is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"El orden {rule['priority_order']} para {rule['artist']} ya lo usa {conflict['display_name']}.",
+                )
+
+        for rule in prepared_rules:
             conn.execute(
                 """
                 INSERT INTO booking_commission_rules (
-                    employee_id, artist, percentage, calculation_base, active_from_month,
-                    active_to_month, active, notes, created_by, updated_by, created_at, updated_at
+                    employee_id, artist, percentage, calculation_base, include_booking_fee_paid_shows,
+                    priority_order, active_from_month, active_to_month, active, notes, created_by, updated_by, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(employee_id, artist) DO UPDATE SET
                     percentage = excluded.percentage,
                     calculation_base = excluded.calculation_base,
+                    include_booking_fee_paid_shows = excluded.include_booking_fee_paid_shows,
+                    priority_order = excluded.priority_order,
                     active_from_month = excluded.active_from_month,
                     active_to_month = excluded.active_to_month,
                     active = excluded.active,
@@ -6884,6 +7623,8 @@ def save_booking_commission_rules(
                     rule["artist"],
                     rule["percentage"],
                     rule["calculation_base"],
+                    rule["include_booking_fee_paid_shows"],
+                    rule["priority_order"],
                     rule["active_from_month"],
                     rule["active_to_month"],
                     rule["active"],
@@ -7039,7 +7780,6 @@ def booking_artist_summary(
         "items": items,
         "months": [monthly[key] for key in sorted(monthly.keys(), reverse=True)],
         "totals": totals,
-        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -7442,7 +8182,6 @@ def artist_finance_summary(
         "finance_project_summary": finance_project_summary,
         "finance_movements": finance_movements,
         "recovery_applications": recovery_applications,
-        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -7473,7 +8212,6 @@ def finance_projects(
 
     return {
         "items": [dict(row) for row in rows],
-        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -7528,7 +8266,7 @@ def create_finance_project(
             (int(cursor.lastrowid),),
         ).fetchone()
 
-    return {"item": dict(item), "db_path": legacy_booking_db_path_for_response()}
+    return {"item": dict(item)}
 
 
 @app.get("/finance/movements")
@@ -7628,14 +8366,37 @@ def finance_movements(
             """,
             project_params,
         ).fetchall()
-        artists = filter_artists_by_scope(booking_artist_options(), conn, x_vpo_username, "finance_movements")
+        distinct_artist_params: list = []
+        distinct_artist_scope_sql = apply_artist_scope_sql(conn, x_vpo_username, "finance_movements", distinct_artist_params)
+        distinct_artist_rows = conn.execute(
+            f"""
+            SELECT DISTINCT artist
+            FROM finance_staging_movements
+            WHERE artist IS NOT NULL
+              AND TRIM(artist) != ''
+              {distinct_artist_scope_sql}
+            ORDER BY artist
+            """,
+            distinct_artist_params,
+        ).fetchall()
+        movement_ids = [int(row["id"]) for row in rows]
+        allocation_map = finance_allocation_rows_for_ids(conn, movement_ids)
+        movement_items = []
+        for row in rows:
+            item = finance_movement_item(row)
+            item["allocation_lines"] = allocation_map.get(int(row["id"]), [])
+            movement_items.append(item)
+        artists = sorted(set([
+            *filter_artists_by_scope(booking_artist_options(), conn, x_vpo_username, "finance_movements"),
+            *[row["artist"] for row in distinct_artist_rows if row["artist"]],
+        ]), key=lambda value: value.casefold())
 
     return {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "selected_artist": selected_artist,
         "selected_project": selected_project,
         "artists": artists,
-        "items": [finance_movement_item(row) for row in rows],
+        "items": movement_items,
         "projects": [dict(row) for row in projects],
         "project_options": [row["name"] for row in project_options],
         "summary": {
@@ -7647,7 +8408,6 @@ def finance_movements(
             "official": False,
             "note": "Staging financiero: carga y control. Todavia no impacta automaticamente el ledger oficial.",
         },
-        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -7668,9 +8428,20 @@ def create_finance_movement(
 
     with booking_connect() as conn:
         movement_artist = clean_booking_artist(request.artist) or request.artist.strip()
-        allowed, scoped_artists = user_artist_scope_for_module(conn, x_vpo_username, "finance_movements")
-        if not allowed or (scoped_artists is not None and movement_artist.casefold() not in scoped_artists):
-            raise HTTPException(status_code=403, detail="No tenes permiso para cargar movimientos de este artista.")
+        require_module_permission(
+            conn,
+            x_vpo_username,
+            "finance_movements",
+            "create",
+            artist=movement_artist,
+        )
+        if is_payroll_compensation_movement(request.business_area, request.category, request.movement_type):
+            require_module_permission(
+                conn,
+                x_vpo_username,
+                "payroll_compensation",
+                "create",
+            )
         project_id, project_name = resolve_finance_project(conn, request, now)
         cursor = conn.execute(
             """
@@ -7721,18 +8492,21 @@ def create_finance_movement(
                 now,
             ),
         )
+        movement_id = int(cursor.lastrowid)
+        replace_finance_movement_allocations(conn, movement_id, request, amount_ars, now)
         row = conn.execute(
             """
             SELECT *
             FROM finance_staging_movements
             WHERE id = ?
             """,
-            (int(cursor.lastrowid),),
+            (movement_id,),
         ).fetchone()
+        item = finance_movement_item(row)
+        item["allocation_lines"] = finance_allocation_rows_for_ids(conn, [movement_id]).get(movement_id, [])
 
     return {
-        "item": finance_movement_item(row),
-        "db_path": legacy_booking_db_path_for_response(),
+        "item": item,
     }
 
 
@@ -7771,18 +8545,21 @@ def update_finance_movement(
 
         movement_artist = clean_booking_artist(request.artist) or request.artist.strip()
         existing_artist = clean_booking_artist(existing["artist"]) if existing else ""
-        allowed, scoped_artists = user_artist_scope_for_module(conn, x_vpo_username, "finance_movements")
-        if (
-            not allowed
-            or (
-                scoped_artists is not None
-                and (
-                    movement_artist.casefold() not in scoped_artists
-                    or (existing_artist and existing_artist.casefold() not in scoped_artists)
-                )
+        require_module_permission(
+            conn,
+            x_vpo_username,
+            "finance_movements",
+            "edit",
+            artist=movement_artist,
+            existing_artist=existing_artist,
+        )
+        if is_payroll_compensation_movement(request.business_area, request.category, request.movement_type):
+            require_module_permission(
+                conn,
+                x_vpo_username,
+                "payroll_compensation",
+                "edit",
             )
-        ):
-            raise HTTPException(status_code=403, detail="No tenes permiso para editar movimientos de este artista.")
 
         project_id, project_name = resolve_finance_project(conn, request, now)
         conn.execute(
@@ -7856,14 +8633,16 @@ def update_finance_movement(
                 movement_id,
             ),
         )
+        replace_finance_movement_allocations(conn, movement_id, request, amount_ars, now)
         row = conn.execute(
             "SELECT * FROM finance_staging_movements WHERE id = ?",
             (movement_id,),
         ).fetchone()
+        item = finance_movement_item(row)
+        item["allocation_lines"] = finance_allocation_rows_for_ids(conn, [movement_id]).get(movement_id, [])
 
     return {
-        "item": finance_movement_item(row),
-        "db_path": legacy_booking_db_path_for_response(),
+        "item": item,
     }
 
 
@@ -7903,7 +8682,6 @@ def booking_artist_records(
 
     return {
         "items": [row_to_booking_artist(row) for row in rows],
-        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -7950,7 +8728,6 @@ def create_booking_artist_record(
 
     return {
         "item": row_to_booking_artist(row),
-        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -8008,7 +8785,6 @@ def update_booking_artist_record(
 
     return {
         "item": row_to_booking_artist(row),
-        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -8039,7 +8815,6 @@ def deactivate_booking_artist_record(
 
     return {
         "item": row_to_booking_artist(row),
-        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -8047,6 +8822,7 @@ def deactivate_booking_artist_record(
 def employee_records(
     include_inactive: bool = False,
     x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
 ) -> dict:
     require_api_key(x_vpo_api_key)
     if operational_db_settings().driver == "sqlite":
@@ -8055,6 +8831,18 @@ def employee_records(
     where = "" if include_inactive else "WHERE active = ?"
     params = () if include_inactive else (db_bool(True),)
     with operational_connect() as conn:
+        ensure_employee_compensation_columns(conn)
+        employees_permission = require_module_permission(conn, x_vpo_username, "employees", "access")
+        payroll_permission = user_module_permission(conn, x_vpo_username, "payroll_compensation")
+        can_manage_employees = bool(
+            employees_permission.get("is_admin")
+            or employees_permission.get("can_edit")
+            or employees_permission.get("can_approve")
+        )
+        can_view_compensation = bool(
+            payroll_permission.get("allowed")
+            and payroll_permission.get("can_access")
+        )
         rows = conn.execute(
             db_sql(
                 conn,
@@ -8067,12 +8855,84 @@ def employee_records(
             ),
             params,
         ).fetchall()
+        items = []
+        for row in rows:
+            item = row_to_employee(conn, row)
+            if not can_view_compensation:
+                item["compensation_type"] = "none"
+                item["salary_amount"] = 0.0
+                item["salary_currency"] = "ARS"
+                item["salary_frequency"] = "monthly"
+                item["salary_notes"] = None
+            if not can_manage_employees:
+                item["users"] = []
+                item["permissions"] = []
+            items.append(item)
 
         return {
-            "items": [row_to_employee(conn, row) for row in rows],
+            "items": items,
             "function_options": EMPLOYEE_FUNCTION_OPTIONS,
             "modules": [{"module_key": key, "label": label} for key, label in APP_MODULES],
-            "db_path": legacy_booking_db_path_for_response(),
+            "db_driver": operational_db_settings().driver,
+        }
+
+
+@app.get("/employees/finance-options")
+def employee_finance_options(
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    if operational_db_settings().driver == "sqlite":
+        init_booking_db()
+
+    with operational_connect() as conn:
+        ensure_employee_compensation_columns(conn)
+        require_module_permission(conn, x_vpo_username, "finance_movements", "access")
+        require_module_permission(conn, x_vpo_username, "payroll_compensation", "access")
+        rows = conn.execute(
+            db_sql(
+                conn,
+                """
+            SELECT id, display_name, compensation_type, salary_amount,
+                   salary_currency, salary_frequency, active, created_at, updated_at
+            FROM employees
+            WHERE active = ?
+            ORDER BY display_name
+            """,
+            ),
+            (db_bool(True),),
+        ).fetchall()
+
+        items = []
+        for row in rows:
+            functions = conn.execute(
+                db_sql(
+                    conn,
+                    """
+                SELECT function_code
+                FROM employee_functions
+                WHERE employee_id = ?
+                ORDER BY function_code
+                """,
+                ),
+                (row["id"],),
+            ).fetchall()
+            items.append({
+                "id": row["id"],
+                "display_name": row["display_name"],
+                "compensation_type": row["compensation_type"] or "none",
+                "salary_amount": float(row["salary_amount"] or 0),
+                "salary_currency": row["salary_currency"] or "ARS",
+                "salary_frequency": row["salary_frequency"] or "monthly",
+                "active": bool(row["active"]),
+                "functions": [item["function_code"] for item in functions],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+            })
+
+        return {
+            "items": items,
             "db_driver": operational_db_settings().driver,
         }
 
@@ -8086,6 +8946,7 @@ def employee_commission_options(
     init_booking_db()
 
     with booking_connect() as conn:
+        ensure_employee_compensation_columns(conn)
         permission = require_module_permission(conn, x_vpo_username, "booking_commissions", "access")
         employee_filter_sql = ""
         params: list = []
@@ -8382,15 +9243,21 @@ def create_employee_record(
 
     now = datetime.now().isoformat(timespec="seconds")
     with booking_connect() as conn:
+        ensure_employee_compensation_columns(conn)
         try:
             cursor = conn.execute(
-                """
+                db_sql(
+                    conn,
+                    """
                 INSERT INTO employees (
                     display_name, legal_name, cuit, phone, email, address,
-                    notes, active, created_at, updated_at
+                    compensation_type, salary_amount, salary_currency, salary_frequency,
+                    salary_notes, notes, active, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                RETURNING id
                 """,
+                ),
                 (
                     display_name,
                     clean_optional_text(request.legal_name) or display_name,
@@ -8398,8 +9265,13 @@ def create_employee_record(
                     clean_optional_text(request.phone),
                     clean_optional_text(request.email),
                     clean_optional_text(request.address),
+                    request.compensation_type,
+                    request.salary_amount,
+                    request.salary_currency,
+                    request.salary_frequency,
+                    clean_optional_text(request.salary_notes),
                     clean_optional_text(request.notes),
-                    1 if request.active else 0,
+                    db_bool(request.active),
                     now,
                     now,
                 ),
@@ -8407,7 +9279,8 @@ def create_employee_record(
         except sqlite3.IntegrityError as exc:
             raise HTTPException(status_code=409, detail="Employee already exists.") from exc
 
-        employee_id = int(cursor.lastrowid)
+        returned = cursor.fetchone()
+        employee_id = int(returned["id"] if returned else cursor.lastrowid)
         upsert_employee_functions(conn, employee_id, request.functions)
         upsert_employee_user(conn, employee_id, request.username, request.user_role, request.user_active)
         if request.permissions is not None:
@@ -8435,11 +9308,10 @@ def create_employee_record(
                 request.password,
                 request.must_change_password,
             )
-        row = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
+        row = conn.execute(db_sql(conn, "SELECT * FROM employees WHERE id = ?"), (employee_id,)).fetchone()
 
         return {
             "item": row_to_employee(conn, row),
-            "db_path": legacy_booking_db_path_for_response(),
         }
 
 
@@ -8458,13 +9330,16 @@ def update_employee_record(
 
     now = datetime.now().isoformat(timespec="seconds")
     with booking_connect() as conn:
-        existing = conn.execute("SELECT id FROM employees WHERE id = ?", (employee_id,)).fetchone()
+        ensure_employee_compensation_columns(conn)
+        existing = conn.execute(db_sql(conn, "SELECT id FROM employees WHERE id = ?"), (employee_id,)).fetchone()
         if existing is None:
             raise HTTPException(status_code=404, detail="Employee not found.")
 
         try:
             conn.execute(
-                """
+                db_sql(
+                    conn,
+                    """
                 UPDATE employees
                 SET display_name = ?,
                     legal_name = ?,
@@ -8472,11 +9347,17 @@ def update_employee_record(
                     phone = ?,
                     email = ?,
                     address = ?,
+                    compensation_type = ?,
+                    salary_amount = ?,
+                    salary_currency = ?,
+                    salary_frequency = ?,
+                    salary_notes = ?,
                     notes = ?,
                     active = ?,
                     updated_at = ?
                 WHERE id = ?
                 """,
+                ),
                 (
                     display_name,
                     clean_optional_text(request.legal_name) or display_name,
@@ -8484,8 +9365,13 @@ def update_employee_record(
                     clean_optional_text(request.phone),
                     clean_optional_text(request.email),
                     clean_optional_text(request.address),
+                    request.compensation_type,
+                    request.salary_amount,
+                    request.salary_currency,
+                    request.salary_frequency,
+                    clean_optional_text(request.salary_notes),
                     clean_optional_text(request.notes),
-                    1 if request.active else 0,
+                    db_bool(request.active),
                     now,
                     employee_id,
                 ),
@@ -8520,11 +9406,10 @@ def update_employee_record(
                 request.password,
                 request.must_change_password,
             )
-        row = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
+        row = conn.execute(db_sql(conn, "SELECT * FROM employees WHERE id = ?"), (employee_id,)).fetchone()
 
         return {
             "item": row_to_employee(conn, row),
-            "db_path": legacy_booking_db_path_for_response(),
         }
 
 
@@ -8541,6 +9426,7 @@ def set_employee_password(
     init_booking_db()
     now = datetime.now().isoformat(timespec="seconds")
     with booking_connect() as conn:
+        ensure_employee_compensation_columns(conn)
         employee = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
         if employee is None:
             raise HTTPException(status_code=404, detail="Employee not found.")
@@ -8588,7 +9474,6 @@ def set_employee_password(
         row = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
         return {
             "item": row_to_employee(conn, row),
-            "db_path": legacy_booking_db_path_for_response(),
         }
 
 
@@ -8602,6 +9487,7 @@ def deactivate_employee_record(
 
     now = datetime.now().isoformat(timespec="seconds")
     with booking_connect() as conn:
+        ensure_employee_compensation_columns(conn)
         existing = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
         if existing is None:
             raise HTTPException(status_code=404, detail="Employee not found.")
@@ -8621,7 +9507,6 @@ def deactivate_employee_record(
 
         return {
             "item": row_to_employee(conn, row),
-            "db_path": legacy_booking_db_path_for_response(),
         }
 
 
@@ -8767,7 +9652,6 @@ def booking_composite_events(
 
     return {
         "items": items,
-        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -9180,7 +10064,6 @@ def caserio_events(
 
     return {
         "items": items,
-        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -9314,7 +10197,6 @@ def create_caserio_event(
 
     return {
         "item": item,
-        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -9398,7 +10280,6 @@ def create_booking_show(
 
     return {
         "item": item,
-        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -9430,7 +10311,6 @@ def update_booking_show(
 
     return {
         "item": item,
-        "db_path": legacy_booking_db_path_for_response(),
     }
 
 
@@ -9689,7 +10569,388 @@ def create_booking_show_account_application(
     return {
         "item": item,
         "linked_item": linked_item,
-        "db_path": legacy_booking_db_path_for_response(),
+    }
+
+
+@app.post("/booking/account-movements")
+def create_booking_account_parent_movement(
+    request: BookingAccountParentMovementRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+    movement_date = validate_iso_date(request.movement_date)
+    artist = clean_booking_artist(request.artist)
+    if not artist:
+        raise HTTPException(status_code=400, detail="Elegir un artista para el movimiento.")
+    amount = float(request.amount or 0)
+    if amount <= 0.01:
+        raise HTTPException(status_code=400, detail="El importe del movimiento debe ser mayor a cero.")
+    now = datetime.now().isoformat(timespec="seconds")
+    notes = (request.notes or "").strip() or None
+    counterparty = (request.counterparty or "").strip() or None
+    proof_refs = clean_receipt_refs(request.proof_refs)
+
+    seen_shows: set[int] = set()
+    if not request.applications:
+        raise HTTPException(status_code=400, detail="Seleccionar al menos un show para aplicar.")
+    for application in request.applications:
+        if application.show_id in seen_shows:
+            raise HTTPException(status_code=400, detail="Un movimiento padre no puede repetir el mismo show.")
+        seen_shows.add(application.show_id)
+
+    with booking_connect() as conn:
+        require_module_permission(conn, x_vpo_username, "booking", "edit", artist=artist)
+        ensure_booking_account_applications_table(conn)
+
+        prepared_applications: list[dict] = []
+        applied_amount = 0.0
+        for application in request.applications:
+            existing = conn.execute("SELECT * FROM booking_shows WHERE id = ?", (application.show_id,)).fetchone()
+            if existing is None:
+                raise HTTPException(status_code=404, detail=f"Show #{application.show_id} no encontrado.")
+            show_artist = clean_booking_artist(existing["artist"])
+            if (show_artist or "").casefold() != artist.casefold():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Show #{application.show_id} pertenece a {show_artist}, no a {artist}.",
+                )
+            require_module_permission(
+                conn,
+                x_vpo_username,
+                "booking",
+                "edit",
+                existing_artist=show_artist,
+            )
+            show = row_to_booking_show(existing)
+            previous_rows = conn.execute(
+                """
+                SELECT *
+                FROM booking_account_applications
+                WHERE show_id = ?
+                ORDER BY application_date, id
+                """,
+                (application.show_id,),
+            ).fetchall()
+            previous_applications = [row_to_booking_account_application(row) for row in previous_rows]
+            current_balance = booking_open_balance_for_target(show, previous_applications, application.target_balance)
+            effect_amount = booking_application_effect(current_balance, application.amount, application.target_balance)
+            counterpart_target, counterpart_effect = booking_same_show_counterpart_effect(
+                show,
+                previous_applications,
+                application.target_balance,
+                effect_amount,
+            )
+            application_type = booking_parent_application_type(
+                request.movement_type,
+                application.target_balance,
+                current_balance,
+            )
+            prepared_applications.append(
+                {
+                    "show_id": application.show_id,
+                    "target_balance": application.target_balance,
+                    "application_type": application_type,
+                    "amount": abs(effect_amount),
+                    "effect_amount": effect_amount,
+                    "counterpart_target": counterpart_target,
+                    "counterpart_effect": counterpart_effect,
+                }
+            )
+            applied_amount += abs(effect_amount)
+
+        if applied_amount <= 0.01:
+            raise HTTPException(status_code=400, detail="No hay importe aplicado a shows.")
+        if applied_amount > amount + 0.01:
+            raise HTTPException(status_code=400, detail="La suma aplicada supera el importe del movimiento.")
+
+        cursor = conn.execute(
+            """
+            INSERT INTO booking_account_movements (
+                movement_date, artist, movement_type, amount, applied_amount, unapplied_amount,
+                payment_method, counterparty, proof_refs_json, notes, created_by, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                movement_date,
+                artist,
+                request.movement_type,
+                amount,
+                applied_amount,
+                max(0.0, amount - applied_amount),
+                request.payment_method,
+                counterparty,
+                booking_application_json_value(conn, proof_refs),
+                notes,
+                x_vpo_username,
+                now,
+                now,
+            ),
+        )
+        movement_id = int(cursor.lastrowid)
+
+        affected_show_ids: set[int] = set()
+        for application in prepared_applications:
+            conn.execute(
+                """
+                INSERT INTO booking_account_applications (
+                    show_id, application_date, target_balance, application_type,
+                    amount, effect_amount, payment_method, counterparty, linked_show_id, movement_id,
+                    proof_refs_json, notes, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    application["show_id"],
+                    movement_date,
+                    application["target_balance"],
+                    application["application_type"],
+                    application["amount"],
+                    application["effect_amount"],
+                    request.payment_method,
+                    counterparty,
+                    None,
+                    movement_id,
+                    booking_application_json_value(conn, proof_refs),
+                    notes,
+                    now,
+                    now,
+                ),
+            )
+            affected_show_ids.add(application["show_id"])
+            if application["counterpart_target"] is not None and application["counterpart_effect"] is not None:
+                counterpart_notes_parts = [f"Contrapartida contable automatica de movimiento padre #{movement_id}"]
+                if notes:
+                    counterpart_notes_parts.append(notes)
+                conn.execute(
+                    """
+                    INSERT INTO booking_account_applications (
+                        show_id, application_date, target_balance, application_type,
+                        amount, effect_amount, payment_method, counterparty, linked_show_id, movement_id,
+                        proof_refs_json, notes, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        application["show_id"],
+                        movement_date,
+                        application["counterpart_target"],
+                        "adjustment",
+                        abs(application["counterpart_effect"]),
+                        application["counterpart_effect"],
+                        "ajuste",
+                        counterparty,
+                        None,
+                        movement_id,
+                        booking_application_json_value(conn, proof_refs),
+                        " | ".join(counterpart_notes_parts),
+                        now,
+                        now,
+                    ),
+                )
+
+        updated_shows = []
+        for affected_show_id in sorted(affected_show_ids):
+            item = fetch_booking_show_item(conn, affected_show_id)
+            first_application = next(
+                (application for application in prepared_applications if application["show_id"] == affected_show_id),
+                None,
+            )
+            application_type = first_application["application_type"] if first_application else "adjustment"
+            updated_shows.append(
+                update_booking_settlement_from_account(conn, affected_show_id, item, application_type, now)
+            )
+
+        movement_row = conn.execute(
+            "SELECT * FROM booking_account_movements WHERE id = ?",
+            (movement_id,),
+        ).fetchone()
+
+    return {
+        "item": row_to_booking_account_movement(movement_row),
+        "updated_shows": updated_shows,
+        "db_driver": operational_db_settings().driver,
+    }
+
+
+@app.post("/booking/account-block-settlements")
+def create_booking_account_block_settlement(
+    request: BookingAccountBlockSettlementRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+    settlement_date = validate_iso_date(request.settlement_date)
+    artist = clean_booking_artist(request.artist)
+    if not artist:
+        raise HTTPException(status_code=400, detail="Elegir un artista para cerrar el bloque.")
+    show_ids = list(dict.fromkeys(int(show_id) for show_id in request.show_ids))
+    if not show_ids:
+        raise HTTPException(status_code=400, detail="Seleccionar al menos un show.")
+    amount = float(request.amount or 0)
+    if amount <= 0.01:
+        raise HTTPException(status_code=400, detail="El importe pagado/cobrado debe ser mayor a cero.")
+    now = datetime.now().isoformat(timespec="seconds")
+    notes = (request.notes or "").strip() or None
+    counterparty = (request.counterparty or "").strip() or None
+    proof_refs = clean_receipt_refs(request.proof_refs)
+
+    with booking_connect() as conn:
+        require_module_permission(conn, x_vpo_username, "booking", "edit", artist=artist)
+        ensure_booking_account_applications_table(conn)
+        placeholders = ",".join("?" for _ in show_ids)
+        rows = conn.execute(
+            f"""
+            SELECT *
+            FROM booking_shows
+            WHERE id IN ({placeholders})
+            ORDER BY show_date, id
+            """,
+            show_ids,
+        ).fetchall()
+        if len(rows) != len(show_ids):
+            raise HTTPException(status_code=404, detail="Alguno de los shows seleccionados no existe.")
+
+        selected: list[dict] = []
+        aggregate_artist = 0.0
+        aggregate_producer = 0.0
+        aggregate_venue = 0.0
+        for row in rows:
+            show_artist = clean_booking_artist(row["artist"])
+            if (show_artist or "").casefold() != artist.casefold():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Show #{row['id']} pertenece a {show_artist}, no a {artist}.",
+                )
+            require_module_permission(conn, x_vpo_username, "booking", "edit", existing_artist=show_artist)
+            show = row_to_booking_show(row)
+            previous_rows = conn.execute(
+                """
+                SELECT *
+                FROM booking_account_applications
+                WHERE show_id = ?
+                ORDER BY application_date, id
+                """,
+                (show["id"],),
+            ).fetchall()
+            previous_applications = [row_to_booking_account_application(item) for item in previous_rows]
+            open_artist = booking_open_balance_for_target(show, previous_applications, "artist")
+            open_producer = booking_open_balance_for_target(show, previous_applications, "producer")
+            open_venue = booking_open_balance_for_target(show, previous_applications, "venue")
+            aggregate_artist += open_artist
+            aggregate_producer += open_producer
+            aggregate_venue += open_venue
+            selected.append({
+                "show": show,
+                "open_artist": open_artist,
+                "open_producer": open_producer,
+                "open_venue": open_venue,
+            })
+
+        if abs(aggregate_venue) > 0.01:
+            raise HTTPException(
+                status_code=400,
+                detail="El cierre de bloque no salda deuda de boliche. Primero resolver esa deuda por separado.",
+            )
+        aggregate_net = booking_current_account_net(aggregate_producer, aggregate_artist)
+        required_amount = abs(aggregate_net)
+        if required_amount <= 0.01:
+            raise HTTPException(status_code=400, detail="El bloque seleccionado ya esta saldado.")
+        if abs(amount - required_amount) > 0.01:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "El importe no coincide con el saldo neto del bloque. "
+                    f"Saldo esperado: {required_amount:.2f}."
+                ),
+            )
+
+        movement_type = "pago_saldo_artista" if aggregate_net < -0.01 else "cobro_deuda_booking"
+        cursor = conn.execute(
+            """
+            INSERT INTO booking_account_movements (
+                movement_date, artist, movement_type, amount, applied_amount, unapplied_amount,
+                payment_method, counterparty, proof_refs_json, notes, created_by, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                settlement_date,
+                artist,
+                movement_type,
+                amount,
+                required_amount,
+                0.0,
+                request.payment_method,
+                counterparty,
+                booking_application_json_value(conn, proof_refs),
+                notes,
+                x_vpo_username,
+                now,
+                now,
+            ),
+        )
+        movement_id = int(cursor.lastrowid)
+
+        affected_show_ids: set[int] = set()
+        for item in selected:
+            show_id = item["show"]["id"]
+            for target_balance, current_balance in (
+                ("artist", item["open_artist"]),
+                ("producer", item["open_producer"]),
+            ):
+                if abs(current_balance) <= 0.01:
+                    continue
+                effect_amount = -current_balance
+                application_type = booking_block_application_type(target_balance, current_balance, aggregate_net)
+                conn.execute(
+                    """
+                    INSERT INTO booking_account_applications (
+                        show_id, application_date, target_balance, application_type,
+                        amount, effect_amount, payment_method, counterparty, linked_show_id, movement_id,
+                        proof_refs_json, notes, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        show_id,
+                        settlement_date,
+                        target_balance,
+                        application_type,
+                        abs(effect_amount),
+                        effect_amount,
+                        request.payment_method
+                        if application_type in {"artist_payment", "artist_reimbursement", "producer_reimbursement"}
+                        else "compensacion",
+                        counterparty,
+                        None,
+                        movement_id,
+                        booking_application_json_value(conn, proof_refs),
+                        notes,
+                        now,
+                        now,
+                    ),
+                )
+                affected_show_ids.add(show_id)
+
+        updated_shows = []
+        for show_id in sorted(affected_show_ids):
+            item = fetch_booking_show_item(conn, show_id)
+            updated_shows.append(update_booking_settlement_from_account(conn, show_id, item, "artist_payment", now))
+
+        movement_row = conn.execute(
+            "SELECT * FROM booking_account_movements WHERE id = ?",
+            (movement_id,),
+        ).fetchone()
+
+    return {
+        "item": row_to_booking_account_movement(movement_row),
+        "updated_shows": updated_shows,
+        "net_balance": aggregate_net,
+        "db_driver": operational_db_settings().driver,
     }
 
 

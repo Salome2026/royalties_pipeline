@@ -28,11 +28,19 @@ CREATE TABLE IF NOT EXISTS employees (
     phone text,
     email text,
     address text,
+    compensation_type text NOT NULL DEFAULT 'none',
+    salary_amount numeric(18,6) NOT NULL DEFAULT 0,
+    salary_currency text NOT NULL DEFAULT 'ARS',
+    salary_frequency text NOT NULL DEFAULT 'monthly',
+    salary_notes text,
     notes text,
     active boolean NOT NULL DEFAULT true,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
-    legacy_sqlite_id bigint UNIQUE
+    legacy_sqlite_id bigint UNIQUE,
+    CONSTRAINT employees_compensation_type_chk CHECK (compensation_type IN ('none', 'salary', 'salary_plus_booking_commission', 'booking_commission_only')),
+    CONSTRAINT employees_salary_currency_chk CHECK (salary_currency IN ('ARS', 'USD')),
+    CONSTRAINT employees_salary_frequency_chk CHECK (salary_frequency IN ('monthly'))
 );
 
 CREATE TABLE IF NOT EXISTS employee_functions (
@@ -252,6 +260,8 @@ CREATE TABLE IF NOT EXISTS booking_commission_rules (
     artist text NOT NULL,
     percentage numeric(9, 4) NOT NULL DEFAULT 0,
     calculation_base text NOT NULL DEFAULT 'commissionable',
+    include_booking_fee_paid_shows boolean NOT NULL DEFAULT false,
+    priority_order integer,
     active_from_month text,
     active_to_month text,
     active boolean NOT NULL DEFAULT true,
@@ -261,7 +271,8 @@ CREATE TABLE IF NOT EXISTS booking_commission_rules (
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE(employee_id, artist),
-    CONSTRAINT booking_commission_rules_base_chk CHECK (calculation_base IN ('commissionable', 'total'))
+    CONSTRAINT booking_commission_rules_base_chk CHECK (calculation_base IN ('commissionable', 'total')),
+    CONSTRAINT booking_commission_rules_priority_chk CHECK (priority_order BETWEEN 1 AND 5)
 );
 
 CREATE INDEX IF NOT EXISTS idx_booking_commission_rules_employee ON booking_commission_rules(employee_id);
@@ -451,6 +462,26 @@ CREATE TABLE IF NOT EXISTS booking_current_account_entries (
 CREATE INDEX IF NOT EXISTS idx_booking_ca_artist_date ON booking_current_account_entries(artist, entry_date);
 CREATE INDEX IF NOT EXISTS idx_booking_ca_origin ON booking_current_account_entries(origin_type, origin_id);
 
+CREATE TABLE IF NOT EXISTS booking_account_movements (
+    id bigserial PRIMARY KEY,
+    movement_date date NOT NULL,
+    artist text NOT NULL,
+    movement_type text NOT NULL,
+    amount numeric(18, 6) NOT NULL DEFAULT 0,
+    applied_amount numeric(18, 6) NOT NULL DEFAULT 0,
+    unapplied_amount numeric(18, 6) NOT NULL DEFAULT 0,
+    payment_method text NOT NULL DEFAULT 'transferencia',
+    counterparty text,
+    proof_refs_json jsonb NOT NULL DEFAULT '[]'::jsonb,
+    notes text,
+    created_by text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT booking_account_mov_type_chk CHECK (movement_type IN ('cobro_deuda_booking', 'pago_saldo_artista', 'compensacion_booking', 'pago_deuda_boliche', 'ajuste_booking')),
+    CONSTRAINT booking_account_mov_method_chk CHECK (payment_method IN ('transferencia', 'efectivo', 'compensacion', 'ajuste', 'otro'))
+);
+CREATE INDEX IF NOT EXISTS idx_booking_account_mov_artist ON booking_account_movements(artist, movement_date);
+
 CREATE TABLE IF NOT EXISTS booking_account_applications (
     id bigserial PRIMARY KEY,
     show_id bigint NOT NULL REFERENCES booking_shows(id) ON DELETE CASCADE,
@@ -462,6 +493,7 @@ CREATE TABLE IF NOT EXISTS booking_account_applications (
     payment_method text NOT NULL DEFAULT 'transferencia',
     counterparty text,
     linked_show_id bigint REFERENCES booking_shows(id) ON DELETE SET NULL,
+    movement_id bigint REFERENCES booking_account_movements(id) ON DELETE SET NULL,
     proof_refs_json jsonb NOT NULL DEFAULT '[]'::jsonb,
     notes text,
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -471,6 +503,7 @@ CREATE TABLE IF NOT EXISTS booking_account_applications (
     CONSTRAINT booking_account_app_method_chk CHECK (payment_method IN ('transferencia', 'efectivo', 'compensacion', 'ajuste', 'otro'))
 );
 CREATE INDEX IF NOT EXISTS idx_booking_account_app_show ON booking_account_applications(show_id, application_date);
+CREATE INDEX IF NOT EXISTS idx_booking_account_app_movement ON booking_account_applications(movement_id);
 
 -- =========================================================
 -- Caserio
@@ -567,6 +600,25 @@ CREATE TABLE IF NOT EXISTS finance_movements (
 
 CREATE INDEX IF NOT EXISTS idx_finance_movements_artist_date ON finance_movements(artist, movement_date DESC);
 CREATE INDEX IF NOT EXISTS idx_finance_movements_project ON finance_movements(project_name, artist);
+
+CREATE TABLE IF NOT EXISTS finance_movement_allocations (
+    id bigserial PRIMARY KEY,
+    movement_id bigint NOT NULL REFERENCES finance_movements(id) ON DELETE CASCADE,
+    allocation_type text NOT NULL DEFAULT 'indyana_cost',
+    target_name text NOT NULL,
+    business_area text,
+    amount numeric(18, 6) NOT NULL DEFAULT 0,
+    currency text NOT NULL DEFAULT 'ARS',
+    fx_rate numeric(18, 6),
+    amount_ars numeric(18, 6) NOT NULL DEFAULT 0,
+    notes text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT finance_movement_allocations_type_chk CHECK (allocation_type IN ('indyana_cost', 'third_party_receivable', 'artist_current_account', 'other')),
+    CONSTRAINT finance_movement_allocations_currency_chk CHECK (currency IN ('ARS', 'USD'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_finance_movement_allocations_movement ON finance_movement_allocations(movement_id);
 
 CREATE TABLE IF NOT EXISTS finance_movement_lines (
     id bigserial PRIMARY KEY,

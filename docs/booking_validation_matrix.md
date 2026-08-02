@@ -57,7 +57,7 @@ Entrada:
 - gasto propio de linea: Gaston/Facha 15%;
 - tercero externo: Fede;
 - split G Sony / Indyana / Fede;
-- marca no comisionable si corresponde.
+- marca exclusion de comision general si corresponde.
 
 Debe mostrar:
 
@@ -66,7 +66,7 @@ Debe mostrar:
 - Facha como gasto/comision propia de linea;
 - Fede como tercero/socio externo, no como gasto;
 - Indyana ganado;
-- base comisionable segun marca;
+- comisiones aplicables segun reglas vigentes;
 - saldos reales.
 
 No debe:
@@ -203,7 +203,7 @@ Debe mostrar:
 - artista externo baja caja del evento;
 - no genera show VPO;
 - no genera Indyana ganado;
-- no suma a base comisionable;
+- no genera comision interna de booking;
 - queda trazado para auditoria.
 
 No debe:
@@ -264,7 +264,7 @@ Una pantalla se considera lista para guardar solo si:
 - los saldos no se esconden;
 - los botones `Usar sugerido` cargan valores exactos;
 - los reportes no duplican Indyana;
-- la base comisionable se distingue de Indyana ganado;
+- Indyana ganado se distingue de comisiones aplicables y neto Indyana;
 - Caserio sigue aislado;
 - no se rompe Booking Indyana actual.
 

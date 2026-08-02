@@ -393,7 +393,7 @@ Reglas actuales:
 - monitorea carpetas de `input_raw`;
 - compara raw files contra marts;
 - puede ejecutar pipeline por source/account;
-- puede publicar marts a cloud;
+- puede publicar datos analiticos a cloud;
 - `monitoring_active = false` solo apaga alertas, no excluye historico.
 
 Reglas hardcodeadas detectadas:

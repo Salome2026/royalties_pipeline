@@ -226,6 +226,24 @@ type BookingAccountApplication = {
   notes: string | null;
 };
 
+type BookingParentMovementType =
+  | "cobro_deuda_booking"
+  | "pago_saldo_artista"
+  | "compensacion_booking"
+  | "pago_deuda_boliche"
+  | "ajuste_booking";
+
+type BookingParentMovementDraft = {
+  movementDate: string;
+  movementType: BookingParentMovementType;
+  amount: string;
+  paymentMethod: "transferencia" | "efectivo" | "compensacion" | "ajuste" | "otro";
+  counterparty: string;
+  proofRefs: string;
+  notes: string;
+  applications: Record<number, string>;
+};
+
 type BookingShow = {
   id: number;
   artist: string;
@@ -375,6 +393,11 @@ type EmployeeRecord = {
   phone: string | null;
   email: string | null;
   address: string | null;
+  compensation_type: EmployeeCompensationType;
+  salary_amount: number;
+  salary_currency: "ARS" | "USD";
+  salary_frequency: "monthly";
+  salary_notes: string | null;
   notes: string | null;
   active: boolean;
   functions: string[];
@@ -384,12 +407,38 @@ type EmployeeRecord = {
   updated_at: string;
 };
 
+type EmployeeCompensationType =
+  | "none"
+  | "salary"
+  | "salary_plus_booking_commission"
+  | "booking_commission_only";
+
+const employeeCompensationLabels: Record<EmployeeCompensationType, string> = {
+  none: "Sin compensacion fija",
+  salary: "Salario mensual",
+  salary_plus_booking_commission: "Salario + comision booking",
+  booking_commission_only: "Solo comision booking",
+};
+
 type CommissionEmployeeRecord = {
   id: number;
   display_name: string;
   active: boolean;
   functions: string[];
   permissions: EmployeePermission[];
+  created_at?: string;
+  updated_at?: string;
+};
+
+type FinanceEmployeeOption = {
+  id: number;
+  display_name: string;
+  compensation_type: EmployeeCompensationType;
+  salary_amount: number;
+  salary_currency: "ARS" | "USD";
+  salary_frequency: "monthly";
+  active: boolean;
+  functions: string[];
   created_at?: string;
   updated_at?: string;
 };
@@ -407,6 +456,11 @@ type EmployeeForm = {
   email: string;
   address: string;
   functions: string[];
+  compensationType: EmployeeCompensationType;
+  salaryAmount: string;
+  salaryCurrency: "ARS" | "USD";
+  salaryFrequency: "monthly";
+  salaryNotes: string;
   username: string;
   newPassword: string;
   mustChangePassword: boolean;
@@ -431,6 +485,9 @@ type BookingSummaryMonth = {
   indyana_total: number;
   commissionable_total: number;
   non_commissionable_total: number;
+  commission_total: number;
+  indyana_net_total: number;
+  commission_details: BookingSummaryCommissionDetail[];
 };
 
 type BookingSummaryItem = {
@@ -439,8 +496,37 @@ type BookingSummaryItem = {
   indyana_total: number;
   commissionable_total: number;
   non_commissionable_total: number;
+  commission_total: number;
+  indyana_net_total: number;
+  commission_details: BookingSummaryCommissionDetail[];
   months: Record<string, BookingSummaryMonth>;
   notes: string[];
+};
+
+type BookingSummaryCommissionDetail = {
+  employee_id: number;
+  employee_name: string;
+  artist: string;
+  month: string;
+  priority_order: number;
+  percent: number;
+  base_amount: number;
+  commission_amount: number;
+  show_excludes_general: boolean;
+  include_booking_fee_paid_shows: boolean;
+};
+
+type BookingSummaryCommissionRule = {
+  employee_id: number;
+  employee_name: string;
+  artist: string;
+  percent: number;
+  base: "commissionable" | "total";
+  include_booking_fee_paid_shows: boolean;
+  priority_order?: number | null;
+  start_month?: string | null;
+  end_month?: string | null;
+  active: boolean;
 };
 
 type BookingSummary = {
@@ -452,7 +538,10 @@ type BookingSummary = {
     indyana_total: number;
     commissionable_total: number;
     non_commissionable_total: number;
+    commission_total: number;
+    indyana_net_total: number;
   };
+  commission_rules: BookingSummaryCommissionRule[];
 };
 
 type BookingArtistSummaryItem = {
@@ -709,9 +798,23 @@ type FinanceMovement = {
   source_type: string;
   source_id: string | null;
   proof_refs: string[];
+  allocation_lines: FinanceMovementAllocation[];
   notes: string | null;
   created_at: string;
   updated_at: string;
+};
+
+type FinanceMovementAllocation = {
+  id?: number;
+  movement_id?: number;
+  allocation_type: FinanceAllocationType;
+  target_name: string;
+  business_area: string | null;
+  amount: number;
+  currency: "ARS" | "USD";
+  fx_rate: number | null;
+  amount_ars: number;
+  notes: string | null;
 };
 
 type FinanceMovementData = {
@@ -746,11 +849,37 @@ type FinanceMovementLineForm = {
   fxRate: string;
 };
 
+type FinanceAllocationType =
+  | "indyana_cost"
+  | "third_party_receivable"
+  | "artist_current_account"
+  | "other";
+
+type FinanceBusinessArea = "booking" | "label" | "marketing" | "digitales" | "management" | "administracion" | "estructura" | "general";
+
+type FinanceAllocationForm = {
+  uid: string;
+  allocationType: FinanceAllocationType;
+  targetName: string;
+  businessArea: FinanceBusinessArea;
+  amount: string;
+  currency: "ARS" | "USD";
+  fxRate: string;
+  notes: string;
+};
+
+const financeAllocationTypeLabels: Record<FinanceAllocationType, string> = {
+  indyana_cost: "Costo Indyana",
+  third_party_receivable: "Cuenta por cobrar a tercero",
+  artist_current_account: "Cuenta corriente artista",
+  other: "Otra imputacion",
+};
+
 type FinanceMovementForm = {
   movementDate: string;
   artist: string;
-  businessArea: "booking" | "label" | "marketing" | "digitales" | "general";
-  movementType: "gasto" | "ingreso" | "recupero" | "adelanto" | "prestamo" | "ajuste" | "pago";
+  businessArea: FinanceBusinessArea | "";
+  movementType: "gasto" | "ingreso" | "recupero" | "adelanto" | "prestamo" | "ajuste" | "pago" | "salario";
   category: string;
   projectName: string;
   multipleConcepts: boolean;
@@ -775,6 +904,8 @@ type FinanceMovementForm = {
   proofRefs: string;
   notes: string;
   conceptLines: FinanceMovementLineForm[];
+  economicDistributionEnabled: boolean;
+  allocationLines: FinanceAllocationForm[];
 };
 
 type SourceMonitorItem = {
@@ -839,6 +970,17 @@ type SourceMonitorPublishResult = {
   bucket: string;
   prefix: string;
   uploaded: { file_name: string; object_name: string; size_bytes: number; size_mb: number }[];
+};
+
+type SourceMonitorPublishJob = {
+  job_id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  stage: string;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  result: SourceMonitorPublishResult | null;
+  error: unknown;
 };
 
 type CatalogItem = {
@@ -1519,11 +1661,17 @@ function ars(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
 }
 
+function employeeSalaryAmount(currency: "ARS" | "USD", value: number) {
+  return currency === "USD" ? money(value) : ars(value);
+}
+
 type CommissionRuleDraft = {
   employee: string;
   artist: string;
   percent: number;
   base: "commissionable" | "total";
+  includeBookingFeePaidShows: boolean;
+  priorityOrder: number | null;
   startMonth: string;
   endMonth: string;
   active: boolean;
@@ -1536,6 +1684,8 @@ type StoredCommissionRule = {
   artist: string;
   percent: number;
   base: "commissionable" | "total";
+  include_booking_fee_paid_shows?: boolean;
+  priority_order?: number | null;
   start_month?: string | null;
   end_month?: string | null;
   active: boolean;
@@ -1796,6 +1946,19 @@ function initialBookingAccountApplicationForm(): BookingAccountApplicationForm {
   };
 }
 
+function initialBookingParentMovementDraft(): BookingParentMovementDraft {
+  return {
+    movementDate: new Date().toISOString().slice(0, 10),
+    movementType: "cobro_deuda_booking",
+    amount: "",
+    paymentMethod: "transferencia",
+    counterparty: "",
+    proofRefs: "",
+    notes: "",
+    applications: {},
+  };
+}
+
 function bookingDefaultAccountTarget(item: BookingShow): BookingAccountTarget {
   if (Math.abs(bookingOpenTargetBalance(item, "artist")) > 0.01) return "artist";
   if (Math.abs(bookingOpenTargetBalance(item, "producer")) > 0.01) return "producer";
@@ -1937,11 +2100,24 @@ function newFinanceMovementLine(): FinanceMovementLineForm {
   };
 }
 
+function newFinanceAllocationLine(values: Partial<FinanceAllocationForm> = {}): FinanceAllocationForm {
+  return {
+    uid: `${Date.now()}-${Math.random()}`,
+    allocationType: values.allocationType || "indyana_cost",
+    targetName: values.targetName || "Indyana",
+    businessArea: values.businessArea || "estructura",
+    amount: values.amount || "",
+    currency: values.currency || "ARS",
+    fxRate: values.fxRate || "",
+    notes: values.notes || "",
+  };
+}
+
 function initialFinanceMovementForm(): FinanceMovementForm {
   return {
     movementDate: new Date().toISOString().slice(0, 10),
     artist: "",
-    businessArea: "label",
+    businessArea: "",
     movementType: "gasto",
     category: "",
     projectName: "",
@@ -1967,6 +2143,8 @@ function initialFinanceMovementForm(): FinanceMovementForm {
     proofRefs: "",
     notes: "",
     conceptLines: [newFinanceMovementLine()],
+    economicDistributionEnabled: false,
+    allocationLines: [newFinanceAllocationLine()],
   };
 }
 
@@ -2029,6 +2207,7 @@ export default function Home() {
   const [sourceMonitorLastProcess, setSourceMonitorLastProcess] = useState<SourceMonitorProcessResult | null>(null);
   const [sourceMonitorPublishing, setSourceMonitorPublishing] = useState(false);
   const [sourceMonitorLastPublish, setSourceMonitorLastPublish] = useState<SourceMonitorPublishResult | null>(null);
+  const [sourceMonitorPublishJob, setSourceMonitorPublishJob] = useState<SourceMonitorPublishJob | null>(null);
   const [catalogData, setCatalogData] = useState<CatalogData | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogSource, setCatalogSource] = useState("");
@@ -2036,8 +2215,7 @@ export default function Home() {
   const [catalogArtist, setCatalogArtist] = useState("");
   const [catalogKeyword, setCatalogKeyword] = useState("");
   const [catalogLabel, setCatalogLabel] = useState("");
-  const [catalogStartMonth, setCatalogStartMonth] = useState("");
-  const [catalogEndMonth, setCatalogEndMonth] = useState("");
+  const [catalogPeriod, setCatalogPeriod] = useState<PeriodSelection>({ mode: "all" });
   const [catalogStatus, setCatalogStatus] = useState<"active" | "inactive" | "all">("active");
   const [catalogOffset, setCatalogOffset] = useState(0);
   const [catalogLabelEditKey, setCatalogLabelEditKey] = useState("");
@@ -2086,6 +2264,8 @@ export default function Home() {
   const [artistFinanceView, setArtistFinanceView] = useState<"summary" | "booking" | "projects" | "account" | "technical">("summary");
   const [artistFinanceProjectFilter, setArtistFinanceProjectFilter] = useState("");
   const [artistFinanceLoading, setArtistFinanceLoading] = useState(false);
+  const [artistFinanceBookingMovementOpen, setArtistFinanceBookingMovementOpen] = useState(false);
+  const [artistFinanceBookingMovementDraft, setArtistFinanceBookingMovementDraft] = useState<BookingParentMovementDraft>(() => initialBookingParentMovementDraft());
   const [financeMovements, setFinanceMovements] = useState<FinanceMovementData | null>(null);
   const [financeMovementLoading, setFinanceMovementLoading] = useState(false);
   const [financeMovementEditingId, setFinanceMovementEditingId] = useState<number | null>(null);
@@ -2093,6 +2273,9 @@ export default function Home() {
   const [financeMovementProjectFilter, setFinanceMovementProjectFilter] = useState("");
   const [financeMovementStatusFilter, setFinanceMovementStatusFilter] = useState("");
   const [financeMovementForm, setFinanceMovementForm] = useState<FinanceMovementForm>(() => initialFinanceMovementForm());
+  const [financeMovementProjectMode, setFinanceMovementProjectMode] = useState<"existing" | "new">("existing");
+  const [financeEmployeeOptions, setFinanceEmployeeOptions] = useState<FinanceEmployeeOption[]>([]);
+  const [financeEmployeeOptionsLoading, setFinanceEmployeeOptionsLoading] = useState(false);
   const [artistRecords, setArtistRecords] = useState<BookingArtistRecord[]>([]);
   const [artistRecordSearch, setArtistRecordSearch] = useState("");
   const [artistRecordLoading, setArtistRecordLoading] = useState(false);
@@ -2121,6 +2304,11 @@ export default function Home() {
     email: "",
     address: "",
     functions: [],
+    compensationType: "none",
+    salaryAmount: "",
+    salaryCurrency: "ARS",
+    salaryFrequency: "monthly",
+    salaryNotes: "",
     username: "",
     newPassword: "",
     mustChangePassword: true,
@@ -2242,7 +2430,7 @@ export default function Home() {
     if (authenticated && view === "catalog") {
       loadCatalog();
     }
-  }, [authenticated, view, catalogSource, catalogAccount, catalogArtist, catalogStatus, catalogStartMonth, catalogEndMonth, catalogOffset]);
+  }, [authenticated, view, catalogSource, catalogAccount, catalogArtist, catalogStatus, catalogPeriod, catalogOffset]);
 
   useEffect(() => {
     if (authenticated && view === "digital-income") {
@@ -2258,7 +2446,7 @@ export default function Home() {
 
   useEffect(() => {
     setCatalogOffset(0);
-  }, [catalogSource, catalogAccount, catalogArtist, catalogKeyword, catalogLabel, catalogStatus, catalogStartMonth, catalogEndMonth]);
+  }, [catalogSource, catalogAccount, catalogArtist, catalogKeyword, catalogLabel, catalogStatus, catalogPeriod]);
 
   useEffect(() => {
     if (authenticated && view === "custom-reports" && !customReportOptions) {
@@ -2353,10 +2541,63 @@ export default function Home() {
   }, [authenticated, view, artistFinanceArtist]);
 
   useEffect(() => {
+    if (
+      authenticated
+      && view === "finance-movements"
+      && financeMovementForm.movementType === "pago"
+      && financeMovementForm.businessArea === "booking"
+      && financeMovementForm.artist
+    ) {
+      if (artistFinanceArtist !== financeMovementForm.artist) {
+        setArtistFinanceArtist(financeMovementForm.artist);
+      }
+      loadArtistFinance(financeMovementForm.artist);
+    }
+  }, [
+    authenticated,
+    view,
+    financeMovementForm.movementType,
+    financeMovementForm.businessArea,
+    financeMovementForm.artist,
+  ]);
+
+  useEffect(() => {
     if (authenticated && view === "finance-movements") {
+      loadBookingArtists();
+      loadFinanceEmployeeOptions();
       loadFinanceMovements();
     }
-  }, [authenticated, view, financeMovementArtistFilter, financeMovementProjectFilter, financeMovementStatusFilter]);
+  }, [authenticated, view, currentUserModuleAccess, financeMovementArtistFilter, financeMovementProjectFilter, financeMovementStatusFilter]);
+
+  useEffect(() => {
+    setFinanceMovementForm((current) => {
+      const canUseOffice = currentUser?.role === "admin" || Boolean(currentModulePermission("payroll_compensation")?.can_access);
+      const hasArtist = Boolean(current.artist.trim());
+      let nextArea = current.businessArea;
+      let nextCategory = current.category;
+      if (nextArea === "estructura" && !canUseOffice) {
+        nextArea = "";
+        nextCategory = "";
+      }
+      if (current.movementType === "pago") {
+        if (nextArea === "booking" && hasArtist) {
+          nextCategory = nextCategory || "cuenta_booking";
+        }
+        if (nextArea === "booking" && !hasArtist) {
+          nextCategory = "";
+        }
+      } else if (nextArea === "estructura" && hasArtist) {
+        nextArea = "";
+        nextCategory = "";
+      }
+      if (nextArea === current.businessArea && nextCategory === current.category) return current;
+      return {
+        ...current,
+        businessArea: nextArea,
+        category: nextCategory,
+      };
+    });
+  }, [financeMovementForm.artist, financeMovementForm.businessArea, financeMovementForm.movementType, currentUser?.role, currentUserPermissions]);
 
   const digitalIncomeAccountOptions = useMemo(() => {
     if (!digitalIncome) return [];
@@ -2607,6 +2848,8 @@ export default function Home() {
     return {
       percent: 0,
       base: "commissionable",
+      includeBookingFeePaidShows: false,
+      priorityOrder: null,
       startMonth: "",
       endMonth: "",
       active: true,
@@ -2618,6 +2861,8 @@ export default function Home() {
     return {
       percent: Number(rule.percent || 0),
       base: rule.base === "total" ? "total" : "commissionable",
+      includeBookingFeePaidShows: Boolean(rule.include_booking_fee_paid_shows),
+      priorityOrder: rule.priority_order ? Number(rule.priority_order) : null,
       startMonth: rule.start_month || "",
       endMonth: rule.end_month || "",
       active: Boolean(rule.active),
@@ -2629,6 +2874,23 @@ export default function Home() {
     return commissionRuleDrafts[commissionRuleKey(commissionsEmployee, artist)] || defaultCommissionRule();
   }
 
+  function commissionPriorityOptions(artist: string, currentPriority: number | null) {
+    const selectedEmployeeId = Number(commissionsEmployee || 0);
+    const used = new Set(
+      (commissionSummary?.commission_rules || [])
+        .filter((rule) => artistScopeKey(rule.artist) === artistScopeKey(artist))
+        .filter((rule) => rule.active && Number(rule.percent || 0) > 0)
+        .filter((rule) => Number(rule.employee_id) !== selectedEmployeeId)
+        .map((rule) => Number(rule.priority_order || 0))
+        .filter((order) => order >= 1 && order <= 5),
+    );
+    const available = [1, 2, 3, 4, 5].filter((order) => !used.has(order));
+    if (available.length === 0 && currentPriority && currentPriority >= 1 && currentPriority <= 5 && !used.has(currentPriority)) {
+      return [currentPriority];
+    }
+    return available;
+  }
+
   const commissionRulesForEmployee = useMemo(() => {
     if (!commissionsEmployee || !selectedCommissionPermission?.can_access) return [];
     return commissionAvailableArtists.map((artist) => ({
@@ -2637,6 +2899,10 @@ export default function Home() {
       ...commissionRuleForArtist(artist),
     }));
   }, [commissionsEmployee, selectedCommissionEmployee, selectedCommissionPermission, commissionAvailableArtists, commissionRuleDrafts]);
+
+  const commissionRulesMissingPriority = useMemo(() => {
+    return commissionRulesForEmployee.filter((rule) => rule.active && Number(rule.percent || 0) > 0 && !rule.priorityOrder);
+  }, [commissionRulesForEmployee]);
 
   const commissionResolvedPeriod = useMemo(
     () => resolvePeriod(selectionFromMonths(commissionStartMonth, commissionEndMonth), "commission_period"),
@@ -2655,10 +2921,14 @@ export default function Home() {
         return true;
       })
       .map(([month, monthItem]) => {
+        const employeeId = Number(commissionsEmployee);
         const rule = commissionRuleForArtist(item.artist);
-        const baseAmount = rule.base === "total" ? monthItem.indyana_total : monthItem.commissionable_total;
         const ruleInPeriod = (!rule.startMonth || month >= rule.startMonth) && (!rule.endMonth || month <= rule.endMonth);
         const percent = rule.active && ruleInPeriod ? Number(rule.percent || 0) : 0;
+        const details = (monthItem.commission_details || []).filter((detail) => Number(detail.employee_id) === employeeId);
+        const baseAmount = details.reduce((sum, detail) => sum + Number(detail.base_amount || 0), 0);
+        const commissionAmount = details.reduce((sum, detail) => sum + Number(detail.commission_amount || 0), 0);
+        const firstPriority = details.length ? Math.min(...details.map((detail) => Number(detail.priority_order || 1))) : rule.priorityOrder;
         return {
           month,
           artist: item.artist,
@@ -2667,14 +2937,19 @@ export default function Home() {
           commissionableBase: monthItem.commissionable_total,
           nonCommissionable: monthItem.non_commissionable_total,
           percent,
+          priorityOrder: firstPriority,
           baseAmount: percent > 0 ? baseAmount : 0,
-          commissionAmount: percent > 0 ? baseAmount * percent / 100 : 0,
+          commissionAmount: percent > 0 ? commissionAmount : 0,
           notes: item.notes.length ? item.notes.join(" / ") : "Comisiona normal",
           ruleNotes: !rule.active
             ? "Regla inactiva."
             : !ruleInPeriod
               ? "Fuera de vigencia."
-              : rule.notes || (percent > 0 ? "Regla guardada." : "Sin porcentaje configurado."),
+              : rule.notes || (percent > 0
+                ? rule.includeBookingFeePaidShows
+                  ? "Cobra tambien shows con booking ya pagado."
+                  : "Respeta exclusion general."
+                : "Sin porcentaje configurado."),
         };
       }))
       .sort((a, b) => b.month.localeCompare(a.month) || a.artist.localeCompare(b.artist));
@@ -2705,6 +2980,217 @@ export default function Home() {
   }, [visibleCommissionSettlementRows]);
 
   const commissionPeriodLabel = commissionResolvedPeriod.label === "Todo" ? "Todos los meses" : commissionResolvedPeriod.label;
+
+  function escapePrintHtml(value: unknown) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function printCommissionSettlement() {
+    if (!selectedCommissionEmployee || !selectedCommissionPermission?.can_access) {
+      setMessage({ type: "error", text: "Selecciona un empleado con acceso a Comisiones." });
+      return;
+    }
+
+    const generatedAt = new Date().toLocaleString("es-AR");
+    const rowsHtml = visibleCommissionSettlementRows.length
+      ? visibleCommissionSettlementRows.map((item) => `
+          <tr>
+            <td>${escapePrintHtml(item.month)}</td>
+            <td><strong>${escapePrintHtml(item.artist)}</strong></td>
+            <td class="number">${item.shows}</td>
+            <td class="money">${escapePrintHtml(ars(item.indyanaTotal))}</td>
+            <td class="money">${escapePrintHtml(ars(item.baseAmount))}</td>
+            <td class="money">${escapePrintHtml(ars(item.nonCommissionable))}</td>
+            <td class="number">${escapePrintHtml(item.priorityOrder || "-")}</td>
+            <td class="number">${escapePrintHtml(pct(item.percent))}</td>
+            <td class="money strong">${escapePrintHtml(ars(item.commissionAmount))}</td>
+            <td>${escapePrintHtml(item.notes)}<span>${escapePrintHtml(item.ruleNotes)}</span></td>
+          </tr>
+        `).join("")
+      : `<tr><td colspan="9">Sin movimientos para los filtros seleccionados.</td></tr>`;
+
+    const searchLabel = commissionSettlementSearch.trim()
+      ? `Busqueda aplicada: ${commissionSettlementSearch.trim()}`
+      : "Sin busqueda adicional";
+    const popup = window.open("", "_blank", "width=1100,height=800");
+    if (!popup) {
+      setMessage({ type: "error", text: "El navegador bloqueo la ventana de impresion." });
+      return;
+    }
+
+    popup.document.write(`<!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Liquidacion de comisiones - ${escapePrintHtml(selectedCommissionEmployee.display_name)}</title>
+          <style>
+            @page { size: A4 landscape; margin: 14mm; }
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              color: #162033;
+              font-family: Arial, Helvetica, sans-serif;
+              font-size: 11px;
+              background: #ffffff;
+            }
+            .header {
+              display: flex;
+              justify-content: space-between;
+              gap: 24px;
+              border-bottom: 3px solid #1f4e78;
+              padding-bottom: 14px;
+              margin-bottom: 18px;
+            }
+            .brand {
+              font-size: 13px;
+              color: #607089;
+              font-weight: 700;
+              letter-spacing: 0.04em;
+              text-transform: uppercase;
+            }
+            h1 {
+              margin: 6px 0 4px;
+              font-size: 26px;
+              color: #10243f;
+            }
+            .meta {
+              text-align: right;
+              color: #607089;
+              line-height: 1.5;
+              min-width: 230px;
+            }
+            .kpis {
+              display: grid;
+              grid-template-columns: repeat(5, 1fr);
+              gap: 10px;
+              margin-bottom: 18px;
+            }
+            .kpi {
+              border: 1px solid #d8e1ef;
+              border-radius: 8px;
+              padding: 10px 12px;
+              background: #f7f9fc;
+              min-height: 64px;
+            }
+            .kpi span {
+              display: block;
+              color: #607089;
+              font-size: 10px;
+              font-weight: 700;
+              text-transform: uppercase;
+              margin-bottom: 6px;
+            }
+            .kpi strong {
+              display: block;
+              font-size: 17px;
+              color: #10243f;
+            }
+            .kpi.total {
+              background: #ecf7f2;
+              border-color: #9fd7bd;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              table-layout: fixed;
+            }
+            th {
+              background: #1f4e78;
+              color: white;
+              font-size: 10px;
+              padding: 8px 7px;
+              text-align: left;
+            }
+            td {
+              border-bottom: 1px solid #d9e2ef;
+              padding: 7px;
+              vertical-align: top;
+              line-height: 1.25;
+            }
+            tbody tr:nth-child(even) td { background: #f8fafc; }
+            .number, .money { text-align: right; white-space: nowrap; }
+            .strong { font-weight: 700; color: #0f5132; }
+            td span {
+              display: block;
+              margin-top: 3px;
+              color: #607089;
+              font-size: 9px;
+            }
+            .note {
+              margin-top: 12px;
+              color: #607089;
+              font-size: 10px;
+            }
+            .footer {
+              margin-top: 16px;
+              border-top: 1px solid #d9e2ef;
+              padding-top: 8px;
+              color: #607089;
+              display: flex;
+              justify-content: space-between;
+              font-size: 10px;
+            }
+          </style>
+        </head>
+        <body>
+          <header class="header">
+            <div>
+              <div class="brand">VPO Corp</div>
+              <h1>Liquidacion de comisiones</h1>
+              <div>Empleado: <strong>${escapePrintHtml(selectedCommissionEmployee.display_name)}</strong></div>
+              <div>Periodo: <strong>${escapePrintHtml(commissionPeriodLabel)}</strong></div>
+              <div>${escapePrintHtml(searchLabel)}</div>
+            </div>
+            <div class="meta">
+              <div>Generado: ${escapePrintHtml(generatedAt)}</div>
+              <div>Fuente: Booking Indyana</div>
+              <div>Base: reglas guardadas de comision</div>
+            </div>
+          </header>
+          <section class="kpis">
+            <div class="kpi"><span>Shows incluidos</span><strong>${commissionTotals.shows}</strong></div>
+            <div class="kpi"><span>Indyana total</span><strong>${escapePrintHtml(ars(commissionTotals.indyanaTotal))}</strong></div>
+            <div class="kpi"><span>Base empleado</span><strong>${escapePrintHtml(ars(commissionTotals.baseAmount))}</strong></div>
+            <div class="kpi"><span>Excluido general</span><strong>${escapePrintHtml(ars(commissionTotals.nonCommissionable))}</strong></div>
+            <div class="kpi total"><span>Comision calculada</span><strong>${escapePrintHtml(ars(commissionTotals.commissionAmount))}</strong></div>
+          </section>
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 8%;">Mes</th>
+                <th style="width: 17%;">Artista</th>
+                <th style="width: 7%;">Shows</th>
+                <th style="width: 12%;">Indyana total</th>
+                <th style="width: 12%;">Base empleado</th>
+                <th style="width: 12%;">Excluido general</th>
+                <th style="width: 7%;">Orden</th>
+                <th style="width: 8%;">%</th>
+                <th style="width: 12%;">Comision</th>
+                <th style="width: 12%;">Notas</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+          <p class="note">Este informe refleja los filtros visibles en pantalla al momento de imprimir.</p>
+          <footer class="footer">
+            <span>VPO Corp - Comisiones</span>
+            <span>${escapePrintHtml(selectedCommissionEmployee.display_name)} - ${escapePrintHtml(commissionPeriodLabel)}</span>
+          </footer>
+          <script>
+            window.addEventListener("load", () => {
+              window.focus();
+              setTimeout(() => window.print(), 250);
+            });
+          </script>
+        </body>
+      </html>`);
+    popup.document.close();
+  }
 
   function updateCommissionRuleDraft(artist: string, patch: Partial<CommissionRuleDraftState>) {
     if (!commissionsEmployee) return;
@@ -3777,15 +4263,15 @@ export default function Home() {
   async function loadCatalog(nextOffset = catalogOffset) {
     setCatalogLoading(true);
     try {
-      const catalogPeriod = resolvePeriod(selectionFromMonths(catalogStartMonth, catalogEndMonth), "activity_window");
+      const resolvedCatalogPeriod = resolvePeriod(catalogPeriod, "activity_window");
       const params = new URLSearchParams();
       if (catalogSource) params.set("source", catalogSource);
       if (catalogAccount) params.set("account", catalogAccount);
       if (catalogArtist) params.set("artist", catalogArtist);
       if (catalogKeyword.trim()) params.set("keyword", catalogKeyword.trim());
       if (catalogLabel.trim()) params.set("label", catalogLabel.trim());
-      if (catalogPeriod.startMonth) params.set("start_month", catalogPeriod.startMonth);
-      if (catalogPeriod.endMonth) params.set("end_month", catalogPeriod.endMonth);
+      if (resolvedCatalogPeriod.startMonth) params.set("start_month", resolvedCatalogPeriod.startMonth);
+      if (resolvedCatalogPeriod.endMonth) params.set("end_month", resolvedCatalogPeriod.endMonth);
       params.set("status", catalogStatus);
       params.set("limit", String(catalogLimit));
       params.set("offset", String(nextOffset));
@@ -3954,6 +4440,7 @@ export default function Home() {
 
   async function publishSourceMonitorMarts() {
     setSourceMonitorPublishing(true);
+    setSourceMonitorPublishJob(null);
     setMessage(null);
     try {
       const response = await fetch("/api/source-monitor?action=publish", {
@@ -3971,11 +4458,50 @@ export default function Home() {
         return;
       }
       const data = await response.json();
-      setSourceMonitorLastPublish(data);
-      setMessage({ type: "ok", text: "Marts publicados a cloud. La web online puede usar estos datos." });
+      setSourceMonitorPublishJob(data);
+      setMessage({ type: "ok", text: "Publicacion iniciada. Podes dejar la pantalla abierta mientras se actualiza el estado." });
+      pollSourceMonitorPublishJob(data.job_id);
     } catch {
-      setMessage({ type: "error", text: "No se pudieron publicar los marts a cloud." });
-    } finally {
+      setMessage({ type: "error", text: "No se pudo iniciar la publicacion de datos analiticos." });
+      setSourceMonitorPublishing(false);
+    }
+  }
+
+  async function pollSourceMonitorPublishJob(jobId: string) {
+    try {
+      const response = await fetch(`/api/source-monitor?action=publish-status&job_id=${encodeURIComponent(jobId)}`, {
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        let text = "No se pudo consultar el estado de publicacion.";
+        try {
+          const payload = await response.json();
+          text = payload.error || text;
+        } catch {
+          // keep generic message
+        }
+        setMessage({ type: "error", text });
+        setSourceMonitorPublishing(false);
+        return;
+      }
+      const job: SourceMonitorPublishJob = await response.json();
+      setSourceMonitorPublishJob(job);
+      if (job.status === "completed" && job.result) {
+        setSourceMonitorLastPublish(job.result);
+        setMessage({ type: "ok", text: "Datos analiticos publicados a cloud. La web online puede usar estos datos." });
+        setSourceMonitorPublishing(false);
+        await loadSourceMonitor();
+        return;
+      }
+      if (job.status === "failed") {
+        const errorText = typeof job.error === "string" ? job.error : JSON.stringify(job.error || "Error de publicacion");
+        setMessage({ type: "error", text: `Fallo la publicacion: ${errorText}` });
+        setSourceMonitorPublishing(false);
+        return;
+      }
+      window.setTimeout(() => pollSourceMonitorPublishJob(jobId), 4000);
+    } catch {
+      setMessage({ type: "error", text: "No se pudo consultar el estado de publicacion." });
       setSourceMonitorPublishing(false);
     }
   }
@@ -4032,6 +4558,13 @@ export default function Home() {
       setMessage({ type: "error", text: "No tenes permiso para editar Comisiones." });
       return;
     }
+    if (commissionRulesMissingPriority.length > 0) {
+      setMessage({
+        type: "error",
+        text: `Elegí orden de cobro para: ${commissionRulesMissingPriority.map((rule) => rule.artist).join(", ")}.`,
+      });
+      return;
+    }
     setCommissionRulesSaving(true);
     const payload = {
       employee_id: Number(commissionsEmployee),
@@ -4039,6 +4572,8 @@ export default function Home() {
         artist: rule.artist,
         percent: Number(rule.percent || 0),
         base: rule.base,
+        include_booking_fee_paid_shows: Boolean(rule.includeBookingFeePaidShows),
+        priority_order: rule.priorityOrder || null,
         start_month: rule.startMonth || null,
         end_month: rule.endMonth || null,
         active: Boolean(rule.active),
@@ -4085,15 +4620,16 @@ export default function Home() {
     setBookingArtistSummaryLoading(false);
   }
 
-  async function loadArtistFinance() {
+  async function loadArtistFinance(artistOverride?: string) {
     setArtistFinanceLoading(true);
     const params = new URLSearchParams();
-    if (artistFinanceArtist) params.set("artist", artistFinanceArtist);
+    const selectedArtist = artistOverride ?? artistFinanceArtist;
+    if (selectedArtist) params.set("artist", selectedArtist);
     const response = await fetch(`/api/artist-finance${params.toString() ? `?${params.toString()}` : ""}`, { cache: "no-store" });
     if (response.ok) {
       const data = await response.json();
       setArtistFinance(data);
-      if (!artistFinanceArtist && data.artists?.length === 1) {
+      if (!selectedArtist && data.artists?.length === 1) {
         setArtistFinanceArtist(data.artists[0]);
       }
     }
@@ -4119,6 +4655,87 @@ export default function Home() {
 
   function updateFinanceMovementField<K extends keyof FinanceMovementForm>(key: K, value: FinanceMovementForm[K]) {
     setFinanceMovementForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateFinanceMovementArtist(value: string) {
+    const hasArtist = Boolean(value.trim());
+    setFinanceMovementProjectMode("existing");
+    setFinanceMovementForm((current) => {
+      let nextArea = current.businessArea;
+      let nextCategory = current.category;
+      if (hasArtist && nextArea === "estructura") return current;
+      if (!hasArtist && current.movementType === "pago" && nextArea === "booking") {
+        nextArea = "";
+        nextCategory = "sin_aplicar";
+      }
+      return {
+        ...current,
+        artist: value,
+        businessArea: nextArea,
+        category: nextCategory,
+      };
+    });
+    if (hasArtist && financeMovementForm.movementType === "pago") {
+      setArtistFinanceArtist(value);
+    }
+  }
+
+  function updateFinanceMovementType(value: FinanceMovementForm["movementType"]) {
+    if (value === "pago") {
+      setArtistFinanceBookingMovementOpen(true);
+      if (financeMovementForm.artist) setArtistFinanceArtist(financeMovementForm.artist);
+    }
+    setFinanceMovementForm((current) => {
+      const hasArtist = Boolean(current.artist.trim());
+      if (value === "pago") {
+        return {
+          ...current,
+          movementType: value,
+          category: current.businessArea === "booking" && hasArtist ? "cuenta_booking" : "",
+          recoverable: false,
+          recoverablePercent: "0",
+          recoveryMethod: "none",
+          accountEffect: "sin_impacto",
+        };
+      }
+      if (value !== "salario") {
+        return {
+          ...current,
+          movementType: value,
+          category: value === current.movementType && current.category !== "cuenta_booking" ? current.category : "",
+        };
+      }
+      return {
+        ...current,
+        movementType: value,
+        businessArea: "estructura",
+        category: current.category || "salario",
+        recoverable: false,
+        recoverablePercent: "0",
+        recoveryMethod: "none",
+        accountEffect: "sin_impacto",
+      };
+    });
+  }
+
+  function updateFinanceMovementArea(value: FinanceMovementForm["businessArea"]) {
+    setFinanceMovementProjectMode("existing");
+    if (financeMovementForm.movementType === "pago" && value === "booking") {
+      setArtistFinanceBookingMovementOpen(true);
+      if (financeMovementForm.artist) setArtistFinanceArtist(financeMovementForm.artist);
+    }
+    setFinanceMovementForm((current) => ({
+      ...current,
+      businessArea: value,
+      artist: value === "estructura" ? "" : current.artist,
+      projectName: value === "estructura" ? "" : current.projectName,
+      counterparty: value !== "estructura" && current.category === "salario" ? "" : current.counterparty,
+      category: current.businessArea === value
+        ? current.category
+        : current.movementType === "pago" && value === "booking"
+          ? "cuenta_booking"
+          : "",
+    }));
   }
 
   function setFinanceMovementMultipleConcepts(enabled: boolean) {
@@ -4202,6 +4819,63 @@ export default function Home() {
     }));
   }
 
+  function setFinanceEconomicDistributionEnabled(enabled: boolean) {
+    setFinanceMovementForm((current) => ({
+      ...current,
+      economicDistributionEnabled: enabled,
+      allocationLines: current.allocationLines.length
+        ? current.allocationLines.map((line, index) => (
+          index === 0 && enabled && !line.amount
+            ? { ...line, amount: current.amount, currency: current.currency, fxRate: current.fxRate }
+            : line
+        ))
+        : [newFinanceAllocationLine({
+          businessArea: (current.businessArea || "general") as FinanceAllocationForm["businessArea"],
+          amount: current.amount,
+          currency: current.currency,
+          fxRate: current.fxRate,
+        })],
+    }));
+  }
+
+  function addFinanceAllocationLine() {
+    setFinanceMovementForm((current) => ({
+      ...current,
+      allocationLines: [
+        ...current.allocationLines,
+        newFinanceAllocationLine({
+          allocationType: "third_party_receivable",
+          targetName: "",
+          businessArea: (current.businessArea || "general") as FinanceAllocationForm["businessArea"],
+          currency: current.currency,
+          fxRate: current.fxRate,
+        }),
+      ],
+    }));
+  }
+
+  function removeFinanceAllocationLine(uid: string) {
+    setFinanceMovementForm((current) => ({
+      ...current,
+      allocationLines: current.allocationLines.length <= 1
+        ? current.allocationLines
+        : current.allocationLines.filter((line) => line.uid !== uid),
+    }));
+  }
+
+  function updateFinanceAllocationLineField<K extends keyof FinanceAllocationForm>(
+    uid: string,
+    key: K,
+    value: FinanceAllocationForm[K],
+  ) {
+    setFinanceMovementForm((current) => ({
+      ...current,
+      allocationLines: current.allocationLines.map((line) => (
+        line.uid === uid ? { ...line, [key]: value } : line
+      )),
+    }));
+  }
+
   function isFinanceMovementLocked(status: string) {
     return ["aprobado", "aplicado", "anulado"].includes(status);
   }
@@ -4211,13 +4885,23 @@ export default function Home() {
       setMessage({ type: "error", text: "Este movimiento financiero ya esta bloqueado. Para corregirlo, carga un nuevo movimiento." });
       return;
     }
+    const normalizedMovementType = item.movement_type === "salario"
+      ? "gasto"
+      : item.movement_type as FinanceMovementForm["movementType"];
+    const normalizedBusinessArea = item.movement_type === "salario"
+      ? "estructura"
+      : item.business_area as FinanceMovementForm["businessArea"];
+    const normalizedCategory = item.movement_type === "salario"
+      ? item.category || "salario"
+      : item.category;
     setFinanceMovementEditingId(item.id);
+    setFinanceMovementProjectMode("existing");
     setFinanceMovementForm({
       movementDate: item.movement_date,
       artist: item.artist,
-      businessArea: item.business_area as FinanceMovementForm["businessArea"],
-      movementType: item.movement_type as FinanceMovementForm["movementType"],
-      category: item.category,
+      businessArea: normalizedBusinessArea,
+      movementType: normalizedMovementType,
+      category: normalizedCategory,
       projectName: item.project_name || "",
       multipleConcepts: false,
       concept: item.concept,
@@ -4252,12 +4936,30 @@ export default function Home() {
         currency: item.currency,
         fxRate: amountToInput(item.fx_rate),
       }],
+      economicDistributionEnabled: Boolean(item.allocation_lines?.length),
+      allocationLines: item.allocation_lines?.length
+        ? item.allocation_lines.map((line) => newFinanceAllocationLine({
+          allocationType: line.allocation_type,
+          targetName: line.target_name,
+          businessArea: (line.business_area || normalizedBusinessArea || "estructura") as FinanceAllocationForm["businessArea"],
+          amount: amountToInput(line.amount),
+          currency: line.currency,
+          fxRate: amountToInput(line.fx_rate),
+          notes: line.notes || "",
+        }))
+        : [newFinanceAllocationLine({
+          businessArea: normalizedBusinessArea as FinanceAllocationForm["businessArea"],
+          amount: amountToInput(item.amount),
+          currency: item.currency,
+          fxRate: amountToInput(item.fx_rate),
+        })],
     });
     setMessage({ type: "ok", text: `Editando movimiento financiero #${item.id}.` });
   }
 
   function resetFinanceMovementForm() {
     setFinanceMovementEditingId(null);
+    setFinanceMovementProjectMode("existing");
     setFinanceMovementForm(initialFinanceMovementForm());
   }
 
@@ -4265,8 +4967,22 @@ export default function Home() {
     event.preventDefault();
     setMessage(null);
 
+    if (!financeMovementCanSave) {
+      setMessage({
+        type: "error",
+        text: financeMovementEditingId
+          ? "No tenes permiso para editar movimientos financieros."
+          : "No tenes permiso para cargar movimientos financieros.",
+      });
+      return;
+    }
+
     if (financeMovementEditingId && financeMovementForm.multipleConcepts) {
       setMessage({ type: "error", text: "Para editar un movimiento existente usa un solo concepto. Para un lote, carga movimientos nuevos." });
+      return;
+    }
+    if (financeMovementForm.multipleConcepts && financeMovementForm.economicDistributionEnabled) {
+      setMessage({ type: "error", text: "Para usar distribucion economica, carga un solo concepto por movimiento." });
       return;
     }
 
@@ -4305,13 +5021,47 @@ export default function Home() {
       })
       .filter((line) => line.concept || line.amount > 0 || line.counterparty);
 
-    if (!financeMovementForm.artist || !financeMovementForm.category || movementLines.length === 0) {
-      setMessage({ type: "error", text: "Completa artista, categoria y al menos un concepto con importe." });
+    if (!financeMovementForm.businessArea) {
+      setMessage({ type: "error", text: "Elegi primero el area del movimiento." });
+      return;
+    }
+    if (financeMovementRequiresArtist && !financeMovementForm.artist.trim()) {
+      setMessage({ type: "error", text: "Para esta area, elegi el artista desde la lista." });
+      return;
+    }
+    if (financeMovementNeedsEmployee && !financeMovementForm.counterparty.trim()) {
+      setMessage({ type: "error", text: "Para sueldo o comision interna, elegi el empleado desde el ABM." });
+      return;
+    }
+    if (!financeMovementForm.category) {
+      setMessage({ type: "error", text: "Completa la categoria del movimiento." });
+      return;
+    }
+    if (movementLines.length === 0) {
+      setMessage({
+        type: "error",
+        text: financeMovementForm.multipleConcepts
+          ? "Agrega al menos un concepto con compromiso total."
+          : "Completa Concepto y Compromiso total.",
+      });
       return;
     }
     const invalidLineIndex = movementLines.findIndex((line) => !line.concept || line.amount <= 0);
     if (invalidLineIndex >= 0) {
-      setMessage({ type: "error", text: `Completa concepto e importe en la linea ${invalidLineIndex + 1}.` });
+      const invalidLine = movementLines[invalidLineIndex];
+      const missingConcept = !invalidLine.concept;
+      const missingAmount = invalidLine.amount <= 0;
+      const missingText = missingConcept && missingAmount
+        ? "concepto y compromiso total"
+        : missingConcept
+          ? "concepto"
+          : "compromiso total";
+      setMessage({
+        type: "error",
+        text: financeMovementForm.multipleConcepts
+          ? `Completa ${missingText} en la linea ${invalidLineIndex + 1}.`
+          : `Completa ${missingText}.`,
+      });
       return;
     }
     if (financeMovementForm.recoverable && financeMovementForm.recoveryMethod === "none") {
@@ -4323,14 +5073,48 @@ export default function Home() {
       setMessage({ type: "error", text: `Para cargar USD, completa el tipo de cambio en la linea ${missingFxIndex + 1}.` });
       return;
     }
+    const allocationLines = financeMovementForm.economicDistributionEnabled
+      ? financeMovementForm.allocationLines
+        .map((line) => {
+          const amount = parseMoneyInput(stripUsdPrefix(line.amount));
+          const currency = isUsdAmountInput(line.amount) ? "USD" : line.currency;
+          const fxRate = parseMoneyInput(line.fxRate);
+          return {
+            ...line,
+            targetName: line.targetName.trim(),
+            amount,
+            currency,
+            fxRate,
+          };
+        })
+          .filter((line) => line.targetName || line.amount > 0)
+      : [];
+    if (financeMovementForm.economicDistributionEnabled) {
+      const invalidAllocationIndex = allocationLines.findIndex((line) => !line.targetName || line.amount <= 0);
+      if (invalidAllocationIndex >= 0) {
+        setMessage({ type: "error", text: `Completa destino e importe en la imputacion ${invalidAllocationIndex + 1}.` });
+        return;
+      }
+      const missingAllocationFxIndex = allocationLines.findIndex((line) => line.currency === "USD" && line.fxRate <= 0);
+      if (missingAllocationFxIndex >= 0) {
+        setMessage({ type: "error", text: `Para imputaciones en USD, completa el tipo de cambio en la imputacion ${missingAllocationFxIndex + 1}.` });
+        return;
+      }
+      if (Math.abs(financeAllocationDifferenceArs) > 0.05) {
+        setMessage({ type: "error", text: "La distribucion economica debe cerrar contra el compromiso total del movimiento." });
+        return;
+      }
+    }
 
     setFinanceMovementLoading(true);
     let savedCount = 0;
+    const movementBusinessArea = financeMovementForm.businessArea as FinanceBusinessArea;
+    const movementArtist = financeMovementForm.artist.trim() || "Sin artista asignado";
     for (const line of movementLines) {
       const payload = {
         movement_date: financeMovementForm.movementDate,
-        artist: financeMovementForm.artist,
-        business_area: financeMovementForm.businessArea,
+        artist: movementArtist,
+        business_area: movementBusinessArea,
         movement_type: financeMovementForm.movementType,
         category: financeMovementForm.category,
         project_name: financeMovementForm.projectName || null,
@@ -4354,6 +5138,15 @@ export default function Home() {
         source_id: financeMovementForm.sourceId || null,
         proof_refs: financeMovementForm.proofRefs.split(/\r?\n/).map((proofLine) => proofLine.trim()).filter(Boolean),
         notes: financeMovementForm.notes || null,
+        allocation_lines: allocationLines.map((allocation) => ({
+          allocation_type: allocation.allocationType,
+          target_name: allocation.targetName,
+          business_area: allocation.businessArea || movementBusinessArea,
+          amount: allocation.amount,
+          currency: allocation.currency,
+          fx_rate: allocation.currency === "USD" ? allocation.fxRate : null,
+          notes: allocation.notes || null,
+        })),
       };
 
       const url = financeMovementEditingId
@@ -4423,6 +5216,18 @@ export default function Home() {
         })),
       });
     }
+  }
+
+  async function loadFinanceEmployeeOptions() {
+    setFinanceEmployeeOptionsLoading(true);
+    const response = await fetch("/api/employees/finance-options", { cache: "no-store" });
+    if (response.ok) {
+      const data = await response.json();
+      setFinanceEmployeeOptions(data.items || []);
+    } else {
+      setFinanceEmployeeOptions([]);
+    }
+    setFinanceEmployeeOptionsLoading(false);
   }
 
   async function loadCommissionEmployeeRecords() {
@@ -5511,6 +6316,11 @@ export default function Home() {
       email: "",
       address: "",
       functions: [],
+      compensationType: "none",
+      salaryAmount: "",
+      salaryCurrency: "ARS",
+      salaryFrequency: "monthly",
+      salaryNotes: "",
       username: "",
       newPassword: "",
       mustChangePassword: true,
@@ -5533,6 +6343,11 @@ export default function Home() {
       email: item.email || "",
       address: item.address || "",
       functions: item.functions || [],
+      compensationType: item.compensation_type || "none",
+      salaryAmount: amountToInput(item.salary_amount || 0),
+      salaryCurrency: item.salary_currency || "ARS",
+      salaryFrequency: item.salary_frequency || "monthly",
+      salaryNotes: item.salary_notes || "",
       username: primaryUser?.username || "",
       newPassword: "",
       mustChangePassword: primaryUser?.must_change_password ?? true,
@@ -5562,6 +6377,11 @@ export default function Home() {
           email: employeeForm.email || null,
           address: employeeForm.address || null,
           functions: employeeForm.functions,
+          compensation_type: employeeForm.compensationType,
+          salary_amount: parseMoneyInput(employeeForm.salaryAmount),
+          salary_currency: employeeForm.salaryCurrency,
+          salary_frequency: employeeForm.salaryFrequency,
+          salary_notes: employeeForm.salaryNotes || null,
           username: employeeForm.username || null,
           password: employeeForm.newPassword || null,
           must_change_password: employeeForm.newPassword ? employeeForm.mustChangePassword : null,
@@ -6167,6 +6987,25 @@ export default function Home() {
   const financeMovementAmountArs = financeMovementPreviewTotals.amountArs;
   const financeMovementPaidArs = financeMovementPreviewTotals.paidArs;
   const financeMovementPendingArs = Math.max(financeMovementAmountArs - financeMovementPaidArs, 0);
+  const financeAllocationPreviewTotals = financeMovementForm.allocationLines.reduce((totals, line) => {
+    const amount = parseMoneyInput(stripUsdPrefix(line.amount));
+    const currency = isUsdAmountInput(line.amount) ? "USD" : line.currency;
+    const fxRate = parseMoneyInput(line.fxRate);
+    const amountArs = currency === "USD" ? amount * fxRate : amount;
+    const indyanaCostArs = line.allocationType === "indyana_cost" ? amountArs : 0;
+    const thirdPartyReceivableArs = line.allocationType === "third_party_receivable" ? amountArs : 0;
+    return {
+      amountArs: totals.amountArs + amountArs,
+      indyanaCostArs: totals.indyanaCostArs + indyanaCostArs,
+      thirdPartyReceivableArs: totals.thirdPartyReceivableArs + thirdPartyReceivableArs,
+    };
+  }, { amountArs: 0, indyanaCostArs: 0, thirdPartyReceivableArs: 0 });
+  const financeAllocationDifferenceArs = financeMovementForm.economicDistributionEnabled
+    ? financeAllocationPreviewTotals.amountArs - financeMovementAmountArs
+    : 0;
+  const financeMovementSelectedEmployee = financeEmployeeOptions.find(
+    (employee) => employee.display_name === financeMovementForm.counterparty,
+  );
   const financeMovementRecoverablePct = parseMoneyInput(financeMovementForm.recoverablePercent);
   const financeMovementArtistPct = parseMoneyInput(financeMovementForm.artistPercent);
   const financeMovementProducerPct = parseMoneyInput(financeMovementForm.producerPercent);
@@ -6186,11 +7025,146 @@ export default function Home() {
     royalties: "Se recupera contra regalias digitales futuras.",
     manual: "Caso especial que se va a aplicar con un movimiento o ajuste especifico.",
   };
+  const financeMovementIsBookingAccountFlow = financeMovementForm.movementType === "pago"
+    && financeMovementForm.businessArea === "booking";
+  const financeMovementReadyForDetails = Boolean(financeMovementForm.businessArea && financeMovementForm.category);
+  const payrollPermission = currentModulePermission("payroll_compensation");
+  const financeMovementCanUseOffice = currentUser?.role === "admin" || Boolean(payrollPermission?.can_access);
+  const financeMovementCanCreatePayroll = currentUser?.role === "admin" || Boolean(payrollPermission?.can_create);
+  const financeMovementCanEditPayroll = currentUser?.role === "admin" || Boolean(payrollPermission?.can_edit);
+  const financeMovementRequiresArtist = ["marketing", "label", "digitales", "booking"].includes(financeMovementForm.businessArea);
+  const financeMovementIsOfficeArea = financeMovementForm.businessArea === "estructura";
+  const financeMovementNeedsEmployee = financeMovementIsOfficeArea && ["salario", "comision_interna"].includes(financeMovementForm.category);
+  const financeMovementShowConceptFields = financeMovementReadyForDetails && !financeMovementIsBookingAccountFlow;
+  const financeMovementShowTreatment = financeMovementShowConceptFields
+    && !financeMovementIsOfficeArea
+    && financeMovementForm.movementType !== "ingreso"
+    && financeMovementForm.movementType !== "pago";
+  const financeMovementAreaLabel = "Area";
+  const financeMovementCategoryLabel = financeMovementIsOfficeArea ? "Categoria oficina" : "Categoria";
+  const financeMovementBaseCanSave = financeMovementEditingId
+    ? canEditModule("finance_movements")
+    : canCreateModule("finance_movements");
+  const financeMovementCanSave = financeMovementBaseCanSave && (
+    !financeMovementNeedsEmployee
+      || (financeMovementEditingId ? financeMovementCanEditPayroll : financeMovementCanCreatePayroll)
+  );
+  const financeMovementAreaOptions: [FinanceBusinessArea, string][] = [
+    ["marketing", "Marketing"],
+    ["label", "Label"],
+    ["digitales", "Digitales"],
+    ["booking", "Booking"],
+    ...(financeMovementCanUseOffice ? [["estructura", "Oficina"] as [FinanceBusinessArea, string]] : []),
+  ];
+  const financeMovementPermission = currentModulePermission("finance_movements");
+  const financeMovementAllowedArtistNames = financeMovementPermission && permissionUsesArtistScope(financeMovementPermission) && !permissionHasAllArtists(financeMovementPermission)
+    ? new Set(permissionArtistNames(financeMovementPermission).map(artistScopeKey))
+    : null;
+  const financeMovementArtistOptions = Array.from(new Set([
+    ...(financeMovements?.artists || []),
+    ...bookingArtists,
+  ]))
+    .filter((artist) => artist && artist !== "VPO Corp / estructura" && artist !== "Sin artista asignado")
+    .filter((artist) => !financeMovementAllowedArtistNames || financeMovementAllowedArtistNames.has(artistScopeKey(artist)))
+    .sort((a, b) => a.localeCompare(b));
+  const financeMovementCategoryOptions = (() => {
+    if (financeMovementForm.movementType === "ajuste") {
+      return [
+        ["ajuste_admin", "Ajuste administrativo"],
+        ["correccion", "Correccion"],
+        ["reclasificacion", "Reclasificacion"],
+        ["cierre", "Cierre / regularizacion"],
+        ["otro", "Otro ajuste"],
+      ];
+    }
+    if (financeMovementForm.movementType === "pago") {
+      return [
+        ["cuenta_booking", "Cuenta booking"],
+        ["recuperable_abierto", "Recuperable abierto"],
+        ["proveedor_pendiente", "Proveedor pendiente"],
+        ["adelanto_prestamo", "Adelanto / prestamo"],
+        ["sin_aplicar", "Sin aplicar todavia"],
+      ];
+    }
+    const optionsByArea: Record<FinanceBusinessArea, string[][]> = {
+      booking: [
+        ["movilidad", "Movilidad / viaticos"],
+        ["produccion_show", "Produccion"],
+        ["dj_set", "DJ set / contenido booking"],
+        ["comision_booking", "Comision booking"],
+        ["staff_tecnico", "Staff / tecnico"],
+        ["otro_booking", "Otro booking"],
+      ],
+      label: [
+        ["videoclip", "Videoclip"],
+        ["produccion_musical", "Produccion musical"],
+        ["mix_master", "Mix & master"],
+        ["estreno", "Estreno"],
+        ["arte_diseno", "Arte / diseno"],
+        ["fotografia_contenido", "Fotografia / contenido"],
+        ["estudio", "Estudio"],
+        ["otro_label", "Otro label"],
+      ],
+      management: [
+        ["imagen_branding", "Imagen / branding"],
+        ["vestuario_styling", "Vestuario / styling"],
+        ["fotos", "Fotos"],
+        ["coaching", "Coaching / entrenamiento"],
+        ["logistica_artista", "Logistica artista"],
+        ["otro_management", "Otro management"],
+      ],
+      digitales: [
+        ["distribucion", "Distribucion"],
+        ["metadata_catalogo", "Metadata / catalogo"],
+        ["herramientas_digitales", "Herramientas digitales"],
+        ["reclamos_soporte", "Reclamos / soporte"],
+        ["otro_digital", "Otro digital"],
+      ],
+      marketing: [
+        ["pauta", "Pauta"],
+        ["prensa", "Prensa"],
+        ["influencers", "Influencers"],
+        ["activacion", "Activacion"],
+        ["diseno_contenido", "Diseno / contenido"],
+        ["otro_marketing", "Otro marketing"],
+      ],
+      estructura: [
+        ["salario", "Sueldo"],
+        ["comision_interna", "Comision interna"],
+        ["oficina", "Oficina"],
+        ["sistema", "Sistema"],
+        ["impuesto", "Impuesto"],
+        ["alquiler", "Alquiler"],
+        ["servicio", "Servicio"],
+        ["honorarios", "Honorarios"],
+        ["otro_estructura", "Otro estructura"],
+      ],
+      administracion: [
+        ["honorarios", "Honorarios"],
+        ["impuesto", "Impuesto"],
+        ["banco", "Banco / financiero"],
+        ["proveedor", "Proveedor"],
+        ["otro_administracion", "Otro administracion"],
+      ],
+      general: [
+        ["general", "General"],
+        ["otro", "Otro"],
+      ],
+    };
+    return optionsByArea[(financeMovementForm.businessArea || "general") as FinanceBusinessArea] || optionsByArea.general;
+  })();
   const financeProjectOptions = (financeMovements?.projects || []).filter((project) => (
-    !financeMovementForm.artist
-      || !project.artist
-      || project.artist === financeMovementForm.artist
+    (!financeMovementForm.artist || !project.artist || artistScopeKey(project.artist) === artistScopeKey(financeMovementForm.artist))
+    && (!financeMovementForm.businessArea || project.business_area === financeMovementForm.businessArea || !project.business_area)
   ));
+  const financeMovementProjectSelectValue = financeMovementProjectMode === "new"
+    ? "__new__"
+    : !financeMovementForm.projectName
+    ? ""
+    : financeProjectOptions.some((project) => project.name === financeMovementForm.projectName)
+      ? financeMovementForm.projectName
+      : "__new__";
+  const financeMovementProjectIsNew = financeMovementProjectMode === "new" || financeMovementProjectSelectValue === "__new__";
   const financeMovementProjectOptions = financeMovements?.project_options || [];
   const artistFinanceProjectOptions = Array.from(new Set([
     ...(artistFinance?.finance_project_summary || []).map((project) => project.project_name),
@@ -6250,6 +7224,266 @@ export default function Home() {
   const artistFinanceAccountEntries = (artistFinance?.finance_ledger.entries || []).filter((item) => (
     Math.abs(item.account_delta_ars || 0) > 0.01 || Math.abs(item.venue_receivable_ars || 0) > 0.01
   ));
+  const bookingParentMovementLabels: Record<BookingParentMovementType, string> = {
+    cobro_deuda_booking: "Cobro de deuda booking",
+    pago_saldo_artista: "Pago saldo artista",
+    compensacion_booking: "Compensacion booking",
+    pago_deuda_boliche: "Pago deuda boliche",
+    ajuste_booking: "Ajuste booking",
+  };
+  const bookingParentMovementHelp: Record<BookingParentMovementType, string> = {
+    cobro_deuda_booking: "Entra plata real a Indyana para saldar shows donde nos deben.",
+    pago_saldo_artista: "Sale plata real de Indyana para saldar shows donde debemos al artista.",
+    compensacion_booking: "No entra ni sale plata nueva; se cruza un saldo contra otro.",
+    pago_deuda_boliche: "El cliente o boliche paga una deuda pendiente de cachet.",
+    ajuste_booking: "Decision administrativa observada. No usar como camino normal.",
+  };
+  function artistFinanceOpenAmountForMovement(item: ArtistFinanceOpenBalance, movementType: BookingParentMovementType) {
+    const bookingNet = bookingCurrentAccountNet(item.indyana_balance || 0, item.artist_balance || 0);
+    if (movementType === "cobro_deuda_booking") return Math.max(bookingNet, 0);
+    if (movementType === "pago_saldo_artista") return Math.max(-bookingNet, 0);
+    if (movementType === "pago_deuda_boliche") return Math.max(item.venue_balance || 0, 0);
+    if (movementType === "compensacion_booking") return Math.abs(bookingNet);
+    return Math.max(Math.abs(bookingNet), Math.max(item.venue_balance || 0, 0));
+  }
+
+  function artistFinanceTargetForMovement(item: ArtistFinanceOpenBalance, movementType: BookingParentMovementType): BookingAccountTarget {
+    const artistBalance = item.artist_balance || 0;
+    const producerBalance = item.indyana_balance || 0;
+    const venueBalance = item.venue_balance || 0;
+    if (movementType === "pago_deuda_boliche") return "venue";
+    if (movementType === "cobro_deuda_booking") {
+      if (artistBalance < -0.01) return "artist";
+      if (producerBalance > 0.01) return "producer";
+      return "artist";
+    }
+    if (movementType === "pago_saldo_artista") {
+      if (artistBalance > 0.01) return "artist";
+      if (producerBalance < -0.01) return "producer";
+      return "artist";
+    }
+    if (movementType === "ajuste_booking" && venueBalance > 0.01 && Math.abs(artistBalance) <= 0.01 && Math.abs(producerBalance) <= 0.01) {
+      return "venue";
+    }
+    if (Math.abs(artistBalance) > 0.01) return "artist";
+    if (Math.abs(producerBalance) > 0.01) return "producer";
+    return "venue";
+  }
+
+  const artistFinanceBookingMovementAmount = parseMoneyInput(artistFinanceBookingMovementDraft.amount);
+  const artistFinanceBookingMovementRows = (artistFinance?.open_booking_balances || [])
+    .map((item) => ({
+      item,
+      openAmount: artistFinanceOpenAmountForMovement(item, artistFinanceBookingMovementDraft.movementType),
+      appliedAmount: parseMoneyInput(artistFinanceBookingMovementDraft.applications[item.id] || ""),
+    }))
+    .filter((row) => row.openAmount > 0.01)
+    .sort((a, b) => (a.item.show_date || "").localeCompare(b.item.show_date || "") || a.item.id - b.item.id);
+  const artistFinanceBookingMovementApplied = artistFinanceBookingMovementRows.reduce((total, row) => total + row.appliedAmount, 0);
+  const artistFinanceBookingMovementRemaining = artistFinanceBookingMovementAmount - artistFinanceBookingMovementApplied;
+  const artistFinanceBookingMovementOverApplied = artistFinanceBookingMovementRows.some((row) => row.appliedAmount > row.openAmount + 0.01);
+  const artistFinanceBookingBlockRows = (artistFinance?.open_booking_balances || [])
+    .map((item) => ({
+      item,
+      netAmount: bookingCurrentAccountNet(item.indyana_balance || 0, item.artist_balance || 0),
+      selected: parseMoneyInput(artistFinanceBookingMovementDraft.applications[item.id] || "") > 0.01,
+    }))
+    .filter((row) => Math.abs(row.netAmount) > 0.01 || Math.abs(row.item.venue_balance || 0) > 0.01)
+    .sort((a, b) => (a.item.show_date || "").localeCompare(b.item.show_date || "") || a.item.id - b.item.id);
+  const artistFinanceBookingBlockSelectedRows = artistFinanceBookingBlockRows.filter((row) => row.selected);
+  const artistFinanceBookingBlockArtistBalance = artistFinanceBookingBlockSelectedRows.reduce((total, row) => total + (row.item.artist_balance || 0), 0);
+  const artistFinanceBookingBlockProducerBalance = artistFinanceBookingBlockSelectedRows.reduce((total, row) => total + (row.item.indyana_balance || 0), 0);
+  const artistFinanceBookingBlockVenueBalance = artistFinanceBookingBlockSelectedRows.reduce((total, row) => total + (row.item.venue_balance || 0), 0);
+  const artistFinanceBookingBlockNet = bookingCurrentAccountNet(artistFinanceBookingBlockProducerBalance, artistFinanceBookingBlockArtistBalance);
+  const artistFinanceBookingBlockExpectedAmount = Math.abs(artistFinanceBookingBlockNet);
+  const artistFinanceBookingBlockAmountMatches = Math.abs(artistFinanceBookingMovementAmount - artistFinanceBookingBlockExpectedAmount) <= 0.01;
+  const artistFinanceBookingMovementCanSave = Boolean(artistFinanceArtist)
+    && canEditModule("booking")
+    && !artistFinanceLoading
+    && artistFinanceBookingMovementAmount > 0.01
+    && artistFinanceBookingMovementApplied > 0.01
+    && artistFinanceBookingMovementRemaining >= -0.01
+    && !artistFinanceBookingMovementOverApplied;
+
+  function updateArtistFinanceBookingMovementField<K extends keyof BookingParentMovementDraft>(key: K, value: BookingParentMovementDraft[K]) {
+    setArtistFinanceBookingMovementDraft((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateArtistFinanceBookingMovementApplication(showId: number, value: string) {
+    setArtistFinanceBookingMovementDraft((current) => ({
+      ...current,
+      applications: {
+        ...current.applications,
+        [showId]: value,
+      },
+    }));
+  }
+
+  function resetArtistFinanceBookingMovementDraft() {
+    setArtistFinanceBookingMovementDraft(initialBookingParentMovementDraft());
+  }
+
+  function suggestArtistFinanceBookingMovementApplications() {
+    let remaining = artistFinanceBookingMovementAmount;
+    const nextApplications: Record<number, string> = {};
+    for (const row of artistFinanceBookingMovementRows) {
+      if (remaining <= 0.01) break;
+      const applied = Math.min(row.openAmount, remaining);
+      nextApplications[row.item.id] = amountToInput(applied);
+      remaining -= applied;
+    }
+    setArtistFinanceBookingMovementDraft((current) => ({
+      ...current,
+      applications: nextApplications,
+    }));
+  }
+
+  function selectArtistFinanceBookingBlockRows() {
+    const nextApplications: Record<number, string> = {};
+    for (const row of artistFinanceBookingBlockRows) {
+      nextApplications[row.item.id] = amountToInput(Math.abs(row.netAmount));
+    }
+    const producerBalance = artistFinanceBookingBlockRows.reduce((total, row) => total + (row.item.indyana_balance || 0), 0);
+    const artistBalance = artistFinanceBookingBlockRows.reduce((total, row) => total + (row.item.artist_balance || 0), 0);
+    const netAmount = bookingCurrentAccountNet(producerBalance, artistBalance);
+    setArtistFinanceBookingMovementDraft((current) => ({
+      ...current,
+      amount: amountToInput(Math.abs(netAmount)),
+      applications: nextApplications,
+    }));
+  }
+
+  async function submitArtistFinanceBookingMovement() {
+    if (!artistFinanceArtist) {
+      setMessage({ type: "error", text: "Elegir un artista antes de guardar el movimiento." });
+      return;
+    }
+    if (!canEditModule("booking")) {
+      setMessage({ type: "error", text: "No tenes permiso para registrar movimientos de Booking." });
+      return;
+    }
+    if (artistFinanceBookingMovementAmount <= 0.01) {
+      setMessage({ type: "error", text: "Cargar el importe total del movimiento." });
+      return;
+    }
+    if (artistFinanceBookingMovementApplied <= 0.01) {
+      setMessage({ type: "error", text: "Aplicar el movimiento a por lo menos un show." });
+      return;
+    }
+    if (artistFinanceBookingMovementRemaining < -0.01) {
+      setMessage({ type: "error", text: "La suma aplicada supera el importe del movimiento." });
+      return;
+    }
+    if (artistFinanceBookingMovementOverApplied) {
+      setMessage({ type: "error", text: "Hay un show con importe aplicado mayor al saldo abierto." });
+      return;
+    }
+    const applications = artistFinanceBookingMovementRows
+      .filter((row) => row.appliedAmount > 0.01)
+      .map((row) => ({
+        show_id: row.item.id,
+        target_balance: artistFinanceTargetForMovement(row.item, artistFinanceBookingMovementDraft.movementType),
+        amount: row.appliedAmount,
+      }));
+    const proofRefs = artistFinanceBookingMovementDraft.proofRefs
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    setArtistFinanceLoading(true);
+    setMessage(null);
+    const response = await fetch("/api/booking/account-movements", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        movement_date: artistFinanceBookingMovementDraft.movementDate,
+        artist: artistFinanceArtist,
+        movement_type: artistFinanceBookingMovementDraft.movementType,
+        amount: artistFinanceBookingMovementAmount,
+        payment_method: artistFinanceBookingMovementDraft.paymentMethod,
+        counterparty: artistFinanceBookingMovementDraft.counterparty.trim() || null,
+        proof_refs: proofRefs,
+        notes: artistFinanceBookingMovementDraft.notes.trim() || null,
+        applications,
+      }),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({ error: "No se pudo guardar el movimiento." }));
+      setArtistFinanceLoading(false);
+      setMessage({ type: "error", text: payload.error || "No se pudo guardar el movimiento." });
+      return;
+    }
+    const data = await response.json();
+    resetArtistFinanceBookingMovementDraft();
+    setArtistFinanceBookingMovementOpen(false);
+    await loadArtistFinance();
+    const unapplied = data.item?.unapplied_amount || 0;
+    setMessage({
+      type: "ok",
+      text: unapplied > 0.01
+        ? `Movimiento guardado. Quedaron ${ars(unapplied)} sin aplicar.`
+        : "Movimiento guardado y aplicado a los shows seleccionados.",
+    });
+  }
+
+  async function submitArtistFinanceBookingBlockSettlement() {
+    if (!artistFinanceArtist) {
+      setMessage({ type: "error", text: "Elegir un artista antes de cerrar el bloque." });
+      return;
+    }
+    if (!canEditModule("booking")) {
+      setMessage({ type: "error", text: "No tenes permiso para cerrar bloques de Booking." });
+      return;
+    }
+    if (artistFinanceBookingBlockSelectedRows.length === 0) {
+      setMessage({ type: "error", text: "Seleccionar los shows que forman parte del bloque." });
+      return;
+    }
+    if (Math.abs(artistFinanceBookingBlockVenueBalance) > 0.01) {
+      setMessage({ type: "error", text: "El bloque tiene deuda de boliche. Cerrala por separado antes de saldar el artista." });
+      return;
+    }
+    if (artistFinanceBookingBlockExpectedAmount <= 0.01) {
+      setMessage({ type: "error", text: "El bloque seleccionado ya esta saldado." });
+      return;
+    }
+    if (!artistFinanceBookingBlockAmountMatches) {
+      setMessage({
+        type: "error",
+        text: `El importe debe coincidir con el neto del bloque: ${ars(artistFinanceBookingBlockExpectedAmount)}.`,
+      });
+      return;
+    }
+    const proofRefs = artistFinanceBookingMovementDraft.proofRefs
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    setArtistFinanceLoading(true);
+    setMessage(null);
+    const response = await fetch("/api/booking/account-block-settlements", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        settlement_date: artistFinanceBookingMovementDraft.movementDate,
+        artist: artistFinanceArtist,
+        amount: artistFinanceBookingMovementAmount,
+        payment_method: artistFinanceBookingMovementDraft.paymentMethod,
+        counterparty: artistFinanceBookingMovementDraft.counterparty.trim() || null,
+        proof_refs: proofRefs,
+        notes: artistFinanceBookingMovementDraft.notes.trim() || null,
+        show_ids: artistFinanceBookingBlockSelectedRows.map((row) => row.item.id),
+      }),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({ error: "No se pudo cerrar el bloque." }));
+      setArtistFinanceLoading(false);
+      setMessage({ type: "error", text: payload.error || "No se pudo cerrar el bloque." });
+      return;
+    }
+    resetArtistFinanceBookingMovementDraft();
+    setArtistFinanceBookingMovementOpen(false);
+    await loadArtistFinance();
+    setMessage({ type: "ok", text: "Bloque cerrado: el sistema compenso saldos cruzados y aplico el pago/cobro real." });
+  }
 
   return (
     <div className="shell">
@@ -6330,12 +7564,12 @@ export default function Home() {
                   <button type="button" className={`menu-card ${canShowMenuView("booking-summary") ? "" : "menu-card-hidden"}`} onClick={() => openView("booking-summary")}>
                     <span className="card-index">09</span>
                     <strong>Resumen booking</strong>
-                    <span>Indyana por artista y mes, separando base comisionable y excepciones.</span>
+                    <span>Indyana bruto, comisiones aplicables y neto por artista y mes.</span>
                   </button>
                   <button type="button" className={`menu-card ${canShowMenuView("commissions") ? "" : "menu-card-hidden"}`} onClick={() => openView("commissions")}>
                     <span className="card-index">10</span>
                     <strong>Comisiones</strong>
-                    <span>Configuracion por empleado y liquidacion sobre base comisionable.</span>
+                    <span>Configuracion por empleado y liquidacion segun reglas aplicables.</span>
                   </button>
               <button type="button" className={`menu-card ${canShowMenuView("booking-artist-summary") ? "" : "menu-card-hidden"}`} onClick={() => openView("booking-artist-summary")}>
                 <span className="card-index">11</span>
@@ -7173,7 +8407,7 @@ export default function Home() {
               <div>
                 <h2>Publicacion cloud</h2>
                 <p>
-                  Este paso debe hacerse despues de revisar los resumenes locales. Publicar cloud actualiza la web online con los marts validados.
+                  Este paso debe hacerse despues de revisar los resumenes locales. Publicar cloud actualiza la web online con los datos analiticos validados.
                 </p>
               </div>
               <button
@@ -7182,12 +8416,19 @@ export default function Home() {
                 title={publishDisabledReason}
                 onClick={publishSourceMonitorMarts}
               >
-                {sourceMonitorPublishing ? "Publicando..." : "Publicar marts a cloud"}
+                {sourceMonitorPublishing ? "Publicando..." : "Publicar datos analiticos"}
               </button>
               <p className="field-help">
-                Flujo correcto: revisar carpetas, procesar pendientes reales, validar importes locales y recien ahi publicar.
+                Flujo correcto: revisar carpetas, procesar pendientes reales, validar importes y catalogo local, y recien ahi publicar.
                 {sourceMonitorPendingTotal > 0 ? ` Hay ${sourceMonitorPendingTotal} archivo(s) pendiente(s) real(es).` : " No hay pendientes reales detectados."}
               </p>
+              {sourceMonitorPublishJob && sourceMonitorPublishJob.status !== "completed" && (
+                <div className="publish-result">
+                  <strong>Publicacion en curso</strong>
+                  <span>Estado: {sourceMonitorPublishJob.status} / {sourceMonitorPublishJob.stage}</span>
+                  <span>Job: {sourceMonitorPublishJob.job_id}</span>
+                </div>
+              )}
               {sourceMonitorLastPublish && (
                 <div className="publish-result">
                   <strong>Ultima publicacion: {sourceMonitorLastPublish.published_at}</strong>
@@ -7288,8 +8529,10 @@ export default function Home() {
                 id="catalog_period"
                 label="Actividad"
                 profile="activity_window"
-                selection={selectionFromMonths(catalogStartMonth, catalogEndMonth)}
-                onChange={(selection) => applyResolvedPeriod(selection, "activity_window", setCatalogStartMonth, setCatalogEndMonth)}
+                selection={catalogPeriod}
+                onChange={setCatalogPeriod}
+                minMonth={catalogData?.options.first_month || undefined}
+                maxMonth={catalogData?.options.last_month || undefined}
                 helperText="Filtra obras con actividad en el mes o rango elegido."
               />
               <div>
@@ -8057,7 +9300,7 @@ export default function Home() {
             <div className="section-heading">
               <div>
                 <h1>Resumen booking</h1>
-                <p>Ingreso Indyana por artista y mes. La base comisionable excluye shows con regla especial.</p>
+                <p>Ingreso Indyana por artista y mes, comisiones aplicables y neto real de booking.</p>
               </div>
               <button type="button" onClick={loadBookingSummary} disabled={bookingSummaryLoading}>
                 {bookingSummaryLoading ? "Actualizando..." : "Actualizar"}
@@ -8074,17 +9317,17 @@ export default function Home() {
                 <strong>{ars(bookingSummary?.totals.indyana_total || 0)}</strong>
               </div>
               <div>
-                <span>Base comisionable</span>
-                <strong>{ars(bookingSummary?.totals.commissionable_total || 0)}</strong>
+                <span>Comisiones</span>
+                <strong>{ars(bookingSummary?.totals.commission_total || 0)}</strong>
               </div>
-              <div className={(bookingSummary?.totals.non_commissionable_total || 0) > 0 ? "warn" : ""}>
-                <span>No comisionable</span>
-                <strong>{ars(bookingSummary?.totals.non_commissionable_total || 0)}</strong>
+              <div>
+                <span>Neto Indyana</span>
+                <strong>{ars(bookingSummary?.totals.indyana_net_total || 0)}</strong>
               </div>
             </div>
 
             <p className="field-help">
-              Si un show tiene comision directa o una regla especial, Indyana conserva el ingreso, pero ese monto no entra en la comision general del responsable de booking.
+              Las comisiones se calculan show por show segun reglas activas. Un show excluido de comision general no genera deuda, salvo que una regla particular indique que esa persona cobra igual.
             </p>
 
             <div className="summary-table-wrap">
@@ -8094,8 +9337,8 @@ export default function Home() {
                     <th>Artista</th>
                     <th>Shows</th>
                     <th>Indyana</th>
-                    <th>Base comisionable</th>
-                    <th>No comisionable</th>
+                    <th>Comisiones</th>
+                    <th>Neto Indyana</th>
                     {bookingSummary?.months.map((month) => (
                       <th key={month}>{month}</th>
                     ))}
@@ -8113,10 +9356,8 @@ export default function Home() {
                       <td><strong>{item.artist}</strong></td>
                       <td>{item.shows}</td>
                       <td>{ars(item.indyana_total)}</td>
-                      <td>{ars(item.commissionable_total)}</td>
-                      <td className={item.non_commissionable_total > 0 ? "amount-warn" : ""}>
-                        {ars(item.non_commissionable_total)}
-                      </td>
+                      <td>{ars(item.commission_total || 0)}</td>
+                      <td><strong>{ars(item.indyana_net_total ?? item.indyana_total)}</strong></td>
                       {bookingSummary.months.map((month) => {
                         const monthItem = item.months[month];
                         return (
@@ -8124,8 +9365,8 @@ export default function Home() {
                             {monthItem ? (
                               <>
                                 <strong>{ars(monthItem.indyana_total)}</strong>
-                                {monthItem.non_commissionable_total > 0 && (
-                                  <span className="cell-note">No com. {ars(monthItem.non_commissionable_total)}</span>
+                                {(monthItem.commission_total || 0) > 0 && (
+                                  <span className="cell-note amount-warn">Neto {ars(monthItem.indyana_net_total)}</span>
                                 )}
                               </>
                             ) : "-"}
@@ -8146,7 +9387,7 @@ export default function Home() {
             <div className="section-heading">
               <div>
                 <h1>Comisiones</h1>
-                <p>Configura porcentajes por empleado y revisa la liquidacion sobre la base comisionable de booking.</p>
+                <p>Configura porcentajes por empleado y revisa la liquidacion segun las reglas aplicables de booking.</p>
               </div>
               <button
                 type="button"
@@ -8156,6 +9397,7 @@ export default function Home() {
                   || !selectedCommissionPermission?.can_access
                   || !canEditModule("booking_commissions")
                   || !commissionDirtyEmployees[commissionsEmployee]
+                  || commissionRulesMissingPriority.length > 0
                   || commissionRulesLoading
                   || commissionRulesSaving
                 }
@@ -8163,6 +9405,11 @@ export default function Home() {
                 {commissionRulesSaving ? "Guardando..." : "Guardar configuracion"}
               </button>
             </div>
+            {commissionsEmployee && commissionRulesMissingPriority.length > 0 && (
+              <p className="field-help amount-warn">
+                Elegi orden de cobro para: {commissionRulesMissingPriority.map((rule) => rule.artist).join(", ")}.
+              </p>
+            )}
 
             <div className="row three">
               <div>
@@ -8250,11 +9497,11 @@ export default function Home() {
                     <strong>{ars(commissionTotals.indyanaTotal)}</strong>
                   </div>
                   <div>
-                    <span>Base comisionable</span>
+                    <span>Base empleado</span>
                     <strong>{ars(commissionTotals.baseAmount)}</strong>
                   </div>
                   <div className={commissionTotals.nonCommissionable > 0 ? "warn" : ""}>
-                    <span>No comisionable</span>
+                    <span>Excluido general</span>
                     <strong>{ars(commissionTotals.nonCommissionable)}</strong>
                   </div>
                   <div>
@@ -8276,6 +9523,18 @@ export default function Home() {
                       Mostrando {visibleCommissionSettlementRows.length} de {commissionSettlementRows.length} filas.
                     </p>
                   </div>
+                  <div className="actions-panel">
+                    <button
+                      type="button"
+                      onClick={printCommissionSettlement}
+                      disabled={!selectedCommissionEmployee || !selectedCommissionPermission?.can_access || commissionSummaryLoading}
+                    >
+                      Imprimir PDF
+                    </button>
+                    <p className="field-help">
+                      Abre un informe listo para imprimir o guardar como PDF.
+                    </p>
+                  </div>
                 </div>
 
                 <div className="summary-table-wrap">
@@ -8286,8 +9545,9 @@ export default function Home() {
                         <th>Artista</th>
                         <th>Shows</th>
                         <th>Indyana total</th>
-                        <th>Base comision</th>
-                        <th>No comisionable</th>
+                        <th>Base empleado</th>
+                        <th>Excluido general</th>
+                        <th>Orden</th>
                         <th>% empleado</th>
                         <th>Comision</th>
                         <th>Notas</th>
@@ -8302,6 +9562,7 @@ export default function Home() {
                           <td>{ars(item.indyanaTotal)}</td>
                           <td>{ars(item.baseAmount)}</td>
                           <td className={item.nonCommissionable > 0 ? "amount-warn" : ""}>{ars(item.nonCommissionable)}</td>
+                          <td>{item.priorityOrder || "-"}</td>
                           <td>{pct(item.percent)}</td>
                           <td><strong>{ars(item.commissionAmount)}</strong></td>
                           <td>
@@ -8342,7 +9603,7 @@ export default function Home() {
                   </div>
                   <div>
                     <span>Base default</span>
-                    <strong>Indyana comisionable</strong>
+                    <strong>Indyana aplicable</strong>
                   </div>
                   <div>
                     <span>Vigencia</span>
@@ -8363,7 +9624,9 @@ export default function Home() {
                       <tr>
                         <th>Artista</th>
                         <th>% comision</th>
+                        <th>Orden</th>
                         <th>Base de calculo</th>
+                        <th>Booking ya pagado</th>
                         <th>Desde</th>
                         <th>Hasta</th>
                         <th>Activo</th>
@@ -8387,13 +9650,41 @@ export default function Home() {
                           </td>
                           <td>
                             <select
+                              value={item.priorityOrder || ""}
+                              disabled={!canEditModule("booking_commissions") || commissionRulesLoading || commissionRulesSaving || Number(item.percent || 0) <= 0 || !item.active}
+                              onChange={(event) => updateCommissionRuleDraft(item.artist, { priorityOrder: event.target.value ? Number(event.target.value) : null })}
+                            >
+                              <option value="">Elegir</option>
+                              {commissionPriorityOptions(item.artist, item.priorityOrder).length === 0 && (
+                                <option value={item.priorityOrder || ""}>Sin orden disponible</option>
+                              )}
+                              {commissionPriorityOptions(item.artist, item.priorityOrder).map((order) => (
+                                <option key={`${item.artist}_priority_${order}`} value={order}>Orden {order}</option>
+                              ))}
+                            </select>
+                            <span className="cell-note">Cobra antes el orden menor.</span>
+                          </td>
+                          <td>
+                            <select
                               value={item.base}
                               disabled={!canEditModule("booking_commissions") || commissionRulesLoading || commissionRulesSaving}
                               onChange={(event) => updateCommissionRuleDraft(item.artist, { base: event.target.value as CommissionRuleDraftState["base"] })}
                             >
-                              <option value="commissionable">Ingreso Indyana comisionable</option>
-                              <option value="total">Ingreso Indyana total</option>
+                              <option value="commissionable">Ingreso Indyana aplicable</option>
+                              <option value="total">Ingreso Indyana total de shows aplicables</option>
                             </select>
+                          </td>
+                          <td>
+                            <label className="inline-check">
+                              <input
+                                type="checkbox"
+                                checked={item.includeBookingFeePaidShows}
+                                disabled={!canEditModule("booking_commissions") || commissionRulesLoading || commissionRulesSaving}
+                                onChange={(event) => updateCommissionRuleDraft(item.artist, { includeBookingFeePaidShows: event.target.checked })}
+                              />
+                              Cobra igual
+                            </label>
+                            <span className="cell-note">Si el show excluye comision general.</span>
                           </td>
                           <td>
                             <input
@@ -8434,7 +9725,7 @@ export default function Home() {
                       ))}
                       {commissionRulesForEmployee.length === 0 && (
                         <tr>
-                          <td colSpan={7}>Sin artistas asignados para este empleado.</td>
+                          <td colSpan={9}>Sin artistas asignados para este empleado.</td>
                         </tr>
                       )}
                     </tbody>
@@ -8442,7 +9733,7 @@ export default function Home() {
                 </div>
 
                 <p className="field-help">
-                  Las reglas viven por empleado y artista, sin modificar los shows. La liquidacion toma esos porcentajes contra el ingreso Indyana comisionable.
+                  Las reglas viven por empleado y artista, sin modificar los shows. Si un show excluye comision general, solo cobra quien tenga habilitada la excepcion.
                 </p>
                 {!canEditModule("booking_commissions") && (
                   <p className="field-help amount-warn">Tu usuario puede ver Comisiones, pero no editar reglas.</p>
@@ -8510,11 +9801,11 @@ export default function Home() {
                 <strong>{ars(bookingArtistSummary?.totals.indyana_income || 0)}</strong>
               </div>
               <div>
-                <span>Comisionable</span>
+                <span>Aplica comision general</span>
                 <strong>{ars(bookingArtistSummary?.totals.commissionable_income || 0)}</strong>
               </div>
               <div className={(bookingArtistSummary?.totals.non_commissionable_income || 0) > 0 ? "warn" : ""}>
-                <span>No comisionable</span>
+                <span>Excluye comision general</span>
                 <strong>{ars(bookingArtistSummary?.totals.non_commissionable_income || 0)}</strong>
               </div>
             </div>
@@ -8529,8 +9820,8 @@ export default function Home() {
                     <th>Cachet total</th>
                     <th>Ingreso artista</th>
                     <th>Ingreso Indyana</th>
-                    <th>Comisionable</th>
-                    <th>No comisionable</th>
+                    <th>Aplica general</th>
+                    <th>Excluye general</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -8592,7 +9883,7 @@ export default function Home() {
                       <td>{ars(item.artist_income)}</td>
                       <td>{ars(item.indyana_income)}</td>
                       <td>
-                        <strong>{item.is_commissionable ? "Comisionable" : "No comisionable"}</strong>
+                        <strong>{item.is_commissionable ? "Aplica general" : "Excluye general"}</strong>
                         <span className="cell-note">
                           {item.is_commissionable ? ars(item.commissionable_income) : ars(item.non_commissionable_income)}
                         </span>
@@ -8622,7 +9913,7 @@ export default function Home() {
                 <p>Vista operativa: saldos de shows, cuenta corriente, inversiones, proyectos y recuperables en lenguaje de negocio.</p>
               </div>
               <div className="button-row">
-                <button type="button" onClick={loadArtistFinance} disabled={artistFinanceLoading}>
+                <button type="button" onClick={() => loadArtistFinance()} disabled={artistFinanceLoading}>
                   {artistFinanceLoading ? "Actualizando..." : "Actualizar"}
                 </button>
               </div>
@@ -8637,6 +9928,8 @@ export default function Home() {
                   onChange={(event) => {
                     setArtistFinanceArtist(event.target.value);
                     setArtistFinanceProjectFilter("");
+                    setArtistFinanceBookingMovementOpen(false);
+                    resetArtistFinanceBookingMovementDraft();
                   }}
                 >
                   <option value="">Todos</option>
@@ -8780,6 +10073,301 @@ export default function Home() {
                     <span>Shows</span>
                     <strong>{artistFinance?.summary.booking.shows || 0}</strong>
                   </div>
+                </div>
+                <div className="booking-parent-movement-card">
+                  <div className="section-heading compact-heading">
+                    <div>
+                      <h3>Registrar movimiento de cuenta booking</h3>
+                      <p>Cobros, pagos o compensaciones que se aplican a uno o varios shows sin reescribir la liquidacion original.</p>
+                    </div>
+                    <div className="button-row">
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => setArtistFinanceBookingMovementOpen((current) => !current)}
+                      >
+                        {artistFinanceBookingMovementOpen ? "Ocultar" : "Registrar movimiento"}
+                      </button>
+                    </div>
+                  </div>
+                  {artistFinanceBookingMovementOpen && (
+                    <div className="booking-parent-movement-form">
+                      <p className="field-help">El movimiento queda guardado como comprobante padre y cada aplicacion impacta en la cuenta booking del show seleccionado.</p>
+                      {!artistFinanceArtist && (
+                        <p className="field-help danger-text">Elegir un artista antes de registrar un movimiento de cuenta booking.</p>
+                      )}
+                      <div className="row">
+                        <div>
+                          <label htmlFor="booking_parent_date">Fecha</label>
+                          <input
+                            id="booking_parent_date"
+                            type="date"
+                            value={artistFinanceBookingMovementDraft.movementDate}
+                            onChange={(event) => updateArtistFinanceBookingMovementField("movementDate", event.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="booking_parent_type">Tipo</label>
+                          <select
+                            id="booking_parent_type"
+                            value={artistFinanceBookingMovementDraft.movementType}
+                            onChange={(event) => setArtistFinanceBookingMovementDraft((current) => ({
+                              ...current,
+                              movementType: event.target.value as BookingParentMovementType,
+                              paymentMethod: event.target.value === "compensacion_booking" ? "compensacion" : current.paymentMethod,
+                              applications: {},
+                            }))}
+                          >
+                            {Object.entries(bookingParentMovementLabels).map(([key, label]) => (
+                              <option key={key} value={key}>{label}</option>
+                            ))}
+                          </select>
+                          <p className="field-help">{bookingParentMovementHelp[artistFinanceBookingMovementDraft.movementType]}</p>
+                        </div>
+                        <div>
+                          <label htmlFor="booking_parent_amount">Importe total</label>
+                          <input
+                            id="booking_parent_amount"
+                            inputMode="decimal"
+                            value={artistFinanceBookingMovementDraft.amount}
+                            onChange={(event) => updateArtistFinanceBookingMovementField("amount", event.target.value)}
+                            placeholder="$ 0"
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="booking_parent_method">Metodo</label>
+                          <select
+                            id="booking_parent_method"
+                            value={artistFinanceBookingMovementDraft.paymentMethod}
+                            onChange={(event) => updateArtistFinanceBookingMovementField("paymentMethod", event.target.value as BookingParentMovementDraft["paymentMethod"])}
+                          >
+                            <option value="transferencia">Transferencia</option>
+                            <option value="efectivo">Efectivo</option>
+                            <option value="compensacion">Compensacion</option>
+                            <option value="ajuste">Ajuste</option>
+                            <option value="otro">Otro</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="row">
+                        <div>
+                          <label htmlFor="booking_parent_counterparty">Contraparte</label>
+                          <input
+                            id="booking_parent_counterparty"
+                            value={artistFinanceBookingMovementDraft.counterparty}
+                            onChange={(event) => updateArtistFinanceBookingMovementField("counterparty", event.target.value)}
+                            placeholder={artistFinanceSelectedLabel}
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="booking_parent_proofs">Comprobante / refs</label>
+                          <textarea
+                            id="booking_parent_proofs"
+                            value={artistFinanceBookingMovementDraft.proofRefs}
+                            onChange={(event) => updateArtistFinanceBookingMovementField("proofRefs", event.target.value)}
+                            placeholder="Uno por linea"
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="booking_parent_notes">Notas</label>
+                          <textarea
+                            id="booking_parent_notes"
+                            value={artistFinanceBookingMovementDraft.notes}
+                            onChange={(event) => updateArtistFinanceBookingMovementField("notes", event.target.value)}
+                            placeholder="Ej: pago recibido para saldar shows pendientes"
+                          />
+                        </div>
+                      </div>
+                      <div className="booking-parent-summary">
+                        <div>
+                          <span>Cierre de bloque</span>
+                          <strong>{artistFinanceBookingBlockSelectedRows.length} show(s)</strong>
+                        </div>
+                        <div className={artistFinanceBookingBlockNet < -0.01 ? "warn" : artistFinanceBookingBlockNet > 0.01 ? "danger" : ""}>
+                          <span>Neto bloque seleccionado</span>
+                          <strong>
+                            {Math.abs(artistFinanceBookingBlockNet) <= 0.01
+                              ? "$ 0"
+                              : `${artistFinanceBookingBlockNet < 0 ? "Indyana paga " : "Indyana cobra "}${ars(Math.abs(artistFinanceBookingBlockNet))}`}
+                          </strong>
+                        </div>
+                        <div className={artistFinanceBookingBlockAmountMatches || artistFinanceBookingBlockSelectedRows.length === 0 ? "" : "danger"}>
+                          <span>Control importe</span>
+                          <strong>{artistFinanceBookingBlockSelectedRows.length === 0 ? "Seleccionar" : artistFinanceBookingBlockAmountMatches ? "OK" : "No coincide"}</strong>
+                        </div>
+                        <div className={Math.abs(artistFinanceBookingBlockVenueBalance) > 0.01 ? "danger" : ""}>
+                          <span>Deuda boliche</span>
+                          <strong>{ars(Math.abs(artistFinanceBookingBlockVenueBalance))}</strong>
+                        </div>
+                      </div>
+                      <div className="button-row">
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={selectArtistFinanceBookingBlockRows}
+                          disabled={artistFinanceBookingBlockRows.length === 0}
+                        >
+                          Seleccionar bloque visible
+                        </button>
+                        <button
+                          type="button"
+                          onClick={submitArtistFinanceBookingBlockSettlement}
+                          disabled={
+                            artistFinanceBookingBlockSelectedRows.length === 0
+                            || artistFinanceBookingBlockExpectedAmount <= 0.01
+                            || !artistFinanceBookingBlockAmountMatches
+                            || Math.abs(artistFinanceBookingBlockVenueBalance) > 0.01
+                            || !canEditModule("booking")
+                          }
+                        >
+                          Cerrar bloque seleccionado
+                        </button>
+                      </div>
+                      <p className="field-help">
+                        Para liquidaciones con shows cruzados, usa Cerrar bloque seleccionado. El sistema compensa automaticamente los shows donde el artista cobro de mas contra los shows donde cobro de menos, y aplica solo el pago/cobro neto real.
+                      </p>
+                      <div className="summary-table-wrap compact-table">
+                        <table className="summary-table">
+                          <thead>
+                            <tr>
+                              <th>Bloque</th>
+                              <th>Fecha</th>
+                              <th>Show</th>
+                              <th>Saldo neto show</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {artistFinanceBookingBlockRows.length === 0 && (
+                              <tr><td colSpan={4}>Sin saldos abiertos para cerrar por bloque.</td></tr>
+                            )}
+                            {artistFinanceBookingBlockRows.map((row) => (
+                              <tr key={`booking-block-${row.item.id}`}>
+                                <td>
+                                  <input
+                                    type="checkbox"
+                                    checked={row.selected}
+                                    onChange={(event) => {
+                                      updateArtistFinanceBookingMovementApplication(
+                                        row.item.id,
+                                        event.target.checked ? amountToInput(Math.abs(row.netAmount)) : "",
+                                      );
+                                    }}
+                                  />
+                                </td>
+                                <td>{row.item.show_date}</td>
+                                <td>
+                                  <strong>{row.item.venue}</strong>
+                                  <span className="cell-note">Show #{row.item.id}</span>
+                                </td>
+                                <td>
+                                  {Math.abs(row.netAmount) <= 0.01
+                                    ? "$ 0"
+                                    : `${row.netAmount < 0 ? "Indyana debe " : "Deben a Indyana "}${ars(Math.abs(row.netAmount))}`}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="booking-parent-summary">
+                        <div>
+                          <span>Importe movimiento</span>
+                          <strong>{ars(artistFinanceBookingMovementAmount)}</strong>
+                        </div>
+                        <div>
+                          <span>Aplicado a shows</span>
+                          <strong>{ars(artistFinanceBookingMovementApplied)}</strong>
+                        </div>
+                        <div className={artistFinanceBookingMovementRemaining < -0.01 ? "danger" : artistFinanceBookingMovementRemaining > 0.01 ? "warn" : ""}>
+                          <span>{artistFinanceBookingMovementRemaining >= 0 ? "Sin aplicar" : "Excedido"}</span>
+                          <strong>{ars(Math.abs(artistFinanceBookingMovementRemaining))}</strong>
+                        </div>
+                        <div className={artistFinanceBookingMovementOverApplied ? "danger" : ""}>
+                          <span>Control</span>
+                          <strong>{artistFinanceBookingMovementOverApplied ? "Revisar" : "OK"}</strong>
+                        </div>
+                      </div>
+                      <div className="button-row">
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={suggestArtistFinanceBookingMovementApplications}
+                          disabled={artistFinanceBookingMovementAmount <= 0 || artistFinanceBookingMovementRows.length === 0}
+                        >
+                          Sugerir por fecha
+                        </button>
+                        <button type="button" className="secondary" onClick={resetArtistFinanceBookingMovementDraft}>Limpiar</button>
+                        <button
+                          type="button"
+                          onClick={submitArtistFinanceBookingMovement}
+                          disabled={!artistFinanceBookingMovementCanSave}
+                        >
+                          Guardar movimiento
+                        </button>
+                      </div>
+                      <div className="summary-table-wrap compact-table">
+                        <table className="summary-table">
+                          <thead>
+                            <tr>
+                              <th>Usar</th>
+                              <th>Fecha</th>
+                              <th>Show</th>
+                              <th>Saldo elegible</th>
+                              <th>Aplicar</th>
+                              <th>Resultado</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {artistFinanceBookingMovementRows.length === 0 && (
+                              <tr><td colSpan={6}>Sin saldos compatibles con este tipo de movimiento.</td></tr>
+                            )}
+                            {artistFinanceBookingMovementRows.map(({ item, openAmount, appliedAmount }) => {
+                              const result = appliedAmount <= 0.01
+                                ? "sin aplicar"
+                                : appliedAmount > openAmount + 0.01
+                                  ? "excede saldo"
+                                  : Math.abs(openAmount - appliedAmount) <= 0.01
+                                    ? "cerraria"
+                                    : `quedaria ${ars(openAmount - appliedAmount)}`;
+                              return (
+                                <tr key={`booking-parent-${item.id}`} className={appliedAmount > openAmount + 0.01 ? "danger-row" : ""}>
+                                  <td>
+                                    <input
+                                      type="checkbox"
+                                      checked={appliedAmount > 0.01}
+                                      onChange={(event) => {
+                                        if (!event.target.checked) {
+                                          updateArtistFinanceBookingMovementApplication(item.id, "");
+                                          return;
+                                        }
+                                        const remaining = Math.max(artistFinanceBookingMovementAmount - artistFinanceBookingMovementApplied, 0);
+                                        updateArtistFinanceBookingMovementApplication(item.id, amountToInput(Math.min(openAmount, remaining > 0 ? remaining : openAmount)));
+                                      }}
+                                    />
+                                  </td>
+                                  <td>{item.show_date}</td>
+                                  <td>
+                                    <strong>{item.venue}</strong>
+                                    <span className="cell-note">Show #{item.id}</span>
+                                  </td>
+                                  <td>{ars(openAmount)}</td>
+                                  <td>
+                                    <input
+                                      inputMode="decimal"
+                                      value={artistFinanceBookingMovementDraft.applications[item.id] || ""}
+                                      onChange={(event) => updateArtistFinanceBookingMovementApplication(item.id, event.target.value)}
+                                      placeholder="$ 0"
+                                    />
+                                  </td>
+                                  <td>{result}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div className="summary-table-wrap">
                   <table className="summary-table">
@@ -9153,7 +10741,7 @@ export default function Home() {
             <div className="section-heading">
               <div>
                 <h1>Movimientos financieros</h1>
-                <p>Carga staging para gastos, inversiones, recuperos, adelantos y ajustes por artista. No impacta automaticamente saldos oficiales.</p>
+                <p>Carga hechos financieros reales o pendientes. El tratamiento contable se define aparte y queda trazable para control.</p>
               </div>
               <div className="button-row">
                 <button type="button" onClick={loadFinanceMovements} disabled={financeMovementLoading}>
@@ -9163,79 +10751,329 @@ export default function Home() {
               </div>
             </div>
 
-            <form className="panel nested-panel" onSubmit={saveFinanceMovement}>
-              <div className="row three">
+            <form
+              className="panel nested-panel finance-dynamic-form"
+              onSubmit={financeMovementIsBookingAccountFlow ? (event) => event.preventDefault() : saveFinanceMovement}
+            >
+              <div className="row">
                 <div>
                   <label htmlFor="finance_date">Fecha</label>
                   <input id="finance_date" type="date" value={financeMovementForm.movementDate} onChange={(event) => updateFinanceMovementField("movementDate", event.target.value)} />
                 </div>
                 <div>
-                  <label htmlFor="finance_artist">Artista</label>
-                  <select id="finance_artist" value={financeMovementForm.artist} onChange={(event) => updateFinanceMovementField("artist", event.target.value)}>
-                    <option value="">Elegir artista</option>
-                    {(financeMovements?.artists || bookingArtists).map((artist) => (
-                      <option key={artist} value={artist}>{artist}</option>
+                  <label htmlFor="finance_area">{financeMovementAreaLabel}</label>
+                  <select id="finance_area" value={financeMovementForm.businessArea} onChange={(event) => updateFinanceMovementArea(event.target.value as FinanceMovementForm["businessArea"])}>
+                    <option value="">Elegir area</option>
+                    {financeMovementAreaOptions.map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
                     ))}
                   </select>
-                </div>
-                <div>
-                  <label htmlFor="finance_area">Area</label>
-                  <select id="finance_area" value={financeMovementForm.businessArea} onChange={(event) => updateFinanceMovementField("businessArea", event.target.value as FinanceMovementForm["businessArea"])}>
-                    <option value="booking">Booking</option>
-                    <option value="label">Label</option>
-                    <option value="marketing">Marketing</option>
-                    <option value="digitales">Digitales</option>
-                    <option value="general">General</option>
-                  </select>
+                  <p className="field-help">
+                    {financeMovementForm.businessArea
+                      ? financeMovementIsOfficeArea
+                        ? "Oficina no lleva artista. Usa empleado/proveedor cuando corresponda."
+                        : "Esta area trabaja con artista y proyecto asociado si existe."
+                      : "Primero elegi a que parte del negocio pertenece el movimiento."}
+                  </p>
                 </div>
               </div>
 
-              <div className="row three">
-                <div>
-                  <label htmlFor="finance_type">Tipo</label>
-                  <select id="finance_type" value={financeMovementForm.movementType} onChange={(event) => updateFinanceMovementField("movementType", event.target.value as FinanceMovementForm["movementType"])}>
-                    <option value="gasto">Gasto</option>
-                    <option value="ingreso">Ingreso</option>
-                    <option value="recupero">Recupero</option>
-                    <option value="adelanto">Adelanto</option>
-                    <option value="prestamo">Prestamo</option>
-                    <option value="ajuste">Ajuste</option>
-                    <option value="pago">Pago</option>
-                  </select>
+              {financeMovementRequiresArtist && (
+                <div className="row">
+                  <div>
+                    <label htmlFor="finance_artist">Artista</label>
+                    <select id="finance_artist" value={financeMovementForm.artist} onChange={(event) => updateFinanceMovementArtist(event.target.value)}>
+                      <option value="">Elegir artista</option>
+                      {financeMovementArtistOptions.map((artist) => (
+                        <option key={artist} value={artist}>{artist}</option>
+                      ))}
+                    </select>
+                    <p className="field-help">
+                      {financeMovementArtistOptions.length === 0
+                        ? "No hay artistas disponibles para tu usuario en esta pantalla."
+                        : "La lista respeta los permisos de artistas del usuario."}
+                    </p>
+                  </div>
+                  <div>
+                    <label htmlFor="finance_project_select">Proyecto asociado</label>
+                    <select
+                      id="finance_project_select"
+                      value={financeMovementProjectSelectValue}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setFinanceMovementProjectMode(value === "__new__" ? "new" : "existing");
+                        updateFinanceMovementField("projectName", value === "__new__" ? "" : value);
+                      }}
+                      disabled={!financeMovementForm.artist}
+                    >
+                      <option value="">Sin proyecto asociado</option>
+                      {financeProjectOptions.map((project) => (
+                        <option key={project.id} value={project.name}>{project.name}</option>
+                      ))}
+                      <option value="__new__">Nuevo proyecto...</option>
+                    </select>
+                    {financeMovementProjectIsNew && (
+                      <input
+                        className="stacked-input"
+                        value={financeMovementForm.projectName}
+                        onChange={(event) => updateFinanceMovementField("projectName", event.target.value)}
+                        placeholder="Nombre del nuevo proyecto"
+                      />
+                    )}
+                  </div>
                 </div>
-                <div>
-                  <label htmlFor="finance_category">Categoria</label>
+              )}
+
+              {financeMovementForm.businessArea && (
+              <div>
+                <label>Que queres cargar?</label>
+                <div className="finance-flow-strip">
+                  <button
+                    type="button"
+                    className={financeMovementForm.movementType === "gasto" ? "active" : ""}
+                    onClick={() => updateFinanceMovementType("gasto")}
+                  >
+                    Gasto / inversion
+                  </button>
+                  <button
+                    type="button"
+                    className={financeMovementForm.movementType === "pago" ? "active" : ""}
+                    onClick={() => updateFinanceMovementType("pago")}
+                  >
+                    Pago / cobro
+                  </button>
+                  <button
+                    type="button"
+                    className={financeMovementForm.movementType === "ajuste" ? "active" : ""}
+                    onClick={() => updateFinanceMovementType("ajuste")}
+                  >
+                    Ajuste admin
+                  </button>
+                </div>
+              </div>
+              )}
+
+              {financeMovementForm.businessArea && (
+              <div className="row three">
+                {!financeMovementIsBookingAccountFlow && (
+                  <div>
+                  <label htmlFor="finance_category">{financeMovementCategoryLabel}</label>
                   <select id="finance_category" value={financeMovementForm.category} onChange={(event) => updateFinanceMovementField("category", event.target.value)}>
                     <option value="">Elegir categoria</option>
-                    <option value="videoclip">Videoclip</option>
-                    <option value="dj_set">DJ set</option>
-                    <option value="estreno">Estreno</option>
-                    <option value="produccion">Produccion</option>
-                    <option value="marketing">Marketing</option>
-                    <option value="viaticos">Viaticos / movilidad</option>
-                    <option value="adelanto">Adelanto</option>
-                    <option value="prestamo">Prestamo</option>
-                    <option value="ajuste">Ajuste</option>
-                    <option value="otro">Otro</option>
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="finance_project">Proyecto</label>
-                  <input
-                    id="finance_project"
-                    list="finance_project_options"
-                    value={financeMovementForm.projectName}
-                    onChange={(event) => updateFinanceMovementField("projectName", event.target.value)}
-                    placeholder="Ej: Set Padel, DJ Set Techengue"
-                  />
-                  <datalist id="finance_project_options">
-                    {financeProjectOptions.map((project) => (
-                      <option key={project.id} value={project.name} />
+                    {financeMovementCategoryOptions.map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
                     ))}
-                  </datalist>
-                </div>
+                  </select>
+                  <p className="field-help">
+                    {financeMovementForm.businessArea === "estructura"
+                      ? "Sueldo, oficina y gastos internos viven aca como categorias de estructura."
+                      : "La categoria cambia segun el sector elegido."}
+                  </p>
+                  </div>
+                )}
               </div>
+              )}
 
+              {financeMovementIsBookingAccountFlow ? (
+                <div className="booking-parent-movement-card finance-booking-application">
+                  <div className="section-heading compact-heading">
+                    <div>
+                      <h2>Aplicar pago/cobro a cuenta booking</h2>
+                      <p>Selecciona el artista, carga el movimiento real y aplicalo a los shows que corresponde cerrar.</p>
+                    </div>
+                  </div>
+                  {!financeMovementForm.artist && (
+                    <p className="field-help danger-text">Elegir artista/unidad para traer sus shows abiertos.</p>
+                  )}
+                  {financeMovementForm.artist && artistFinanceLoading && (
+                    <p className="field-help">Cargando cuenta booking de {financeMovementForm.artist}...</p>
+                  )}
+                  {financeMovementForm.artist && (
+                    <>
+                      <div className="row">
+                        <div>
+                          <label htmlFor="finance_booking_parent_date">Fecha del movimiento</label>
+                          <input
+                            id="finance_booking_parent_date"
+                            type="date"
+                            value={artistFinanceBookingMovementDraft.movementDate}
+                            onChange={(event) => updateArtistFinanceBookingMovementField("movementDate", event.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="finance_booking_parent_type">Tipo</label>
+                          <select
+                            id="finance_booking_parent_type"
+                            value={artistFinanceBookingMovementDraft.movementType}
+                            onChange={(event) => setArtistFinanceBookingMovementDraft((current) => ({
+                              ...current,
+                              movementType: event.target.value as BookingParentMovementType,
+                              paymentMethod: event.target.value === "compensacion_booking" ? "compensacion" : current.paymentMethod,
+                              applications: {},
+                            }))}
+                          >
+                            {Object.entries(bookingParentMovementLabels).map(([key, label]) => (
+                              <option key={key} value={key}>{label}</option>
+                            ))}
+                          </select>
+                          <p className="field-help">{bookingParentMovementHelp[artistFinanceBookingMovementDraft.movementType]}</p>
+                        </div>
+                        <div>
+                          <label htmlFor="finance_booking_parent_amount">Importe total</label>
+                          <input
+                            id="finance_booking_parent_amount"
+                            inputMode="decimal"
+                            value={artistFinanceBookingMovementDraft.amount}
+                            onChange={(event) => updateArtistFinanceBookingMovementField("amount", event.target.value)}
+                            placeholder="$ 0"
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="finance_booking_parent_method">Metodo</label>
+                          <select
+                            id="finance_booking_parent_method"
+                            value={artistFinanceBookingMovementDraft.paymentMethod}
+                            onChange={(event) => updateArtistFinanceBookingMovementField("paymentMethod", event.target.value as BookingParentMovementDraft["paymentMethod"])}
+                          >
+                            <option value="transferencia">Transferencia</option>
+                            <option value="efectivo">Efectivo</option>
+                            <option value="compensacion">Compensacion</option>
+                            <option value="ajuste">Ajuste</option>
+                            <option value="otro">Otro</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="row">
+                        <div>
+                          <label htmlFor="finance_booking_parent_counterparty">Contraparte</label>
+                          <input
+                            id="finance_booking_parent_counterparty"
+                            value={artistFinanceBookingMovementDraft.counterparty}
+                            onChange={(event) => updateArtistFinanceBookingMovementField("counterparty", event.target.value)}
+                            placeholder={financeMovementForm.artist}
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="finance_booking_parent_proofs">Comprobante / refs</label>
+                          <textarea
+                            id="finance_booking_parent_proofs"
+                            value={artistFinanceBookingMovementDraft.proofRefs}
+                            onChange={(event) => updateArtistFinanceBookingMovementField("proofRefs", event.target.value)}
+                            placeholder="Uno por linea"
+                          />
+                        </div>
+                        <div>
+                          <label htmlFor="finance_booking_parent_notes">Notas</label>
+                          <textarea
+                            id="finance_booking_parent_notes"
+                            value={artistFinanceBookingMovementDraft.notes}
+                            onChange={(event) => updateArtistFinanceBookingMovementField("notes", event.target.value)}
+                            placeholder="Ej: pago recibido para saldar shows pendientes"
+                          />
+                        </div>
+                      </div>
+                      <div className="booking-parent-summary">
+                        <div>
+                          <span>Importe movimiento</span>
+                          <strong>{ars(artistFinanceBookingMovementAmount)}</strong>
+                        </div>
+                        <div>
+                          <span>Aplicado a shows</span>
+                          <strong>{ars(artistFinanceBookingMovementApplied)}</strong>
+                        </div>
+                        <div className={artistFinanceBookingMovementRemaining < -0.01 ? "danger" : artistFinanceBookingMovementRemaining > 0.01 ? "warn" : ""}>
+                          <span>{artistFinanceBookingMovementRemaining >= 0 ? "Sin aplicar" : "Excedido"}</span>
+                          <strong>{ars(Math.abs(artistFinanceBookingMovementRemaining))}</strong>
+                        </div>
+                        <div className={artistFinanceBookingMovementOverApplied ? "danger" : ""}>
+                          <span>Control</span>
+                          <strong>{artistFinanceBookingMovementOverApplied ? "Revisar" : "OK"}</strong>
+                        </div>
+                      </div>
+                      <div className="button-row">
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={suggestArtistFinanceBookingMovementApplications}
+                          disabled={artistFinanceBookingMovementAmount <= 0 || artistFinanceBookingMovementRows.length === 0}
+                        >
+                          Sugerir por fecha
+                        </button>
+                        <button type="button" className="secondary" onClick={resetArtistFinanceBookingMovementDraft}>Limpiar aplicacion</button>
+                        <button
+                          type="button"
+                          onClick={submitArtistFinanceBookingMovement}
+                          disabled={!artistFinanceBookingMovementCanSave}
+                        >
+                          Guardar movimiento
+                        </button>
+                      </div>
+                      <div className="summary-table-wrap compact-table">
+                        <table className="summary-table">
+                          <thead>
+                            <tr>
+                              <th>Usar</th>
+                              <th>Fecha</th>
+                              <th>Show</th>
+                              <th>Saldo elegible</th>
+                              <th>Aplicar</th>
+                              <th>Resultado</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {artistFinanceBookingMovementRows.length === 0 && (
+                              <tr><td colSpan={6}>Sin saldos compatibles con este tipo de movimiento.</td></tr>
+                            )}
+                            {artistFinanceBookingMovementRows.map(({ item, openAmount, appliedAmount }) => {
+                              const result = appliedAmount <= 0.01
+                                ? "sin aplicar"
+                                : appliedAmount > openAmount + 0.01
+                                  ? "excede saldo"
+                                  : Math.abs(openAmount - appliedAmount) <= 0.01
+                                    ? "cerraria"
+                                    : `quedaria ${ars(openAmount - appliedAmount)}`;
+                              return (
+                                <tr key={`finance-booking-parent-${item.id}`} className={appliedAmount > openAmount + 0.01 ? "danger-row" : ""}>
+                                  <td>
+                                    <input
+                                      type="checkbox"
+                                      checked={appliedAmount > 0.01}
+                                      onChange={(event) => {
+                                        if (!event.target.checked) {
+                                          updateArtistFinanceBookingMovementApplication(item.id, "");
+                                          return;
+                                        }
+                                        const remaining = Math.max(artistFinanceBookingMovementAmount - artistFinanceBookingMovementApplied, 0);
+                                        updateArtistFinanceBookingMovementApplication(item.id, amountToInput(Math.min(openAmount, remaining > 0 ? remaining : openAmount)));
+                                      }}
+                                    />
+                                  </td>
+                                  <td>{item.show_date}</td>
+                                  <td>
+                                    <strong>{item.venue}</strong>
+                                    <span className="cell-note">Show #{item.id}</span>
+                                  </td>
+                                  <td>{ars(openAmount)}</td>
+                                  <td>
+                                    <input
+                                      inputMode="decimal"
+                                      value={artistFinanceBookingMovementDraft.applications[item.id] || ""}
+                                      onChange={(event) => updateArtistFinanceBookingMovementApplication(item.id, event.target.value)}
+                                      placeholder="$ 0"
+                                    />
+                                  </td>
+                                  <td>{result}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : financeMovementShowConceptFields ? (
+                <>
               <div className="section-heading compact">
                 <div>
                   <h2>Conceptos</h2>
@@ -9259,8 +11097,40 @@ export default function Home() {
 
                   <div className="row three">
                     <div>
-                      <label htmlFor="finance_counterparty">A quien se pago / de quien viene</label>
-                      <input id="finance_counterparty" value={financeMovementForm.counterparty} onChange={(event) => updateFinanceMovementField("counterparty", event.target.value)} placeholder="Proveedor, manager, artista, tercero" />
+                      <label htmlFor="finance_counterparty">{financeMovementNeedsEmployee ? "Empleado" : "A quien se pago / de quien viene"}</label>
+                      {financeMovementNeedsEmployee ? (
+                        <>
+                          <select
+                            id="finance_counterparty"
+                            value={financeMovementForm.counterparty}
+                            onFocus={() => {
+                              if (!financeEmployeeOptionsLoading && financeEmployeeOptions.length === 0) {
+                                loadFinanceEmployeeOptions();
+                              }
+                            }}
+                            onChange={(event) => updateFinanceMovementField("counterparty", event.target.value)}
+                          >
+                            <option value="">{financeEmployeeOptionsLoading ? "Cargando empleados..." : "Elegir empleado"}</option>
+                            {financeEmployeeOptions.map((employee) => (
+                              <option key={employee.id} value={employee.display_name}>{employee.display_name}</option>
+                            ))}
+                          </select>
+                          <p className="field-help">
+                            {financeMovementSelectedEmployee
+                              ? `${employeeCompensationLabels[financeMovementSelectedEmployee.compensation_type] || "Sin compensacion fija"}${financeMovementSelectedEmployee.salary_amount ? ` - pactado ${employeeSalaryAmount(financeMovementSelectedEmployee.salary_currency, financeMovementSelectedEmployee.salary_amount)}` : ""}`
+                              : financeEmployeeOptionsLoading
+                                ? "Buscando empleados habilitados para sueldos y compensaciones."
+                                : "Elegilo desde la lista de empleados habilitada por permisos."}
+                          </p>
+                        </>
+                      ) : (
+                        <input
+                          id="finance_counterparty"
+                          value={financeMovementForm.counterparty}
+                          onChange={(event) => updateFinanceMovementField("counterparty", event.target.value)}
+                          placeholder="Proveedor, manager, artista, tercero"
+                        />
+                      )}
                     </div>
                     <div>
                       <label htmlFor="finance_paid_by">Quien pago / recibio</label>
@@ -9407,97 +11277,219 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="row three">
+              <div className="section-heading compact">
+                <div>
+                  <h2>Distribucion economica</h2>
+                  <p>Opcional. Usa esto cuando caja y costo real no son lo mismo.</p>
+                </div>
                 <label className="checkbox-field">
-                  <input type="checkbox" checked={financeMovementForm.recoverable} onChange={(event) => updateFinanceMovementField("recoverable", event.target.checked)} />
-                  Recuperable
+                  <input
+                    type="checkbox"
+                    checked={financeMovementForm.economicDistributionEnabled}
+                    disabled={financeMovementForm.multipleConcepts}
+                    onChange={(event) => setFinanceEconomicDistributionEnabled(event.target.checked)}
+                  />
+                  Costo compartido / imputacion manual
                 </label>
-                <div>
-                  <label htmlFor="finance_recoverable_pct">Parte recuperable %</label>
-                  <input id="finance_recoverable_pct" inputMode="decimal" value={financeMovementForm.recoverablePercent} onChange={(event) => updateFinanceMovementField("recoverablePercent", event.target.value)} />
-                </div>
-                <div>
-                  <label htmlFor="finance_effect">Impacto esperado</label>
-                  <select id="finance_effect" value={financeMovementForm.accountEffect} onChange={(event) => updateFinanceMovementField("accountEffect", event.target.value as FinanceMovementForm["accountEffect"])}>
-                    <option value="inversion_indyana">Inversion Indyana</option>
-                    <option value="artista_debe_indyana">Artista debe a Indyana</option>
-                    <option value="indyana_debe_artista">Indyana debe artista</option>
-                    <option value="sin_impacto">Sin impacto por ahora</option>
-                  </select>
-                </div>
               </div>
-
-              {financeMovementForm.recoverable && (
+              {financeMovementForm.multipleConcepts && (
+                <p className="field-help">Para distribuir economicamente, carga un solo concepto por movimiento.</p>
+              )}
+              {financeMovementForm.economicDistributionEnabled && (
                 <div className="recoupment-panel">
-                  <div className="row three">
-                    <div>
-                      <label htmlFor="finance_recovery_method">Como se recupera</label>
-                      <select id="finance_recovery_method" value={financeMovementForm.recoveryMethod} onChange={(event) => updateFinanceMovementField("recoveryMethod", event.target.value as FinanceMovementForm["recoveryMethod"])}>
-                        <option value="none">Elegir metodo</option>
-                        <option value="before_split">Antes del split del show</option>
-                        <option value="after_split">Despues del split</option>
-                        <option value="direct_account">Cuenta corriente directa</option>
-                        <option value="royalties">Regalias digitales</option>
-                        <option value="manual">Manual / caso especial</option>
-                      </select>
-                      <p className="field-help">{financeRecoveryMethodHelp[financeMovementForm.recoveryMethod]}</p>
-                    </div>
-                    <div>
-                      <label htmlFor="finance_artist_pct">Costo economico artista %</label>
-                      <input id="finance_artist_pct" inputMode="decimal" value={financeMovementForm.artistPercent} onChange={(event) => updateFinanceMovementField("artistPercent", event.target.value)} />
-                    </div>
-                    <div>
-                      <label htmlFor="finance_producer_pct">Costo economico Indyana %</label>
-                      <input id="finance_producer_pct" inputMode="decimal" value={financeMovementForm.producerPercent} onChange={(event) => updateFinanceMovementField("producerPercent", event.target.value)} />
-                    </div>
+                  <div className="summary-table-wrap compact-table">
+                    <table className="summary-table">
+                      <thead>
+                        <tr>
+                          <th>Tipo</th>
+                          <th>Destino</th>
+                          <th>Area</th>
+                          <th>Importe</th>
+                          <th>Moneda</th>
+                          <th>TC</th>
+                          <th>Notas</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {financeMovementForm.allocationLines.map((line) => (
+                          <tr key={line.uid}>
+                            <td>
+                              <select value={line.allocationType} onChange={(event) => updateFinanceAllocationLineField(line.uid, "allocationType", event.target.value as FinanceAllocationType)}>
+                                <option value="indyana_cost">Costo Indyana</option>
+                                <option value="third_party_receivable">Cuenta por cobrar a tercero</option>
+                                <option value="artist_current_account">Cuenta corriente artista</option>
+                                <option value="other">Otra imputacion</option>
+                              </select>
+                            </td>
+                            <td>
+                              <input value={line.targetName} onChange={(event) => updateFinanceAllocationLineField(line.uid, "targetName", event.target.value)} placeholder="Indyana, productora, artista" />
+                            </td>
+                            <td>
+                              <select value={line.businessArea} onChange={(event) => updateFinanceAllocationLineField(line.uid, "businessArea", event.target.value as FinanceAllocationForm["businessArea"])}>
+                                <option value="booking">Booking</option>
+                                <option value="label">Label</option>
+                                <option value="management">Management</option>
+                                <option value="marketing">Marketing</option>
+                                <option value="digitales">Digitales</option>
+                                <option value="administracion">Administracion</option>
+                                <option value="estructura">Estructura</option>
+                                <option value="general">General</option>
+                              </select>
+                            </td>
+                            <td>
+                              <input inputMode="decimal" value={line.amount} onChange={(event) => updateFinanceAllocationLineField(line.uid, "amount", event.target.value)} placeholder="Importe" />
+                            </td>
+                            <td>
+                              <select value={line.currency} onChange={(event) => updateFinanceAllocationLineField(line.uid, "currency", event.target.value as "ARS" | "USD")}>
+                                <option value="ARS">ARS</option>
+                                <option value="USD">USD</option>
+                              </select>
+                            </td>
+                            <td>
+                              <input inputMode="decimal" value={line.fxRate} onChange={(event) => updateFinanceAllocationLineField(line.uid, "fxRate", event.target.value)} placeholder="si USD" />
+                            </td>
+                            <td>
+                              <input value={line.notes} onChange={(event) => updateFinanceAllocationLineField(line.uid, "notes", event.target.value)} placeholder="opcional" />
+                            </td>
+                            <td>
+                              <button type="button" className="secondary" onClick={() => removeFinanceAllocationLine(line.uid)} disabled={financeMovementForm.allocationLines.length <= 1}>Quitar</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="button-row">
+                    <button type="button" onClick={addFinanceAllocationLine}>Agregar imputacion</button>
                   </div>
                   <div className="control-dashboard">
                     <div>
-                      <span>Base recuperable</span>
-                      <strong>{ars(financeMovementRecoverableBase)}</strong>
-                    </div>
-                    <div>
-                      <span>Recupero caja Indyana</span>
-                      <strong>{ars(financeMovementCashRecovery)}</strong>
-                    </div>
-                    <div>
-                      <span>Costo artista</span>
-                      <strong>{ars(financeMovementArtistEconomicCost)}</strong>
+                      <span>Distribuido</span>
+                      <strong>{ars(financeAllocationPreviewTotals.amountArs)}</strong>
                     </div>
                     <div>
                       <span>Costo Indyana</span>
-                      <strong>{ars(financeMovementProducerEconomicCost)}</strong>
+                      <strong>{ars(financeAllocationPreviewTotals.indyanaCostArs)}</strong>
+                    </div>
+                    <div>
+                      <span>A cobrar tercero</span>
+                      <strong>{ars(financeAllocationPreviewTotals.thirdPartyReceivableArs)}</strong>
+                    </div>
+                    <div className={Math.abs(financeAllocationDifferenceArs) > 0.05 ? "danger" : ""}>
+                      <span>Diferencia</span>
+                      <strong>{ars(financeAllocationDifferenceArs)}</strong>
                     </div>
                   </div>
                 </div>
               )}
 
-              <div className="row three">
-                <div>
-                  <label htmlFor="finance_status">Estado</label>
-                  <select id="finance_status" value={financeMovementForm.status} onChange={(event) => updateFinanceMovementField("status", event.target.value as FinanceMovementForm["status"])}>
-                    <option value="borrador">Borrador</option>
-                    <option value="pendiente_control">Pendiente control</option>
-                    <option value="aprobado">Aprobado</option>
-                    <option value="aplicado">Aplicado</option>
-                    <option value="anulado">Anulado</option>
-                  </select>
+              {financeMovementShowTreatment && (
+                <>
+                  <div className="section-heading compact">
+                    <div>
+                      <h2>Tratamiento financiero</h2>
+                      <p>Define si el hecho queda como inversion, cuenta corriente, recuperable o pendiente de criterio.</p>
+                    </div>
+                  </div>
+                  <div className="recoupment-panel">
+                    <div className="row three">
+                      <label className="checkbox-field">
+                        <input type="checkbox" checked={financeMovementForm.recoverable} onChange={(event) => updateFinanceMovementField("recoverable", event.target.checked)} />
+                        Es recuperable
+                      </label>
+                      <div>
+                        <label htmlFor="finance_recoverable_pct">Parte recuperable %</label>
+                        <input id="finance_recoverable_pct" inputMode="decimal" value={financeMovementForm.recoverablePercent} onChange={(event) => updateFinanceMovementField("recoverablePercent", event.target.value)} />
+                      </div>
+                      <div>
+                        <label htmlFor="finance_effect">Impacto esperado</label>
+                        <select id="finance_effect" value={financeMovementForm.accountEffect} onChange={(event) => updateFinanceMovementField("accountEffect", event.target.value as FinanceMovementForm["accountEffect"])}>
+                          <option value="inversion_indyana">Inversion Indyana</option>
+                          <option value="artista_debe_indyana">Artista debe a Indyana</option>
+                          <option value="indyana_debe_artista">Indyana debe artista</option>
+                          <option value="sin_impacto">Pendiente / sin impacto por ahora</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {financeMovementForm.recoverable && (
+                      <div className="row three">
+                        <div>
+                          <label htmlFor="finance_recovery_method">Como se recupera</label>
+                          <select id="finance_recovery_method" value={financeMovementForm.recoveryMethod} onChange={(event) => updateFinanceMovementField("recoveryMethod", event.target.value as FinanceMovementForm["recoveryMethod"])}>
+                            <option value="none">Elegir metodo</option>
+                            <option value="before_split">Antes del split del show</option>
+                            <option value="after_split">Despues del split</option>
+                            <option value="direct_account">Cuenta corriente directa</option>
+                            <option value="royalties">Regalias digitales</option>
+                            <option value="manual">Manual / caso especial</option>
+                          </select>
+                          <p className="field-help">{financeRecoveryMethodHelp[financeMovementForm.recoveryMethod]}</p>
+                        </div>
+                        <div>
+                          <label htmlFor="finance_artist_pct">Costo economico artista %</label>
+                          <input id="finance_artist_pct" inputMode="decimal" value={financeMovementForm.artistPercent} onChange={(event) => updateFinanceMovementField("artistPercent", event.target.value)} />
+                        </div>
+                        <div>
+                          <label htmlFor="finance_producer_pct">Costo economico Indyana %</label>
+                          <input id="finance_producer_pct" inputMode="decimal" value={financeMovementForm.producerPercent} onChange={(event) => updateFinanceMovementField("producerPercent", event.target.value)} />
+                        </div>
+                      </div>
+                    )}
+                    {financeMovementForm.recoverable && (
+                      <div className="control-dashboard">
+                        <div>
+                          <span>Base recuperable</span>
+                          <strong>{ars(financeMovementRecoverableBase)}</strong>
+                        </div>
+                        <div>
+                          <span>Recupero caja Indyana</span>
+                          <strong>{ars(financeMovementCashRecovery)}</strong>
+                        </div>
+                        <div>
+                          <span>Costo artista</span>
+                          <strong>{ars(financeMovementArtistEconomicCost)}</strong>
+                        </div>
+                        <div>
+                          <span>Costo Indyana</span>
+                          <strong>{ars(financeMovementProducerEconomicCost)}</strong>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+
+              <details className="audit-details">
+                <summary>Avanzado / auditoria</summary>
+                <div className="row three">
+                  <div>
+                    <label htmlFor="finance_status">Estado</label>
+                    <select id="finance_status" value={financeMovementForm.status} onChange={(event) => updateFinanceMovementField("status", event.target.value as FinanceMovementForm["status"])}>
+                      <option value="borrador">Borrador</option>
+                      <option value="pendiente_control">Pendiente control</option>
+                      <option value="aprobado">Aprobado</option>
+                      <option value="aplicado">Aplicado</option>
+                      <option value="anulado">Anulado</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="finance_source">Origen tecnico</label>
+                    <select id="finance_source" value={financeMovementForm.sourceType} onChange={(event) => updateFinanceMovementField("sourceType", event.target.value as FinanceMovementForm["sourceType"])}>
+                      <option value="manual">Manual</option>
+                      <option value="legacy">Historico</option>
+                      <option value="booking">Booking</option>
+                      <option value="royalties">Regalias</option>
+                      <option value="import">Importacion</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="finance_source_id">Referencia origen</label>
+                    <input id="finance_source_id" value={financeMovementForm.sourceId} onChange={(event) => updateFinanceMovementField("sourceId", event.target.value)} placeholder="Show ID, reporte, Excel, etc." />
+                  </div>
                 </div>
-                <div>
-                  <label htmlFor="finance_source">Origen</label>
-                  <select id="finance_source" value={financeMovementForm.sourceType} onChange={(event) => updateFinanceMovementField("sourceType", event.target.value as FinanceMovementForm["sourceType"])}>
-                    <option value="manual">Manual</option>
-                    <option value="legacy">Legacy</option>
-                    <option value="booking">Booking</option>
-                    <option value="royalties">Regalias</option>
-                    <option value="import">Import</option>
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="finance_source_id">Referencia origen</label>
-                  <input id="finance_source_id" value={financeMovementForm.sourceId} onChange={(event) => updateFinanceMovementField("sourceId", event.target.value)} placeholder="Show ID, reporte, Excel, etc." />
-                </div>
-              </div>
+              </details>
 
               <label htmlFor="finance_proofs">Comprobantes / links</label>
               <textarea id="finance_proofs" value={financeMovementForm.proofRefs} onChange={(event) => updateFinanceMovementField("proofRefs", event.target.value)} placeholder="Uno por linea" />
@@ -9505,10 +11497,20 @@ export default function Home() {
               <label htmlFor="finance_notes">Notas</label>
               <textarea id="finance_notes" value={financeMovementForm.notes} onChange={(event) => updateFinanceMovementField("notes", event.target.value)} />
 
-              <button type="submit" disabled={financeMovementLoading || !currentUser?.canEdit}>
+              <button type="submit" disabled={financeMovementLoading || !financeMovementCanSave}>
                 {financeMovementLoading ? "Guardando..." : financeMovementEditingId ? "Actualizar movimiento" : "Guardar en staging"}
               </button>
-              {!currentUser?.canEdit && <p className="field-help">Necesitas usuario editor/admin para guardar.</p>}
+              {!financeMovementCanSave && (
+                <p className="field-help">
+                  {financeMovementNeedsEmployee && !(financeMovementEditingId ? financeMovementCanEditPayroll : financeMovementCanCreatePayroll)
+                    ? "Necesitas permiso en Sueldos y compensaciones para cargar o editar sueldos/comisiones internas."
+                    : financeMovementEditingId
+                    ? "Necesitas permiso de editar en Movimientos financieros."
+                    : "Necesitas permiso de crear en Movimientos financieros."}
+                </p>
+              )}
+                </>
+              ) : null}
             </form>
 
             <div className="section-heading">
@@ -9581,6 +11583,7 @@ export default function Home() {
                     <th>Concepto</th>
                     <th>Compromiso</th>
                     <th>Pagado</th>
+                    <th>Imputacion</th>
                     <th>Pendiente</th>
                     <th>Recuperable</th>
                     <th>Estado</th>
@@ -9589,10 +11592,10 @@ export default function Home() {
                 </thead>
                 <tbody>
                   {!financeMovements && (
-                    <tr><td colSpan={11}>Cargando movimientos...</td></tr>
+                    <tr><td colSpan={12}>Cargando movimientos...</td></tr>
                   )}
                   {financeMovements?.items.length === 0 && (
-                    <tr><td colSpan={11}>Sin movimientos para este filtro.</td></tr>
+                    <tr><td colSpan={12}>Sin movimientos para este filtro.</td></tr>
                   )}
                   {financeMovements?.items.map((item) => (
                     <tr key={item.id}>
@@ -9613,6 +11616,19 @@ export default function Home() {
                         {item.currency === "USD" && <span className="cell-note">USD {item.amount} x {item.fx_rate}</span>}
                       </td>
                       <td>{ars(item.paid_amount_ars)}</td>
+                      <td>
+                        {(item.allocation_lines || []).length > 0 ? (
+                          <>
+                            {item.allocation_lines.map((line, index) => (
+                              <span className="cell-note" key={`${item.id}_allocation_${index}`}>
+                                {financeAllocationTypeLabels[line.allocation_type] || line.allocation_type}: {ars(line.amount_ars)} {line.target_name}
+                              </span>
+                            ))}
+                          </>
+                        ) : (
+                          <span className="cell-note">Costo Indyana: {ars(item.amount_ars)}</span>
+                        )}
+                      </td>
                       <td className={item.pending_amount_ars > 0 ? "amount-warn" : ""}>
                         {ars(item.pending_amount_ars)}
                         {item.pending_amount_ars > 0 && <span className="cell-note">{item.payment_status}</span>}
@@ -9771,7 +11787,7 @@ export default function Home() {
                   <strong>{suggestedAmount(bookingLabPreview.indyanaExpected, bookingLabForm.currency)}</strong>
                 </div>
                 <div>
-                  <span>Base comisionable</span>
+                  <span>Base regla general</span>
                   <strong>{suggestedAmount(bookingLabPreview.commissionableBase, bookingLabForm.currency)}</strong>
                 </div>
                 <div>
@@ -11280,6 +13296,67 @@ export default function Home() {
 
               <div className="section-heading compact">
                 <div>
+                  <h2>Compensacion</h2>
+                  <p>Esto guarda la condicion pactada. El pago real se carga en Movimientos Financieros.</p>
+                </div>
+              </div>
+              <div className="row three">
+                <div>
+                  <label htmlFor="employee_compensation_type">Modelo</label>
+                  <select
+                    id="employee_compensation_type"
+                    value={employeeForm.compensationType}
+                    onChange={(event) => updateEmployeeField("compensationType", event.target.value as EmployeeCompensationType)}
+                  >
+                    <option value="none">Sin compensacion fija</option>
+                    <option value="salary">Salario mensual</option>
+                    <option value="salary_plus_booking_commission">Salario + comision booking</option>
+                    <option value="booking_commission_only">Solo comision booking</option>
+                  </select>
+                </div>
+                {employeeForm.compensationType !== "none" && employeeForm.compensationType !== "booking_commission_only" && (
+                  <>
+                    <div>
+                      <label htmlFor="employee_salary_amount">Salario pactado</label>
+                      <input
+                        id="employee_salary_amount"
+                        inputMode="decimal"
+                        value={employeeForm.salaryAmount}
+                        onChange={(event) => updateEmployeeField("salaryAmount", event.target.value)}
+                        placeholder="Importe mensual"
+                      />
+                    </div>
+                    <div>
+                      <label htmlFor="employee_salary_currency">Moneda</label>
+                      <select
+                        id="employee_salary_currency"
+                        value={employeeForm.salaryCurrency}
+                        onChange={(event) => updateEmployeeField("salaryCurrency", event.target.value as "ARS" | "USD")}
+                      >
+                        <option value="ARS">ARS</option>
+                        <option value="USD">USD</option>
+                      </select>
+                    </div>
+                  </>
+                )}
+              </div>
+              {employeeForm.compensationType !== "none" && (
+                <>
+                  <label htmlFor="employee_salary_notes">Notas de compensacion</label>
+                  <textarea
+                    id="employee_salary_notes"
+                    value={employeeForm.salaryNotes}
+                    onChange={(event) => updateEmployeeField("salaryNotes", event.target.value)}
+                    placeholder="Ej: parte fija, financiacion externa, condicion pendiente"
+                  />
+                </>
+              )}
+              <p className="field-help">
+                Las comisiones variables de booking se configuran en la tarjeta Comisiones. Este bloque no crea pagos automaticos.
+              </p>
+
+              <div className="section-heading compact">
+                <div>
                   <h2>Usuario web</h2>
                   <p>Este usuario ya es la base operativa de login local/cloud.</p>
                 </div>
@@ -11489,6 +13566,13 @@ export default function Home() {
                         <span>{item.phone || "Sin telefono"}</span>
                         <span>{item.email || "Sin email"}</span>
                         <span>{item.active ? "Activo" : "Inactivo"}</span>
+                      </div>
+                      <div className="artist-record-meta">
+                        <span>{employeeCompensationLabels[item.compensation_type] || "Sin compensacion fija"}</span>
+                        {item.compensation_type !== "none" && item.compensation_type !== "booking_commission_only" && (
+                          <span>{employeeSalaryAmount(item.salary_currency, item.salary_amount || 0)} mensual</span>
+                        )}
+                        {item.salary_notes && <span>{item.salary_notes}</span>}
                       </div>
                       <div className="artist-record-meta">
                         <span>{primaryUser ? `Usuario: ${primaryUser.username}` : "Sin usuario"}</span>
@@ -12142,7 +14226,7 @@ export default function Home() {
                       onChange={(event) => updateBookingField("bookingCommissionNotes", event.target.value)}
                       placeholder="Ej: Show Candu + G Sony con booking directo 10%; no comisiona responsable general."
                     />
-                    <p className="field-help">El ingreso de Indyana se mantiene, pero no suma a la base comisionable del responsable de booking.</p>
+                    <p className="field-help">El ingreso de Indyana se mantiene. Esta marca solo bloquea la comision general, salvo reglas particulares en Comisiones.</p>
                   </>
                 )}
               </div>

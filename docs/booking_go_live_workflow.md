@@ -66,7 +66,7 @@ Si el resultado coincide, cargar en `Booking Indyana` solo si se puede expresar 
 - gastos generales;
 - comision Facha como gasto/comision propia;
 - Fede como tercero externo;
-- marcar no comisionable si corresponde;
+- marcar exclusion de comision general si corresponde;
 - notas claras.
 
 Si no se puede expresar bien, no cargar en vivo todavia.
@@ -168,7 +168,7 @@ Cada linea debe tener:
 - split;
 - pagado artista;
 - rendido Indyana;
-- base comisionable o no comisionable;
+- exclusion de comision general y motivo, si aplica;
 - saldo.
 
 ### Cierre

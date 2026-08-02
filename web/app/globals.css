@@ -1209,6 +1209,99 @@ button:disabled:hover {
   font-weight: 700;
 }
 
+.finance-dynamic-form {
+  gap: 14px;
+}
+
+.finance-flow-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.finance-flow-strip button {
+  min-height: 42px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  box-shadow: none;
+}
+
+.finance-flow-strip button.active {
+  border-color: rgba(15, 118, 110, .45);
+  background: #eef8f5;
+  color: var(--primary-dark);
+}
+
+.finance-booking-application {
+  margin-top: 0;
+}
+
+.booking-parent-movement-card {
+  display: grid;
+  gap: 12px;
+  margin: 12px 0 16px;
+  padding: 14px;
+  border: 1px solid rgba(15, 118, 110, .22);
+  border-radius: 8px;
+  background: #f6fbf9;
+}
+
+.booking-parent-movement-card .compact-heading {
+  margin: 0;
+}
+
+.booking-parent-movement-form {
+  display: grid;
+  gap: 12px;
+}
+
+.booking-parent-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.booking-parent-summary div {
+  min-width: 0;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.booking-parent-summary div.warn {
+  border-color: #fedf89;
+  background: #fffbeb;
+}
+
+.booking-parent-summary div.danger,
+.summary-table tr.danger-row td {
+  border-color: #fecdca;
+  background: #fef3f2;
+}
+
+.booking-parent-summary span,
+.booking-parent-summary strong {
+  display: block;
+}
+
+.booking-parent-summary span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.booking-parent-summary strong {
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: 18px;
+}
+
 .recoupment-panel {
   margin: 12px 0;
   padding: 12px;
@@ -2468,6 +2561,8 @@ button:disabled:hover {
   .finance-kpi-grid,
   .finance-subgrid,
   .finance-story-grid,
+  .finance-flow-strip,
+  .booking-parent-summary,
   .source-account-grid,
   .control-alert {
     grid-template-columns: 1fr;
