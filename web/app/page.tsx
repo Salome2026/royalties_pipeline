@@ -824,6 +824,7 @@ type FinanceReceiptDetail = {
   receipt_number: number;
   receipt_date: string;
   receipt_kind: "sena_show";
+  issuer_company: FinanceReceiptIssuerCompany;
   received_from: string;
   amount: number;
   currency: "ARS" | "USD";
@@ -838,6 +839,23 @@ type FinanceReceiptDetail = {
   status: string;
   notes: string | null;
 };
+
+type FinanceReceiptIssuerCompany =
+  | "VPO Corp"
+  | "Indyana Records LLC"
+  | "Carolina Vanesa Alvarez"
+  | "Mawz SRL"
+  | "Mawz Records LLC"
+  | "Mawz Records SRL";
+
+const financeReceiptIssuerCompanies: FinanceReceiptIssuerCompany[] = [
+  "VPO Corp",
+  "Indyana Records LLC",
+  "Carolina Vanesa Alvarez",
+  "Mawz SRL",
+  "Mawz Records LLC",
+  "Mawz Records SRL",
+];
 
 type FinanceMovementData = {
   generated_at: string;
@@ -928,6 +946,7 @@ type FinanceMovementForm = {
   conceptLines: FinanceMovementLineForm[];
   economicDistributionEnabled: boolean;
   allocationLines: FinanceAllocationForm[];
+  receiptIssuerCompany: FinanceReceiptIssuerCompany;
   receiptReceivedFrom: string;
   receiptShowDate: string;
   receiptVenue: string;
@@ -2174,6 +2193,7 @@ function initialFinanceMovementForm(): FinanceMovementForm {
     conceptLines: [newFinanceMovementLine()],
     economicDistributionEnabled: false,
     allocationLines: [newFinanceAllocationLine()],
+    receiptIssuerCompany: "VPO Corp",
     receiptReceivedFrom: "",
     receiptShowDate: "",
     receiptVenue: "",
@@ -4991,6 +5011,7 @@ export default function Home() {
           fxRate: amountToInput(item.fx_rate),
         })],
       receiptReceivedFrom: item.receipt_detail?.received_from || item.counterparty || "",
+      receiptIssuerCompany: item.receipt_detail?.issuer_company || "VPO Corp",
       receiptShowDate: item.receipt_detail?.show_date || "",
       receiptVenue: item.receipt_detail?.venue || "",
       receiptPrimaryArtist: item.receipt_detail?.artist_names?.[0] || item.artist || "",
@@ -5036,7 +5057,7 @@ export default function Home() {
     const rawLines: FinanceMovementLineForm[] = financeMovementIsReceiptFlow
       ? [{
         uid: "receipt",
-        concept: financeMovementForm.concept || "Sena de show",
+        concept: financeMovementForm.concept || "Seña de show",
         counterparty: financeMovementForm.receiptReceivedFrom,
         paidBy: "indyana",
         amount: financeMovementForm.amount,
@@ -5098,7 +5119,7 @@ export default function Home() {
       return;
     }
     if (financeMovementIsReceiptFlow && !financeMovementForm.receiptReceivedFrom.trim()) {
-      setMessage({ type: "error", text: "Completa de quien se recibe la sena." });
+      setMessage({ type: "error", text: "Completa de quien se recibe la seña." });
       return;
     }
     if (financeMovementIsReceiptFlow && !financeMovementForm.receiptPrimaryArtist.trim()) {
@@ -5220,6 +5241,7 @@ export default function Home() {
         })),
         receipt_detail: financeMovementIsReceiptFlow ? {
           receipt_kind: "sena_show",
+          issuer_company: financeMovementForm.receiptIssuerCompany,
           received_from: financeMovementForm.receiptReceivedFrom.trim(),
           show_date: financeMovementForm.receiptShowDate || null,
           venue: financeMovementForm.receiptVenue || null,
@@ -7189,7 +7211,7 @@ export default function Home() {
     if (financeMovementForm.movementType === "pago") {
       return [
         ["cuenta_booking", "Cuenta booking"],
-        ["sena_show", "Sena de show / recibo"],
+        ["sena_show", "Seña de show / recibo"],
         ["recuperable_abierto", "Recuperable abierto"],
         ["proveedor_pendiente", "Proveedor pendiente"],
         ["adelanto_prestamo", "Adelanto / prestamo"],
@@ -11184,12 +11206,24 @@ export default function Home() {
                 <>
                   <div className="section-heading compact">
                     <div>
-                      <h2>Recibo de sena de show</h2>
-                      <p>Registra caja recibida del cliente. No aplica automaticamente contra la liquidacion del show.</p>
+                      <h2>Recibo de seña de show</h2>
+                      <p>Registra caja recibida del cliente. No aplica automáticamente contra la liquidación del show.</p>
                     </div>
                   </div>
                   <div className="recoupment-panel">
                     <div className="row three">
+                      <div>
+                        <label htmlFor="finance_receipt_issuer">Empresa emisora</label>
+                        <select
+                          id="finance_receipt_issuer"
+                          value={financeMovementForm.receiptIssuerCompany}
+                          onChange={(event) => updateFinanceMovementField("receiptIssuerCompany", event.target.value as FinanceReceiptIssuerCompany)}
+                        >
+                          {financeReceiptIssuerCompanies.map((company) => (
+                            <option key={company} value={company}>{company}</option>
+                          ))}
+                        </select>
+                      </div>
                       <div>
                         <label htmlFor="finance_receipt_from">De quien se recibe</label>
                         <input
@@ -11208,6 +11242,9 @@ export default function Home() {
                           onChange={(event) => updateFinanceMovementField("receiptShowDate", event.target.value)}
                         />
                       </div>
+                    </div>
+
+                    <div className="row three">
                       <div>
                         <label htmlFor="finance_receipt_venue">Lugar / venue</label>
                         <input
@@ -11217,16 +11254,13 @@ export default function Home() {
                           placeholder="Nombre del lugar o evento"
                         />
                       </div>
-                    </div>
-
-                    <div className="row three">
                       <div>
                         <label htmlFor="finance_receipt_concept">Concepto</label>
                         <input
                           id="finance_receipt_concept"
                           value={financeMovementForm.concept}
                           onChange={(event) => updateFinanceMovementField("concept", event.target.value)}
-                          placeholder="Sena show fecha / venue"
+                          placeholder="Seña show fecha / venue"
                         />
                       </div>
                       <div>
@@ -11238,18 +11272,6 @@ export default function Home() {
                           onChange={(event) => updateFinanceMovementField("amount", event.target.value)}
                           placeholder="ARS o u$ 300"
                         />
-                      </div>
-                      <div>
-                        <label htmlFor="finance_receipt_vat">IVA</label>
-                        <select
-                          id="finance_receipt_vat"
-                          value={financeMovementForm.receiptVatMode}
-                          onChange={(event) => updateFinanceMovementField("receiptVatMode", event.target.value as FinanceMovementForm["receiptVatMode"])}
-                        >
-                          <option value="no_aplica">No aplica</option>
-                          <option value="mas_iva">Mas IVA</option>
-                          <option value="iva_incluido">IVA incluido</option>
-                        </select>
                       </div>
                     </div>
 
@@ -11302,7 +11324,7 @@ export default function Home() {
                           <option key={artist} value={artist}>{artist}</option>
                         ))}
                       </select>
-                        <p className="field-help">Opcional. Para seleccionar mas de uno, usa Ctrl o Shift. El principal queda incluido automaticamente.</p>
+                        <p className="field-help">Opcional. Para seleccionar más de uno, usa Ctrl o Shift. El principal queda incluido automáticamente.</p>
                       </div>
                     </div>
 
@@ -11318,6 +11340,19 @@ export default function Home() {
                   <details className="audit-details">
                     <summary>Avanzado / auditoria</summary>
                     <div className="row three">
+                      <div>
+                        <label htmlFor="finance_receipt_vat">IVA interno</label>
+                        <select
+                          id="finance_receipt_vat"
+                          value={financeMovementForm.receiptVatMode}
+                          onChange={(event) => updateFinanceMovementField("receiptVatMode", event.target.value as FinanceMovementForm["receiptVatMode"])}
+                        >
+                          <option value="no_aplica">No aplica</option>
+                          <option value="mas_iva">Más IVA</option>
+                          <option value="iva_incluido">IVA incluido</option>
+                        </select>
+                        <p className="field-help">Dato interno. No aparece en el PDF del recibo.</p>
+                      </div>
                       <div>
                         <label htmlFor="finance_receipt_status">Estado</label>
                         <select id="finance_receipt_status" value={financeMovementForm.status} onChange={(event) => updateFinanceMovementField("status", event.target.value as FinanceMovementForm["status"])}>

@@ -626,6 +626,7 @@ CREATE TABLE IF NOT EXISTS finance_receipts (
     receipt_number bigint NOT NULL UNIQUE,
     receipt_date date NOT NULL,
     receipt_kind text NOT NULL DEFAULT 'sena_show',
+    issuer_company text NOT NULL DEFAULT 'VPO Corp',
     received_from text NOT NULL,
     amount numeric(18, 6) NOT NULL DEFAULT 0,
     currency text NOT NULL DEFAULT 'ARS',

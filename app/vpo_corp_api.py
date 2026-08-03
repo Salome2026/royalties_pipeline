@@ -455,6 +455,14 @@ class FinanceMovementAllocationRequest(BaseModel):
 
 class FinanceReceiptDetailRequest(BaseModel):
     receipt_kind: Literal["sena_show"] = "sena_show"
+    issuer_company: Literal[
+        "VPO Corp",
+        "Indyana Records LLC",
+        "Carolina Vanesa Alvarez",
+        "Mawz SRL",
+        "Mawz Records LLC",
+        "Mawz Records SRL",
+    ] = "VPO Corp"
     received_from: str = Field(..., min_length=1, max_length=180)
     show_date: str | None = Field(default=None, max_length=10)
     venue: str | None = Field(default=None, max_length=180)
@@ -2610,6 +2618,7 @@ def init_booking_db() -> None:
                 receipt_number INTEGER NOT NULL UNIQUE,
                 receipt_date TEXT NOT NULL,
                 receipt_kind TEXT NOT NULL DEFAULT 'sena_show',
+                issuer_company TEXT NOT NULL DEFAULT 'VPO Corp',
                 received_from TEXT NOT NULL,
                 amount REAL NOT NULL DEFAULT 0,
                 currency TEXT NOT NULL DEFAULT 'ARS',
@@ -2632,6 +2641,7 @@ def init_booking_db() -> None:
         )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_receipts_date ON finance_receipts(receipt_date DESC, id DESC)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_receipts_show_date ON finance_receipts(show_date)")
+        ensure_sqlite_column(conn, "finance_receipts", "issuer_company", "TEXT NOT NULL DEFAULT 'VPO Corp'")
         ensure_sqlite_column(conn, "finance_staging_movements", "paid_amount", "REAL NOT NULL DEFAULT 0")
         ensure_sqlite_column(conn, "finance_staging_movements", "paid_amount_ars", "REAL NOT NULL DEFAULT 0")
         ensure_sqlite_column(conn, "finance_staging_movements", "pending_amount_ars", "REAL NOT NULL DEFAULT 0")
@@ -5185,6 +5195,7 @@ def ensure_finance_receipts_table(conn: sqlite3.Connection) -> None:
                 receipt_number bigint NOT NULL UNIQUE,
                 receipt_date date NOT NULL,
                 receipt_kind text NOT NULL DEFAULT 'sena_show',
+                issuer_company text NOT NULL DEFAULT 'VPO Corp',
                 received_from text NOT NULL,
                 amount numeric(18, 6) NOT NULL DEFAULT 0,
                 currency text NOT NULL DEFAULT 'ARS',
@@ -5214,6 +5225,7 @@ def ensure_finance_receipts_table(conn: sqlite3.Connection) -> None:
                 receipt_number INTEGER NOT NULL UNIQUE,
                 receipt_date TEXT NOT NULL,
                 receipt_kind TEXT NOT NULL DEFAULT 'sena_show',
+                issuer_company TEXT NOT NULL DEFAULT 'VPO Corp',
                 received_from TEXT NOT NULL,
                 amount REAL NOT NULL DEFAULT 0,
                 currency TEXT NOT NULL DEFAULT 'ARS',
@@ -5234,6 +5246,10 @@ def ensure_finance_receipts_table(conn: sqlite3.Connection) -> None:
             )
             """
         )
+    if is_postgres_connection(conn):
+        conn.execute("ALTER TABLE finance_receipts ADD COLUMN IF NOT EXISTS issuer_company text NOT NULL DEFAULT 'VPO Corp'")
+    else:
+        ensure_sqlite_column(conn, "finance_receipts", "issuer_company", "TEXT NOT NULL DEFAULT 'VPO Corp'")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_receipts_date ON finance_receipts(receipt_date DESC, id DESC)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_receipts_show_date ON finance_receipts(show_date)")
 
@@ -5275,13 +5291,13 @@ def validate_finance_receipt_request(request: FinanceMovementRequest) -> Finance
     if request.category != "sena_show":
         return None
     if request.business_area != "booking" or request.movement_type != "pago":
-        raise HTTPException(status_code=400, detail="La sena de show debe cargarse como Pago / cobro del area Booking.")
+        raise HTTPException(status_code=400, detail="La seña de show debe cargarse como Pago / cobro del area Booking.")
     if not request.receipt_detail:
-        raise HTTPException(status_code=400, detail="Completa los datos del recibo de sena.")
+        raise HTTPException(status_code=400, detail="Completa los datos del recibo de seña.")
     if request.amount <= 0:
-        raise HTTPException(status_code=400, detail="El recibo de sena necesita un importe mayor a cero.")
+        raise HTTPException(status_code=400, detail="El recibo de seña necesita un importe mayor a cero.")
     if request.currency == "USD" and not request.fx_rate:
-        raise HTTPException(status_code=400, detail="Para una sena en USD, completa el tipo de cambio.")
+        raise HTTPException(status_code=400, detail="Para una seña en USD, completa el tipo de cambio.")
     artists = [clean_booking_artist(name) or name.strip() for name in request.receipt_detail.artist_names if name.strip()]
     if request.artist.strip() and request.artist.strip() not in artists:
         artists.insert(0, request.artist.strip())
@@ -5323,6 +5339,7 @@ def replace_finance_receipt_detail(
             UPDATE finance_receipts
             SET receipt_date = ?,
                 receipt_kind = ?,
+                issuer_company = ?,
                 received_from = ?,
                 amount = ?,
                 currency = ?,
@@ -5342,6 +5359,7 @@ def replace_finance_receipt_detail(
             (
                 request.movement_date,
                 receipt.receipt_kind,
+                receipt.issuer_company,
                 receipt.received_from.strip(),
                 request.amount,
                 request.currency,
@@ -5363,17 +5381,18 @@ def replace_finance_receipt_detail(
             """
             INSERT INTO finance_receipts (
                 movement_id, receipt_number, receipt_date, receipt_kind,
-                received_from, amount, currency, fx_rate, amount_ars,
+                issuer_company, received_from, amount, currency, fx_rate, amount_ars,
                 vat_mode, concept, show_date, venue, artist_names_json,
                 booking_show_id, status, notes, created_by, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'emitido', ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'emitido', ?, ?, ?, ?)
             """,
             (
                 movement_id,
                 receipt_number,
                 request.movement_date,
                 receipt.receipt_kind,
+                receipt.issuer_company,
                 receipt.received_from.strip(),
                 request.amount,
                 request.currency,
@@ -5395,15 +5414,20 @@ def replace_finance_receipt_detail(
     return finance_receipt_item(row) if row else None
 
 
-def finance_receipt_amount_label(currency: str, amount: float, amount_ars: float, fx_rate: float | None) -> str:
+def finance_receipt_number_label(amount: float) -> str:
+    value = f"{float(amount or 0):,.2f}"
+    return value.replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def finance_receipt_amount_label(currency: str, amount: float) -> str:
     if currency == "USD":
-        fx = f" x TC {fx_rate:,.2f}" if fx_rate else ""
-        return f"USD {amount:,.2f}{fx} / ARS {amount_ars:,.2f}"
-    return f"ARS {amount_ars:,.2f}"
+        return f"{finance_receipt_number_label(amount)} dólares americanos"
+    return f"{finance_receipt_number_label(amount)} pesos argentinos"
 
 
 def finance_receipt_pdf_bytes(receipt: dict, movement: dict) -> bytes:
     try:
+        from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.units import mm
         from reportlab.pdfgen import canvas
@@ -5417,73 +5441,87 @@ def finance_receipt_pdf_bytes(receipt: dict, movement: dict) -> bytes:
     page = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
     margin = 20 * mm
-    y = height - margin
+    issuer_company = str(receipt.get("issuer_company") or "VPO Corp").strip() or "VPO Corp"
+    receipt_number = int(receipt["receipt_number"])
 
-    page.setTitle(f"Recibo {receipt['receipt_number']}")
+    def draw_wrapped(text: str, x: float, y_pos: float, max_chars: int = 82, line_height: float = 5 * mm) -> float:
+        cleaned = " ".join(str(text or "").split()) or "-"
+        lines = [cleaned[i:i + max_chars] for i in range(0, len(cleaned), max_chars)]
+        for line in lines[:4]:
+            page.drawString(x, y_pos, line)
+            y_pos -= line_height
+        return y_pos
+
+    page.setTitle(f"Recibo {receipt_number:06d}")
+    page.setFillColor(colors.HexColor("#2f6f67"))
+    page.rect(0, height - 34 * mm, width, 34 * mm, stroke=0, fill=1)
+    page.setFillColor(colors.white)
     page.setFont("Helvetica-Bold", 18)
-    page.drawString(margin, y, "VPO Corp")
+    page.drawString(margin, height - 18 * mm, issuer_company)
+    page.setFont("Helvetica", 9)
+    page.drawString(margin, height - 25 * mm, "Comprobante interno de recepción de dinero")
+    page.setFont("Helvetica-Bold", 22)
+    page.drawRightString(width - margin, height - 17 * mm, "RECIBO")
     page.setFont("Helvetica", 10)
-    page.drawRightString(width - margin, y + 2, f"Recibo Nro. {int(receipt['receipt_number']):06d}")
-    y -= 9 * mm
-    page.setStrokeColorRGB(0.13, 0.25, 0.35)
-    page.line(margin, y, width - margin, y)
-    y -= 14 * mm
+    page.drawRightString(width - margin, height - 25 * mm, f"Nro. {receipt_number:06d}")
 
-    page.setFont("Helvetica-Bold", 13)
-    page.drawString(margin, y, "Recibo por sena de show")
-    y -= 10 * mm
+    y = height - 48 * mm
+    page.setFillColor(colors.HexColor("#0f172a"))
+    page.setFont("Helvetica-Bold", 12)
+    page.drawString(margin, y, "Datos del recibo")
+    y -= 7 * mm
+
+    box_x = margin
+    box_w = width - (2 * margin)
+    box_y = y - 55 * mm
+    page.setStrokeColor(colors.HexColor("#d7dee8"))
+    page.setFillColor(colors.HexColor("#f8fafc"))
+    page.roundRect(box_x, box_y, box_w, 58 * mm, 4 * mm, stroke=1, fill=1)
+    y -= 9 * mm
 
     rows = [
-        ("Fecha de recibo", str(receipt.get("receipt_date") or "")),
+        ("Fecha", str(receipt.get("receipt_date") or "")),
         ("Recibimos de", str(receipt.get("received_from") or "")),
-        (
-            "Importe",
-            finance_receipt_amount_label(
-                str(receipt.get("currency") or "ARS"),
-                float(receipt.get("amount") or 0),
-                float(receipt.get("amount_ars") or 0),
-                receipt.get("fx_rate"),
-            ),
-        ),
-        ("IVA", {
-            "no_aplica": "No aplica",
-            "mas_iva": "Mas IVA",
-            "iva_incluido": "IVA incluido",
-        }.get(str(receipt.get("vat_mode") or "no_aplica"), str(receipt.get("vat_mode") or ""))),
-        ("Concepto", str(receipt.get("concept") or movement.get("concept") or "")),
+        ("Importe recibido", finance_receipt_amount_label(str(receipt.get("currency") or "ARS"), float(receipt.get("amount") or 0))),
+        ("Concepto", str(receipt.get("concept") or movement.get("concept") or "Seña de show")),
         ("Fecha del show", str(receipt.get("show_date") or "-")),
-        ("Lugar / venue", str(receipt.get("venue") or "-")),
+        ("Lugar", str(receipt.get("venue") or "-")),
         ("Artista(s)", ", ".join(receipt.get("artist_names") or [movement.get("artist") or ""])),
     ]
-    page.setFont("Helvetica", 10)
+    label_x = margin + 7 * mm
+    value_x = margin + 50 * mm
     for label, value in rows:
         page.setFont("Helvetica-Bold", 10)
-        page.drawString(margin, y, f"{label}:")
+        page.setFillColor(colors.HexColor("#475569"))
+        page.drawString(label_x, y, f"{label}:")
         page.setFont("Helvetica", 10)
-        page.drawString(margin + 38 * mm, y, value[:95])
-        y -= 7 * mm
+        page.setFillColor(colors.HexColor("#0f172a"))
+        y = draw_wrapped(value, value_x, y, max_chars=62)
+        y -= 2 * mm
 
     notes = str(receipt.get("notes") or movement.get("notes") or "").strip()
     if notes:
-        y -= 4 * mm
+        y -= 6 * mm
         page.setFont("Helvetica-Bold", 10)
         page.drawString(margin, y, "Notas:")
         y -= 6 * mm
         page.setFont("Helvetica", 10)
         for line in notes.splitlines()[:8]:
-            page.drawString(margin, y, line[:115])
-            y -= 6 * mm
+            y = draw_wrapped(line, margin, y, max_chars=105)
 
-    y -= 14 * mm
+    y = 65 * mm
+    page.setStrokeColor(colors.HexColor("#94a3b8"))
     page.line(margin, y, margin + 65 * mm, y)
     page.line(width - margin - 65 * mm, y, width - margin, y)
     y -= 5 * mm
+    page.setFillColor(colors.HexColor("#334155"))
     page.setFont("Helvetica", 9)
-    page.drawString(margin, y, "Firma / aclaracion")
-    page.drawString(width - margin - 65 * mm, y, "Recibido por VPO Corp")
+    page.drawString(margin, y, "Firma / aclaración")
+    page.drawString(width - margin - 65 * mm, y, f"Recibido por {issuer_company}"[:48])
 
+    page.setFillColor(colors.HexColor("#64748b"))
     page.setFont("Helvetica", 8)
-    page.drawString(margin, 18 * mm, "Documento generado por VPO Corp desde Movimientos financieros.")
+    page.drawString(margin, 18 * mm, "Documento generado desde Movimientos financieros.")
     page.drawRightString(width - margin, 18 * mm, datetime.now().isoformat(timespec="seconds"))
     page.showPage()
     page.save()

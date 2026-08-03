@@ -254,14 +254,14 @@ El movimiento padre guarda:
 Selector:
 
 - Cuenta booking;
-- Sena de show / recibo;
+- Seña de show / recibo;
 - Recuperable / proyecto;
 - Proveedor pendiente;
 - Adelanto / prestamo;
 - Cuenta corriente financiera;
 - Dejar sin aplicar por ahora.
 
-### Pago / cobro como Sena de show / recibo
+### Pago / cobro como Seña de show / recibo
 
 Uso:
 
@@ -271,7 +271,7 @@ Uso:
 
 Regla core:
 
-- la sena es caja real;
+- la seña es caja real;
 - no cambia cachet, gastos ni split;
 - queda como movimiento financiero trazable;
 - queda preparada para vincularse luego con booking, agenda o cuenta corriente;
@@ -292,7 +292,8 @@ Campos:
 - fecha del show;
 - venue/lugar;
 - concepto;
-- si es mas IVA, IVA incluido o no aplica;
+- si es mas IVA, IVA incluido o no aplica. Es dato interno y no aparece en el PDF del recibo;
+- empresa emisora del recibo;
 - comprobantes y notas.
 
 El guardado debe escribir en:
@@ -307,7 +308,7 @@ duplicar caja ni cerrar shows por accidente.
 Regla multiartista:
 
 - no duplicar el recibo por artista;
-- no repartir la sena automaticamente entre artistas;
+- no repartir la seña automaticamente entre artistas;
 - usar el artista principal solo como ancla operativa para permisos, filtros y
   listados;
 - conservar la lista completa de artistas del evento en el detalle del recibo;

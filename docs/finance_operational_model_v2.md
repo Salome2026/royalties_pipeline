@@ -399,17 +399,17 @@ Impacto:
 - baja o cierra cuenta corriente;
 - no modifica el show/proyecto original.
 
-### 3.a Sena de show con recibo
+### 3.a Seña de show con recibo
 
 Uso:
 
-- un cliente entrega una sena para reservar un show;
+- un cliente entrega una seña para reservar un show;
 - Indyana necesita emitir un recibo formal;
 - todavia no se quiere modificar la liquidacion del show ni aplicar contra cuenta booking.
 
 Regla:
 
-- la sena se carga como `Pago / cobro` del area `booking`;
+- la seña se carga como `Pago / cobro` del area `booking`;
 - el tipo de aplicacion es `sena_show`;
 - el movimiento financiero representa caja real recibida;
 - el detalle del recibo vive en `finance_receipts`;
@@ -428,7 +428,8 @@ Campos minimos:
 - fecha del show;
 - venue/lugar;
 - concepto;
-- tratamiento IVA: no aplica, mas IVA o IVA incluido;
+- tratamiento IVA: no aplica, mas IVA o IVA incluido. Es dato interno y no aparece en el PDF del recibo;
+- empresa emisora del recibo: VPO Corp, Indyana Records LLC, Carolina Vanesa Alvarez, Mawz SRL, Mawz Records LLC o Mawz Records SRL;
 - notas/comprobantes.
 
 Impacto:
@@ -439,10 +440,10 @@ Impacto:
 
 Regla multiartista:
 
-- una sena por un evento de dos o mas artistas genera un solo recibo;
+- una seña por un evento de dos o mas artistas genera un solo recibo;
 - el recibo guarda todos los artistas asociados;
 - no se duplica caja por artista;
-- no se reparte la sena automaticamente en esta etapa;
+- no se reparte la seña automaticamente en esta etapa;
 - el artista principal funciona como ancla administrativa para permisos y filtros;
 - la distribucion/aplicacion economica se resuelve despues desde Booking o Cuenta
   booking, cuando exista el show o la liquidacion correspondiente.
