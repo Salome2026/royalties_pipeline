@@ -931,6 +931,7 @@ type FinanceMovementForm = {
   receiptReceivedFrom: string;
   receiptShowDate: string;
   receiptVenue: string;
+  receiptPrimaryArtist: string;
   receiptArtists: string[];
   receiptVatMode: "no_aplica" | "mas_iva" | "iva_incluido";
   receiptNotes: string;
@@ -2176,6 +2177,7 @@ function initialFinanceMovementForm(): FinanceMovementForm {
     receiptReceivedFrom: "",
     receiptShowDate: "",
     receiptVenue: "",
+    receiptPrimaryArtist: "",
     receiptArtists: [],
     receiptVatMode: "no_aplica",
     receiptNotes: "",
@@ -4708,6 +4710,7 @@ export default function Home() {
         artist: value,
         businessArea: nextArea,
         category: nextCategory,
+        receiptPrimaryArtist: hasArtist && !current.receiptPrimaryArtist ? value : current.receiptPrimaryArtist,
         receiptArtists: hasArtist ? Array.from(new Set([value, ...current.receiptArtists.filter(Boolean)])) : current.receiptArtists,
       };
     });
@@ -4990,6 +4993,7 @@ export default function Home() {
       receiptReceivedFrom: item.receipt_detail?.received_from || item.counterparty || "",
       receiptShowDate: item.receipt_detail?.show_date || "",
       receiptVenue: item.receipt_detail?.venue || "",
+      receiptPrimaryArtist: item.receipt_detail?.artist_names?.[0] || item.artist || "",
       receiptArtists: item.receipt_detail?.artist_names?.length ? item.receipt_detail.artist_names : [item.artist].filter(Boolean),
       receiptVatMode: item.receipt_detail?.vat_mode || "no_aplica",
       receiptNotes: item.receipt_detail?.notes || "",
@@ -5081,7 +5085,7 @@ export default function Home() {
       setMessage({ type: "error", text: "Elegi primero el area del movimiento." });
       return;
     }
-    if (financeMovementRequiresArtist && !financeMovementForm.artist.trim()) {
+    if (financeMovementRequiresArtist && !financeMovementIsReceiptFlow && !financeMovementForm.artist.trim()) {
       setMessage({ type: "error", text: "Para esta area, elegi el artista desde la lista." });
       return;
     }
@@ -5097,8 +5101,8 @@ export default function Home() {
       setMessage({ type: "error", text: "Completa de quien se recibe la sena." });
       return;
     }
-    if (financeMovementIsReceiptFlow && financeMovementForm.receiptArtists.length === 0) {
-      setMessage({ type: "error", text: "Elegir al menos un artista del show para el recibo." });
+    if (financeMovementIsReceiptFlow && !financeMovementForm.receiptPrimaryArtist.trim()) {
+      setMessage({ type: "error", text: "Elegir el artista principal del recibo." });
       return;
     }
     if (movementLines.length === 0) {
@@ -5174,7 +5178,9 @@ export default function Home() {
     let savedCount = 0;
     let savedReceiptPdf: { href: string; label: string } | null = null;
     const movementBusinessArea = financeMovementForm.businessArea as FinanceBusinessArea;
-    const movementArtist = financeMovementForm.artist.trim() || "Sin artista asignado";
+    const movementArtist = financeMovementIsReceiptFlow
+      ? financeMovementForm.receiptPrimaryArtist.trim()
+      : financeMovementForm.artist.trim() || "Sin artista asignado";
     for (const line of movementLines) {
       const payload = {
         movement_date: financeMovementForm.movementDate,
@@ -7130,6 +7136,10 @@ export default function Home() {
   const financeMovementCanCreatePayroll = currentUser?.role === "admin" || Boolean(payrollPermission?.can_create);
   const financeMovementCanEditPayroll = currentUser?.role === "admin" || Boolean(payrollPermission?.can_edit);
   const financeMovementRequiresArtist = ["marketing", "label", "digitales", "booking"].includes(financeMovementForm.businessArea);
+  const financeMovementBookingWaitingForType = financeMovementForm.businessArea === "booking" && !financeMovementForm.category;
+  const financeMovementShowTopArtistSelector = financeMovementRequiresArtist
+    && !financeMovementIsReceiptFlow
+    && !financeMovementBookingWaitingForType;
   const financeMovementIsOfficeArea = financeMovementForm.businessArea === "estructura";
   const financeMovementNeedsEmployee = financeMovementIsOfficeArea && ["salario", "comision_interna"].includes(financeMovementForm.category);
   const financeMovementShowConceptFields = financeMovementReadyForDetails && !financeMovementIsBookingAccountFlow && !financeMovementIsReceiptFlow;
@@ -10878,7 +10888,7 @@ export default function Home() {
                 </div>
               </div>
 
-              {financeMovementRequiresArtist && (
+              {financeMovementShowTopArtistSelector && (
                 <div className="row">
                   <div>
                     <label htmlFor="finance_artist">Artista</label>
@@ -11261,8 +11271,23 @@ export default function Home() {
                       </div>
                     </div>
 
-                    <div>
-                      <label htmlFor="finance_receipt_artists">Artistas del show</label>
+                    <div className="row">
+                      <div>
+                        <label htmlFor="finance_receipt_primary_artist">Artista principal</label>
+                        <select
+                          id="finance_receipt_primary_artist"
+                          value={financeMovementForm.receiptPrimaryArtist}
+                          onChange={(event) => updateFinanceMovementField("receiptPrimaryArtist", event.target.value)}
+                        >
+                          <option value="">Elegir artista</option>
+                          {financeMovementArtistOptions.map((artist) => (
+                            <option key={artist} value={artist}>{artist}</option>
+                          ))}
+                        </select>
+                        <p className="field-help">Este artista funciona como ancla del movimiento para permisos y filtros.</p>
+                      </div>
+                      <div>
+                        <label htmlFor="finance_receipt_artists">Otros artistas del show</label>
                       <select
                         id="finance_receipt_artists"
                         multiple
@@ -11277,7 +11302,8 @@ export default function Home() {
                           <option key={artist} value={artist}>{artist}</option>
                         ))}
                       </select>
-                      <p className="field-help">Para seleccionar mas de uno, usa Ctrl o Shift. El artista principal queda incluido automaticamente.</p>
+                        <p className="field-help">Opcional. Para seleccionar mas de uno, usa Ctrl o Shift. El principal queda incluido automaticamente.</p>
+                      </div>
                     </div>
 
                     <label htmlFor="finance_receipt_notes">Notas del recibo</label>

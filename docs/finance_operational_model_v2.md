@@ -416,14 +416,15 @@ Regla:
 - el recibo se numera de manera incremental;
 - el PDF se genera desde los datos guardados, no desde texto suelto;
 - no se altera cachet, gasto, split ni estado del show hasta que exista una aplicacion explicita.
+- el artista del movimiento sale del artista principal del recibo.
 
 Campos minimos:
 
 - fecha;
 - importe, moneda y tipo de cambio;
 - de quien se recibe;
-- artista principal;
-- artistas del show;
+- artista principal desde el ABM;
+- otros artistas del show desde el ABM, si corresponde;
 - fecha del show;
 - venue/lugar;
 - concepto;
@@ -435,6 +436,16 @@ Impacto:
 - aumenta la caja recibida por Indyana;
 - queda preparada para vincularse con booking, agenda y cuenta corriente;
 - no cierra saldos de booking automaticamente.
+
+Regla multiartista:
+
+- una sena por un evento de dos o mas artistas genera un solo recibo;
+- el recibo guarda todos los artistas asociados;
+- no se duplica caja por artista;
+- no se reparte la sena automaticamente en esta etapa;
+- el artista principal funciona como ancla administrativa para permisos y filtros;
+- la distribucion/aplicacion economica se resuelve despues desde Booking o Cuenta
+  booking, cuando exista el show o la liquidacion correspondiente.
 
 ### 4. Gasto de oficina / estructura
 

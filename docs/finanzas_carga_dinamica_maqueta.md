@@ -276,6 +276,10 @@ Regla core:
 - queda como movimiento financiero trazable;
 - queda preparada para vincularse luego con booking, agenda o cuenta corriente;
 - el recibo tiene numeracion incremental y puede imprimirse en PDF.
+- el artista del movimiento financiero sale del artista principal elegido dentro
+  del recibo, no de un campo previo del formulario;
+- si el show tiene mas de un artista, se emite un solo recibo y se guardan todos
+  los artistas asociados.
 
 Campos:
 
@@ -283,7 +287,8 @@ Campos:
 - fecha del recibo;
 - importe, moneda y tipo de cambio si corresponde;
 - de quien se recibe;
-- artista principal y artistas del show desde el ABM;
+- artista principal desde el ABM;
+- otros artistas del show desde el ABM, si corresponde;
 - fecha del show;
 - venue/lugar;
 - concepto;
@@ -298,6 +303,16 @@ El guardado debe escribir en:
 No debe escribir directamente saldos de booking en esta primera etapa. La aplicacion
 contra un show o una cuenta booking se hara con un paso explicito posterior, para no
 duplicar caja ni cerrar shows por accidente.
+
+Regla multiartista:
+
+- no duplicar el recibo por artista;
+- no repartir la sena automaticamente entre artistas;
+- usar el artista principal solo como ancla operativa para permisos, filtros y
+  listados;
+- conservar la lista completa de artistas del evento en el detalle del recibo;
+- la aplicacion economica contra cada show/artista se define luego desde Booking
+  o Cuenta booking.
 
 ### Pago / cobro contra Cuenta booking
 
