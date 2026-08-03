@@ -12,6 +12,8 @@ snapshots historicos y operacion viva.
   Cloud SQL.
 - SQLite local queda como foto historica o backup de corte, no como segunda
   base viva.
+- Modulo nuevo operativo = Postgres-only. No se agrega schema, columnas ni
+  fallback SQLite para funcionalidades nuevas.
 - Los snapshots en GCS pueden existir para datos analiticos o catalogo, pero
   no reemplazan la base operativa.
 
@@ -166,3 +168,14 @@ Checklist antes de push:
 Desde el corte 2026-06-27, el proyecto pasa a base operativa cloud unica. Las
 viejas rutas temporales pueden quedar como referencia historica, pero no deben guiar
 la operacion nueva.
+
+## Regla anti-ramas viejas
+
+Cuando un cambio toca base de datos:
+
+1. Revisar `docs/production_guardrails.md`.
+2. Confirmar si es operacion viva o snapshot analitico.
+3. Si es operacion viva, implementar solo sobre Postgres/Cloud SQL.
+4. No extender `init_booking_db()` ni helpers SQLite para ese cambio.
+5. Si aparece una rama SQLite nueva en `git diff`, detenerse y justificarla antes
+   de continuar.

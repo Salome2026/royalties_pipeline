@@ -1,5 +1,16 @@
 # Royalties pipeline docs
 
+## Leer primero
+
+- [Production guardrails](production_guardrails.md)
+- [Cloud environment policy](cloud_environment_policy.md)
+- [Secure operational DB connection](secure_operational_db_connection.md)
+
+Regla vigente: Cloud SQL Postgres es la unica base operativa viva. SQLite queda
+solo como foto historica/recuperacion controlada y no debe recibir funcionalidad
+nueva. Si un documento de migracion viejo contradice esto, se considera
+historico y no normativo.
+
 ## Fuente por fuente
 
 - [FUGA](fuga_pipeline_notes.md)
@@ -20,6 +31,7 @@
 - [Configurador distribuidoras fase 4](distributor_configurator_phase4_policy_integration.md)
 - [Statement period policy](statement_period_policy.md)
 - [Web users admin](web_users_admin.md)
+- [Production guardrails](production_guardrails.md)
 - [Cloud environment policy](cloud_environment_policy.md)
 - [Cloud operational schema v1](cloud_operational_schema_v1.md)
 - [Cloud migration progress 2026-06-25](cloud_migration_progress_20260625.md)

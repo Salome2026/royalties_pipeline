@@ -113,6 +113,10 @@ Regla actual:
   `VPO_OPERATIONAL_DB_DRIVER=postgres`.
 - El adaptador de compatibilidad existe para no reescribir todas las rutas de golpe.
 - No se debe crear funcionalidad nueva que dependa de SQLite.
+- No se debe agregar schema nuevo, columnas nuevas ni `ensure_sqlite_column` para
+  funcionalidades creadas despues del corte cloud.
+- Un modulo nuevo operativo debe fallar explicitamente si alguien intenta usarlo
+  con SQLite.
 - No se debe devolver `booking_live.sqlite` como ruta operativa cuando el driver es
   Postgres.
 - No se debe borrar el soporte SQLite hasta que todas las rutas vivas esten

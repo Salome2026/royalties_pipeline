@@ -2,6 +2,15 @@
 
 Fecha: 2026-06-24
 
+> ESTADO DEL DOCUMENTO: historico/parcialmente superado.
+>
+> Este documento explica el razonamiento de migracion. Para cambios actuales,
+> manda `production_guardrails.md` junto con `cloud_environment_policy.md` y
+> `secure_operational_db_connection.md`.
+>
+> Regla vigente: Cloud SQL Postgres es la unica base operativa viva. SQLite es
+> foto historica/recuperacion controlada y no debe recibir funcionalidad nueva.
+
 Este documento manda sobre la migracion de la operacion viva a cloud. No
 reemplaza las reglas de booking, finanzas, catalogo o reportes: las organiza en
 una arquitectura comun para que usuarios, permisos, auditoria y base persistente
@@ -520,14 +529,14 @@ Motivo:
 
 ## Estado tecnico detectado al iniciar
 
-Revision inicial del 2026-06-24:
+Revision inicial historica del 2026-06-24:
 
 - El backend principal esta en `app/vpo_corp_api.py`.
-- La base operativa actual es SQLite:
+- En ese momento, antes del corte cloud, la base diaria era SQLite:
   `warehouse/booking/live/booking_live.sqlite`.
-- La funcion central de conexion actual es `booking_connect()`.
+- La funcion central de conexion era `booking_connect()`.
 - `booking`, `caserio`, `liquidaciones compuestas`, `finance_projects`,
-  `finance_staging_movements` y `finance_recovery_applications` se crean hoy
+  `finance_staging_movements` y `finance_recovery_applications` se creaban
   dentro de `init_booking_db()`.
 - El frontend esta en `web/app/page.tsx`.
 - El login actual esta en `web/app/api/_auth.ts`.

@@ -2,6 +2,12 @@
 
 Fecha: 2026-06-24
 
+> ESTADO DEL DOCUMENTO: historico/parcialmente superado.
+>
+> Este documento describe el esquema de migracion inicial. Para cambios actuales
+> manda `production_guardrails.md`: Cloud SQL Postgres es la unica base viva y
+> SQLite no debe recibir funcionalidades nuevas.
+
 Este documento baja a tierra el paso siguiente del sistema: pasar de snapshots por
 snapshots a operacion cloud con base persistente, sin perder el taller local ni
 romper lo que ya funciona.
@@ -271,7 +277,8 @@ Crear una capa de acceso:
 Objetivo:
 
 - dejar de llamar `booking_connect()` directo en cada endpoint nuevo;
-- permitir que local use SQLite o Postgres segun variable;
+- permitir que local use SQLite o Postgres segun variable fue una capacidad de
+  transicion. Actualmente local operativo debe usar Cloud SQL Postgres por proxy;
 - permitir que Cloud Run use Postgres para operacion viva.
 
 Variable propuesta:

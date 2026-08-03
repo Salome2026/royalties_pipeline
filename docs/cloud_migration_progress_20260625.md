@@ -1,5 +1,13 @@
 ﻿# Cloud Migration Progress - 2026-06-25
 
+> ESTADO DEL DOCUMENTO: historico/no normativo.
+>
+> Este archivo registra la migracion y conserva contexto de decisiones pasadas.
+> No debe usarse para disenar funcionalidad nueva. La regla vigente esta en
+> `production_guardrails.md`, `cloud_environment_policy.md` y
+> `secure_operational_db_connection.md`: Cloud SQL Postgres es la unica base viva
+> y SQLite no recibe funcionalidades nuevas.
+
 ## Estado actual operativo
 
 Desde el 2026-06-25 la direccion correcta es cloud operativo, no entornos paralelos.
@@ -30,11 +38,15 @@ Regla de lenguaje y arquitectura:
 - Si una pantalla todavia lee snapshot, se documenta explicitamente como snapshot temporal de lectura, no como entorno paralelo.
 - La instancia anterior `vpo-corp-postgres-dev` queda como prueba historica y debe eliminarse cuando Ruben confirme.
 
-## Objetivo
+## Objetivo historico
 
-Preparar el paso desde la base productiva local actual hacia una base operacional única en Cloud SQL PostgreSQL sin tocar todavía la base viva ni crear recursos cloud.
+Preparar, en aquel momento, el paso desde la operacion local previa hacia una
+base operacional unica en Cloud SQL PostgreSQL sin tocar todavia la base viva ni
+crear recursos cloud.
 
-Nota importante: en este proyecto la SQLite local actual ya se considera productiva para la operacion diaria. Las carpetas de exportacion de migracion no representan un entorno staging de negocio; son solamente artefactos temporales de control para mover datos con trazabilidad.
+Nota historica: en ese momento la SQLite local se consideraba productiva para la
+operacion diaria. Ese criterio quedo superado por el corte cloud. Actualmente
+Cloud SQL Postgres es la unica base operativa viva.
 
 ## Foto segura
 
@@ -84,7 +96,7 @@ Motivo:
 
 Tratamiento:
 
-- No se pierde la informacion: la SQLite productiva local y el backup conservan la tabla.
+- No se pierde la informacion: la foto SQLite de corte y el backup conservan la tabla.
 - Para Cloud SQL v1, el dato vivo es `finance_recovery_applications`.
 - Si mas adelante se quiere exposicion historica, debe hacerse como vista/auditoria legacy, no como saldo.
 
@@ -197,7 +209,9 @@ Resultado:
 
 Siguiente paso:
 
-Preparar el adapter de base de datos para que la app pueda funcionar contra SQLite productiva local o Postgres dev segun configuracion, empezando en modo lectura/control.
+Preparar el adapter de base de datos para que la app pudiera comparar la foto
+SQLite de corte contra Postgres durante la migracion. Esa etapa ya no define la
+arquitectura vigente.
 
 ## Adapter seguro creado
 
@@ -207,7 +221,7 @@ Archivo:
 
 Regla:
 
-- Default: SQLite productiva local.
+- Default historico de esa etapa: foto SQLite de corte.
 - Postgres: solo por Cloud SQL socket o proxy local.
 - TCP directo a IP publica queda bloqueado salvo override temporal explicito.
 
@@ -225,9 +239,11 @@ Rutas cambiadas para usar `operational_connect()`:
 - `POST /auth/login`
 - `POST /auth/change-password`
 
-Default local:
+Default local historico:
 
-- Sigue usando SQLite productiva local porque `VPO_OPERATIONAL_DB_DRIVER=sqlite` es el default.
+- En esa etapa seguia usando la foto SQLite de corte porque
+  `VPO_OPERATIONAL_DB_DRIVER=sqlite` era el default.
+- Ese comportamiento ya no es el criterio vigente para funcionalidades nuevas.
 
 Cloud/Postgres:
 
