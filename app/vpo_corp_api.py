@@ -9053,7 +9053,7 @@ def finance_receipt_pdf(
             conn,
             x_vpo_username,
             "finance_movements",
-            "view",
+            "access",
             artist=clean_booking_artist(row["movement_artist"]) or row["movement_artist"],
         )
 
