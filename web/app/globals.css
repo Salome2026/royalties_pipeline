@@ -427,6 +427,19 @@ textarea {
   transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
 }
 
+select:not([multiple]) {
+  height: 46px;
+  min-height: 46px;
+  max-height: 46px;
+  line-height: 1.2;
+  overflow: hidden;
+}
+
+select[multiple] {
+  height: auto;
+  min-height: 116px;
+}
+
 input:hover,
 select:hover,
 textarea:hover {
