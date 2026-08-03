@@ -414,9 +414,17 @@ Regla:
 - el movimiento financiero representa caja real recibida;
 - el detalle del recibo vive en `finance_receipts`;
 - el recibo se numera de manera incremental;
+- la numeracion incremental es canonica de Postgres y debe ser atomica; no se
+  calcula con `MAX(numero) + 1` para evitar duplicados si dos usuarios emiten a
+  la vez;
 - el PDF se genera desde los datos guardados, no desde texto suelto;
 - no se altera cachet, gasto, split ni estado del show hasta que exista una aplicacion explicita.
 - el artista del movimiento sale del artista principal del recibo.
+- un usuario con permiso de crear en Movimientos Financieros puede emitir
+  recibos, pero no puede editarlos despues, ni siquiera los que cargo;
+- corregir un recibo emitido requiere permiso de editar en Movimientos
+  Financieros. Sin ese permiso, el usuario solo puede abrir/descargar el PDF si
+  tiene acceso al movimiento;
 
 Campos minimos:
 

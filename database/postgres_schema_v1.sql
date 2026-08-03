@@ -620,10 +620,12 @@ CREATE TABLE IF NOT EXISTS finance_movement_allocations (
 
 CREATE INDEX IF NOT EXISTS idx_finance_movement_allocations_movement ON finance_movement_allocations(movement_id);
 
+CREATE SEQUENCE IF NOT EXISTS finance_receipts_receipt_number_seq;
+
 CREATE TABLE IF NOT EXISTS finance_receipts (
     id bigserial PRIMARY KEY,
     movement_id bigint NOT NULL UNIQUE REFERENCES finance_movements(id) ON DELETE CASCADE,
-    receipt_number bigint NOT NULL UNIQUE,
+    receipt_number bigint NOT NULL UNIQUE DEFAULT nextval('finance_receipts_receipt_number_seq'),
     receipt_date date NOT NULL,
     receipt_kind text NOT NULL DEFAULT 'sena_show',
     issuer_company text NOT NULL DEFAULT 'VPO Corp',

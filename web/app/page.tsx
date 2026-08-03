@@ -11974,23 +11974,25 @@ export default function Home() {
                         {isFinanceMovementLocked(item.status) && <span className="cell-note">Bloqueado</span>}
                       </td>
                       <td>
-                        {isFinanceMovementLocked(item.status) ? (
-                          <span className="cell-note">Sin edicion</span>
-                        ) : (
-                          <div className="button-row compact-buttons">
+                        <div className="button-row compact-buttons">
+                          {isFinanceMovementLocked(item.status) ? (
+                            <span className="cell-note">Sin edicion</span>
+                          ) : canEditModule("finance_movements") ? (
                             <button type="button" className="secondary" onClick={() => editFinanceMovement(item)}>Editar</button>
-                            {item.receipt_detail && (
-                              <a
-                                className="button-link secondary"
-                                href={`/api/finance/receipts/${item.receipt_detail.id}/pdf`}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                PDF
-                              </a>
-                            )}
-                          </div>
-                        )}
+                          ) : (
+                            <span className="cell-note">Solo carga</span>
+                          )}
+                          {item.receipt_detail && (
+                            <a
+                              className="button-link secondary"
+                              href={`/api/finance/receipts/${item.receipt_detail.id}/pdf`}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              PDF
+                            </a>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

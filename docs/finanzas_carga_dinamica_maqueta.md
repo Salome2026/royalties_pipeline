@@ -276,10 +276,16 @@ Regla core:
 - queda como movimiento financiero trazable;
 - queda preparada para vincularse luego con booking, agenda o cuenta corriente;
 - el recibo tiene numeracion incremental y puede imprimirse en PDF.
+- la numeracion incremental debe salir de una secuencia atomica de Postgres; no
+  se calcula leyendo el ultimo numero porque en produccion puede haber dos
+  usuarios guardando al mismo tiempo.
 - el artista del movimiento financiero sale del artista principal elegido dentro
   del recibo, no de un campo previo del formulario;
 - si el show tiene mas de un artista, se emite un solo recibo y se guardan todos
   los artistas asociados.
+- los operadores con permiso de crear pueden emitir recibos, pero no editarlos
+  luego. Para modificar un recibo ya emitido se requiere permiso de editar en
+  Movimientos Financieros.
 
 Campos:
 

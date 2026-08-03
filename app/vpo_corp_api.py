@@ -5159,12 +5159,13 @@ def ensure_finance_receipts_table(conn: sqlite3.Connection) -> None:
             status_code=500,
             detail="Los recibos operativos usan Cloud SQL Postgres. SQLite no es una base viva para emitir recibos.",
         )
+    conn.execute("CREATE SEQUENCE IF NOT EXISTS finance_receipts_receipt_number_seq")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS finance_receipts (
             id bigserial PRIMARY KEY,
             movement_id bigint NOT NULL UNIQUE REFERENCES finance_movements(id) ON DELETE CASCADE,
-            receipt_number bigint NOT NULL UNIQUE,
+            receipt_number bigint NOT NULL UNIQUE DEFAULT nextval('finance_receipts_receipt_number_seq'),
             receipt_date date NOT NULL,
             receipt_kind text NOT NULL DEFAULT 'sena_show',
             issuer_company text NOT NULL DEFAULT 'VPO Corp',
@@ -5189,6 +5190,23 @@ def ensure_finance_receipts_table(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("ALTER TABLE finance_receipts ADD COLUMN IF NOT EXISTS issuer_company text NOT NULL DEFAULT 'VPO Corp'")
+    conn.execute(
+        "ALTER TABLE finance_receipts ALTER COLUMN receipt_number SET DEFAULT nextval('finance_receipts_receipt_number_seq')"
+    )
+    conn.execute(
+        """
+        SELECT setval(
+            'finance_receipts_receipt_number_seq',
+            GREATEST(
+                1,
+                COALESCE((SELECT MAX(receipt_number) FROM finance_receipts), 0),
+                (SELECT last_value FROM finance_receipts_receipt_number_seq)
+            ),
+            COALESCE((SELECT MAX(receipt_number) FROM finance_receipts), 0) > 0
+                OR (SELECT is_called FROM finance_receipts_receipt_number_seq)
+        )
+        """
+    )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_receipts_date ON finance_receipts(receipt_date DESC, id DESC)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_receipts_show_date ON finance_receipts(show_date)")
 
@@ -5248,7 +5266,7 @@ def validate_finance_receipt_request(request: FinanceMovementRequest) -> Finance
 
 def next_finance_receipt_number(conn: sqlite3.Connection) -> int:
     ensure_finance_receipts_table(conn)
-    row = conn.execute("SELECT COALESCE(MAX(receipt_number), 0) + 1 AS next_number FROM finance_receipts").fetchone()
+    row = conn.execute("SELECT nextval('finance_receipts_receipt_number_seq') AS next_number").fetchone()
     return int(row["next_number"] or 1)
 
 
