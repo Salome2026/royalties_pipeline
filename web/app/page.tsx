@@ -2308,6 +2308,7 @@ export default function Home() {
   const [financeMovementStatusFilter, setFinanceMovementStatusFilter] = useState("");
   const [financeMovementForm, setFinanceMovementForm] = useState<FinanceMovementForm>(() => initialFinanceMovementForm());
   const [financeMovementProjectMode, setFinanceMovementProjectMode] = useState<"existing" | "new">("existing");
+  const [financeMovementLastReceiptPdf, setFinanceMovementLastReceiptPdf] = useState<{ href: string; label: string } | null>(null);
   const [financeEmployeeOptions, setFinanceEmployeeOptions] = useState<FinanceEmployeeOption[]>([]);
   const [financeEmployeeOptionsLoading, setFinanceEmployeeOptionsLoading] = useState(false);
   const [artistRecords, setArtistRecords] = useState<BookingArtistRecord[]>([]);
@@ -5005,6 +5006,9 @@ export default function Home() {
   async function saveFinanceMovement(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage(null);
+    setFinanceMovementLastReceiptPdf(null);
+    const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const shouldOpenReceiptPdf = submitter?.value === "save_print_receipt";
 
     if (!financeMovementCanSave) {
       setMessage({
@@ -5168,6 +5172,7 @@ export default function Home() {
 
     setFinanceMovementLoading(true);
     let savedCount = 0;
+    let savedReceiptPdf: { href: string; label: string } | null = null;
     const movementBusinessArea = financeMovementForm.businessArea as FinanceBusinessArea;
     const movementArtist = financeMovementForm.artist.trim() || "Sin artista asignado";
     for (const line of movementLines) {
@@ -5236,13 +5241,28 @@ export default function Home() {
         setMessage({ type: "error", text: data.error || `No se pudo guardar la linea ${savedCount + 1}.` });
         return;
       }
+      if (financeMovementIsReceiptFlow && data.item?.receipt_detail?.id) {
+        const receiptNumber = String(data.item.receipt_detail.receipt_number || "").padStart(6, "0");
+        savedReceiptPdf = {
+          href: `/api/finance/receipts/${data.item.receipt_detail.id}/pdf`,
+          label: `Recibo #${receiptNumber}`,
+        };
+      }
       savedCount += 1;
     }
 
     setFinanceMovementLoading(false);
+    if (savedReceiptPdf) {
+      setFinanceMovementLastReceiptPdf(savedReceiptPdf);
+      if (shouldOpenReceiptPdf) {
+        window.open(savedReceiptPdf.href, "_blank", "noopener,noreferrer");
+      }
+    }
     setMessage({
       type: "ok",
-      text: financeMovementEditingId
+      text: savedReceiptPdf
+        ? `${savedReceiptPdf.label} guardado.`
+        : financeMovementEditingId
         ? "Movimiento financiero actualizado."
         : savedCount === 1
           ? "Movimiento financiero cargado en staging."
@@ -11293,9 +11313,22 @@ export default function Home() {
                     </div>
                   </details>
 
-                  <button type="submit" disabled={financeMovementLoading || !financeMovementCanSave}>
-                    {financeMovementLoading ? "Guardando..." : financeMovementEditingId ? "Actualizar recibo" : "Guardar recibo"}
-                  </button>
+                  <div className="button-row receipt-actions">
+                    <button type="submit" name="finance_action" value="save_receipt" disabled={financeMovementLoading || !financeMovementCanSave}>
+                      {financeMovementLoading ? "Guardando..." : financeMovementEditingId ? "Actualizar recibo" : "Guardar recibo"}
+                    </button>
+                    <button type="submit" name="finance_action" value="save_print_receipt" disabled={financeMovementLoading || !financeMovementCanSave}>
+                      {financeMovementLoading ? "Guardando..." : "Guardar y abrir PDF"}
+                    </button>
+                  </div>
+                  {financeMovementLastReceiptPdf && (
+                    <p className="field-help">
+                      Ultimo recibo guardado:{" "}
+                      <a href={financeMovementLastReceiptPdf.href} target="_blank" rel="noreferrer">
+                        abrir {financeMovementLastReceiptPdf.label} en PDF
+                      </a>
+                    </p>
+                  )}
                   {!financeMovementCanSave && (
                     <p className="field-help">
                       {financeMovementEditingId

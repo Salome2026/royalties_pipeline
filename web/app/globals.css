@@ -1497,6 +1497,15 @@ button:disabled:hover {
   justify-content: flex-start;
 }
 
+.button-row.receipt-actions {
+  justify-content: flex-start;
+}
+
+.button-row.receipt-actions button {
+  width: auto;
+  min-width: 190px;
+}
+
 .button-row.compact-buttons button,
 .button-row.compact-buttons .button-link {
   width: auto;
