@@ -1493,6 +1493,35 @@ button:disabled:hover {
   justify-content: flex-end;
 }
 
+.button-row.compact-buttons {
+  justify-content: flex-start;
+}
+
+.button-row.compact-buttons button,
+.button-row.compact-buttons .button-link {
+  width: auto;
+  min-height: 34px;
+  margin-top: 0;
+  padding: 7px 10px;
+  font-size: 12px;
+}
+
+.button-link {
+  border-radius: 7px;
+  background: var(--accent);
+  color: #fff;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  box-shadow: 0 10px 20px rgba(15, 118, 110, .18);
+}
+
+.button-link:hover {
+  background: var(--accent-dark);
+}
+
 .inline-remove {
   display: grid;
   grid-template-columns: 1fr auto;

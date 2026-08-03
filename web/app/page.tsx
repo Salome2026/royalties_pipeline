@@ -799,6 +799,7 @@ type FinanceMovement = {
   source_id: string | null;
   proof_refs: string[];
   allocation_lines: FinanceMovementAllocation[];
+  receipt_detail: FinanceReceiptDetail | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -814,6 +815,27 @@ type FinanceMovementAllocation = {
   currency: "ARS" | "USD";
   fx_rate: number | null;
   amount_ars: number;
+  notes: string | null;
+};
+
+type FinanceReceiptDetail = {
+  id: number;
+  movement_id: number;
+  receipt_number: number;
+  receipt_date: string;
+  receipt_kind: "sena_show";
+  received_from: string;
+  amount: number;
+  currency: "ARS" | "USD";
+  fx_rate: number | null;
+  amount_ars: number;
+  vat_mode: "no_aplica" | "mas_iva" | "iva_incluido";
+  concept: string;
+  show_date: string | null;
+  venue: string | null;
+  artist_names: string[];
+  booking_show_id: number | null;
+  status: string;
   notes: string | null;
 };
 
@@ -906,6 +928,12 @@ type FinanceMovementForm = {
   conceptLines: FinanceMovementLineForm[];
   economicDistributionEnabled: boolean;
   allocationLines: FinanceAllocationForm[];
+  receiptReceivedFrom: string;
+  receiptShowDate: string;
+  receiptVenue: string;
+  receiptArtists: string[];
+  receiptVatMode: "no_aplica" | "mas_iva" | "iva_incluido";
+  receiptNotes: string;
 };
 
 type SourceMonitorItem = {
@@ -2145,6 +2173,12 @@ function initialFinanceMovementForm(): FinanceMovementForm {
     conceptLines: [newFinanceMovementLine()],
     economicDistributionEnabled: false,
     allocationLines: [newFinanceAllocationLine()],
+    receiptReceivedFrom: "",
+    receiptShowDate: "",
+    receiptVenue: "",
+    receiptArtists: [],
+    receiptVatMode: "no_aplica",
+    receiptNotes: "",
   };
 }
 
@@ -4673,6 +4707,7 @@ export default function Home() {
         artist: value,
         businessArea: nextArea,
         category: nextCategory,
+        receiptArtists: hasArtist ? Array.from(new Set([value, ...current.receiptArtists.filter(Boolean)])) : current.receiptArtists,
       };
     });
     if (hasArtist && financeMovementForm.movementType === "pago") {
@@ -4691,7 +4726,7 @@ export default function Home() {
         return {
           ...current,
           movementType: value,
-          category: current.businessArea === "booking" && hasArtist ? "cuenta_booking" : "",
+          category: current.category === "cuenta_booking" || current.category === "sena_show" ? current.category : "",
           recoverable: false,
           recoverablePercent: "0",
           recoveryMethod: "none",
@@ -4732,9 +4767,7 @@ export default function Home() {
       counterparty: value !== "estructura" && current.category === "salario" ? "" : current.counterparty,
       category: current.businessArea === value
         ? current.category
-        : current.movementType === "pago" && value === "booking"
-          ? "cuenta_booking"
-          : "",
+        : "",
     }));
   }
 
@@ -4953,6 +4986,12 @@ export default function Home() {
           currency: item.currency,
           fxRate: amountToInput(item.fx_rate),
         })],
+      receiptReceivedFrom: item.receipt_detail?.received_from || item.counterparty || "",
+      receiptShowDate: item.receipt_detail?.show_date || "",
+      receiptVenue: item.receipt_detail?.venue || "",
+      receiptArtists: item.receipt_detail?.artist_names?.length ? item.receipt_detail.artist_names : [item.artist].filter(Boolean),
+      receiptVatMode: item.receipt_detail?.vat_mode || "no_aplica",
+      receiptNotes: item.receipt_detail?.notes || "",
     });
     setMessage({ type: "ok", text: `Editando movimiento financiero #${item.id}.` });
   }
@@ -4986,7 +5025,20 @@ export default function Home() {
       return;
     }
 
-    const rawLines: FinanceMovementLineForm[] = financeMovementForm.multipleConcepts
+    const rawLines: FinanceMovementLineForm[] = financeMovementIsReceiptFlow
+      ? [{
+        uid: "receipt",
+        concept: financeMovementForm.concept || "Sena de show",
+        counterparty: financeMovementForm.receiptReceivedFrom,
+        paidBy: "indyana",
+        amount: financeMovementForm.amount,
+        paidAmount: financeMovementForm.amount,
+        dueDate: "",
+        paymentStatus: "pagado",
+        currency: financeMovementForm.currency,
+        fxRate: financeMovementForm.fxRate,
+      }]
+      : financeMovementForm.multipleConcepts
       ? financeMovementForm.conceptLines
       : [{
         uid: "single",
@@ -5035,6 +5087,14 @@ export default function Home() {
     }
     if (!financeMovementForm.category) {
       setMessage({ type: "error", text: "Completa la categoria del movimiento." });
+      return;
+    }
+    if (financeMovementIsReceiptFlow && !financeMovementForm.receiptReceivedFrom.trim()) {
+      setMessage({ type: "error", text: "Completa de quien se recibe la sena." });
+      return;
+    }
+    if (financeMovementIsReceiptFlow && financeMovementForm.receiptArtists.length === 0) {
+      setMessage({ type: "error", text: "Elegir al menos un artista del show para el recibo." });
       return;
     }
     if (movementLines.length === 0) {
@@ -5147,6 +5207,19 @@ export default function Home() {
           fx_rate: allocation.currency === "USD" ? allocation.fxRate : null,
           notes: allocation.notes || null,
         })),
+        receipt_detail: financeMovementIsReceiptFlow ? {
+          receipt_kind: "sena_show",
+          received_from: financeMovementForm.receiptReceivedFrom.trim(),
+          show_date: financeMovementForm.receiptShowDate || null,
+          venue: financeMovementForm.receiptVenue || null,
+          artist_names: Array.from(new Set([
+            movementArtist,
+            ...financeMovementForm.receiptArtists,
+          ].map((artist) => artist.trim()).filter(Boolean))),
+          booking_show_id: null,
+          vat_mode: financeMovementForm.receiptVatMode,
+          notes: financeMovementForm.receiptNotes || null,
+        } : null,
       };
 
       const url = financeMovementEditingId
@@ -7026,7 +7099,11 @@ export default function Home() {
     manual: "Caso especial que se va a aplicar con un movimiento o ajuste especifico.",
   };
   const financeMovementIsBookingAccountFlow = financeMovementForm.movementType === "pago"
-    && financeMovementForm.businessArea === "booking";
+    && financeMovementForm.businessArea === "booking"
+    && financeMovementForm.category === "cuenta_booking";
+  const financeMovementIsReceiptFlow = financeMovementForm.movementType === "pago"
+    && financeMovementForm.businessArea === "booking"
+    && financeMovementForm.category === "sena_show";
   const financeMovementReadyForDetails = Boolean(financeMovementForm.businessArea && financeMovementForm.category);
   const payrollPermission = currentModulePermission("payroll_compensation");
   const financeMovementCanUseOffice = currentUser?.role === "admin" || Boolean(payrollPermission?.can_access);
@@ -7035,13 +7112,15 @@ export default function Home() {
   const financeMovementRequiresArtist = ["marketing", "label", "digitales", "booking"].includes(financeMovementForm.businessArea);
   const financeMovementIsOfficeArea = financeMovementForm.businessArea === "estructura";
   const financeMovementNeedsEmployee = financeMovementIsOfficeArea && ["salario", "comision_interna"].includes(financeMovementForm.category);
-  const financeMovementShowConceptFields = financeMovementReadyForDetails && !financeMovementIsBookingAccountFlow;
+  const financeMovementShowConceptFields = financeMovementReadyForDetails && !financeMovementIsBookingAccountFlow && !financeMovementIsReceiptFlow;
   const financeMovementShowTreatment = financeMovementShowConceptFields
     && !financeMovementIsOfficeArea
     && financeMovementForm.movementType !== "ingreso"
     && financeMovementForm.movementType !== "pago";
   const financeMovementAreaLabel = "Area";
-  const financeMovementCategoryLabel = financeMovementIsOfficeArea ? "Categoria oficina" : "Categoria";
+  const financeMovementCategoryLabel = financeMovementForm.movementType === "pago"
+    ? "Tipo de pago/cobro"
+    : financeMovementIsOfficeArea ? "Categoria oficina" : "Categoria";
   const financeMovementBaseCanSave = financeMovementEditingId
     ? canEditModule("finance_movements")
     : canCreateModule("finance_movements");
@@ -7080,6 +7159,7 @@ export default function Home() {
     if (financeMovementForm.movementType === "pago") {
       return [
         ["cuenta_booking", "Cuenta booking"],
+        ["sena_show", "Sena de show / recibo"],
         ["recuperable_abierto", "Recuperable abierto"],
         ["proveedor_pendiente", "Proveedor pendiente"],
         ["adelanto_prestamo", "Adelanto / prestamo"],
@@ -10855,8 +10935,7 @@ export default function Home() {
 
               {financeMovementForm.businessArea && (
               <div className="row three">
-                {!financeMovementIsBookingAccountFlow && (
-                  <div>
+                <div>
                   <label htmlFor="finance_category">{financeMovementCategoryLabel}</label>
                   <select id="finance_category" value={financeMovementForm.category} onChange={(event) => updateFinanceMovementField("category", event.target.value)}>
                     <option value="">Elegir categoria</option>
@@ -10869,8 +10948,7 @@ export default function Home() {
                       ? "Sueldo, oficina y gastos internos viven aca como categorias de estructura."
                       : "La categoria cambia segun el sector elegido."}
                   </p>
-                  </div>
-                )}
+                </div>
               </div>
               )}
 
@@ -11072,6 +11150,160 @@ export default function Home() {
                     </>
                   )}
                 </div>
+              ) : financeMovementIsReceiptFlow ? (
+                <>
+                  <div className="section-heading compact">
+                    <div>
+                      <h2>Recibo de sena de show</h2>
+                      <p>Registra caja recibida del cliente. No aplica automaticamente contra la liquidacion del show.</p>
+                    </div>
+                  </div>
+                  <div className="recoupment-panel">
+                    <div className="row three">
+                      <div>
+                        <label htmlFor="finance_receipt_from">De quien se recibe</label>
+                        <input
+                          id="finance_receipt_from"
+                          value={financeMovementForm.receiptReceivedFrom}
+                          onChange={(event) => updateFinanceMovementField("receiptReceivedFrom", event.target.value)}
+                          placeholder="Cliente, boliche, productor"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="finance_receipt_show_date">Fecha del show</label>
+                        <input
+                          id="finance_receipt_show_date"
+                          type="date"
+                          value={financeMovementForm.receiptShowDate}
+                          onChange={(event) => updateFinanceMovementField("receiptShowDate", event.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="finance_receipt_venue">Lugar / venue</label>
+                        <input
+                          id="finance_receipt_venue"
+                          value={financeMovementForm.receiptVenue}
+                          onChange={(event) => updateFinanceMovementField("receiptVenue", event.target.value)}
+                          placeholder="Nombre del lugar o evento"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="row three">
+                      <div>
+                        <label htmlFor="finance_receipt_concept">Concepto</label>
+                        <input
+                          id="finance_receipt_concept"
+                          value={financeMovementForm.concept}
+                          onChange={(event) => updateFinanceMovementField("concept", event.target.value)}
+                          placeholder="Sena show fecha / venue"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="finance_receipt_amount">Importe recibido</label>
+                        <input
+                          id="finance_receipt_amount"
+                          inputMode="decimal"
+                          value={financeMovementForm.amount}
+                          onChange={(event) => updateFinanceMovementField("amount", event.target.value)}
+                          placeholder="ARS o u$ 300"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="finance_receipt_vat">IVA</label>
+                        <select
+                          id="finance_receipt_vat"
+                          value={financeMovementForm.receiptVatMode}
+                          onChange={(event) => updateFinanceMovementField("receiptVatMode", event.target.value as FinanceMovementForm["receiptVatMode"])}
+                        >
+                          <option value="no_aplica">No aplica</option>
+                          <option value="mas_iva">Mas IVA</option>
+                          <option value="iva_incluido">IVA incluido</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="row three">
+                      <div>
+                        <label htmlFor="finance_receipt_currency">Moneda</label>
+                        <select id="finance_receipt_currency" value={financeMovementForm.currency} onChange={(event) => updateFinanceMovementField("currency", event.target.value as "ARS" | "USD")}>
+                          <option value="ARS">ARS</option>
+                          <option value="USD">USD</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label htmlFor="finance_receipt_fx">Tipo de cambio</label>
+                        <input id="finance_receipt_fx" inputMode="decimal" value={financeMovementForm.fxRate} onChange={(event) => updateFinanceMovementField("fxRate", event.target.value)} placeholder="Solo si es USD" />
+                      </div>
+                      <div className="metric-card">
+                        <span>Total ARS</span>
+                        <strong>{ars(financeMovementAmountArs || 0)}</strong>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label htmlFor="finance_receipt_artists">Artistas del show</label>
+                      <select
+                        id="finance_receipt_artists"
+                        multiple
+                        size={Math.min(Math.max(financeMovementArtistOptions.length, 3), 6)}
+                        value={financeMovementForm.receiptArtists}
+                        onChange={(event) => updateFinanceMovementField(
+                          "receiptArtists",
+                          Array.from(event.currentTarget.selectedOptions).map((option) => option.value),
+                        )}
+                      >
+                        {financeMovementArtistOptions.map((artist) => (
+                          <option key={artist} value={artist}>{artist}</option>
+                        ))}
+                      </select>
+                      <p className="field-help">Para seleccionar mas de uno, usa Ctrl o Shift. El artista principal queda incluido automaticamente.</p>
+                    </div>
+
+                    <label htmlFor="finance_receipt_notes">Notas del recibo</label>
+                    <textarea
+                      id="finance_receipt_notes"
+                      value={financeMovementForm.receiptNotes}
+                      onChange={(event) => updateFinanceMovementField("receiptNotes", event.target.value)}
+                      placeholder="Comprobante, condicion, aclaracion para el cliente"
+                    />
+                  </div>
+
+                  <details className="audit-details">
+                    <summary>Avanzado / auditoria</summary>
+                    <div className="row three">
+                      <div>
+                        <label htmlFor="finance_receipt_status">Estado</label>
+                        <select id="finance_receipt_status" value={financeMovementForm.status} onChange={(event) => updateFinanceMovementField("status", event.target.value as FinanceMovementForm["status"])}>
+                          <option value="borrador">Borrador</option>
+                          <option value="pendiente_control">Pendiente control</option>
+                          <option value="aprobado">Aprobado</option>
+                          <option value="aplicado">Aplicado</option>
+                          <option value="anulado">Anulado</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label htmlFor="finance_receipt_proofs">Comprobantes / links</label>
+                        <textarea id="finance_receipt_proofs" value={financeMovementForm.proofRefs} onChange={(event) => updateFinanceMovementField("proofRefs", event.target.value)} placeholder="Uno por linea" />
+                      </div>
+                      <div>
+                        <label htmlFor="finance_receipt_general_notes">Notas internas</label>
+                        <textarea id="finance_receipt_general_notes" value={financeMovementForm.notes} onChange={(event) => updateFinanceMovementField("notes", event.target.value)} />
+                      </div>
+                    </div>
+                  </details>
+
+                  <button type="submit" disabled={financeMovementLoading || !financeMovementCanSave}>
+                    {financeMovementLoading ? "Guardando..." : financeMovementEditingId ? "Actualizar recibo" : "Guardar recibo"}
+                  </button>
+                  {!financeMovementCanSave && (
+                    <p className="field-help">
+                      {financeMovementEditingId
+                        ? "Necesitas permiso de editar en Movimientos financieros."
+                        : "Necesitas permiso de crear en Movimientos financieros."}
+                    </p>
+                  )}
+                </>
               ) : financeMovementShowConceptFields ? (
                 <>
               <div className="section-heading compact">
@@ -11606,6 +11838,11 @@ export default function Home() {
                       <td>
                         <strong>{item.concept}</strong>
                         <span className="cell-note">{item.category} - {item.movement_type}</span>
+                        {item.receipt_detail && (
+                          <span className="cell-note">
+                            Recibo #{String(item.receipt_detail.receipt_number).padStart(6, "0")} - {item.receipt_detail.received_from}
+                          </span>
+                        )}
                         {item.notes && <span className="cell-note">{item.notes}</span>}
                         {item.recoverable ? (
                           <span className="cell-note">Metodo: {item.recovery_method || "none"} | costo {item.artist_percent}% / {item.producer_percent}%</span>
@@ -11646,7 +11883,19 @@ export default function Home() {
                         {isFinanceMovementLocked(item.status) ? (
                           <span className="cell-note">Sin edicion</span>
                         ) : (
-                          <button type="button" className="secondary" onClick={() => editFinanceMovement(item)}>Editar</button>
+                          <div className="button-row compact-buttons">
+                            <button type="button" className="secondary" onClick={() => editFinanceMovement(item)}>Editar</button>
+                            {item.receipt_detail && (
+                              <a
+                                className="button-link secondary"
+                                href={`/api/finance/receipts/${item.receipt_detail.id}/pdf`}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                PDF
+                              </a>
+                            )}
+                          </div>
                         )}
                       </td>
                     </tr>

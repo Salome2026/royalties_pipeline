@@ -14,13 +14,14 @@ import uuid
 from calendar import monthrange
 from datetime import date
 from datetime import datetime
+from io import BytesIO
 from time import time
 from pathlib import Path
 from typing import Literal
 
 import polars as pl
 from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from google.cloud import storage
 from google.oauth2.credentials import Credentials as UserCredentials
 from google.oauth2 import service_account
@@ -452,6 +453,17 @@ class FinanceMovementAllocationRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=1000)
 
 
+class FinanceReceiptDetailRequest(BaseModel):
+    receipt_kind: Literal["sena_show"] = "sena_show"
+    received_from: str = Field(..., min_length=1, max_length=180)
+    show_date: str | None = Field(default=None, max_length=10)
+    venue: str | None = Field(default=None, max_length=180)
+    artist_names: list[str] = Field(default_factory=list, max_length=12)
+    booking_show_id: int | None = None
+    vat_mode: Literal["no_aplica", "mas_iva", "iva_incluido"] = "no_aplica"
+    notes: str | None = Field(default=None, max_length=2000)
+
+
 class FinanceMovementRequest(BaseModel):
     movement_date: str = Field(..., min_length=10, max_length=10)
     artist: str = Field(..., min_length=1, max_length=160)
@@ -493,6 +505,7 @@ class FinanceMovementRequest(BaseModel):
     proof_refs: list[str] = Field(default_factory=list, max_length=30)
     notes: str | None = Field(default=None, max_length=2000)
     allocation_lines: list[FinanceMovementAllocationRequest] = Field(default_factory=list, max_length=20)
+    receipt_detail: FinanceReceiptDetailRequest | None = None
 
 
 
@@ -2589,6 +2602,36 @@ def init_booking_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS finance_receipts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                movement_id INTEGER NOT NULL UNIQUE REFERENCES finance_staging_movements(id) ON DELETE CASCADE,
+                receipt_number INTEGER NOT NULL UNIQUE,
+                receipt_date TEXT NOT NULL,
+                receipt_kind TEXT NOT NULL DEFAULT 'sena_show',
+                received_from TEXT NOT NULL,
+                amount REAL NOT NULL DEFAULT 0,
+                currency TEXT NOT NULL DEFAULT 'ARS',
+                fx_rate REAL,
+                amount_ars REAL NOT NULL DEFAULT 0,
+                vat_mode TEXT NOT NULL DEFAULT 'no_aplica',
+                concept TEXT NOT NULL,
+                show_date TEXT,
+                venue TEXT,
+                artist_names_json TEXT NOT NULL DEFAULT '[]',
+                booking_show_id INTEGER REFERENCES booking_shows(id) ON DELETE SET NULL,
+                status TEXT NOT NULL DEFAULT 'emitido',
+                pdf_path TEXT,
+                notes TEXT,
+                created_by TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_receipts_date ON finance_receipts(receipt_date DESC, id DESC)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_receipts_show_date ON finance_receipts(show_date)")
         ensure_sqlite_column(conn, "finance_staging_movements", "paid_amount", "REAL NOT NULL DEFAULT 0")
         ensure_sqlite_column(conn, "finance_staging_movements", "paid_amount_ars", "REAL NOT NULL DEFAULT 0")
         ensure_sqlite_column(conn, "finance_staging_movements", "pending_amount_ars", "REAL NOT NULL DEFAULT 0")
@@ -5130,6 +5173,321 @@ def finance_allocation_rows_for_ids(conn: sqlite3.Connection, movement_ids: list
         item = finance_allocation_item(row)
         grouped.setdefault(int(item["movement_id"]), []).append(item)
     return grouped
+
+
+def ensure_finance_receipts_table(conn: sqlite3.Connection) -> None:
+    if is_postgres_connection(conn):
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS finance_receipts (
+                id bigserial PRIMARY KEY,
+                movement_id bigint NOT NULL UNIQUE REFERENCES finance_movements(id) ON DELETE CASCADE,
+                receipt_number bigint NOT NULL UNIQUE,
+                receipt_date date NOT NULL,
+                receipt_kind text NOT NULL DEFAULT 'sena_show',
+                received_from text NOT NULL,
+                amount numeric(18, 6) NOT NULL DEFAULT 0,
+                currency text NOT NULL DEFAULT 'ARS',
+                fx_rate numeric(18, 6),
+                amount_ars numeric(18, 6) NOT NULL DEFAULT 0,
+                vat_mode text NOT NULL DEFAULT 'no_aplica',
+                concept text NOT NULL,
+                show_date date,
+                venue text,
+                artist_names_json jsonb NOT NULL DEFAULT '[]'::jsonb,
+                booking_show_id bigint REFERENCES booking_shows(id) ON DELETE SET NULL,
+                status text NOT NULL DEFAULT 'emitido',
+                pdf_path text,
+                notes text,
+                created_by text,
+                created_at timestamptz NOT NULL DEFAULT now(),
+                updated_at timestamptz NOT NULL DEFAULT now()
+            )
+            """
+        )
+    else:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS finance_receipts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                movement_id INTEGER NOT NULL UNIQUE REFERENCES finance_staging_movements(id) ON DELETE CASCADE,
+                receipt_number INTEGER NOT NULL UNIQUE,
+                receipt_date TEXT NOT NULL,
+                receipt_kind TEXT NOT NULL DEFAULT 'sena_show',
+                received_from TEXT NOT NULL,
+                amount REAL NOT NULL DEFAULT 0,
+                currency TEXT NOT NULL DEFAULT 'ARS',
+                fx_rate REAL,
+                amount_ars REAL NOT NULL DEFAULT 0,
+                vat_mode TEXT NOT NULL DEFAULT 'no_aplica',
+                concept TEXT NOT NULL,
+                show_date TEXT,
+                venue TEXT,
+                artist_names_json TEXT NOT NULL DEFAULT '[]',
+                booking_show_id INTEGER REFERENCES booking_shows(id) ON DELETE SET NULL,
+                status TEXT NOT NULL DEFAULT 'emitido',
+                pdf_path TEXT,
+                notes TEXT,
+                created_by TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_receipts_date ON finance_receipts(receipt_date DESC, id DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_receipts_show_date ON finance_receipts(show_date)")
+
+
+def finance_receipt_item(row: sqlite3.Row) -> dict:
+    item = dict(row)
+    for key in ("amount", "fx_rate", "amount_ars"):
+        if key in item:
+            item[key] = float(item.get(key) or 0)
+    raw_artists = item.pop("artist_names_json", "[]")
+    if isinstance(raw_artists, list):
+        item["artist_names"] = raw_artists
+    else:
+        try:
+            item["artist_names"] = json.loads(raw_artists or "[]")
+        except (TypeError, json.JSONDecodeError):
+            item["artist_names"] = []
+    return item
+
+
+def finance_receipt_rows_for_ids(conn: sqlite3.Connection, movement_ids: list[int]) -> dict[int, dict]:
+    if not movement_ids:
+        return {}
+    ensure_finance_receipts_table(conn)
+    placeholders = ",".join("?" for _ in movement_ids)
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM finance_receipts
+        WHERE movement_id IN ({placeholders})
+        ORDER BY movement_id, id
+        """,
+        movement_ids,
+    ).fetchall()
+    return {int(row["movement_id"]): finance_receipt_item(row) for row in rows}
+
+
+def validate_finance_receipt_request(request: FinanceMovementRequest) -> FinanceReceiptDetailRequest | None:
+    if request.category != "sena_show":
+        return None
+    if request.business_area != "booking" or request.movement_type != "pago":
+        raise HTTPException(status_code=400, detail="La sena de show debe cargarse como Pago / cobro del area Booking.")
+    if not request.receipt_detail:
+        raise HTTPException(status_code=400, detail="Completa los datos del recibo de sena.")
+    if request.amount <= 0:
+        raise HTTPException(status_code=400, detail="El recibo de sena necesita un importe mayor a cero.")
+    if request.currency == "USD" and not request.fx_rate:
+        raise HTTPException(status_code=400, detail="Para una sena en USD, completa el tipo de cambio.")
+    artists = [clean_booking_artist(name) or name.strip() for name in request.receipt_detail.artist_names if name.strip()]
+    if request.artist.strip() and request.artist.strip() not in artists:
+        artists.insert(0, request.artist.strip())
+    if not artists:
+        raise HTTPException(status_code=400, detail="Elegir al menos un artista del show para el recibo.")
+    request.receipt_detail.artist_names = list(dict.fromkeys(artists))
+    return request.receipt_detail
+
+
+def next_finance_receipt_number(conn: sqlite3.Connection) -> int:
+    ensure_finance_receipts_table(conn)
+    row = conn.execute("SELECT COALESCE(MAX(receipt_number), 0) + 1 AS next_number FROM finance_receipts").fetchone()
+    return int(row["next_number"] or 1)
+
+
+def replace_finance_receipt_detail(
+    conn: sqlite3.Connection,
+    movement_id: int,
+    request: FinanceMovementRequest,
+    amount_ars: float,
+    now: str,
+    username: str | None,
+) -> dict | None:
+    receipt = validate_finance_receipt_request(request)
+    ensure_finance_receipts_table(conn)
+    if not receipt:
+        conn.execute("DELETE FROM finance_receipts WHERE movement_id = ?", (movement_id,))
+        return None
+
+    existing = conn.execute(
+        "SELECT id, receipt_number FROM finance_receipts WHERE movement_id = ?",
+        (movement_id,),
+    ).fetchone()
+    receipt_number = int(existing["receipt_number"]) if existing else next_finance_receipt_number(conn)
+    artist_names_json = json.dumps(receipt.artist_names, ensure_ascii=False)
+    if existing:
+        conn.execute(
+            """
+            UPDATE finance_receipts
+            SET receipt_date = ?,
+                receipt_kind = ?,
+                received_from = ?,
+                amount = ?,
+                currency = ?,
+                fx_rate = ?,
+                amount_ars = ?,
+                vat_mode = ?,
+                concept = ?,
+                show_date = ?,
+                venue = ?,
+                artist_names_json = ?,
+                booking_show_id = ?,
+                status = 'emitido',
+                notes = ?,
+                updated_at = ?
+            WHERE movement_id = ?
+            """,
+            (
+                request.movement_date,
+                receipt.receipt_kind,
+                receipt.received_from.strip(),
+                request.amount,
+                request.currency,
+                request.fx_rate,
+                amount_ars,
+                receipt.vat_mode,
+                request.concept.strip(),
+                clean_optional_text(receipt.show_date),
+                clean_optional_text(receipt.venue),
+                artist_names_json,
+                receipt.booking_show_id,
+                clean_optional_text(receipt.notes),
+                now,
+                movement_id,
+            ),
+        )
+    else:
+        conn.execute(
+            """
+            INSERT INTO finance_receipts (
+                movement_id, receipt_number, receipt_date, receipt_kind,
+                received_from, amount, currency, fx_rate, amount_ars,
+                vat_mode, concept, show_date, venue, artist_names_json,
+                booking_show_id, status, notes, created_by, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'emitido', ?, ?, ?, ?)
+            """,
+            (
+                movement_id,
+                receipt_number,
+                request.movement_date,
+                receipt.receipt_kind,
+                receipt.received_from.strip(),
+                request.amount,
+                request.currency,
+                request.fx_rate,
+                amount_ars,
+                receipt.vat_mode,
+                request.concept.strip(),
+                clean_optional_text(receipt.show_date),
+                clean_optional_text(receipt.venue),
+                artist_names_json,
+                receipt.booking_show_id,
+                clean_optional_text(receipt.notes),
+                clean_optional_text(username),
+                now,
+                now,
+            ),
+        )
+    row = conn.execute("SELECT * FROM finance_receipts WHERE movement_id = ?", (movement_id,)).fetchone()
+    return finance_receipt_item(row) if row else None
+
+
+def finance_receipt_amount_label(currency: str, amount: float, amount_ars: float, fx_rate: float | None) -> str:
+    if currency == "USD":
+        fx = f" x TC {fx_rate:,.2f}" if fx_rate else ""
+        return f"USD {amount:,.2f}{fx} / ARS {amount_ars:,.2f}"
+    return f"ARS {amount_ars:,.2f}"
+
+
+def finance_receipt_pdf_bytes(receipt: dict, movement: dict) -> bytes:
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.units import mm
+        from reportlab.pdfgen import canvas
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Falta reportlab para generar PDF de recibos. Instalar dependencias y redeployar.",
+        ) from exc
+
+    buffer = BytesIO()
+    page = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    margin = 20 * mm
+    y = height - margin
+
+    page.setTitle(f"Recibo {receipt['receipt_number']}")
+    page.setFont("Helvetica-Bold", 18)
+    page.drawString(margin, y, "VPO Corp")
+    page.setFont("Helvetica", 10)
+    page.drawRightString(width - margin, y + 2, f"Recibo Nro. {int(receipt['receipt_number']):06d}")
+    y -= 9 * mm
+    page.setStrokeColorRGB(0.13, 0.25, 0.35)
+    page.line(margin, y, width - margin, y)
+    y -= 14 * mm
+
+    page.setFont("Helvetica-Bold", 13)
+    page.drawString(margin, y, "Recibo por sena de show")
+    y -= 10 * mm
+
+    rows = [
+        ("Fecha de recibo", str(receipt.get("receipt_date") or "")),
+        ("Recibimos de", str(receipt.get("received_from") or "")),
+        (
+            "Importe",
+            finance_receipt_amount_label(
+                str(receipt.get("currency") or "ARS"),
+                float(receipt.get("amount") or 0),
+                float(receipt.get("amount_ars") or 0),
+                receipt.get("fx_rate"),
+            ),
+        ),
+        ("IVA", {
+            "no_aplica": "No aplica",
+            "mas_iva": "Mas IVA",
+            "iva_incluido": "IVA incluido",
+        }.get(str(receipt.get("vat_mode") or "no_aplica"), str(receipt.get("vat_mode") or ""))),
+        ("Concepto", str(receipt.get("concept") or movement.get("concept") or "")),
+        ("Fecha del show", str(receipt.get("show_date") or "-")),
+        ("Lugar / venue", str(receipt.get("venue") or "-")),
+        ("Artista(s)", ", ".join(receipt.get("artist_names") or [movement.get("artist") or ""])),
+    ]
+    page.setFont("Helvetica", 10)
+    for label, value in rows:
+        page.setFont("Helvetica-Bold", 10)
+        page.drawString(margin, y, f"{label}:")
+        page.setFont("Helvetica", 10)
+        page.drawString(margin + 38 * mm, y, value[:95])
+        y -= 7 * mm
+
+    notes = str(receipt.get("notes") or movement.get("notes") or "").strip()
+    if notes:
+        y -= 4 * mm
+        page.setFont("Helvetica-Bold", 10)
+        page.drawString(margin, y, "Notas:")
+        y -= 6 * mm
+        page.setFont("Helvetica", 10)
+        for line in notes.splitlines()[:8]:
+            page.drawString(margin, y, line[:115])
+            y -= 6 * mm
+
+    y -= 14 * mm
+    page.line(margin, y, margin + 65 * mm, y)
+    page.line(width - margin - 65 * mm, y, width - margin, y)
+    y -= 5 * mm
+    page.setFont("Helvetica", 9)
+    page.drawString(margin, y, "Firma / aclaracion")
+    page.drawString(width - margin - 65 * mm, y, "Recibido por VPO Corp")
+
+    page.setFont("Helvetica", 8)
+    page.drawString(margin, 18 * mm, "Documento generado por VPO Corp desde Movimientos financieros.")
+    page.drawRightString(width - margin, 18 * mm, datetime.now().isoformat(timespec="seconds"))
+    page.showPage()
+    page.save()
+    return buffer.getvalue()
 
 
 def finance_normalized_allocations(
@@ -8381,10 +8739,12 @@ def finance_movements(
         ).fetchall()
         movement_ids = [int(row["id"]) for row in rows]
         allocation_map = finance_allocation_rows_for_ids(conn, movement_ids)
+        receipt_map = finance_receipt_rows_for_ids(conn, movement_ids)
         movement_items = []
         for row in rows:
             item = finance_movement_item(row)
             item["allocation_lines"] = allocation_map.get(int(row["id"]), [])
+            item["receipt_detail"] = receipt_map.get(int(row["id"]))
             movement_items.append(item)
         artists = sorted(set([
             *filter_artists_by_scope(booking_artist_options(), conn, x_vpo_username, "finance_movements"),
@@ -8421,6 +8781,7 @@ def create_finance_movement(
     init_booking_db()
     now = datetime.now().isoformat(timespec="seconds")
     amount_ars = finance_amount_ars(request.amount, request.currency, request.fx_rate)
+    validate_finance_receipt_request(request)
     paid_amount = request.amount if request.paid_amount is None else request.paid_amount
     paid_amount_ars = finance_amount_ars(paid_amount, request.currency, request.fx_rate)
     pending_amount_ars = max(amount_ars - paid_amount_ars, 0.0)
@@ -8494,6 +8855,7 @@ def create_finance_movement(
         )
         movement_id = int(cursor.lastrowid)
         replace_finance_movement_allocations(conn, movement_id, request, amount_ars, now)
+        receipt_detail = replace_finance_receipt_detail(conn, movement_id, request, amount_ars, now, x_vpo_username)
         row = conn.execute(
             """
             SELECT *
@@ -8504,6 +8866,7 @@ def create_finance_movement(
         ).fetchone()
         item = finance_movement_item(row)
         item["allocation_lines"] = finance_allocation_rows_for_ids(conn, [movement_id]).get(movement_id, [])
+        item["receipt_detail"] = receipt_detail
 
     return {
         "item": item,
@@ -8521,6 +8884,7 @@ def update_finance_movement(
     init_booking_db()
     now = datetime.now().isoformat(timespec="seconds")
     amount_ars = finance_amount_ars(request.amount, request.currency, request.fx_rate)
+    validate_finance_receipt_request(request)
     paid_amount = request.amount if request.paid_amount is None else request.paid_amount
     paid_amount_ars = finance_amount_ars(paid_amount, request.currency, request.fx_rate)
     pending_amount_ars = max(amount_ars - paid_amount_ars, 0.0)
@@ -8634,16 +8998,72 @@ def update_finance_movement(
             ),
         )
         replace_finance_movement_allocations(conn, movement_id, request, amount_ars, now)
+        receipt_detail = replace_finance_receipt_detail(conn, movement_id, request, amount_ars, now, x_vpo_username)
         row = conn.execute(
             "SELECT * FROM finance_staging_movements WHERE id = ?",
             (movement_id,),
         ).fetchone()
         item = finance_movement_item(row)
         item["allocation_lines"] = finance_allocation_rows_for_ids(conn, [movement_id]).get(movement_id, [])
+        item["receipt_detail"] = receipt_detail
 
     return {
         "item": item,
     }
+
+
+@app.get("/finance/receipts/{receipt_id}/pdf")
+def finance_receipt_pdf(
+    receipt_id: int,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> Response:
+    require_api_key(x_vpo_api_key)
+    init_booking_db()
+    with booking_connect() as conn:
+        ensure_finance_receipts_table(conn)
+        row = conn.execute(
+            """
+            SELECT
+                r.*,
+                m.artist AS movement_artist,
+                m.business_area,
+                m.movement_type,
+                m.category,
+                m.concept AS movement_concept,
+                m.notes AS movement_notes
+            FROM finance_receipts r
+            JOIN finance_staging_movements m ON m.id = r.movement_id
+            WHERE r.id = ?
+            """,
+            (receipt_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Recibo no encontrado.")
+        receipt = finance_receipt_item(row)
+        movement = {
+            "artist": row["movement_artist"],
+            "business_area": row["business_area"],
+            "movement_type": row["movement_type"],
+            "category": row["category"],
+            "concept": row["movement_concept"],
+            "notes": row["movement_notes"],
+        }
+        require_module_permission(
+            conn,
+            x_vpo_username,
+            "finance_movements",
+            "view",
+            artist=clean_booking_artist(row["movement_artist"]) or row["movement_artist"],
+        )
+
+    pdf_bytes = finance_receipt_pdf_bytes(receipt, movement)
+    filename = f"recibo_{int(receipt['receipt_number']):06d}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @app.get("/booking/artists")

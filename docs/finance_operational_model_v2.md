@@ -399,6 +399,43 @@ Impacto:
 - baja o cierra cuenta corriente;
 - no modifica el show/proyecto original.
 
+### 3.a Sena de show con recibo
+
+Uso:
+
+- un cliente entrega una sena para reservar un show;
+- Indyana necesita emitir un recibo formal;
+- todavia no se quiere modificar la liquidacion del show ni aplicar contra cuenta booking.
+
+Regla:
+
+- la sena se carga como `Pago / cobro` del area `booking`;
+- el tipo de aplicacion es `sena_show`;
+- el movimiento financiero representa caja real recibida;
+- el detalle del recibo vive en `finance_receipts`;
+- el recibo se numera de manera incremental;
+- el PDF se genera desde los datos guardados, no desde texto suelto;
+- no se altera cachet, gasto, split ni estado del show hasta que exista una aplicacion explicita.
+
+Campos minimos:
+
+- fecha;
+- importe, moneda y tipo de cambio;
+- de quien se recibe;
+- artista principal;
+- artistas del show;
+- fecha del show;
+- venue/lugar;
+- concepto;
+- tratamiento IVA: no aplica, mas IVA o IVA incluido;
+- notas/comprobantes.
+
+Impacto:
+
+- aumenta la caja recibida por Indyana;
+- queda preparada para vincularse con booking, agenda y cuenta corriente;
+- no cierra saldos de booking automaticamente.
+
 ### 4. Gasto de oficina / estructura
 
 Uso:

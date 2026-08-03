@@ -254,11 +254,50 @@ El movimiento padre guarda:
 Selector:
 
 - Cuenta booking;
+- Sena de show / recibo;
 - Recuperable / proyecto;
 - Proveedor pendiente;
 - Adelanto / prestamo;
 - Cuenta corriente financiera;
 - Dejar sin aplicar por ahora.
+
+### Pago / cobro como Sena de show / recibo
+
+Uso:
+
+- un cliente entrega dinero para reservar un show;
+- Indyana emite un recibo por ese dinero;
+- todavia no se quiere aplicar automaticamente contra la liquidacion del show.
+
+Regla core:
+
+- la sena es caja real;
+- no cambia cachet, gastos ni split;
+- queda como movimiento financiero trazable;
+- queda preparada para vincularse luego con booking, agenda o cuenta corriente;
+- el recibo tiene numeracion incremental y puede imprimirse en PDF.
+
+Campos:
+
+- numero de recibo generado por el sistema;
+- fecha del recibo;
+- importe, moneda y tipo de cambio si corresponde;
+- de quien se recibe;
+- artista principal y artistas del show desde el ABM;
+- fecha del show;
+- venue/lugar;
+- concepto;
+- si es mas IVA, IVA incluido o no aplica;
+- comprobantes y notas.
+
+El guardado debe escribir en:
+
+- `finance_movements`;
+- `finance_receipts`.
+
+No debe escribir directamente saldos de booking en esta primera etapa. La aplicacion
+contra un show o una cuenta booking se hara con un paso explicito posterior, para no
+duplicar caja ni cerrar shows por accidente.
 
 ### Pago / cobro contra Cuenta booking
 

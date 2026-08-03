@@ -620,6 +620,38 @@ CREATE TABLE IF NOT EXISTS finance_movement_allocations (
 
 CREATE INDEX IF NOT EXISTS idx_finance_movement_allocations_movement ON finance_movement_allocations(movement_id);
 
+CREATE TABLE IF NOT EXISTS finance_receipts (
+    id bigserial PRIMARY KEY,
+    movement_id bigint NOT NULL UNIQUE REFERENCES finance_movements(id) ON DELETE CASCADE,
+    receipt_number bigint NOT NULL UNIQUE,
+    receipt_date date NOT NULL,
+    receipt_kind text NOT NULL DEFAULT 'sena_show',
+    received_from text NOT NULL,
+    amount numeric(18, 6) NOT NULL DEFAULT 0,
+    currency text NOT NULL DEFAULT 'ARS',
+    fx_rate numeric(18, 6),
+    amount_ars numeric(18, 6) NOT NULL DEFAULT 0,
+    vat_mode text NOT NULL DEFAULT 'no_aplica',
+    concept text NOT NULL,
+    show_date date,
+    venue text,
+    artist_names_json jsonb NOT NULL DEFAULT '[]'::jsonb,
+    booking_show_id bigint REFERENCES booking_shows(id) ON DELETE SET NULL,
+    status text NOT NULL DEFAULT 'emitido',
+    pdf_path text,
+    notes text,
+    created_by text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT finance_receipts_kind_chk CHECK (receipt_kind IN ('sena_show')),
+    CONSTRAINT finance_receipts_currency_chk CHECK (currency IN ('ARS', 'USD')),
+    CONSTRAINT finance_receipts_vat_mode_chk CHECK (vat_mode IN ('no_aplica', 'mas_iva', 'iva_incluido')),
+    CONSTRAINT finance_receipts_status_chk CHECK (status IN ('borrador', 'emitido', 'anulado', 'aplicado'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_finance_receipts_date ON finance_receipts(receipt_date DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_finance_receipts_show_date ON finance_receipts(show_date);
+
 CREATE TABLE IF NOT EXISTS finance_movement_lines (
     id bigserial PRIMARY KEY,
     movement_id bigint NOT NULL REFERENCES finance_movements(id) ON DELETE CASCADE,

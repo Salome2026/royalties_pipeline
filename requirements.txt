@@ -11,4 +11,5 @@ polars
 psycopg[binary]
 pyarrow
 requests
+reportlab
 uvicorn
