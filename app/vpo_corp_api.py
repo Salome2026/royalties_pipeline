@@ -2610,38 +2610,6 @@ def init_booking_db() -> None:
             )
             """
         )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS finance_receipts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                movement_id INTEGER NOT NULL UNIQUE REFERENCES finance_staging_movements(id) ON DELETE CASCADE,
-                receipt_number INTEGER NOT NULL UNIQUE,
-                receipt_date TEXT NOT NULL,
-                receipt_kind TEXT NOT NULL DEFAULT 'sena_show',
-                issuer_company TEXT NOT NULL DEFAULT 'VPO Corp',
-                received_from TEXT NOT NULL,
-                amount REAL NOT NULL DEFAULT 0,
-                currency TEXT NOT NULL DEFAULT 'ARS',
-                fx_rate REAL,
-                amount_ars REAL NOT NULL DEFAULT 0,
-                vat_mode TEXT NOT NULL DEFAULT 'no_aplica',
-                concept TEXT NOT NULL,
-                show_date TEXT,
-                venue TEXT,
-                artist_names_json TEXT NOT NULL DEFAULT '[]',
-                booking_show_id INTEGER REFERENCES booking_shows(id) ON DELETE SET NULL,
-                status TEXT NOT NULL DEFAULT 'emitido',
-                pdf_path TEXT,
-                notes TEXT,
-                created_by TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-            """
-        )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_receipts_date ON finance_receipts(receipt_date DESC, id DESC)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_receipts_show_date ON finance_receipts(show_date)")
-        ensure_sqlite_column(conn, "finance_receipts", "issuer_company", "TEXT NOT NULL DEFAULT 'VPO Corp'")
         ensure_sqlite_column(conn, "finance_staging_movements", "paid_amount", "REAL NOT NULL DEFAULT 0")
         ensure_sqlite_column(conn, "finance_staging_movements", "paid_amount_ars", "REAL NOT NULL DEFAULT 0")
         ensure_sqlite_column(conn, "finance_staging_movements", "pending_amount_ars", "REAL NOT NULL DEFAULT 0")
@@ -5186,70 +5154,41 @@ def finance_allocation_rows_for_ids(conn: sqlite3.Connection, movement_ids: list
 
 
 def ensure_finance_receipts_table(conn: sqlite3.Connection) -> None:
-    if is_postgres_connection(conn):
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS finance_receipts (
-                id bigserial PRIMARY KEY,
-                movement_id bigint NOT NULL UNIQUE REFERENCES finance_movements(id) ON DELETE CASCADE,
-                receipt_number bigint NOT NULL UNIQUE,
-                receipt_date date NOT NULL,
-                receipt_kind text NOT NULL DEFAULT 'sena_show',
-                issuer_company text NOT NULL DEFAULT 'VPO Corp',
-                received_from text NOT NULL,
-                amount numeric(18, 6) NOT NULL DEFAULT 0,
-                currency text NOT NULL DEFAULT 'ARS',
-                fx_rate numeric(18, 6),
-                amount_ars numeric(18, 6) NOT NULL DEFAULT 0,
-                vat_mode text NOT NULL DEFAULT 'no_aplica',
-                concept text NOT NULL,
-                show_date date,
-                venue text,
-                artist_names_json jsonb NOT NULL DEFAULT '[]'::jsonb,
-                booking_show_id bigint REFERENCES booking_shows(id) ON DELETE SET NULL,
-                status text NOT NULL DEFAULT 'emitido',
-                pdf_path text,
-                notes text,
-                created_by text,
-                created_at timestamptz NOT NULL DEFAULT now(),
-                updated_at timestamptz NOT NULL DEFAULT now()
-            )
-            """
+    if not is_postgres_connection(conn):
+        raise HTTPException(
+            status_code=500,
+            detail="Los recibos operativos usan Cloud SQL Postgres. SQLite no es una base viva para emitir recibos.",
         )
-    else:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS finance_receipts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                movement_id INTEGER NOT NULL UNIQUE REFERENCES finance_staging_movements(id) ON DELETE CASCADE,
-                receipt_number INTEGER NOT NULL UNIQUE,
-                receipt_date TEXT NOT NULL,
-                receipt_kind TEXT NOT NULL DEFAULT 'sena_show',
-                issuer_company TEXT NOT NULL DEFAULT 'VPO Corp',
-                received_from TEXT NOT NULL,
-                amount REAL NOT NULL DEFAULT 0,
-                currency TEXT NOT NULL DEFAULT 'ARS',
-                fx_rate REAL,
-                amount_ars REAL NOT NULL DEFAULT 0,
-                vat_mode TEXT NOT NULL DEFAULT 'no_aplica',
-                concept TEXT NOT NULL,
-                show_date TEXT,
-                venue TEXT,
-                artist_names_json TEXT NOT NULL DEFAULT '[]',
-                booking_show_id INTEGER REFERENCES booking_shows(id) ON DELETE SET NULL,
-                status TEXT NOT NULL DEFAULT 'emitido',
-                pdf_path TEXT,
-                notes TEXT,
-                created_by TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-            """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS finance_receipts (
+            id bigserial PRIMARY KEY,
+            movement_id bigint NOT NULL UNIQUE REFERENCES finance_movements(id) ON DELETE CASCADE,
+            receipt_number bigint NOT NULL UNIQUE,
+            receipt_date date NOT NULL,
+            receipt_kind text NOT NULL DEFAULT 'sena_show',
+            issuer_company text NOT NULL DEFAULT 'VPO Corp',
+            received_from text NOT NULL,
+            amount numeric(18, 6) NOT NULL DEFAULT 0,
+            currency text NOT NULL DEFAULT 'ARS',
+            fx_rate numeric(18, 6),
+            amount_ars numeric(18, 6) NOT NULL DEFAULT 0,
+            vat_mode text NOT NULL DEFAULT 'no_aplica',
+            concept text NOT NULL,
+            show_date date,
+            venue text,
+            artist_names_json jsonb NOT NULL DEFAULT '[]'::jsonb,
+            booking_show_id bigint REFERENCES booking_shows(id) ON DELETE SET NULL,
+            status text NOT NULL DEFAULT 'emitido',
+            pdf_path text,
+            notes text,
+            created_by text,
+            created_at timestamptz NOT NULL DEFAULT now(),
+            updated_at timestamptz NOT NULL DEFAULT now()
         )
-    if is_postgres_connection(conn):
-        conn.execute("ALTER TABLE finance_receipts ADD COLUMN IF NOT EXISTS issuer_company text NOT NULL DEFAULT 'VPO Corp'")
-    else:
-        ensure_sqlite_column(conn, "finance_receipts", "issuer_company", "TEXT NOT NULL DEFAULT 'VPO Corp'")
+        """
+    )
+    conn.execute("ALTER TABLE finance_receipts ADD COLUMN IF NOT EXISTS issuer_company text NOT NULL DEFAULT 'VPO Corp'")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_receipts_date ON finance_receipts(receipt_date DESC, id DESC)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_receipts_show_date ON finance_receipts(show_date)")
 
