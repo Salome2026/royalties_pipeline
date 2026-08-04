@@ -3436,15 +3436,18 @@ def grant_employee_view_permissions_if_empty(
 def ensure_user_default_password(conn: sqlite3.Connection, username: str) -> None:
     now = datetime.now().isoformat(timespec="seconds")
     conn.execute(
-        """
+        db_sql(
+            conn,
+            """
         UPDATE app_users
         SET password_hash = ?,
-            must_change_password = 1,
+            must_change_password = ?,
             updated_at = ?
         WHERE lower(username) = lower(?)
           AND (password_hash IS NULL OR password_hash = '')
         """,
-        (hash_web_password(DEFAULT_WEB_PASSWORD), now, username),
+        ),
+        (hash_web_password(DEFAULT_WEB_PASSWORD), db_bool(True), now, username),
     )
 
 
@@ -9668,12 +9671,12 @@ def operational_change_password(
                 """
             UPDATE app_users
             SET password_hash = ?,
-                must_change_password = 0,
+                must_change_password = ?,
                 updated_at = ?
             WHERE id = ?
             """,
             ),
-            (hash_web_password(request.new_password), now, row["id"]),
+            (hash_web_password(request.new_password), db_bool(False), now, row["id"]),
         )
         updated = conn.execute(db_sql(conn, "SELECT * FROM app_users WHERE id = ?"), (row["id"],)).fetchone()
         return {"ok": True, "user": row_to_session_user(updated)}
@@ -9922,7 +9925,7 @@ def set_employee_password(
                 """,
                 (
                     hash_web_password(password),
-                    1 if request.must_change_password else 0,
+                    db_bool(request.must_change_password),
                     now,
                     user["id"],
                 ),
