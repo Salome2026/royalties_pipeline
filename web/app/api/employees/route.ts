@@ -44,6 +44,7 @@ export async function POST(request: NextRequest) {
     headers: {
       "Content-Type": "application/json",
       "X-VPO-API-Key": config.apiKey,
+      "X-VPO-Username": config.user.username,
     },
     body: JSON.stringify(body),
   });
@@ -67,6 +68,7 @@ export async function PUT(request: NextRequest) {
     headers: {
       "Content-Type": "application/json",
       "X-VPO-API-Key": config.apiKey,
+      "X-VPO-Username": config.user.username,
     },
     body: JSON.stringify(body),
   });
@@ -91,6 +93,7 @@ export async function PATCH(request: NextRequest) {
     headers: {
       "Content-Type": "application/json",
       "X-VPO-API-Key": config.apiKey,
+      "X-VPO-Username": config.user.username,
     },
     body: JSON.stringify(body),
   });
@@ -110,7 +113,10 @@ export async function DELETE(request: NextRequest) {
 
   const response = await fetch(`${config.apiUrl}/employees/${id}`, {
     method: "DELETE",
-    headers: { "X-VPO-API-Key": config.apiKey },
+    headers: {
+      "X-VPO-API-Key": config.apiKey,
+      "X-VPO-Username": config.user.username,
+    },
   });
 
   if (!response.ok) return apiError(response);

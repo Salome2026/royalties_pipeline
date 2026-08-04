@@ -2698,13 +2698,20 @@ def ensure_sqlite_column(conn: sqlite3.Connection, table_name: str, column_name:
         conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
 
+_EMPLOYEE_COMPENSATION_COLUMNS_READY = False
+
+
 def ensure_employee_compensation_columns(conn: sqlite3.Connection) -> None:
+    global _EMPLOYEE_COMPENSATION_COLUMNS_READY
     if is_postgres_connection(conn):
+        if _EMPLOYEE_COMPENSATION_COLUMNS_READY:
+            return
         conn.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS compensation_type text NOT NULL DEFAULT 'none'")
         conn.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS salary_amount numeric(18,6) NOT NULL DEFAULT 0")
         conn.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS salary_currency text NOT NULL DEFAULT 'ARS'")
         conn.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS salary_frequency text NOT NULL DEFAULT 'monthly'")
         conn.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS salary_notes text")
+        _EMPLOYEE_COMPENSATION_COLUMNS_READY = True
         return
 
     ensure_sqlite_column(conn, "employees", "compensation_type", "TEXT NOT NULL DEFAULT 'none'")
@@ -3077,9 +3084,37 @@ def upsert_employee_permissions(
 ) -> None:
     now = datetime.now().isoformat(timespec="seconds")
     valid_modules = {module_key for module_key, _label in APP_MODULES}
+    existing_rows = conn.execute(
+        db_sql(
+            conn,
+            """
+        SELECT module_key, can_access, can_create, can_view_history,
+               can_edit, can_approve, scope_json, notes
+        FROM module_permissions
+        WHERE employee_id = ?
+        """,
+        ),
+        (employee_id,),
+    ).fetchall()
+    existing_by_module = {row["module_key"]: row for row in existing_rows}
     for permission in permissions:
         if permission.module_key not in valid_modules:
             continue
+        existing = existing_by_module.get(permission.module_key)
+        if existing is not None:
+            existing_scope = parse_permission_scope(existing["scope_json"])
+            requested_scope = parse_permission_scope(permission.scope)
+            unchanged = (
+                bool(existing["can_access"]) == bool(permission.can_access)
+                and bool(existing["can_create"]) == bool(permission.can_create)
+                and bool(existing["can_view_history"]) == bool(permission.can_view_history)
+                and bool(existing["can_edit"]) == bool(permission.can_edit)
+                and bool(existing["can_approve"]) == bool(permission.can_approve)
+                and existing_scope == requested_scope
+                and (existing["notes"] or None) == clean_optional_text(permission.notes)
+            )
+            if unchanged:
+                continue
         if is_postgres_connection(conn):
             from psycopg.types.json import Jsonb
 
@@ -9648,6 +9683,7 @@ def operational_change_password(
 def create_employee_record(
     request: EmployeeRecordRequest,
     x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
 ) -> dict:
     require_api_key(x_vpo_api_key)
     init_booking_db()
@@ -9659,6 +9695,7 @@ def create_employee_record(
     now = datetime.now().isoformat(timespec="seconds")
     with booking_connect() as conn:
         ensure_employee_compensation_columns(conn)
+        require_module_permission(conn, x_vpo_username, "employees", "create")
         try:
             cursor = conn.execute(
                 db_sql(
@@ -9735,6 +9772,7 @@ def update_employee_record(
     employee_id: int,
     request: EmployeeRecordRequest,
     x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
 ) -> dict:
     require_api_key(x_vpo_api_key)
     init_booking_db()
@@ -9746,6 +9784,7 @@ def update_employee_record(
     now = datetime.now().isoformat(timespec="seconds")
     with booking_connect() as conn:
         ensure_employee_compensation_columns(conn)
+        require_module_permission(conn, x_vpo_username, "employees", "edit")
         existing = conn.execute(db_sql(conn, "SELECT id FROM employees WHERE id = ?"), (employee_id,)).fetchone()
         if existing is None:
             raise HTTPException(status_code=404, detail="Employee not found.")
@@ -9833,6 +9872,7 @@ def set_employee_password(
     employee_id: int,
     request: EmployeePasswordRequest,
     x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
 ) -> dict:
     require_api_key(x_vpo_api_key)
     password = DEFAULT_WEB_PASSWORD if request.use_default else request.password
@@ -9842,6 +9882,7 @@ def set_employee_password(
     now = datetime.now().isoformat(timespec="seconds")
     with booking_connect() as conn:
         ensure_employee_compensation_columns(conn)
+        require_module_permission(conn, x_vpo_username, "employees", "edit")
         employee = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
         if employee is None:
             raise HTTPException(status_code=404, detail="Employee not found.")
@@ -9896,6 +9937,7 @@ def set_employee_password(
 def deactivate_employee_record(
     employee_id: int,
     x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
 ) -> dict:
     require_api_key(x_vpo_api_key)
     init_booking_db()
@@ -9903,6 +9945,7 @@ def deactivate_employee_record(
     now = datetime.now().isoformat(timespec="seconds")
     with booking_connect() as conn:
         ensure_employee_compensation_columns(conn)
+        require_module_permission(conn, x_vpo_username, "employees", "edit")
         existing = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
         if existing is None:
             raise HTTPException(status_code=404, detail="Employee not found.")
