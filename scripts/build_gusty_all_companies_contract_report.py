@@ -42,8 +42,10 @@ except ModuleNotFoundError:
 
 try:
     from lib.catalog_report_filter import with_catalog_report_status
+    from lib.distributor_policy_store import load_distributor_policy_document
 except ModuleNotFoundError:
     from scripts.lib.catalog_report_filter import with_catalog_report_status
+    from scripts.lib.distributor_policy_store import load_distributor_policy_document
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -51,7 +53,6 @@ MARTS = BASE / "warehouse" / "marts"
 REGISTRY = BASE / "warehouse" / "registry"
 REPORTS = BASE / "reports"
 RAW_PATH = MARTS / "standardized_raw_all_sources.parquet"
-POLICY_PATH = REGISTRY / "distributor_account_policies.json"
 CONTRACT_CUTOFFS_PATH = REGISTRY / "contract_cutoffs.json"
 SUPER_JUNTE_TERMS = [
     "super junte",
@@ -66,9 +67,9 @@ def load_entries(path: Path) -> list[dict]:
     return json.loads(path.read_text(encoding="utf-8")).get("entries", [])
 
 
-def policy_table(policy_path: Path = POLICY_PATH) -> pl.DataFrame:
+def policy_table() -> pl.DataFrame:
     rows: list[dict] = []
-    for policy in load_entries(policy_path):
+    for policy in load_distributor_policy_document().get("entries", []):
         source = policy.get("source")
         account = policy.get("account")
         for source_sheet, rule in (policy.get("sheet_rules") or {}).items():

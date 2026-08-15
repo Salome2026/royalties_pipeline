@@ -1,6 +1,6 @@
 # Booking VPO - Reglas maestras
 
-Fecha: 2026-05-16
+Fecha: 2026-08-15
 
 Este documento es la referencia obligatoria antes de modificar booking. Si una idea nueva no entra aca, primero se actualiza este documento y recien despues se toca codigo.
 
@@ -15,6 +15,35 @@ Booking tiene tres capas distintas:
 Nunca se debe resolver una diferencia cambiando la regla economica del show.
 
 La liquidacion dice lo que deberia pasar. La caja dice lo que realmente paso. La cuenta corriente registra lo que queda vivo.
+
+## Superficie unica de Booking
+
+La operacion viva de booking se presenta en una sola tarjeta y una sola ventana:
+`Booking Indyana`.
+
+Dentro de esa ventana existen dos modos de carga:
+
+1. `Booking individual`: conserva la carga directa de un show propio.
+2. `Booking compartido`: conserva la liquidacion de un evento madre, sus gastos
+   compartidos y sus lineas o shows hijos.
+
+El selector cambia la superficie visible, no la regla economica ni el modelo de datos.
+Cada modo mantiene su propio formulario, calculos, endpoints, registros y estado de
+edicion. Cambiar de modo no convierte un show individual en evento madre, no mezcla
+cajas y no borra una carga en curso.
+
+Reglas obligatorias:
+
+- la entrada predeterminada es `Booking individual`;
+- no existe una segunda tarjeta operativa para booking compartido;
+- `booking` y `composite_booking` siguen siendo permisos independientes;
+- un usuario solo puede seleccionar los modos para los que tiene acceso;
+- una cuenta sin permiso de booking compartido no obtiene acceso por compartir la
+  misma ventana;
+- los shows hijos generados por booking compartido siguen alimentando Booking,
+  cuenta corriente, comisiones y finanzas con la trazabilidad actual;
+- la unificacion visual no autoriza fallbacks, duplicacion de guardados ni rutas
+  operativas paralelas.
 
 ## Liquidacion esperada
 

@@ -5,6 +5,11 @@ from pathlib import Path
 
 import polars as pl
 
+try:
+    from lib.distributor_policy_store import load_distributor_policy_document
+except ModuleNotFoundError:
+    from scripts.lib.distributor_policy_store import load_distributor_policy_document
+
 
 BASE = Path(os.environ.get("VPO_PROJECT_ROOT", Path(__file__).resolve().parents[2]))
 MARTS_DIR = BASE / "warehouse" / "marts"
@@ -12,6 +17,14 @@ REGISTRY_DIR = BASE / "warehouse" / "registry"
 
 CATALOG_MASTER_PATH = MARTS_DIR / "catalog_master.parquet"
 CATALOG_STATUS_PATH = REGISTRY_DIR / "catalog_status.parquet"
+GENERATION_REVENUE_BASIS = {"generation", "correction", "legacy_generation"}
+LEGACY_GENERATION_REVENUE_BASIS = {
+    "master_earning",
+    "youtube_channel_earning",
+    "master_earning_external_account",
+    "youtube_channel_earning_external_account",
+}
+NON_GENERATION_REVENUE_BASIS = {"transfer", "summary", "share_transfer"}
 
 
 def current_catalog_master_path() -> Path:
@@ -51,6 +64,10 @@ def normalized_text(expr: pl.Expr) -> pl.Expr:
         .str.replace_all(r"\s+", " ")
         .str.strip_chars()
     )
+
+
+def normalized_key(expr: pl.Expr) -> pl.Expr:
+    return normalized_text(expr).str.replace_all(" ", "_")
 
 
 def valid_isrc_expr(expr: pl.Expr) -> pl.Expr:
@@ -104,6 +121,7 @@ def row_catalog_key_expr(schema: set[str]) -> pl.Expr:
         "track_id",
     ]))
     title = normalized_text(coalesce_text(schema, [
+        "title",
         "track_statement_style",
         "asset_title_statement",
         "Track Title",
@@ -116,6 +134,7 @@ def row_catalog_key_expr(schema: set[str]) -> pl.Expr:
         "PRODUCT",
     ]))
     artist = normalized_text(coalesce_text(schema, [
+        "artist",
         "artist_statement_style",
         "asset_artist_statement",
         "artist_best_available",
@@ -266,6 +285,131 @@ def catalog_status_for_reports(status_path: Path | None = None) -> pl.DataFrame:
     ])
 
 
+def distributor_policy_rules() -> pl.DataFrame:
+    payload = load_distributor_policy_document()
+    personalization = payload.get("report_personalization") or {}
+    personalization_enabled = bool(personalization.get("enabled", False))
+    rows: list[dict] = []
+    for entry in payload.get("entries", []):
+        source = str(entry.get("source") or "").strip().lower()
+        account = str(entry.get("account") or "").strip().lower()
+        if not source or not account:
+            continue
+        report_net_adjustment_pct = float(entry.get("report_net_adjustment_pct") or 0.0)
+        for source_sheet, rule in (entry.get("sheet_rules") or {}).items():
+            if not isinstance(rule, dict):
+                continue
+            rows.append({
+                "_policy_source": source,
+                "_policy_account": account,
+                "_policy_source_sheet": str(source_sheet or "").strip(),
+                "policy_catalog_view": rule.get("catalog_view"),
+                "policy_statement_view": str(rule.get("statement_view")),
+                "policy_cash_view": str(rule.get("cash_view")),
+                "policy_audit_view": bool(rule.get("audit_view", False)),
+                "policy_revenue_basis": rule.get("revenue_basis"),
+                "policy_report_personalization_enabled": personalization_enabled,
+                "policy_report_net_adjustment_pct": report_net_adjustment_pct,
+            })
+
+    if not rows:
+        raise ValueError("Cloud SQL distributor policy has no sheet rules.")
+
+    return pl.DataFrame(rows).with_columns([
+        pl.col("_policy_source").cast(pl.Utf8),
+        pl.col("_policy_account").cast(pl.Utf8),
+        pl.col("_policy_source_sheet").cast(pl.Utf8),
+        pl.col("policy_catalog_view").cast(pl.Boolean, strict=False),
+        pl.col("policy_statement_view").cast(pl.Utf8, strict=False),
+        pl.col("policy_cash_view").cast(pl.Utf8, strict=False),
+        pl.col("policy_audit_view").cast(pl.Boolean, strict=False),
+        pl.col("policy_revenue_basis").cast(pl.Utf8, strict=False),
+        pl.col("policy_report_personalization_enabled").cast(pl.Boolean, strict=False).fill_null(False),
+        pl.col("policy_report_net_adjustment_pct").cast(pl.Float64, strict=False).fill_null(0.0),
+    ])
+
+
+def row_source_expr(schema: set[str]) -> pl.Expr:
+    return normalized_key(coalesce_text(schema, ["source", "Fuente", "SOURCE"]))
+
+
+def row_account_expr(schema: set[str]) -> pl.Expr:
+    return normalized_key(coalesce_text(schema, ["account", "Cuenta", "ACCOUNT"]))
+
+
+def row_source_sheet_expr(schema: set[str]) -> pl.Expr:
+    direct = coalesce_text(schema, ["source_sheet", "sheet_name", "Sheet", "SHEET"])
+    statement_type = coalesce_text(schema, ["statement_type", "statement_kind"])
+    file_name = coalesce_text(schema, ["statement_file_name", "mart_source_file", "source_file"])
+    source = row_source_expr(schema)
+
+    direct_clean = clean_text(direct)
+    statement_clean = clean_text(statement_type)
+    statement_lower = statement_clean.fill_null("").str.to_lowercase()
+    file_lower = clean_text(file_name).fill_null("").str.to_lowercase()
+
+    return (
+        pl.when(direct_clean.is_not_null() & (direct_clean != ""))
+        .then(direct_clean)
+        .when(source == "dashgo")
+        .then(pl.lit("detail"))
+        .when(
+            (source == "fuga")
+            & (
+                statement_lower.str.contains("correction", literal=True)
+                | file_lower.str.contains("correction", literal=True)
+            )
+        )
+        .then(pl.lit("correction_csv"))
+        .when(source == "fuga")
+        .then(pl.lit("standard_statement_csv"))
+        .when(
+            (source == "orchard")
+            & statement_lower.str.contains("legacy", literal=True)
+        )
+        .then(pl.lit("legacy_altafonte"))
+        .when(source == "orchard")
+        .then(pl.lit("revenue_detail"))
+        .when(source == "soundon")
+        .then(
+            pl.when(statement_clean.is_not_null() & (statement_clean != ""))
+            .then(statement_clean)
+            .otherwise(pl.lit("my_royalty"))
+        )
+        .otherwise(pl.lit(None).cast(pl.Utf8))
+    )
+
+
+def row_revenue_basis_expr(schema: set[str]) -> pl.Expr:
+    return normalized_key(coalesce_text(schema, ["revenue_basis", "Base ingreso"]))
+
+
+def with_distributor_policy(lf: pl.LazyFrame, schema: set[str] | None = None) -> pl.LazyFrame:
+    schema = schema or set(lf.collect_schema().names())
+    rules = distributor_policy_rules()
+    return (
+        lf
+        .with_columns([
+            row_source_expr(schema).alias("_policy_source"),
+            row_account_expr(schema).alias("_policy_account"),
+            row_source_sheet_expr(schema).alias("_policy_source_sheet"),
+            row_revenue_basis_expr(schema).alias("_row_revenue_basis"),
+        ])
+        .join(
+            rules.lazy(),
+            on=["_policy_source", "_policy_account", "_policy_source_sheet"],
+            how="left",
+        )
+        .with_columns([
+            pl.coalesce([
+                normalized_key(pl.col("policy_revenue_basis")),
+                pl.col("_row_revenue_basis"),
+            ]).alias("_effective_revenue_basis"),
+            pl.col("policy_revenue_basis").is_not_null().alias("_policy_matched"),
+        ])
+    )
+
+
 def with_catalog_report_status(lf: pl.LazyFrame, schema: set[str] | None = None) -> pl.LazyFrame:
     schema = schema or set(lf.collect_schema().names())
     alias_lookup = catalog_alias_lookup()
@@ -308,3 +452,73 @@ def with_catalog_report_status(lf: pl.LazyFrame, schema: set[str] | None = None)
 
 def filter_reportable_catalog(lf: pl.LazyFrame, schema: set[str] | None = None) -> pl.LazyFrame:
     return with_catalog_report_status(lf, schema).filter(pl.col("include_in_reports") == True)
+
+
+def filter_reportable_generation(lf: pl.LazyFrame, schema: set[str] | None = None) -> pl.LazyFrame:
+    schema = schema or set(lf.collect_schema().names())
+    enriched = with_distributor_policy(with_catalog_report_status(lf, schema), schema)
+    policy_statement_view = pl.col("policy_statement_view").fill_null("").str.to_lowercase()
+    return enriched.filter(
+        (pl.col("include_in_reports") == True)
+        & (
+            pl.when(pl.col("_policy_matched"))
+            .then(
+                (pl.col("policy_catalog_view") == True)
+                & (~policy_statement_view.is_in(["false", "0", "no", "none"]))
+                & pl.col("_effective_revenue_basis").is_in(GENERATION_REVENUE_BASIS)
+            )
+            .otherwise(
+                pl.col("_effective_revenue_basis").is_in(LEGACY_GENERATION_REVENUE_BASIS)
+                | (
+                    pl.col("_effective_revenue_basis").is_not_null()
+                    & (~pl.col("_effective_revenue_basis").is_in(NON_GENERATION_REVENUE_BASIS))
+                )
+            )
+        )
+    )
+
+
+def apply_report_net_personalization(
+    lf: pl.LazyFrame,
+    schema: set[str] | None = None,
+    amount_col: str = "amount_usd",
+) -> pl.LazyFrame:
+    schema = schema or set(lf.collect_schema().names())
+    if amount_col not in schema:
+        return lf
+    policy = load_distributor_policy_document()
+    personalization = policy.get("report_personalization") or {}
+    if not bool(personalization.get("enabled", False)):
+        return lf
+
+    source = row_source_expr(schema)
+    account = row_account_expr(schema)
+    factor = pl.lit(1.0)
+    for entry in reversed(policy.get("entries", [])):
+        policy_source = str(entry.get("source") or "").strip().lower().replace(" ", "_")
+        policy_account = str(entry.get("account") or "").strip().lower().replace(" ", "_")
+        adjustment = float(entry.get("report_net_adjustment_pct") or 0.0)
+        if not policy_source or not policy_account or adjustment == 0:
+            continue
+        factor = (
+            pl.when((source == policy_source) & (account == policy_account))
+            .then(pl.lit(1 - adjustment / 100))
+            .otherwise(factor)
+        )
+
+    amount = pl.col(amount_col).cast(pl.Float64, strict=False).fill_null(0.0)
+    return lf.with_columns((amount * factor).alias(amount_col))
+
+
+def filter_reportable_cash(lf: pl.LazyFrame, schema: set[str] | None = None) -> pl.LazyFrame:
+    schema = schema or set(lf.collect_schema().names())
+    enriched = with_distributor_policy(with_catalog_report_status(lf, schema), schema)
+    policy_cash_view = pl.col("policy_cash_view").fill_null("").str.to_lowercase()
+    return enriched.filter(
+        (pl.col("include_in_reports") == True)
+        & (
+            pl.when(pl.col("_policy_matched"))
+            .then(~policy_cash_view.is_in(["false", "0", "no", "none"]))
+            .otherwise(True)
+        )
+    )

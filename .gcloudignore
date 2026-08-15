@@ -26,6 +26,7 @@ exports
 cache
 _backups
 output
+outputs
 tmp
 _cleanup_archive
 backups

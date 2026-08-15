@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import unicodedata
 from datetime import datetime
@@ -14,8 +13,10 @@ from openpyxl.utils import get_column_letter
 
 try:
     from lib.catalog_report_filter import current_catalog_status_path, with_catalog_report_status
+    from lib.distributor_policy_store import load_distributor_policy_document
 except ModuleNotFoundError:
     from scripts.lib.catalog_report_filter import current_catalog_status_path, with_catalog_report_status
+    from scripts.lib.distributor_policy_store import load_distributor_policy_document
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -26,7 +27,6 @@ REPORTS_DIR = BASE / "reports" / "api"
 SONG_LEVEL_PATH = MARTS_DIR / "song_level_all_sources.parquet"
 RAW_ALL_PATH = MARTS_DIR / "standardized_raw_all_sources.parquet"
 CATALOG_MASTER_PATH = MARTS_DIR / "catalog_master.parquet"
-POLICY_PATH = REGISTRY_DIR / "distributor_account_policies.json"
 
 HEADER_FILL = PatternFill("solid", fgColor="1F4E78")
 HEADER_FONT = Font(color="FFFFFF", bold=True)
@@ -110,8 +110,7 @@ def source_sheet_policy_expr(schema: dict[str, pl.DataType]) -> pl.Expr:
 
 def load_statement_policy() -> pl.DataFrame:
     rows: list[dict[str, object]] = []
-    with POLICY_PATH.open("r", encoding="utf-8") as fh:
-        config = json.load(fh)
+    config = load_distributor_policy_document()
     for entry in config.get("entries", []):
         source = entry.get("source")
         account = entry.get("account")

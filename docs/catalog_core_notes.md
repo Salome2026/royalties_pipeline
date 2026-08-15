@@ -364,14 +364,35 @@ Reportes conectados:
 Importante: el filtro no modifica `standardized_raw`, `song_level` ni statements
 originales. Solo gobierna la salida de reportes.
 
+Desde 2026-08-15, `scripts/lib/catalog_report_filter.py` tambien cruza cada fila
+contra la policy viva de distribuidoras almacenada en Cloud SQL. El filtro operativo
+de generacion reportable requiere:
+
+- `include_in_reports = true` en el catalogo;
+- `catalog_view = true` en la policy de distribuidora/cuenta/hoja;
+- `statement_view` distinto de `false`;
+- `revenue_basis` de tipo `generation`, `correction` o `legacy_generation`.
+
+Esto separa dos verdades que antes podian mezclarse:
+
+- generacion de obra: entra en reportes de regalias;
+- transferencias/shares/caja: quedan para control de caja o auditoria.
+
+Caso testigo validado:
+
+- `Hechizado` en ONErpm Gusty/MAWZ;
+- `Masters` y `Youtube Channels` son generacion;
+- `Shares In & Out` de MAWZ es transferencia positiva de caja/auditoria;
+- esa transferencia no debe sumarse al reporte de regalias porque inflaria la
+  generacion de la obra.
+
 ## Generacion vs transferencias
 
 El campo principal `catalog_master.amount_usd` representa generacion de obra,
 no caja ni transferencias entre cuentas.
 
-Desde 2026-05-24, `scripts/build_catalog_master.py` lee:
-
-- `warehouse/registry/distributor_account_policies.json`
+Desde 2026-08-15, `scripts/build_catalog_master.py` lee la misma policy viva
+desde Cloud SQL. No existe una copia JSON operativa ni un fallback local.
 
 La regla es:
 

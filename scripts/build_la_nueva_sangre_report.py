@@ -12,9 +12,9 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 try:
-    from lib.catalog_report_filter import current_catalog_status_path, with_catalog_report_status
+    from lib.catalog_report_filter import apply_report_net_personalization, current_catalog_status_path, with_catalog_report_status
 except ModuleNotFoundError:
-    from scripts.lib.catalog_report_filter import current_catalog_status_path, with_catalog_report_status
+    from scripts.lib.catalog_report_filter import apply_report_net_personalization, current_catalog_status_path, with_catalog_report_status
 
 BASE = Path(r"C:\royalties_pipeline")
 MARTS_DIR = BASE / "warehouse" / "marts"
@@ -644,6 +644,7 @@ def classified_rows(end_month: str) -> pl.DataFrame:
             release_metadata_lookup_key_expr(schema).alias("_metadata_lookup_key"),
         ])
     )
+    base = apply_report_net_personalization(base, set(base.collect_schema().names()), amount_col="_amount_usd")
 
     with_catalog = with_catalog_report_status(base, schema_names)
     labels = catalog_label_lookup()
@@ -976,6 +977,7 @@ def fuga_candidate_rows(end_month: str, *, hide_zero_amounts: bool = False) -> p
             col_or_null(schema, "statement_period").alias("_statement_period"),
         ])
     )
+    base = apply_report_net_personalization(base, set(base.collect_schema().names()), amount_col="_amount_usd")
     enriched = with_catalog_report_status(base, schema_names)
     if hide_zero_amounts:
         parent_cols = [
@@ -1119,6 +1121,7 @@ def granular_fuga_rows(end_month: str, *, hide_zero_amounts: bool = False) -> pd
             col_or_null(schema, "statement_period").alias("_statement_period"),
         ])
     )
+    base = apply_report_net_personalization(base, set(base.collect_schema().names()), amount_col="_amount_usd")
     grouped = (
         with_catalog_report_status(base, schema_names)
         .group_by([
@@ -1444,6 +1447,7 @@ def youtube_analysis_rows(
                     col_or_null(schema, "Sale Type"),
                 ], ignore_nulls=True).alias("DSP / Store"),
             ])
+            .pipe(lambda frame: apply_report_net_personalization(frame, set(frame.collect_schema().names()), amount_col="_amount_usd"))
             .group_by([
                 "Tema / video",
                 "Artista statement",

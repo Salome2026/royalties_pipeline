@@ -130,3 +130,10 @@ net_amount_usd * 0.977832
 ```
 
 El reporte nuevo desde marts mantiene ese ajuste para replicar el reporte por statement.
+
+## Evidencia para DSP y monetizacion
+
+FUGA usa `DSP`, `Sale Store Name`, `Sale Type` y `Sale User Type`. Es la fuente
+mas completa para separar Premium/Ads y, en YouTube, Art Track/Music, Channel
+Income, UGC y Manual Claim. La clasificacion es derivada: todos esos campos
+originales permanecen disponibles para auditoria.

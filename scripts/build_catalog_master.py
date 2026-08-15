@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from pathlib import Path
 
 import polars as pl
 
 from lib.identity import valid_youtube_channel_id_expr
+from lib.distributor_policy_store import load_distributor_policy_document
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -16,7 +16,6 @@ REGISTRY_DIR = BASE / "warehouse" / "registry"
 SONG_LEVEL_PATH = MARTS_DIR / "song_level_all_sources.parquet"
 RELEASE_METADATA_PATH = MARTS_DIR / "catalog_release_metadata.parquet"
 OUTPUT_PATH = MARTS_DIR / "catalog_master.parquet"
-POLICY_PATH = REGISTRY_DIR / "distributor_account_policies.json"
 CATALOG_REVENUE_BASIS = {"generation", "correction", "legacy_generation"}
 STANDARDIZED_PATHS = [
     MARTS_DIR / "standardized_raw_fuga.parquet",
@@ -24,6 +23,7 @@ STANDARDIZED_PATHS = [
     MARTS_DIR / "standardized_raw_orchard.parquet",
     MARTS_DIR / "standardized_raw_soundon.parquet",
     MARTS_DIR / "standardized_raw_onerpm.parquet",
+    MARTS_DIR / "standardized_raw_ada.parquet",
 ]
 
 
@@ -136,10 +136,7 @@ def first_mode_expr(col_name: str) -> pl.Expr:
 
 
 def load_account_policy_rules() -> pl.DataFrame:
-    if not POLICY_PATH.exists():
-        raise FileNotFoundError(f"No existe policy de distribuidoras: {POLICY_PATH}")
-
-    payload = json.loads(POLICY_PATH.read_text(encoding="utf-8"))
+    payload = load_distributor_policy_document()
     rows = []
     for entry in payload.get("entries", []):
         source = entry.get("source")
@@ -157,7 +154,7 @@ def load_account_policy_rules() -> pl.DataFrame:
             })
 
     if not rows:
-        raise ValueError(f"Policy sin sheet_rules: {POLICY_PATH}")
+        raise ValueError("Cloud SQL distributor policy has no sheet rules.")
 
     return pl.DataFrame(rows).with_columns([
         pl.col("source").cast(pl.Utf8),

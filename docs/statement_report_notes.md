@@ -72,6 +72,36 @@ reportable/administrada por VPO. Esto permite incluir catalogo que VPO administr
 aunque el dinero haya entrado en una cuenta externa, y tambien permite excluir
 obras que aparecen en statements pero no pertenecen al negocio VPO.
 
+Desde 2026-08-05, la separacion entre generacion/caja/transferencia no se decide
+en el reporte con listas sueltas. Se toma de:
+
+- la policy operativa de distribuidoras en Cloud SQL;
+- `scripts\lib\catalog_report_filter.py`.
+
+Desde 2026-08-15 no existe fallback al JSON ni a reglas hardcodeadas para la
+vista nueva. Una policy faltante es un error de datos y detiene el proceso.
+
+La regla comun de generacion reportable aplica antes de agrupar reportes de
+regalias por keywords, reportes personalizados de titulos y variantes nuevas del
+reporte por statement.
+
+En reportes de regalias por keyword, el criterio `statement_period` y el criterio
+`transaction_month` deben usar la misma definicion de generacion reportable. La
+busqueda en crudos incluye campos de video como `Video Title` y `Channel Name`
+para no perder filas de `Youtube Channels` que no traen `Track Title`. Las hojas
+marcadas como transferencia, por ejemplo ONErpm `Shares In & Out`, no entran en
+la generacion aunque coincidan por titulo o artista.
+
+La hoja `Resumen por tema` usa una fila por `catalog_key` resuelto. No agrupa por
+Store/DSP, territorio, uso ni tipo de contenido, porque esas son dimensiones de
+analisis y no identidades distintas. Los identificadores originales se conservan
+como trazabilidad y el detalle mantiene las filas fuente.
+
+La busqueda por keyword es literal normalizada, no difusa: ignora mayusculas y
+separadores simples (espacios, guion y guion bajo). Asi, `superjunte` y
+`super junte` buscan la misma secuencia, sin autorizar uniones por titulo
+parecido.
+
 Separacion conceptual:
 
 - `generacion reportable`: lo que genero el catalogo que VPO decide reportar;
@@ -113,6 +143,48 @@ Motivo:
 - `Masters` representa generacion del master/tema;
 - `Shares In & Out` representa transferencias de participacion;
 - sumar ambos mezclaria generacion de catalogo con movimientos de participacion.
+
+## Dashboard Regalias
+
+La tarjeta `Dashboard Regalias` es una vista ejecutiva de generacion reportable,
+no una vista de caja cruda.
+
+Usa:
+
+- `standardized_raw_all_sources.parquet` como origen;
+- `scripts\lib\catalog_report_filter.py` para aplicar catalogo activo/inactivo
+  y policies de distribuidoras;
+- `apply_report_net_personalization` para aplicar en la consulta los ajustes
+  porcentuales vigentes de Cloud SQL solamente cuando la personalizacion
+  general esta activada.
+
+El parquet compacto conserva el neto reportable base. El porcentaje no se
+graba dentro del mart: se aplica al consultar el dashboard. Por eso un cambio
+del configurador se refleja sin regenerar ni republicar marts.
+
+No usa el mart de `Ingresos Digitales`, porque esa pantalla muestra caja real
+informada por distribuidoras sin reglas de negocio. El dashboard, en cambio,
+debe coincidir conceptualmente con los reportes de regalias/reportes por
+statement nuevos: mide lo que VPO decide reportar como generacion del catalogo.
+
+La pantalla permite mirar por `statement_period` o por `transaction_month`.
+Cuando el rango es historico completo ambos criterios pueden converger, pero
+para rangos parciales son lecturas distintas y deben mantenerse explicitamente.
+
+La subvista YouTube no cambia el criterio de negocio. Solo toma las filas ya
+reportables cuyo DSP/store/source sheet corresponde a YouTube y las agrupa por
+earning type, asset type, claim type, territorio y asset.
+
+Los importes del mart del dashboard conservan la precision original durante
+todas las agrupaciones. El redondeo a dos decimales se aplica solamente al
+total o agregado final presentado al usuario. No se redondean previamente las
+combinaciones por tema, territorio, store o tipo de uso, porque los micropagos
+acumulados deben cerrar contra el reporte de regalias para el mismo alcance.
+
+La busqueda del dashboard conserva todas las variantes de artista y titulo del
+statement, aunque para mostrar elija una sola variante principal. Esto evita
+perder colaboraciones donde el artista buscado aparece como artista secundario.
+La misma regla de precision aplica al resumen de Ingresos Digitales.
 
 ## ONErpm Gusty DJ en reporte nuevo
 

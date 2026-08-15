@@ -1,4 +1,4 @@
-# Finanzas VPO - maqueta de carga dinamica
+﻿# Finanzas VPO - maqueta de carga dinamica
 
 Fecha: 2026-07-11
 
@@ -163,6 +163,34 @@ Campos visibles:
 - comprobante;
 - notas.
 
+Si `quien pago` es `Empleado`, aparece un selector de empleados del ABM.
+Ese selector no abre datos salariales ni permisos de ABM: solo identifica quien
+puso la plata. El movimiento sigue siendo gasto del artista/proyecto, pero el
+sistema genera una cuenta corriente de reintegro:
+
+- direccion: `Indyana debe a empleado`;
+- contraparte: empleado seleccionado;
+- origen: movimiento financiero;
+- importe: pagado real convertido a ARS;
+- estado inicial: abierto.
+
+Si el movimiento se edita y deja de estar pagado por empleado, o se anula, el
+saldo de reintegro derivado se elimina o se regenera desde el movimiento vigente.
+
+Para pagarle al empleado lo que Indyana le debe por esos gastos, no se carga un
+gasto nuevo. Se usa el mismo flujo:
+
+- tipo: `Pago / cobro`;
+- categoria: `Reintegro a empleado`;
+- empleado desde ABM;
+- importe real pagado;
+- seleccion de saldos pendientes a cancelar.
+
+Ese pago aplica contra las entradas abiertas de `Indyana debe a empleado`.
+Puede cerrar una entrada completa o dejarla parcial. La imputacion de
+artista/proyecto no se vuelve a pedir porque ya esta guardada en el gasto
+original.
+
 Bloque opcional cerrado por defecto:
 
 `Tratamiento`
@@ -254,72 +282,66 @@ El movimiento padre guarda:
 Selector:
 
 - Cuenta booking;
-- Seña de show / recibo;
+- SeÃ±a de show / recibo;
 - Recuperable / proyecto;
 - Proveedor pendiente;
 - Adelanto / prestamo;
 - Cuenta corriente financiera;
 - Dejar sin aplicar por ahora.
 
-### Pago / cobro como Seña de show / recibo
+### Pago / cobro con documento financiero PDF
 
-Uso:
+Cuando el usuario carga `Pago / cobro`, puede emitir un documento financiero
+si necesita dejar una constancia formal en PDF.
 
-- un cliente entrega dinero para reservar un show;
-- Indyana emite un recibo por ese dinero;
-- todavia no se quiere aplicar automaticamente contra la liquidacion del show.
+La pantalla no debe tener un camino separado por area. Debe mostrar un bloque
+de documento cuando el tipo elegido lo requiere.
 
-Regla core:
+Tipos:
 
-- la seña es caja real;
-- no cambia cachet, gastos ni split;
-- queda como movimiento financiero trazable;
-- queda preparada para vincularse luego con booking, agenda o cuenta corriente;
-- el recibo tiene numeracion incremental y puede imprimirse en PDF.
-- la numeracion incremental debe salir de una secuencia atomica de Postgres; no
-  se calcula leyendo el ultimo numero porque en produccion puede haber dos
-  usuarios guardando al mismo tiempo.
-- el artista del movimiento financiero sale del artista principal elegido dentro
-  del recibo, no de un campo previo del formulario;
-- si el show tiene mas de un artista, se emite un solo recibo y se guardan todos
-  los artistas asociados.
-- los operadores con permiso de crear pueden emitir recibos, pero no editarlos
-  luego. Para modificar un recibo ya emitido se requiere permiso de editar en
-  Movimientos Financieros.
+- `Recibo por seña de show`: dinero recibido para reservar un show. Normalmente
+  area Booking.
+- `Orden de pago`: dinero pagado por una empresa del grupo a una persona,
+  proveedor, artista, manager o tercero.
+- `Comprobante de cobro`: dinero recibido por una empresa del grupo por un
+  concepto que no es necesariamente seña de show.
 
-Campos:
+Datos comunes:
 
-- numero de recibo generado por el sistema;
-- fecha del recibo;
-- importe, moneda y tipo de cambio si corresponde;
-- de quien se recibe;
-- artista principal desde el ABM;
-- otros artistas del show desde el ABM, si corresponde;
-- fecha del show;
-- venue/lugar;
+- empresa emisora;
+- contraparte, con etiqueta dinamica segun el tipo: de quien se recibe o a quien se paga;
+- importe, moneda y tipo de cambio;
 - concepto;
-- si es mas IVA, IVA incluido o no aplica. Es dato interno y no aparece en el PDF del recibo;
-- empresa emisora del recibo;
-- comprobantes y notas.
+- artista principal o unidad, si corresponde;
+- otros artistas si corresponde;
+- fecha/lugar del show solo cuando el documento es de seña de show;
+- notas y comprobantes;
+- IVA interno, que no aparece en el PDF.
 
-El guardado debe escribir en:
+Reglas:
 
-- `finance_movements`;
-- `finance_receipts`.
+- el documento se guarda en `finance_documents` y queda vinculado al movimiento financiero;
+- todos los documentos comparten numeracion incremental atomica de Postgres;
+- emitir el PDF no crea un movimiento adicional;
+- editar un documento emitido requiere permiso de editar en Movimientos Financieros;
+- un usuario con permiso de crear puede emitir documentos dentro de su alcance,
+  pero no modificarlos luego si no tiene editar;
+- no se agregan ramas SQLite ni fallback historico.
 
-No debe escribir directamente saldos de booking en esta primera etapa. La aplicacion
-contra un show o una cuenta booking se hara con un paso explicito posterior, para no
-duplicar caja ni cerrar shows por accidente.
+### Gasto / inversion con orden de pago PDF
 
-Regla multiartista:
+Cuando el usuario carga `Gasto / inversion`, puede activar `Generar orden de
+pago PDF` para emitir una constancia formal sin duplicar la carga.
 
-- no duplicar el recibo por artista;
-- no repartir la seña automaticamente entre artistas;
-- usar el artista principal solo como ancla operativa para permisos, filtros y
-  listados;
-- conservar la lista completa de artistas del evento en el detalle del recibo;
-- la aplicacion economica contra cada show/artista se define luego desde Booking
-  o Cuenta booking.
+Reglas:
+
+- el movimiento sigue siendo `Gasto / inversion`;
+- el documento asociado es `Orden de pago`;
+- el sistema precarga el documento con concepto, contraparte, importe, moneda,
+  tipo de cambio, artista, proyecto y area del gasto;
+- si la contraparte del documento queda vacia, toma "A quien se pago";
+- emitir el PDF no crea un movimiento adicional ni aplica saldos;
+- para multiples conceptos no se emite PDF automatico en esta etapa.
 
 ### Pago / cobro contra Cuenta booking
 

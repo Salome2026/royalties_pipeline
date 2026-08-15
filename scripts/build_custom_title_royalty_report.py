@@ -12,9 +12,9 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 try:
-    from lib.catalog_report_filter import filter_reportable_catalog
+    from lib.catalog_report_filter import apply_report_net_personalization, filter_reportable_generation
 except ModuleNotFoundError:
-    from scripts.lib.catalog_report_filter import filter_reportable_catalog
+    from scripts.lib.catalog_report_filter import apply_report_net_personalization, filter_reportable_generation
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -75,6 +75,8 @@ ARTIST_FALLBACK_COLUMNS = [
 
 
 DSP_FALLBACK_COLUMNS = [
+    "dsp_normalized",
+    "store_report_label",
     "dsp",
     "store",
     "store_raw",
@@ -87,6 +89,7 @@ DSP_FALLBACK_COLUMNS = [
 ]
 
 USAGE_FALLBACK_COLUMNS = [
+    "content_origin_normalized",
     "usage_type",
     "usage_raw",
     "TRANSACTION TYPE",
@@ -609,7 +612,11 @@ def build_custom_title_report(
 
     raw_df = build_dataset(raw_path, SEARCH_COLUMNS_RAW, specs, start_month, end_month, sources, source_accounts)
     if raw_df.height:
-        raw_df = filter_reportable_catalog(raw_df.lazy(), set(raw_df.columns)).collect()
+        raw_df = (
+            filter_reportable_generation(raw_df.lazy(), set(raw_df.columns))
+            .pipe(lambda frame: apply_report_net_personalization(frame))
+            .collect()
+        )
 
     raw_df = select_columns(
         raw_df,
@@ -628,6 +635,12 @@ def build_custom_title_report(
             "artist_statement_style",
             "asset_artist_statement",
             "content_type",
+            "dsp_normalized",
+            "monetization_normalized",
+            "content_origin_normalized",
+            "plan_normalized",
+            "classification_status",
+            "store_report_label",
             "store",
             "store_raw",
             "store_name",

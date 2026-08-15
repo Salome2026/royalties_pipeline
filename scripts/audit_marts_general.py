@@ -14,6 +14,7 @@ SOURCES = [
     "onerpm",
     "orchard",
     "soundon",
+    "ada",
 ]
 
 

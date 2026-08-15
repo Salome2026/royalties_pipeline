@@ -11,9 +11,11 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 try:
-    from lib.catalog_report_filter import filter_reportable_catalog
+    from lib.catalog_report_filter import filter_reportable_catalog, filter_reportable_generation
+    from lib.distributor_policy_store import load_distributor_policy_document
 except ModuleNotFoundError:
-    from scripts.lib.catalog_report_filter import filter_reportable_catalog
+    from scripts.lib.catalog_report_filter import filter_reportable_catalog, filter_reportable_generation
+    from scripts.lib.distributor_policy_store import load_distributor_policy_document
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -23,7 +25,6 @@ STANDARDIZED_ALL_PATH = MARTS_DIR / "standardized_raw_all_sources.parquet"
 STATEMENT_SUMMARY_PATH = MARTS_DIR / "statement_summary_all_sources.parquet"
 CATALOG_RELEASE_METADATA_PATH = MARTS_DIR / "catalog_release_metadata.parquet"
 REGISTRY_DIR = BASE / "warehouse" / "registry"
-STATEMENT_POLICY_PATH = REGISTRY_DIR / "distributor_account_policies.json"
 CONTRACT_CUTOFFS_PATH = REGISTRY_DIR / "contract_cutoffs.json"
 
 FUGA_STATEMENT_FACTOR = 0.977832
@@ -515,7 +516,7 @@ def build_post_reference_totals(
             (pl.col("source") == source)
             & (pl.col("account") == base_account)
         )
-        .pipe(lambda frame: filter_reportable_catalog(frame, set(schema.names())))
+        .pipe(lambda frame: filter_reportable_generation(frame, set(schema.names())))
         .with_columns([
             col_or_null(schema, "statement_period").alias("_statement_period"),
             col_or_null(schema, "transaction_month").alias("_transaction_month"),
@@ -638,7 +639,7 @@ def build_source_sheet_totals(
             & (pl.col("account") == account)
             & (col_or_null(schema, "source_sheet") == source_sheet)
         )
-        .pipe(lambda frame: filter_reportable_catalog(frame, set(schema.names())))
+        .pipe(lambda frame: filter_reportable_generation(frame, set(schema.names())))
         .with_columns([
             col_or_null(schema, "statement_period").alias("_statement_period"),
             col_or_null(schema, "artist_statement_style").alias("_artist_raw"),
@@ -763,7 +764,7 @@ def build_release_metadata_totals(
             (pl.col("source") == source)
             & (pl.col("account") == account)
         )
-        .pipe(lambda frame: filter_reportable_catalog(frame, set(schema.names())))
+        .pipe(lambda frame: filter_reportable_generation(frame, set(schema.names())))
         .with_columns([
             col_or_null(schema, "statement_period").alias("_statement_period"),
             col_or_null(schema, "artist_statement_style").alias("_artist_raw"),
@@ -918,12 +919,11 @@ def cutoff_reference_scope(cutoff: dict) -> tuple[str | None, str | None]:
 def build_policy_statement_view(
     base_df: pd.DataFrame,
     standardized_path: Path | None,
-    policy_path: Path = STATEMENT_POLICY_PATH,
     cutoffs_path: Path = CONTRACT_CUTOFFS_PATH,
 ) -> pd.DataFrame:
-    policies = read_registry_entries(policy_path)
+    policies = load_distributor_policy_document().get("entries", [])
     if not policies:
-        return pd.DataFrame(columns=["source", "account", "artist", "statement_period", "total", "has_share_in_out"])
+        raise RuntimeError("Cloud SQL distributor policy has no active accounts.")
 
     cutoffs = {
         entry.get("cutoff_id"): entry
@@ -1001,20 +1001,6 @@ def build_policy_statement_view(
         return pd.DataFrame(columns=["source", "account", "artist", "statement_period", "total", "has_share_in_out"])
 
     return normalize_statement_totals(pd.concat(pieces, ignore_index=True))
-
-
-def build_hardcoded_new_statement_view(
-    base_df: pd.DataFrame,
-    standardized_path: Path | None,
-) -> pd.DataFrame:
-    df = base_df.loc[
-        (base_df["source"] != "onerpm")
-        | (base_df["account"].isin(NEW_REPORT_ONERPM_ACCOUNTS))
-    ].copy()
-    variants = build_statement_report_new_variants(standardized_path)
-    if not variants.empty:
-        df = pd.concat([df, variants], ignore_index=True)
-    return normalize_statement_totals(df)
 
 
 def aggregate_statement_data(standardized_path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -1178,7 +1164,7 @@ def write_statement_report(
         default_excluded_scopes = set()
         policy_df = build_policy_statement_view(df, standardized_path)
         if policy_df.empty:
-            policy_df = build_hardcoded_new_statement_view(df, standardized_path)
+            raise RuntimeError("Distributor policies produced an empty new statement report.")
         df = policy_df
     else:
         gusty_variant = build_gusty_post_motorcito_totals(standardized_path)

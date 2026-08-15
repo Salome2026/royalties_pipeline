@@ -64,3 +64,11 @@ Actualmente vienen vacios. El script esta preparado para leerlos si en el futuro
 
 - `My Royalty` debe cerrar contra `Summary` por `Reporting Period`.
 - `song_level_soundon.amount_usd` debe cerrar contra `standardized_raw_soundon.amount_usd`.
+
+## Evidencia para DSP y monetizacion
+
+La clasificacion usa `Store Name`, `Sales Type`, `Sales Sub Type` y
+`Royalty Type`. Spotify permite separar planes Premium, Ads y Trial. SoundOn
+informa YouTube como `YouTube Music / Content ID`: la monetizacion puede ser
+explicita, pero Music y UGC no siempre se pueden separar. En esos casos el
+origen queda parcial o no especificado, sin inferencias.

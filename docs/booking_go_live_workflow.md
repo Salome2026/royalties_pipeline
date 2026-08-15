@@ -1,16 +1,21 @@
-# Booking VPO - Flujo para empezar a cargar shows
+# Booking VPO - Flujo operativo de carga
 
-Fecha: 2026-05-16
+Fecha: 2026-08-15
 
 Este documento baja a operativo el estado actual del modulo booking. La prioridad es empezar a cargar shows sin romper la base viva ni perder la logica de negocio que ya validamos.
 
 ## Regla de avance
 
-La pantalla nueva `Carga de Shows laboratorio` todavia no guarda. Sirve para validar calculos, reglas, saldos y cuenta corriente sugerida.
+`Booking Indyana` es la unica ventana operativa general. Abre en `Booking individual`
+y permite pasar a `Booking compartido` desde el selector superior cuando el usuario
+tiene ese permiso.
 
-La pantalla `Booking Indyana` sigue siendo la carga viva para shows simples y controlados.
+`Booking individual` conserva la carga viva de shows simples. `Booking compartido`
+conserva el flujo ya validado de eventos madre e hijas, por ejemplo Candu + G Sony.
+La seleccion no cambia calculos ni estructuras de guardado.
 
-La pantalla `Liquidaciones compuestas` solo se usa cuando el caso ya fue probado y entendido, por ejemplo Candu + G Sony, pero no debe convertirse en el flujo definitivo sin revisar.
+`Carga de Shows laboratorio` sigue siendo una herramienta de simulacion y no forma
+parte del guardado vivo.
 
 ## Capas obligatorias
 
@@ -26,7 +31,7 @@ No se cambia la liquidacion para hacer cerrar la caja. Si hay diferencia, queda 
 
 ### Shows simples comunes
 
-Usar `Booking Indyana`.
+Usar `Booking Indyana > Booking individual`.
 
 Ejemplos:
 
@@ -46,7 +51,7 @@ Condiciones:
 
 ### Shows con pago parcial del boliche
 
-Usar `Booking Indyana`.
+Usar `Booking Indyana > Booking individual`.
 
 Campos clave:
 
@@ -61,7 +66,7 @@ El show no debe sumar como cobrado total si el boliche pago menos.
 
 Primero simular en `Carga de Shows laboratorio`.
 
-Si el resultado coincide, cargar en `Booking Indyana` solo si se puede expresar sin perder informacion:
+Si el resultado coincide, cargar en `Booking Indyana > Booking individual` solo si se puede expresar sin perder informacion:
 
 - gastos generales;
 - comision Facha como gasto/comision propia;
@@ -73,7 +78,7 @@ Si no se puede expresar bien, no cargar en vivo todavia.
 
 ### Candu + G Sony
 
-Usar `Liquidaciones compuestas` solo cuando:
+Usar `Booking Indyana > Booking compartido` solo cuando:
 
 - la madre y las hijas se entienden;
 - no se duplican shows historicos;
@@ -111,7 +116,7 @@ Si queda saldo entendido, el show puede ser `cerrado con cuenta corriente`, no p
 
 Seguir usando el modulo `El Caserio`.
 
-No mezclarlo con Booking Indyana ni con el laboratorio general hasta que el flujo comun este cerrado.
+No mezclarlo con los modos generales de Booking Indyana ni con el laboratorio hasta que el flujo comun este cerrado.
 
 ## Maqueta objetivo de carga unica
 
@@ -209,7 +214,7 @@ Antes de guardar debe mostrar:
    - varios artistas;
    - Caserio;
    - historico/dudoso.
-2. Cargar primero los simples en `Booking Indyana`.
+2. Cargar primero los simples en `Booking Indyana > Booking individual`.
 3. Probar los avanzados en `Carga de Shows laboratorio`.
 4. Si el avanzado esta validado, cargarlo en la pantalla viva correspondiente.
 5. Si queda saldo, no forzar cierre: marcarlo y documentarlo.
@@ -230,4 +235,4 @@ No habilitar hasta que pasen estos casos:
 - historico 0/0;
 - dolares con tipo de cambio.
 
-Cuando pase, el guardado nuevo debe escribir en la misma estructura viva sin romper `Booking Indyana`.
+Cuando pase, cualquier guardado nuevo debe escribir en la misma estructura viva sin crear una entrada operativa paralela.

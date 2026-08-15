@@ -3,13 +3,13 @@ import { apiConfig } from "../../../../_auth";
 
 export async function GET(
   _request: NextRequest,
-  context: { params: Promise<{ receiptId: string }> },
+  context: { params: Promise<{ documentId: string }> },
 ) {
   const config = await apiConfig();
   if ("error" in config) return config.error;
 
-  const { receiptId } = await context.params;
-  const response = await fetch(`${config.apiUrl}/finance/receipts/${receiptId}/pdf`, {
+  const { documentId } = await context.params;
+  const response = await fetch(`${config.apiUrl}/finance/documents/${documentId}/pdf`, {
     headers: {
       "X-VPO-API-Key": config.apiKey,
       "X-VPO-Username": config.user.username,

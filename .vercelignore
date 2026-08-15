@@ -11,6 +11,7 @@ staging
 reports
 exports
 cache
+outputs
 _cleanup_archive
 backups
 migration_exports

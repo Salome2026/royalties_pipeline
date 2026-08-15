@@ -8,9 +8,10 @@ The publish script uploads:
 
 - `warehouse/marts/standardized_raw_all_sources.parquet`
 - `warehouse/marts/song_level_all_sources.parquet`
-- `warehouse/marts/catalog_candidates.parquet`
 - `warehouse/marts/catalog_master.parquet`
 - `warehouse/marts/statement_summary_all_sources.parquet`
+- `warehouse/marts/digital_income_statement_summary.parquet`
+- `warehouse/marts/royalties_dashboard_summary.parquet`
 
 It does not upload:
 

@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 import secrets
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -17,7 +18,7 @@ from datetime import datetime
 from io import BytesIO
 from time import time
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import polars as pl
 from fastapi import FastAPI, Header, HTTPException
@@ -52,6 +53,11 @@ from build_statement_report_from_mart import build_statement_report_from_mart  #
 from build_custom_title_royalty_report import (  # noqa: E402
     DEFAULT_LOS_ANORMALES_TERMS,
     build_custom_title_report,
+)
+from lib.catalog_report_filter import apply_report_net_personalization, filter_reportable_generation  # noqa: E402
+from lib.distributor_policy_store import (  # noqa: E402
+    load_distributor_policy_document,
+    update_report_personalization,
 )
 from build_fuga_gusty_contract_report import build_fuga_gusty_contract_report  # noqa: E402
 import build_la_nueva_sangre_report as la_nueva_sangre_report  # noqa: E402
@@ -151,24 +157,24 @@ SONG_FILE = "song_level_all_sources.parquet"
 STANDARDIZED_FILE = "standardized_raw_all_sources.parquet"
 STANDARDIZED_ONERPM_FILE = "standardized_raw_onerpm.parquet"
 STANDARDIZED_FUGA_FILE = "standardized_raw_fuga.parquet"
-CATALOG_FILE = "catalog_candidates.parquet"
 CATALOG_MASTER_FILE = "catalog_master.parquet"
 CATALOG_RELEASE_METADATA_FILE = "catalog_release_metadata.parquet"
 STATEMENT_SUMMARY_FILE = "statement_summary_all_sources.parquet"
 DIGITAL_INCOME_SUMMARY_FILE = "digital_income_statement_summary.parquet"
 DIGITAL_INCOME_SUMMARY_PATH = BASE / "warehouse" / "marts" / "digital_income_statement_summary.parquet"
+ROYALTIES_DASHBOARD_SUMMARY_FILE = "royalties_dashboard_summary.parquet"
+ROYALTIES_DASHBOARD_SUMMARY_PATH = BASE / "warehouse" / "marts" / "royalties_dashboard_summary.parquet"
 REQUIRED_MART_FILES = [
     STANDARDIZED_FILE,
     SONG_FILE,
     STATEMENT_SUMMARY_FILE,
     DIGITAL_INCOME_SUMMARY_FILE,
-    CATALOG_FILE,
+    ROYALTIES_DASHBOARD_SUMMARY_FILE,
     CATALOG_MASTER_FILE,
 ]
 CATALOG_STATUS_PATH = BASE / "warehouse" / "registry" / "catalog_status.parquet"
 CONFIG_REGISTRY_DIR = BASE / "warehouse" / "registry"
 CONFIG_SEED_FILES = {
-    "distributor-account-policies": CONFIG_REGISTRY_DIR / "distributor_account_policies.json",
     "statement-source-dictionary": CONFIG_REGISTRY_DIR / "statement_source_dictionary.json",
     "contract-cutoffs": CONFIG_REGISTRY_DIR / "contract_cutoffs.json",
     "report-templates": CONFIG_REGISTRY_DIR / "report_templates.json",
@@ -223,6 +229,16 @@ class CustomRoyaltyReportRequest(BaseModel):
     refresh_cache: bool = False
     hide_zero_amounts: bool = False
     exclude_related_videos: bool = False
+
+
+class DistributorPersonalizationAccountRequest(BaseModel):
+    policy_id: str = Field(..., min_length=1, max_length=160)
+    report_net_adjustment_pct: float = Field(default=0.0, ge=0.0, le=100.0)
+
+
+class DistributorPersonalizationRequest(BaseModel):
+    enabled: bool = False
+    accounts: list[DistributorPersonalizationAccountRequest] = Field(default_factory=list, max_length=200)
 
 
 class SourceMonitorUpdateRequest(BaseModel):
@@ -453,8 +469,13 @@ class FinanceMovementAllocationRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=1000)
 
 
-class FinanceReceiptDetailRequest(BaseModel):
-    receipt_kind: Literal["sena_show"] = "sena_show"
+class FinanceAccountApplicationRequest(BaseModel):
+    account_entry_id: int = Field(..., ge=1)
+    amount_ars: float = Field(..., gt=0.0)
+
+
+class FinanceDocumentDetailRequest(BaseModel):
+    document_type: Literal["show_deposit_receipt", "payment_order", "collection_receipt"] = "show_deposit_receipt"
     issuer_company: Literal[
         "VPO Corp",
         "Indyana Records LLC",
@@ -463,7 +484,7 @@ class FinanceReceiptDetailRequest(BaseModel):
         "Mawz Records LLC",
         "Mawz Records SRL",
     ] = "VPO Corp"
-    received_from: str = Field(..., min_length=1, max_length=180)
+    counterparty_name: str = Field(..., min_length=1, max_length=180)
     show_date: str | None = Field(default=None, max_length=10)
     venue: str | None = Field(default=None, max_length=180)
     artist_names: list[str] = Field(default_factory=list, max_length=12)
@@ -482,7 +503,8 @@ class FinanceMovementRequest(BaseModel):
     project_name: str | None = Field(default=None, max_length=180)
     concept: str = Field(..., min_length=1, max_length=240)
     counterparty: str | None = Field(default=None, max_length=180)
-    paid_by: Literal["indyana", "artista", "manager", "tercero", "desconocido"] = "indyana"
+    paid_by: Literal["indyana", "artista", "manager", "empleado", "tercero", "desconocido"] = "indyana"
+    paid_by_employee_id: int | None = Field(default=None, ge=1)
     amount: float = Field(..., ge=0.0)
     paid_amount: float | None = Field(default=None, ge=0.0)
     due_date: str | None = Field(default=None, max_length=10)
@@ -513,7 +535,8 @@ class FinanceMovementRequest(BaseModel):
     proof_refs: list[str] = Field(default_factory=list, max_length=30)
     notes: str | None = Field(default=None, max_length=2000)
     allocation_lines: list[FinanceMovementAllocationRequest] = Field(default_factory=list, max_length=20)
-    receipt_detail: FinanceReceiptDetailRequest | None = None
+    account_applications: list[FinanceAccountApplicationRequest] = Field(default_factory=list, max_length=50)
+    document_detail: FinanceDocumentDetailRequest | None = None
 
 
 
@@ -647,6 +670,8 @@ def require_api_key(x_vpo_api_key: str | None) -> None:
 
 
 def load_config_seed(config_name: str) -> dict:
+    if config_name == "distributor-account-policies":
+        return load_distributor_policy_document()
     path = CONFIG_SEED_FILES.get(config_name)
     if path is None:
         raise HTTPException(status_code=404, detail="Configuracion no soportada.")
@@ -1373,6 +1398,19 @@ def previous_calendar_month(today: date | None = None) -> str:
 def default_source_monitor_config() -> list[dict]:
     return [
         {
+            "id": "ada_mawz",
+            "source": "ada",
+            "account": "mawz",
+            "display_name": "ADA / Mawz",
+            "input_path": "input_raw/ada/mawz",
+            "expected_frequency": "monthly",
+            "max_age_months": 2,
+            "monitoring_active": True,
+            "alert_silenced": False,
+            "portal_url": "",
+            "notes": "TXT mensual. Net Royalty Payable es el neto reportable; statements sin actividad son validos.",
+        },
+        {
             "id": "dashgo_mawzrecords",
             "source": "dashgo",
             "account": "mawzrecords",
@@ -1635,6 +1673,19 @@ def classify_raw_file(source: str, path: Path, mart_names: set[str]) -> dict:
                 "status": "pending_real",
                 "reason": "Share in/out con filas; debe entrar al ingest nuevo.",
                 "rows": row_count,
+            }
+
+    if source == "ada" and path.suffix.lower() == ".txt":
+        try:
+            content = path.read_text(encoding="utf-8-sig").strip()
+        except UnicodeDecodeError:
+            content = path.read_text(encoding="cp1252").strip()
+        if content == "No Earning Activity for this Royalty Period":
+            return {
+                "file_name": name,
+                "status": "ignored_empty",
+                "reason": "Statement ADA valido sin actividad de regalias.",
+                "rows": 0,
             }
 
     if source == "fuga" and path.suffix.lower() == ".csv":
@@ -1924,11 +1975,13 @@ def prepare_analytics_package_for_publish() -> dict:
         run_publish_preparation_script("build_catalog_master.py"),
     ]
     digital_summary_path = build_digital_income_summary_mart(standardized_path, refresh_cache=True)
+    royalties_dashboard_summary_path = build_royalties_dashboard_summary_mart(standardized_path, refresh_cache=True)
 
     return {
         "closed_at": datetime.now().isoformat(timespec="seconds"),
         "scripts": scripts,
         "digital_income_summary": parquet_summary(digital_summary_path, ["statement_period"]),
+        "royalties_dashboard_summary": parquet_summary(royalties_dashboard_summary_path, ["statement_period", "transaction_month"]),
     }
 
 
@@ -1936,10 +1989,10 @@ def validate_analytics_package_for_publish() -> dict:
     summaries = {
         SONG_FILE: parquet_summary(mart_path(SONG_FILE), ["transaction_month"]),
         STANDARDIZED_FILE: parquet_summary(mart_path(STANDARDIZED_FILE), ["statement_period", "transaction_month"]),
-        CATALOG_FILE: parquet_summary(mart_path(CATALOG_FILE), []),
         CATALOG_MASTER_FILE: parquet_summary(mart_path(CATALOG_MASTER_FILE), ["first_transaction_month", "last_transaction_month"]),
         STATEMENT_SUMMARY_FILE: parquet_summary(mart_path(STATEMENT_SUMMARY_FILE), ["statement_period"]),
         DIGITAL_INCOME_SUMMARY_FILE: parquet_summary(mart_path(DIGITAL_INCOME_SUMMARY_FILE), ["statement_period"]),
+        ROYALTIES_DASHBOARD_SUMMARY_FILE: parquet_summary(mart_path(ROYALTIES_DASHBOARD_SUMMARY_FILE), ["statement_period", "transaction_month"]),
     }
     missing = [filename for filename, summary in summaries.items() if not summary.get("exists")]
     if missing:
@@ -1956,7 +2009,7 @@ def validate_analytics_package_for_publish() -> dict:
     standardized_mtime = mart_path(STANDARDIZED_FILE).stat().st_mtime
     song_mtime = mart_path(SONG_FILE).stat().st_mtime
     dependency_mtime = max(standardized_mtime, song_mtime)
-    for filename in [CATALOG_MASTER_FILE, STATEMENT_SUMMARY_FILE, DIGITAL_INCOME_SUMMARY_FILE]:
+    for filename in [CATALOG_MASTER_FILE, STATEMENT_SUMMARY_FILE, DIGITAL_INCOME_SUMMARY_FILE, ROYALTIES_DASHBOARD_SUMMARY_FILE]:
         if mart_path(filename).stat().st_mtime + 0.001 < dependency_mtime:
             stale.append(filename)
 
@@ -1968,10 +2021,13 @@ def validate_analytics_package_for_publish() -> dict:
     standardized_last_statement = summaries[STANDARDIZED_FILE].get("last_statement_period")
     statement_summary_last = summaries[STATEMENT_SUMMARY_FILE].get("last_statement_period")
     digital_summary_last = summaries[DIGITAL_INCOME_SUMMARY_FILE].get("last_statement_period")
+    royalties_dashboard_last = summaries[ROYALTIES_DASHBOARD_SUMMARY_FILE].get("last_statement_period")
     if standardized_last_statement and statement_summary_last and str(statement_summary_last) < str(standardized_last_statement):
         stale.append(f"{STATEMENT_SUMMARY_FILE}: statement {statement_summary_last} < standardized {standardized_last_statement}")
     if standardized_last_statement and digital_summary_last and str(digital_summary_last) < str(standardized_last_statement):
         stale.append(f"{DIGITAL_INCOME_SUMMARY_FILE}: statement {digital_summary_last} < standardized {standardized_last_statement}")
+    if standardized_last_statement and royalties_dashboard_last and str(royalties_dashboard_last) < str(standardized_last_statement):
+        stale.append(f"{ROYALTIES_DASHBOARD_SUMMARY_FILE}: statement {royalties_dashboard_last} < standardized {standardized_last_statement}")
 
     if stale:
         raise HTTPException(
@@ -1997,6 +2053,7 @@ def source_monitor_pipeline_scripts(source: str) -> list[str]:
         "onerpm": ["ingest_standardized_onerpm.py", "build_song_level_onerpm.py"],
         "orchard": ["ingest_standardized_orchard.py", "build_song_level_orchard.py"],
         "soundon": ["ingest_standardized_soundon.py", "build_song_level_soundon.py"],
+        "ada": ["ingest_standardized_ada.py", "build_song_level_ada.py"],
     }
     scripts = source_scripts.get(source, [])
     if not scripts:
@@ -2805,7 +2862,7 @@ APP_MODULES = [
     ("booking_detail", "Detalle Booking"),
     ("booking_summary", "Resumen Booking"),
     ("booking_commissions", "Comisiones"),
-    ("composite_booking", "Liquidaciones compuestas"),
+    ("composite_booking", "Booking compartido"),
     ("caserio", "El Caserio"),
     ("finance_movements", "Movimientos financieros"),
     ("payroll_compensation", "Sueldos y compensaciones"),
@@ -2814,6 +2871,7 @@ APP_MODULES = [
     ("employees", "ABM Empleados"),
     ("catalog", "Catalogo General"),
     ("digital_income", "Ingresos Digitales"),
+    ("royalties_dashboard", "Dashboard Regalias"),
     ("distributor_config", "Configuracion Distribuidoras"),
     ("source_monitor", "Control Distribuidoras"),
 ]
@@ -5118,6 +5176,241 @@ def finance_movement_item(row: sqlite3.Row) -> dict:
     return item
 
 
+def ensure_finance_movement_employee_columns(conn: sqlite3.Connection) -> None:
+    if not is_postgres_connection(conn):
+        raise HTTPException(
+            status_code=500,
+            detail="Los reintegros a empleados usan Cloud SQL Postgres.",
+        )
+
+
+def ensure_finance_account_entries_table(conn: sqlite3.Connection) -> None:
+    if not is_postgres_connection(conn):
+        raise HTTPException(
+            status_code=500,
+            detail="Las cuentas financieras usan Cloud SQL Postgres.",
+        )
+
+
+def ensure_finance_account_applications_table(conn: sqlite3.Connection) -> None:
+    ensure_finance_account_entries_table(conn)
+
+
+def finance_employee_option_from_id(conn: sqlite3.Connection, employee_id: int | None) -> dict | None:
+    if not employee_id:
+        return None
+    row = conn.execute(
+        """
+        SELECT id, display_name, active
+        FROM employees
+        WHERE id = ?
+        """,
+        (employee_id,),
+    ).fetchone()
+    if row is None or not bool(row["active"]):
+        return None
+    return {"id": int(row["id"]), "display_name": row["display_name"]}
+
+
+def replace_employee_reimbursement_account_entry(
+    conn: sqlite3.Connection,
+    movement_id: int,
+    request: FinanceMovementRequest,
+    amount_ars: float,
+    paid_amount_ars: float,
+    employee: dict | None,
+    now: str,
+) -> None:
+    ensure_finance_account_applications_table(conn)
+    existing_application = conn.execute(
+        """
+        SELECT COUNT(*) AS rows
+        FROM finance_account_entries fae
+        JOIN finance_account_applications faa
+          ON faa.account_entry_id = fae.id
+        WHERE fae.origin_type = 'finance_employee_reimbursement'
+          AND fae.origin_id = ?
+        """,
+        (movement_id,),
+    ).fetchone()
+    if existing_application and int(existing_application["rows"] or 0) > 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Este gasto ya tiene reintegros aplicados. Corregilo con un nuevo movimiento.",
+        )
+    conn.execute(
+        """
+        DELETE FROM finance_account_entries
+        WHERE origin_type = 'finance_employee_reimbursement'
+          AND origin_id = ?
+        """,
+        (movement_id,),
+    )
+    if (
+        request.paid_by != "empleado"
+        or employee is None
+        or request.movement_type != "gasto"
+        or request.status == "anulado"
+    ):
+        return
+
+    reimbursement_amount_ars = paid_amount_ars if paid_amount_ars > 0 else amount_ars
+    if reimbursement_amount_ars <= 0.01:
+        return
+
+    notes = "Reintegro pendiente por gasto pagado por empleado."
+    if request.notes:
+        notes = f"{notes} {request.notes.strip()}"
+    conn.execute(
+        """
+        INSERT INTO finance_account_entries (
+            artist, counterparty, counterparty_employee_id, entry_date, origin_type, origin_id, concept,
+            amount_ars, direction, status, notes, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, 'finance_employee_reimbursement', ?, ?, ?, 'indyana_owes_third_party', 'open', ?, ?, ?)
+        """,
+        (
+            request.artist.strip(),
+            employee["display_name"],
+            employee["id"],
+            request.movement_date,
+            movement_id,
+            request.concept.strip(),
+            reimbursement_amount_ars,
+            notes,
+            now,
+            now,
+        ),
+    )
+
+
+def finance_account_entry_balance(conn: sqlite3.Connection, entry_id: int) -> tuple[float, float] | None:
+    row = conn.execute(
+        """
+        SELECT
+            fae.amount_ars AS amount_ars,
+            COALESCE(SUM(faa.amount_ars), 0) AS applied_amount_ars
+        FROM finance_account_entries fae
+        LEFT JOIN finance_account_applications faa
+          ON faa.account_entry_id = fae.id
+        WHERE fae.id = ?
+        GROUP BY fae.id, fae.amount_ars
+        """,
+        (entry_id,),
+    ).fetchone()
+    if not row:
+        return None
+    return float(row["amount_ars"] or 0), float(row["applied_amount_ars"] or 0)
+
+
+def refresh_finance_account_entry_status(conn: sqlite3.Connection, entry_id: int, now: str) -> None:
+    balance = finance_account_entry_balance(conn, entry_id)
+    if balance is None:
+        return
+    amount, applied = balance
+    if applied <= 0.01:
+        status = "open"
+    elif applied + 0.01 < amount:
+        status = "partial"
+    else:
+        status = "settled"
+    conn.execute(
+        """
+        UPDATE finance_account_entries
+        SET status = ?,
+            updated_at = ?
+        WHERE id = ?
+          AND status != 'void'
+        """,
+        (status, now, entry_id),
+    )
+
+
+def replace_finance_account_applications(
+    conn: sqlite3.Connection,
+    movement_id: int,
+    request: FinanceMovementRequest,
+    amount_ars: float,
+    now: str,
+    username: str | None,
+) -> None:
+    ensure_finance_account_applications_table(conn)
+    previous_rows = conn.execute(
+        """
+        SELECT DISTINCT account_entry_id
+        FROM finance_account_applications
+        WHERE payment_movement_id = ?
+        """,
+        (movement_id,),
+    ).fetchall()
+    previous_entry_ids = [int(row["account_entry_id"]) for row in previous_rows]
+    conn.execute(
+        """
+        DELETE FROM finance_account_applications
+        WHERE payment_movement_id = ?
+        """,
+        (movement_id,),
+    )
+
+    application_entry_ids: list[int] = []
+    should_apply = (
+        request.movement_type == "pago"
+        and request.category == "employee_reimbursement"
+        and request.status != "anulado"
+        and bool(request.account_applications)
+    )
+    if should_apply:
+        total_applications = sum(float(item.amount_ars or 0) for item in request.account_applications)
+        if total_applications > amount_ars + 0.01:
+            raise HTTPException(status_code=400, detail="La aplicacion supera el importe del pago.")
+        employee_name = clean_optional_text(request.counterparty)
+        for item in request.account_applications:
+            entry = conn.execute(
+                """
+                SELECT id, counterparty, amount_ars, status
+                FROM finance_account_entries
+                WHERE id = ?
+                  AND origin_type = 'finance_employee_reimbursement'
+                  AND direction = 'indyana_owes_third_party'
+                  AND status IN ('open', 'partial', 'observed')
+                """,
+                (item.account_entry_id,),
+            ).fetchone()
+            if not entry:
+                raise HTTPException(status_code=400, detail="Uno de los reintegros elegidos no esta abierto.")
+            if employee_name and entry["counterparty"] != employee_name:
+                raise HTTPException(status_code=400, detail="El pago debe aplicarse a reintegros del mismo empleado.")
+            current_balance = finance_account_entry_balance(conn, int(entry["id"]))
+            if current_balance is None:
+                raise HTTPException(status_code=400, detail="No se pudo calcular el saldo del reintegro.")
+            entry_amount, applied_amount = current_balance
+            available = max(entry_amount - applied_amount, 0.0)
+            if item.amount_ars > available + 0.01:
+                raise HTTPException(status_code=400, detail="La aplicacion supera el saldo pendiente de un reintegro.")
+            conn.execute(
+                """
+                INSERT INTO finance_account_applications (
+                    account_entry_id, payment_movement_id, application_date,
+                    amount_ars, notes, created_by, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(entry["id"]),
+                    movement_id,
+                    request.movement_date,
+                    float(item.amount_ars),
+                    clean_optional_text(request.notes),
+                    clean_username(username or "") or None,
+                    now,
+                ),
+            )
+            application_entry_ids.append(int(entry["id"]))
+
+    for entry_id in sorted(set([*previous_entry_ids, *application_entry_ids])):
+        refresh_finance_account_entry_status(conn, entry_id, now)
+
+
 def ensure_finance_movement_allocations_table(conn: sqlite3.Connection) -> None:
     if is_postgres_connection(conn):
         conn.execute(
@@ -5191,65 +5484,15 @@ def finance_allocation_rows_for_ids(conn: sqlite3.Connection, movement_ids: list
     return grouped
 
 
-def ensure_finance_receipts_table(conn: sqlite3.Connection) -> None:
+def ensure_finance_documents_table(conn: Any) -> None:
     if not is_postgres_connection(conn):
         raise HTTPException(
             status_code=500,
-            detail="Los recibos operativos usan Cloud SQL Postgres. SQLite no es una base viva para emitir recibos.",
+            detail="Los documentos financieros operativos usan Cloud SQL Postgres. SQLite no es una base viva para emitir documentos.",
         )
-    conn.execute("CREATE SEQUENCE IF NOT EXISTS finance_receipts_receipt_number_seq")
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS finance_receipts (
-            id bigserial PRIMARY KEY,
-            movement_id bigint NOT NULL UNIQUE REFERENCES finance_movements(id) ON DELETE CASCADE,
-            receipt_number bigint NOT NULL UNIQUE DEFAULT nextval('finance_receipts_receipt_number_seq'),
-            receipt_date date NOT NULL,
-            receipt_kind text NOT NULL DEFAULT 'sena_show',
-            issuer_company text NOT NULL DEFAULT 'VPO Corp',
-            received_from text NOT NULL,
-            amount numeric(18, 6) NOT NULL DEFAULT 0,
-            currency text NOT NULL DEFAULT 'ARS',
-            fx_rate numeric(18, 6),
-            amount_ars numeric(18, 6) NOT NULL DEFAULT 0,
-            vat_mode text NOT NULL DEFAULT 'no_aplica',
-            concept text NOT NULL,
-            show_date date,
-            venue text,
-            artist_names_json jsonb NOT NULL DEFAULT '[]'::jsonb,
-            booking_show_id bigint REFERENCES booking_shows(id) ON DELETE SET NULL,
-            status text NOT NULL DEFAULT 'emitido',
-            pdf_path text,
-            notes text,
-            created_by text,
-            created_at timestamptz NOT NULL DEFAULT now(),
-            updated_at timestamptz NOT NULL DEFAULT now()
-        )
-        """
-    )
-    conn.execute("ALTER TABLE finance_receipts ADD COLUMN IF NOT EXISTS issuer_company text NOT NULL DEFAULT 'VPO Corp'")
-    conn.execute(
-        "ALTER TABLE finance_receipts ALTER COLUMN receipt_number SET DEFAULT nextval('finance_receipts_receipt_number_seq')"
-    )
-    conn.execute(
-        """
-        SELECT setval(
-            'finance_receipts_receipt_number_seq',
-            GREATEST(
-                1,
-                COALESCE((SELECT MAX(receipt_number) FROM finance_receipts), 0),
-                (SELECT last_value FROM finance_receipts_receipt_number_seq)
-            ),
-            COALESCE((SELECT MAX(receipt_number) FROM finance_receipts), 0) > 0
-                OR (SELECT is_called FROM finance_receipts_receipt_number_seq)
-        )
-        """
-    )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_receipts_date ON finance_receipts(receipt_date DESC, id DESC)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_finance_receipts_show_date ON finance_receipts(show_date)")
 
 
-def finance_receipt_item(row: sqlite3.Row) -> dict:
+def finance_document_item(row: sqlite3.Row) -> dict:
     item = dict(row)
     for key in ("amount", "fx_rate", "amount_ars"):
         if key in item:
@@ -5265,77 +5508,84 @@ def finance_receipt_item(row: sqlite3.Row) -> dict:
     return item
 
 
-def finance_receipt_rows_for_ids(conn: sqlite3.Connection, movement_ids: list[int]) -> dict[int, dict]:
+def finance_document_rows_for_ids(conn: Any, movement_ids: list[int]) -> dict[int, dict]:
     if not movement_ids:
         return {}
-    ensure_finance_receipts_table(conn)
+    ensure_finance_documents_table(conn)
     placeholders = ",".join("?" for _ in movement_ids)
     rows = conn.execute(
         f"""
         SELECT *
-        FROM finance_receipts
+        FROM finance_documents
         WHERE movement_id IN ({placeholders})
         ORDER BY movement_id, id
         """,
         movement_ids,
     ).fetchall()
-    return {int(row["movement_id"]): finance_receipt_item(row) for row in rows}
+    return {int(row["movement_id"]): finance_document_item(row) for row in rows}
 
 
-def validate_finance_receipt_request(request: FinanceMovementRequest) -> FinanceReceiptDetailRequest | None:
-    if request.category != "sena_show":
+def validate_finance_document_request(request: FinanceMovementRequest) -> FinanceDocumentDetailRequest | None:
+    document = request.document_detail
+    if request.category == "sena_show" and not document:
+        raise HTTPException(status_code=400, detail="Completa los datos del documento financiero.")
+    if not document:
         return None
-    if request.business_area != "booking" or request.movement_type != "pago":
-        raise HTTPException(status_code=400, detail="La seña de show debe cargarse como Pago / cobro del area Booking.")
-    if not request.receipt_detail:
-        raise HTTPException(status_code=400, detail="Completa los datos del recibo de seña.")
+    if request.movement_type not in {"pago", "gasto"}:
+        raise HTTPException(status_code=400, detail="Los documentos financieros se emiten desde Pago / cobro o desde Gasto / inversión.")
+    if request.movement_type == "gasto" and document.document_type != "payment_order":
+        raise HTTPException(status_code=400, detail="Un gasto/inversión solo puede emitir una orden de pago.")
+    if request.category == "sena_show" and document.document_type != "show_deposit_receipt":
+        raise HTTPException(status_code=400, detail="La categoría seña de show debe emitir un recibo por seña de show.")
+    if document.document_type == "show_deposit_receipt" and request.business_area != "booking":
+        raise HTTPException(status_code=400, detail="El recibo por seña de show debe cargarse en el área Booking.")
     if request.amount <= 0:
-        raise HTTPException(status_code=400, detail="El recibo de seña necesita un importe mayor a cero.")
+        raise HTTPException(status_code=400, detail="El documento financiero necesita un importe mayor a cero.")
     if request.currency == "USD" and not request.fx_rate:
-        raise HTTPException(status_code=400, detail="Para una seña en USD, completa el tipo de cambio.")
-    artists = [clean_booking_artist(name) or name.strip() for name in request.receipt_detail.artist_names if name.strip()]
+        raise HTTPException(status_code=400, detail="Para emitir un documento en USD, completa el tipo de cambio.")
+    artists = [clean_booking_artist(name) or name.strip() for name in document.artist_names if name.strip()]
     if request.artist.strip() and request.artist.strip() not in artists:
         artists.insert(0, request.artist.strip())
-    if not artists:
+    if document.document_type == "show_deposit_receipt" and not artists:
         raise HTTPException(status_code=400, detail="Elegir al menos un artista del show para el recibo.")
-    request.receipt_detail.artist_names = list(dict.fromkeys(artists))
-    return request.receipt_detail
+    document.artist_names = list(dict.fromkeys(artists))
+    return document
 
 
-def next_finance_receipt_number(conn: sqlite3.Connection) -> int:
-    ensure_finance_receipts_table(conn)
-    row = conn.execute("SELECT nextval('finance_receipts_receipt_number_seq') AS next_number").fetchone()
+def next_finance_document_number(conn: Any) -> int:
+    ensure_finance_documents_table(conn)
+    row = conn.execute("SELECT nextval('finance_documents_document_number_seq') AS next_number").fetchone()
     return int(row["next_number"] or 1)
 
 
-def replace_finance_receipt_detail(
-    conn: sqlite3.Connection,
+def replace_finance_document_detail(
+    conn: Any,
     movement_id: int,
     request: FinanceMovementRequest,
     amount_ars: float,
     now: str,
     username: str | None,
 ) -> dict | None:
-    receipt = validate_finance_receipt_request(request)
-    ensure_finance_receipts_table(conn)
-    if not receipt:
-        conn.execute("DELETE FROM finance_receipts WHERE movement_id = ?", (movement_id,))
+    document = validate_finance_document_request(request)
+    ensure_finance_documents_table(conn)
+    if not document:
+        conn.execute("DELETE FROM finance_documents WHERE movement_id = ?", (movement_id,))
         return None
 
     existing = conn.execute(
-        "SELECT id, receipt_number FROM finance_receipts WHERE movement_id = ?",
+        "SELECT id, document_number FROM finance_documents WHERE movement_id = ?",
         (movement_id,),
     ).fetchone()
-    receipt_number = int(existing["receipt_number"]) if existing else next_finance_receipt_number(conn)
-    artist_names_json = json.dumps(receipt.artist_names, ensure_ascii=False)
+    document_number = int(existing["document_number"]) if existing else next_finance_document_number(conn)
+    artist_names_json = json.dumps(document.artist_names, ensure_ascii=False)
     if existing:
         conn.execute(
             """
-            UPDATE finance_receipts
-            SET receipt_date = ?,
-                receipt_kind = ?,
+            UPDATE finance_documents
+            SET document_date = ?,
+                document_type = ?,
                 issuer_company = ?,
-                received_from = ?,
+                counterparty_name = ?,
                 amount = ?,
                 currency = ?,
                 fx_rate = ?,
@@ -5353,20 +5603,20 @@ def replace_finance_receipt_detail(
             """,
             (
                 request.movement_date,
-                receipt.receipt_kind,
-                receipt.issuer_company,
-                receipt.received_from.strip(),
+                document.document_type,
+                document.issuer_company,
+                document.counterparty_name.strip(),
                 request.amount,
                 request.currency,
                 request.fx_rate,
                 amount_ars,
-                receipt.vat_mode,
+                document.vat_mode,
                 request.concept.strip(),
-                clean_optional_text(receipt.show_date),
-                clean_optional_text(receipt.venue),
+                clean_optional_text(document.show_date),
+                clean_optional_text(document.venue),
                 artist_names_json,
-                receipt.booking_show_id,
-                clean_optional_text(receipt.notes),
+                document.booking_show_id,
+                clean_optional_text(document.notes),
                 now,
                 movement_id,
             ),
@@ -5374,9 +5624,9 @@ def replace_finance_receipt_detail(
     else:
         conn.execute(
             """
-            INSERT INTO finance_receipts (
-                movement_id, receipt_number, receipt_date, receipt_kind,
-                issuer_company, received_from, amount, currency, fx_rate, amount_ars,
+            INSERT INTO finance_documents (
+                movement_id, document_number, document_date, document_type,
+                issuer_company, counterparty_name, amount, currency, fx_rate, amount_ars,
                 vat_mode, concept, show_date, venue, artist_names_json,
                 booking_show_id, status, notes, created_by, created_at, updated_at
             )
@@ -5384,43 +5634,71 @@ def replace_finance_receipt_detail(
             """,
             (
                 movement_id,
-                receipt_number,
+                document_number,
                 request.movement_date,
-                receipt.receipt_kind,
-                receipt.issuer_company,
-                receipt.received_from.strip(),
+                document.document_type,
+                document.issuer_company,
+                document.counterparty_name.strip(),
                 request.amount,
                 request.currency,
                 request.fx_rate,
                 amount_ars,
-                receipt.vat_mode,
+                document.vat_mode,
                 request.concept.strip(),
-                clean_optional_text(receipt.show_date),
-                clean_optional_text(receipt.venue),
+                clean_optional_text(document.show_date),
+                clean_optional_text(document.venue),
                 artist_names_json,
-                receipt.booking_show_id,
-                clean_optional_text(receipt.notes),
+                document.booking_show_id,
+                clean_optional_text(document.notes),
                 clean_optional_text(username),
                 now,
                 now,
             ),
         )
-    row = conn.execute("SELECT * FROM finance_receipts WHERE movement_id = ?", (movement_id,)).fetchone()
-    return finance_receipt_item(row) if row else None
+    row = conn.execute("SELECT * FROM finance_documents WHERE movement_id = ?", (movement_id,)).fetchone()
+    return finance_document_item(row) if row else None
 
 
-def finance_receipt_number_label(amount: float) -> str:
+def finance_document_number_label(amount: float) -> str:
     value = f"{float(amount or 0):,.2f}"
     return value.replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def finance_receipt_amount_label(currency: str, amount: float) -> str:
+def finance_document_amount_label(currency: str, amount: float) -> str:
     if currency == "USD":
-        return f"{finance_receipt_number_label(amount)} dólares americanos"
-    return f"{finance_receipt_number_label(amount)} pesos argentinos"
+        return f"{finance_document_number_label(amount)} dólares americanos"
+    return f"{finance_document_number_label(amount)} pesos argentinos"
 
 
-def finance_receipt_pdf_bytes(receipt: dict, movement: dict) -> bytes:
+def finance_document_title(document_type: str) -> str:
+    if document_type == "payment_order":
+        return "ORDEN DE PAGO"
+    if document_type == "collection_receipt":
+        return "COMPROBANTE DE COBRO"
+    return "RECIBO"
+
+
+def finance_document_subtitle(document_type: str) -> str:
+    if document_type == "payment_order":
+        return "Comprobante interno de pago emitido desde Movimientos financieros"
+    if document_type == "collection_receipt":
+        return "Comprobante interno de cobro emitido desde Movimientos financieros"
+    return "Comprobante interno de recepción de dinero"
+
+
+def finance_document_counterparty_label(document_type: str) -> str:
+    if document_type == "payment_order":
+        return "Pagado a"
+    return "Recibimos de"
+
+
+def finance_document_amount_row_label(document_type: str) -> str:
+    if document_type == "payment_order":
+        return "Importe pagado"
+    return "Importe recibido"
+
+
+def finance_document_pdf_bytes(document: dict, movement: dict) -> bytes:
     try:
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4
@@ -5429,15 +5707,17 @@ def finance_receipt_pdf_bytes(receipt: dict, movement: dict) -> bytes:
     except ImportError as exc:
         raise HTTPException(
             status_code=500,
-            detail="Falta reportlab para generar PDF de recibos. Instalar dependencias y redeployar.",
+            detail="Falta reportlab para generar PDF de documentos financieros. Instalar dependencias y redeployar.",
         ) from exc
 
     buffer = BytesIO()
     page = canvas.Canvas(buffer, pagesize=A4)
     width, height = A4
     margin = 20 * mm
-    issuer_company = str(receipt.get("issuer_company") or "VPO Corp").strip() or "VPO Corp"
-    receipt_number = int(receipt["receipt_number"])
+    issuer_company = str(document.get("issuer_company") or "VPO Corp").strip() or "VPO Corp"
+    document_number = int(document["document_number"])
+    document_type = str(document.get("document_type") or "show_deposit_receipt")
+    title = finance_document_title(document_type)
 
     def draw_wrapped(text: str, x: float, y_pos: float, max_chars: int = 82, line_height: float = 5 * mm) -> float:
         cleaned = " ".join(str(text or "").split()) or "-"
@@ -5447,23 +5727,23 @@ def finance_receipt_pdf_bytes(receipt: dict, movement: dict) -> bytes:
             y_pos -= line_height
         return y_pos
 
-    page.setTitle(f"Recibo {receipt_number:06d}")
+    page.setTitle(f"Documento financiero {document_number:06d}")
     page.setFillColor(colors.HexColor("#2f6f67"))
     page.rect(0, height - 34 * mm, width, 34 * mm, stroke=0, fill=1)
     page.setFillColor(colors.white)
     page.setFont("Helvetica-Bold", 18)
     page.drawString(margin, height - 18 * mm, issuer_company)
     page.setFont("Helvetica", 9)
-    page.drawString(margin, height - 25 * mm, "Comprobante interno de recepción de dinero")
+    page.drawString(margin, height - 25 * mm, finance_document_subtitle(document_type))
     page.setFont("Helvetica-Bold", 22)
-    page.drawRightString(width - margin, height - 17 * mm, "RECIBO")
+    page.drawRightString(width - margin, height - 17 * mm, title)
     page.setFont("Helvetica", 10)
-    page.drawRightString(width - margin, height - 25 * mm, f"Nro. {receipt_number:06d}")
+    page.drawRightString(width - margin, height - 25 * mm, f"Nro. {document_number:06d}")
 
     y = height - 48 * mm
     page.setFillColor(colors.HexColor("#0f172a"))
     page.setFont("Helvetica-Bold", 12)
-    page.drawString(margin, y, "Datos del recibo")
+    page.drawString(margin, y, "Datos del documento")
     y -= 7 * mm
 
     box_x = margin
@@ -5475,14 +5755,18 @@ def finance_receipt_pdf_bytes(receipt: dict, movement: dict) -> bytes:
     y -= 9 * mm
 
     rows = [
-        ("Fecha", str(receipt.get("receipt_date") or "")),
-        ("Recibimos de", str(receipt.get("received_from") or "")),
-        ("Importe recibido", finance_receipt_amount_label(str(receipt.get("currency") or "ARS"), float(receipt.get("amount") or 0))),
-        ("Concepto", str(receipt.get("concept") or movement.get("concept") or "Seña de show")),
-        ("Fecha del show", str(receipt.get("show_date") or "-")),
-        ("Lugar", str(receipt.get("venue") or "-")),
-        ("Artista(s)", ", ".join(receipt.get("artist_names") or [movement.get("artist") or ""])),
+        ("Fecha", str(document.get("document_date") or "")),
+        (finance_document_counterparty_label(document_type), str(document.get("counterparty_name") or "")),
+        (finance_document_amount_row_label(document_type), finance_document_amount_label(str(document.get("currency") or "ARS"), float(document.get("amount") or 0))),
+        ("Concepto", str(document.get("concept") or movement.get("concept") or "")),
+        ("Area", str(movement.get("business_area") or "-")),
+        ("Artista / unidad", ", ".join(document.get("artist_names") or [movement.get("artist") or ""])),
     ]
+    if document_type == "show_deposit_receipt":
+        rows.extend([
+            ("Fecha del show", str(document.get("show_date") or "-")),
+            ("Lugar", str(document.get("venue") or "-")),
+        ])
     label_x = margin + 7 * mm
     value_x = margin + 50 * mm
     for label, value in rows:
@@ -5494,7 +5778,7 @@ def finance_receipt_pdf_bytes(receipt: dict, movement: dict) -> bytes:
         y = draw_wrapped(value, value_x, y, max_chars=62)
         y -= 2 * mm
 
-    notes = str(receipt.get("notes") or movement.get("notes") or "").strip()
+    notes = str(document.get("notes") or movement.get("notes") or "").strip()
     if notes:
         y -= 6 * mm
         page.setFont("Helvetica-Bold", 10)
@@ -5512,7 +5796,7 @@ def finance_receipt_pdf_bytes(receipt: dict, movement: dict) -> bytes:
     page.setFillColor(colors.HexColor("#334155"))
     page.setFont("Helvetica", 9)
     page.drawString(margin, y, "Firma / aclaración")
-    page.drawString(width - margin - 65 * mm, y, f"Recibido por {issuer_company}"[:48])
+    page.drawString(width - margin - 65 * mm, y, f"Emitido por {issuer_company}"[:48])
 
     page.setFillColor(colors.HexColor("#64748b"))
     page.setFont("Helvetica", 8)
@@ -5521,7 +5805,6 @@ def finance_receipt_pdf_bytes(receipt: dict, movement: dict) -> bytes:
     page.showPage()
     page.save()
     return buffer.getvalue()
-
 
 def finance_normalized_allocations(
     request: FinanceMovementRequest,
@@ -6958,13 +7241,17 @@ def distributor_config_overview(
     for policy in policies.get("entries", []):
         source = policy.get("source")
         account = policy.get("account")
+        policy_with_defaults = {
+            **policy,
+            "report_net_adjustment_pct": float(policy.get("report_net_adjustment_pct") or 0.0),
+        }
         related_dictionary = [
             item for item in dictionary_entries
             if item.get("source") == source and item.get("account") in {account, "*"}
         ]
         contract_cutoff_id = policy.get("contract_cutoff_id")
         accounts.append({
-            **policy,
+            **policy_with_defaults,
             "statement_dictionary": related_dictionary,
             "contract_cutoff": cutoff_by_id.get(contract_cutoff_id),
             "account_impact_stats": account_impact_stats.get((str(source), str(account)), {
@@ -7005,7 +7292,12 @@ def distributor_config_overview(
 
     return {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
-        "mode": policies.get("mode", "seed_read_only"),
+        "mode": policies.get("mode", "production_policy"),
+        "policy_version": policies.get("policy_version"),
+        "report_personalization": policies.get("report_personalization", {
+            "enabled": False,
+            "amount_basis": "net_amount_after_distributor",
+        }),
         "accounts": accounts,
         "statement_dictionary": dictionary_entries,
         "contract_cutoffs": cutoffs.get("entries", []),
@@ -7019,6 +7311,32 @@ def distributor_config_overview(
             "account_types": type_counts,
             "catalog_works": sum(int(item.get("catalog_stats", {}).get("works", 0) or 0) for item in accounts),
         },
+    }
+
+
+@app.patch("/config/distributor-account-policies/personalization")
+def update_distributor_personalization(
+    request: DistributorPersonalizationRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+):
+    require_api_key(x_vpo_api_key)
+    try:
+        policies = update_report_personalization(
+            enabled=bool(request.enabled),
+            accounts=[account.model_dump() for account in request.accounts],
+            updated_by=(x_vpo_username or "system").strip() or "system",
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {
+        "ok": True,
+        "report_personalization": policies["report_personalization"],
+        "policy_version": policies["policy_version"],
+        "updated_at": policies["updated_at"],
+        "accounts_updated": len(request.accounts),
     }
 
 
@@ -7251,6 +7569,543 @@ def update_catalog_status(
     return {"ok": True, "catalog_key": catalog_key, "active": bool(request.active), "updated_at": now}
 
 
+def build_royalties_dashboard_summary_mart(
+    standardized_path: Path,
+    refresh_cache: bool = False,
+    *,
+    output_path: Path | None = None,
+    partition_large_input: bool = True,
+) -> Path:
+    target_path = output_path or ROYALTIES_DASHBOARD_SUMMARY_PATH
+    if (
+        not refresh_cache
+        and target_path.exists()
+        and target_path.stat().st_mtime >= standardized_path.stat().st_mtime
+    ):
+        return target_path
+
+    if partition_large_input and standardized_path.stat().st_size > 256 * 1024 * 1024:
+        return build_partitioned_royalties_dashboard_summary_mart(
+            standardized_path=standardized_path,
+            output_path=target_path,
+        )
+
+    lf = pl.scan_parquet(standardized_path)
+    schema = lf.collect_schema()
+    columns = set(schema.names())
+    needed_columns = {
+        "source",
+        "Fuente",
+        "SOURCE",
+        "account",
+        "Cuenta",
+        "ACCOUNT",
+        "source_sheet",
+        "sheet_name",
+        "Sheet",
+        "SHEET",
+        "statement_type",
+        "statement_kind",
+        "statement_file_name",
+        "mart_source_file",
+        "source_file",
+        "revenue_basis",
+        "Base ingreso",
+        "statement_period",
+        "transaction_month",
+        "amount_usd",
+        "net_amount_usd",
+        "net_amount",
+        "units",
+        "Units",
+        "quantity",
+        "Quantity",
+        "Asset Quantity",
+        "Product Quantity",
+        "streams",
+        "Streams",
+        "views",
+        "Views",
+        "asset_isrc",
+        "ISRC",
+        "isrc",
+        "Asset ISRC",
+        "YouTube Asset ISRC",
+        "product_upc",
+        "UPC",
+        "upc",
+        "Product UPC",
+        "DISPLAY UPC",
+        "Display UPC",
+        "MANUFACTURER UPC",
+        "UPC Code",
+        "video_id",
+        "Video ID",
+        "VideoId",
+        "YOUTUBE VIDEO ID",
+        "YouTube Video ID",
+        "YouTube Asset ID",
+        "ID",
+        "Parent ID",
+        "track_id",
+        "artist_statement_style",
+        "artist_best_available",
+        "artist_name_statement",
+        "track_artist_statement",
+        "product_artist_statement",
+        "asset_artist_statement",
+        "Artist Name",
+        "Artists",
+        "Track Artists",
+        "Track Artist",
+        "TRACK ARTIST",
+        "PRODUCT ARTIST",
+        "Asset Artist",
+        "Product Artist",
+        "artists_raw",
+        "payee",
+        "Payee",
+        "Channel Name",
+        "track_statement_style",
+        "asset_title_statement",
+        "release_statement_style",
+        "track_title",
+        "Track Title",
+        "TRACK",
+        "Asset Title",
+        "Product Title",
+        "Title",
+        "Video Title",
+        "YouTube Video Title",
+        "Album Title",
+        "PRODUCT",
+        "dsp",
+        "DSP",
+        "dsp_normalized",
+        "monetization_normalized",
+        "content_origin_normalized",
+        "plan_normalized",
+        "classification_status",
+        "store_report_label",
+        "store_name",
+        "store_raw",
+        "Store",
+        "Sale Store Name",
+        "STORE",
+        "Shop",
+        "Platform",
+        "territory",
+        "Territory",
+        "COUNTRY",
+        "Country",
+        "Sale Country",
+        "Region",
+        "Sale Type",
+        "use_type",
+        "Use Type",
+        "usage_type",
+        "usage_raw",
+        "Product Type",
+        "label_normalized_statement_style",
+        "label_normalized",
+        "label_statement_style",
+        "Label Name",
+        "Product Label",
+        "LABEL",
+        "label",
+    }
+    selected_columns = [column for column in sorted(needed_columns) if column in columns]
+    if selected_columns:
+        lf = lf.select(selected_columns)
+        columns = set(selected_columns)
+
+    def text_expr(column_name: str) -> pl.Expr:
+        if column_name not in columns:
+            return pl.lit("")
+        return pl.col(column_name).cast(pl.Utf8, strict=False).fill_null("").str.strip_chars()
+
+    def non_empty_text_expr(column_name: str) -> pl.Expr:
+        value = text_expr(column_name)
+        return pl.when(value == "").then(None).otherwise(value)
+
+    def coalesce_text_expr(column_names: list[str]) -> pl.Expr:
+        choices = [non_empty_text_expr(column_name) for column_name in column_names if column_name in columns]
+        return pl.coalesce(choices).fill_null("") if choices else pl.lit("")
+
+    def numeric_expr(column_name: str) -> pl.Expr:
+        if column_name not in columns:
+            return pl.lit(None).cast(pl.Float64)
+        return pl.col(column_name).cast(pl.Float64, strict=False)
+
+    def coalesce_numeric_expr(column_names: list[str]) -> pl.Expr:
+        choices = [numeric_expr(column_name) for column_name in column_names if column_name in columns]
+        return pl.coalesce(choices).fill_null(0.0) if choices else pl.lit(0.0)
+
+    amount_usd = coalesce_numeric_expr(["amount_usd", "net_amount_usd", "net_amount"])
+    units = coalesce_numeric_expr([
+        "units",
+        "Units",
+        "quantity",
+        "Quantity",
+        "Asset Quantity",
+        "Product Quantity",
+        "streams",
+        "Streams",
+        "views",
+        "Views",
+    ])
+    artist = coalesce_text_expr([
+        "artist_statement_style",
+        "artist_best_available",
+        "artist_name_statement",
+        "track_artist_statement",
+        "product_artist_statement",
+        "asset_artist_statement",
+        "Artist Name",
+        "Track Artist",
+        "TRACK ARTIST",
+        "PRODUCT ARTIST",
+        "Asset Artist",
+        "Product Artist",
+        "artists_raw",
+        "payee",
+        "Payee",
+    ])
+    title = coalesce_text_expr([
+        "track_statement_style",
+        "release_statement_style",
+        "track_title",
+        "Track Title",
+        "TRACK",
+        "Asset Title",
+        "Product Title",
+        "Title",
+        "Video Title",
+        "Album Title",
+    ])
+    isrc = coalesce_text_expr(["asset_isrc", "isrc", "ISRC", "Track ISRC", "Asset ISRC"])
+    upc = coalesce_text_expr(["upc", "UPC", "Product UPC", "Release UPC"])
+    dsp = coalesce_text_expr([
+        "dsp_normalized",
+        "dsp",
+        "DSP",
+        "store_name",
+        "store_raw",
+        "Store",
+        "Sale Store Name",
+        "STORE",
+        "Shop",
+        "Platform",
+    ])
+    store = coalesce_text_expr(["store_report_label", "Sale Store Name", "store_name", "store_raw", "Store", "DSP", "dsp"])
+    territory = coalesce_text_expr(["territory", "Territory", "COUNTRY", "Country", "Sale Country", "Region"])
+    sale_type = coalesce_text_expr(["Sale Type", "use_type", "Use Type", "usage_type", "usage_raw", "Product Type"])
+    label = coalesce_text_expr([
+        "label_normalized_statement_style",
+        "label_normalized",
+        "label_statement_style",
+        "Label Name",
+        "Product Label",
+        "LABEL",
+        "label",
+    ])
+    search_variants = pl.concat_str([
+        text_expr(column_name)
+        for column_name in [
+            "artist_statement_style",
+            "artist_best_available",
+            "artist_name_statement",
+            "track_artist_statement",
+            "product_artist_statement",
+            "asset_artist_statement",
+            "Artist Name",
+            "Track Artist",
+            "TRACK ARTIST",
+            "PRODUCT ARTIST",
+            "Asset Artist",
+            "Product Artist",
+            "artists_raw",
+            "payee",
+            "Payee",
+            "track_statement_style",
+            "release_statement_style",
+            "track_title",
+            "Track Title",
+            "TRACK",
+            "Asset Title",
+            "Product Title",
+            "Title",
+            "Video Title",
+            "Album Title",
+        ]
+        if column_name in columns
+    ], separator=" ")
+    source_sheet = coalesce_text_expr(["source_sheet", "sheet_name", "Sheet", "SHEET"])
+    precompact = (
+        lf
+        .with_columns([
+            text_expr("source").alias("source"),
+            text_expr("account").alias("account"),
+            text_expr("statement_period").alias("statement_period"),
+            text_expr("transaction_month").alias("transaction_month"),
+            source_sheet.alias("source_sheet"),
+            coalesce_text_expr(["revenue_basis", "Base ingreso"]).alias("revenue_basis"),
+            artist.alias("artist"),
+            title.alias("title"),
+            isrc.alias("asset_isrc"),
+            upc.alias("UPC"),
+            coalesce_text_expr(["video_id", "Video ID", "VideoId", "YOUTUBE VIDEO ID", "YouTube Video ID", "YouTube Asset ID", "ID", "Parent ID", "track_id"]).alias("video_id"),
+            dsp.alias("dsp"),
+            store.alias("store"),
+            territory.alias("territory"),
+            sale_type.alias("sale_type"),
+            coalesce_text_expr(["monetization_normalized"]).alias("monetization_normalized"),
+            coalesce_text_expr(["content_origin_normalized"]).alias("content_origin_normalized"),
+            coalesce_text_expr(["plan_normalized"]).alias("plan_normalized"),
+            coalesce_text_expr(["classification_status"]).alias("classification_status"),
+            label.alias("label"),
+            search_variants.alias("_search_variants"),
+            units.alias("units"),
+            amount_usd.alias("_dashboard_amount_usd"),
+        ])
+        .with_columns([
+            pl.when(pl.col("content_origin_normalized") != "")
+            .then(pl.col("content_origin_normalized"))
+            .when(pl.col("store").str.to_lowercase().str.contains("youtube channel", literal=True))
+            .then(pl.lit("YouTube Channel Income"))
+            .when(pl.col("store").str.to_lowercase().str.contains("youtube ugc", literal=True))
+            .then(pl.lit("YouTube UGC"))
+            .when(pl.col("store").str.to_lowercase().str.contains("youtube art", literal=True) | pl.col("dsp").str.to_lowercase().str.contains("youtube music", literal=True))
+            .then(pl.lit("YouTube Art Track"))
+            .when(pl.col("dsp").str.to_lowercase().str.contains("youtube", literal=True) | pl.col("store").str.to_lowercase().str.contains("youtube", literal=True))
+            .then(pl.lit("YouTube Other"))
+            .otherwise(pl.lit("Other"))
+            .alias("earning_type"),
+            pl.when(pl.col("content_origin_normalized") != "")
+            .then(pl.col("content_origin_normalized"))
+            .when(pl.col("store").str.to_lowercase().str.contains("art track", literal=True) | pl.col("dsp").str.to_lowercase().str.contains("youtube music", literal=True))
+            .then(pl.lit("Art Track"))
+            .when(pl.col("store").str.to_lowercase().str.contains("channel", literal=True) | pl.col("source_sheet").str.to_lowercase().str.contains("youtube", literal=True))
+            .then(pl.lit("Music Video"))
+            .when(pl.col("sale_type").str.to_lowercase().str.contains("audio", literal=True) & ~pl.col("sale_type").str.to_lowercase().str.contains("video", literal=True))
+            .then(pl.lit("Sound Recording"))
+            .otherwise(pl.lit("Unknown"))
+            .alias("asset_type"),
+            pl.when(pl.col("sale_type") == "").then(pl.lit("Unknown")).otherwise(pl.col("sale_type")).alias("claim_type"),
+        ])
+        .with_columns([
+            pl.when(pl.col("artist") == "").then(pl.lit("SIN ARTISTA")).otherwise(pl.col("artist")).alias("artist"),
+            pl.when(pl.col("title") == "").then(pl.lit("SIN TITULO")).otherwise(pl.col("title")).alias("title"),
+            pl.when(pl.col("dsp") == "").then(pl.lit("SIN DSP")).otherwise(pl.col("dsp")).alias("dsp"),
+            pl.when(pl.col("store") == "").then(pl.lit("SIN STORE")).otherwise(pl.col("store")).alias("store"),
+            pl.when(pl.col("territory") == "").then(pl.lit("SIN TERRITORIO")).otherwise(pl.col("territory")).alias("territory"),
+            pl.when(pl.col("sale_type") == "").then(pl.lit("SIN TIPO")).otherwise(pl.col("sale_type")).alias("sale_type"),
+            pl.when(pl.col("label") == "").then(pl.lit("SIN LABEL")).otherwise(pl.col("label")).alias("label"),
+        ])
+        .filter(
+            (pl.col("source") != "")
+            & (pl.col("account") != "")
+            & (pl.col("statement_period") != "")
+        )
+        .group_by([
+            "statement_period",
+            "transaction_month",
+            "source",
+            "account",
+            "source_sheet",
+            "revenue_basis",
+            "artist",
+            "title",
+            "asset_isrc",
+            "UPC",
+            "video_id",
+            "dsp",
+            "store",
+            "territory",
+            "sale_type",
+            "monetization_normalized",
+            "content_origin_normalized",
+            "plan_normalized",
+            "classification_status",
+            "label",
+            "earning_type",
+            "asset_type",
+            "claim_type",
+            "_search_variants",
+        ])
+        .agg([
+            pl.sum("_dashboard_amount_usd").alias("_dashboard_amount_usd"),
+            pl.sum("units").round(0).alias("units"),
+            pl.len().alias("raw_rows"),
+        ])
+    )
+
+    reportable = filter_reportable_generation(precompact, set(precompact.collect_schema().names()))
+    compact = (
+        reportable
+        .select([
+            "statement_period",
+            "transaction_month",
+            "source",
+            "account",
+            "source_sheet",
+            "artist",
+            "title",
+            pl.col("asset_isrc").alias("isrc"),
+            pl.col("UPC").alias("upc"),
+            "dsp",
+            "store",
+            "territory",
+            "sale_type",
+            "monetization_normalized",
+            "content_origin_normalized",
+            "plan_normalized",
+            "classification_status",
+            "label",
+            "earning_type",
+            "asset_type",
+            "claim_type",
+            pl.concat_str([
+                pl.col("artist"),
+                pl.col("title"),
+                pl.col("asset_isrc"),
+                pl.col("UPC"),
+                pl.col("video_id"),
+                pl.col("dsp"),
+                pl.col("store"),
+                pl.col("label"),
+                pl.col("sale_type"),
+                pl.col("_search_variants"),
+            ], separator=" ")
+            .str.to_lowercase()
+            .alias("search_text"),
+            pl.col("_dashboard_amount_usd").alias("amount_usd"),
+            "units",
+            "raw_rows",
+        ])
+    )
+
+    statement_periods = (
+        lf
+        .select(text_expr("statement_period").alias("statement_period"))
+        .filter(pl.col("statement_period") != "")
+        .unique()
+        .sort("statement_period")
+        .collect(engine="streaming")
+        .get_column("statement_period")
+        .to_list()
+    )
+    if not statement_periods:
+        raise ValueError("No hay statement_period validos para construir el dashboard de regalias.")
+
+    parts_dir = BASE / "staging" / f"{target_path.stem}_parts"
+    if parts_dir.exists():
+        shutil.rmtree(parts_dir)
+    parts_dir.mkdir(parents=True, exist_ok=True)
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_output = target_path.with_name(
+        f"{target_path.name}.tmp"
+    )
+    if temporary_output.exists():
+        temporary_output.unlink()
+    try:
+        for index, statement_period in enumerate(statement_periods):
+            part_path = parts_dir / f"{index:03d}_{statement_period}.parquet"
+            (
+                compact
+                .filter(pl.col("statement_period") == statement_period)
+                .sink_parquet(part_path, compression="zstd", engine="streaming")
+            )
+
+        (
+            pl.scan_parquet(parts_dir / "*.parquet")
+            .sink_parquet(temporary_output, compression="zstd", engine="streaming")
+        )
+        temporary_output.replace(target_path)
+    finally:
+        shutil.rmtree(parts_dir, ignore_errors=True)
+    return target_path
+
+
+def build_partitioned_royalties_dashboard_summary_mart(
+    standardized_path: Path,
+    output_path: Path,
+) -> Path:
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    import pyarrow.parquet as pq
+
+    raw_parts_dir = BASE / "staging" / "royalties_dashboard_raw_periods"
+    summary_parts_dir = BASE / "staging" / "royalties_dashboard_compact_periods"
+    temporary_output = output_path.with_name(f"{output_path.name}.tmp")
+
+    for path in [raw_parts_dir, summary_parts_dir]:
+        if path.exists():
+            shutil.rmtree(path)
+        path.mkdir(parents=True, exist_ok=True)
+    if temporary_output.exists():
+        temporary_output.unlink()
+
+    parquet_file = pq.ParquetFile(standardized_path)
+    statement_period_index = parquet_file.schema_arrow.get_field_index("statement_period")
+    if statement_period_index < 0:
+        raise ValueError("El mart consolidado no contiene statement_period.")
+
+    writers: dict[str, pq.ParquetWriter] = {}
+    try:
+        for batch in parquet_file.iter_batches(batch_size=100_000):
+            statement_periods = batch.column(statement_period_index)
+            for scalar in pc.unique(statement_periods):
+                if not scalar.is_valid:
+                    continue
+                statement_period = str(scalar.as_py()).strip()
+                if not statement_period:
+                    continue
+                mask = pc.equal(
+                    statement_periods,
+                    pa.scalar(scalar.as_py(), type=statement_periods.type),
+                )
+                table = pa.Table.from_batches([batch]).filter(mask)
+                writer = writers.get(statement_period)
+                if writer is None:
+                    part_path = raw_parts_dir / f"{statement_period}.parquet"
+                    writer = pq.ParquetWriter(part_path, table.schema, compression="zstd")
+                    writers[statement_period] = writer
+                writer.write_table(table)
+    finally:
+        for writer in writers.values():
+            writer.close()
+
+    raw_parts = sorted(raw_parts_dir.rglob("*.parquet"))
+    if not raw_parts:
+        raise ValueError("No se generaron particiones mensuales para el dashboard de regalias.")
+
+    try:
+        for index, raw_part in enumerate(raw_parts):
+            summary_part = summary_parts_dir / f"{index:03d}.parquet"
+            build_royalties_dashboard_summary_mart(
+                standardized_path=raw_part,
+                refresh_cache=True,
+                output_path=summary_part,
+                partition_large_input=False,
+            )
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        (
+            pl.scan_parquet(summary_parts_dir / "*.parquet")
+            .sink_parquet(temporary_output, compression="zstd", engine="streaming")
+        )
+        temporary_output.replace(output_path)
+    finally:
+        shutil.rmtree(raw_parts_dir, ignore_errors=True)
+        shutil.rmtree(summary_parts_dir, ignore_errors=True)
+        if temporary_output.exists():
+            temporary_output.unlink()
+
+    return output_path
+
+
 def build_digital_income_summary_mart(standardized_path: Path, refresh_cache: bool = False) -> Path:
     if (
         not refresh_cache
@@ -7345,8 +8200,8 @@ def build_digital_income_summary_mart(standardized_path: Path, refresh_cache: bo
         ])
         .group_by(["statement_period", "source", "account", "artist", "title", "search_text"])
         .agg([
-            pl.sum("total_usd").round(2).alias("total_usd"),
-            pl.sum("total_eur").round(2).alias("total_eur"),
+            pl.sum("total_usd").alias("total_usd"),
+            pl.sum("total_eur").alias("total_eur"),
             pl.max("has_share_in_out").alias("has_share_in_out"),
             pl.len().alias("raw_rows"),
         ])
@@ -7580,6 +8435,314 @@ def digital_income(
         "offset": offset,
         "keyword": keyword,
         "totals": totals,
+        "options": options,
+    }
+
+
+@app.get("/royalties-dashboard")
+def royalties_dashboard(
+    source: str | None = None,
+    account: str | None = None,
+    keyword: str | None = None,
+    artist_keyword: str | None = None,
+    start_month: str | None = None,
+    end_month: str | None = None,
+    period_basis: Literal["statement_period", "transaction_month"] = "statement_period",
+    period_mode: Literal["last_6_months", "last_12_months", "all", "single_month", "closed_range"] = "last_6_months",
+    limit: int = 10,
+    refresh_cache: bool = False,
+    x_vpo_api_key: str | None = Header(default=None),
+):
+    require_api_key(x_vpo_api_key)
+    safe_limit = max(3, min(int(limit or 10), 50))
+    period_col = "transaction_month" if period_basis == "transaction_month" else "statement_period"
+
+    if VPO_LOCAL_MARTS_DIR is not None and VPO_LOCAL_MARTS_DIR.exists():
+        marts = ensure_marts(refresh_cache=refresh_cache, filenames=[STANDARDIZED_FILE])
+        standardized_path = marts[STANDARDIZED_FILE]
+        if not standardized_path.exists():
+            raise HTTPException(status_code=500, detail=f"No existe standardized mart: {standardized_path}")
+        summary_path = build_royalties_dashboard_summary_mart(standardized_path, refresh_cache=refresh_cache)
+    else:
+        try:
+            summary_marts = ensure_marts(refresh_cache=refresh_cache, filenames=[ROYALTIES_DASHBOARD_SUMMARY_FILE])
+            summary_path = summary_marts[ROYALTIES_DASHBOARD_SUMMARY_FILE]
+        except HTTPException:
+            marts = ensure_marts(refresh_cache=refresh_cache, filenames=[STANDARDIZED_FILE])
+            standardized_path = marts[STANDARDIZED_FILE]
+            if not standardized_path.exists():
+                raise HTTPException(status_code=500, detail=f"No existe standardized mart: {standardized_path}")
+            summary_path = build_royalties_dashboard_summary_mart(standardized_path, refresh_cache=refresh_cache)
+    base = pl.scan_parquet(summary_path)
+    policy_document = load_distributor_policy_document()
+    base = apply_report_net_personalization(
+        base,
+        set(base.collect_schema().names()),
+        amount_col="amount_usd",
+    )
+    personalization_state = {
+        **policy_document["report_personalization"],
+        "policy_version": policy_document["policy_version"],
+        "updated_at": policy_document["updated_at"],
+    }
+
+    source_account_options = (
+        base
+        .select(["source", "account"])
+        .unique()
+        .sort(["source", "account"])
+        .collect()
+    )
+    all_months = (
+        base
+        .filter(pl.col(period_col) != "")
+        .select(period_col)
+        .unique()
+        .sort(period_col)
+        .collect()
+        .get_column(period_col)
+        .to_list()
+    )
+    options = {
+        "sources": source_account_options.get_column("source").unique().sort().to_list(),
+        "accounts": source_account_options.get_column("account").unique().sort().to_list(),
+        "source_accounts": source_account_options.to_dicts(),
+        "first_month": all_months[0] if all_months else None,
+        "last_month": all_months[-1] if all_months else None,
+    }
+
+    filtered = base.filter(pl.col(period_col) != "")
+    if source:
+        filtered = filtered.filter(pl.col("source") == source.strip())
+    if account:
+        filtered = filtered.filter(pl.col("account") == account.strip())
+
+    search = (keyword or artist_keyword or "").strip().casefold()
+    if search:
+        for token in [part for part in search.split() if part.strip()]:
+            filtered = filtered.filter(pl.col("search_text").str.contains(token, literal=True))
+
+    month_scope = filtered
+    if start_month:
+        month_scope = month_scope.filter(pl.col(period_col) >= start_month)
+    if end_month:
+        month_scope = month_scope.filter(pl.col(period_col) <= end_month)
+
+    available_months = (
+        month_scope
+        .select(period_col)
+        .unique()
+        .sort(period_col)
+        .collect()
+        .get_column(period_col)
+        .to_list()
+    )
+    if not available_months:
+        empty_totals = {
+            "amount_usd": 0.0,
+            "units": 0.0,
+            "rows": 0,
+            "months": 0,
+            "sources": 0,
+            "accounts": 0,
+            "titles": 0,
+            "artists": 0,
+            "first_month": None,
+            "last_month": None,
+        }
+        return {
+            "report_personalization": personalization_state,
+            "period_basis": period_basis,
+            "period_column": period_col,
+            "period_months": [],
+            "keyword": search,
+            "totals": empty_totals,
+            "monthly": [],
+            "matrix": [],
+            "rankings": {
+                "sources": [],
+                "dsp": [],
+                "store": [],
+                "territory": [],
+                "sale_type": [],
+                "artist": [],
+                "title": [],
+                "label": [],
+            },
+            "youtube": {
+                "totals": empty_totals,
+                "earning_type": [],
+                "asset_type": [],
+                "claim_type": [],
+                "title": [],
+                "territory": [],
+            },
+            "options": options,
+        }
+
+    if start_month or end_month or period_mode in {"single_month", "closed_range", "all"}:
+        months = available_months
+    elif period_mode == "last_12_months":
+        months = available_months[-12:]
+    else:
+        months = available_months[-6:]
+
+    scoped = month_scope.filter(pl.col(period_col).is_in(months))
+
+    totals = (
+        scoped
+        .select([
+            pl.sum("amount_usd").round(2).alias("amount_usd"),
+            pl.sum("units").round(0).alias("units"),
+            pl.sum("raw_rows").alias("rows"),
+            pl.col(period_col).n_unique().alias("months"),
+            pl.col("source").n_unique().alias("sources"),
+            pl.col("account").n_unique().alias("accounts"),
+            pl.col("title").n_unique().alias("titles"),
+            pl.col("artist").n_unique().alias("artists"),
+            pl.min(period_col).alias("first_month"),
+            pl.max(period_col).alias("last_month"),
+        ])
+        .collect()
+        .to_dicts()[0]
+    )
+    total_amount = float(totals.get("amount_usd") or 0.0)
+
+    def rank_by(field: str, name_key: str = "name", frame: pl.LazyFrame | None = None) -> list[dict]:
+        source_frame = frame if frame is not None else scoped
+        frame_total = (
+            source_frame
+            .select(pl.sum("amount_usd").round(2).alias("amount_usd"))
+            .collect()
+            .to_dicts()[0]
+            .get("amount_usd")
+        )
+        df = (
+            source_frame
+            .filter(pl.col(field).is_not_null() & (pl.col(field) != ""))
+            .group_by(field)
+            .agg([
+                pl.sum("amount_usd").round(2).alias("amount_usd"),
+                pl.sum("units").round(0).alias("units"),
+                pl.sum("raw_rows").alias("rows"),
+            ])
+            .sort("amount_usd", descending=True)
+            .limit(safe_limit)
+            .collect()
+        )
+        denominator = float(frame_total or 0.0)
+        rows: list[dict] = []
+        for row in df.to_dicts():
+            amount = float(row.get("amount_usd") or 0.0)
+            rows.append({
+                name_key: row.get(field) or "-",
+                "amount_usd": amount,
+                "units": float(row.get("units") or 0.0),
+                "rows": int(row.get("rows") or 0),
+                "percentage": round((amount / denominator * 100), 2) if denominator else 0.0,
+            })
+        return rows
+
+    monthly = (
+        scoped
+        .group_by(period_col)
+        .agg([
+            pl.sum("amount_usd").round(2).alias("amount_usd"),
+            pl.sum("units").round(0).alias("units"),
+            pl.sum("raw_rows").alias("rows"),
+        ])
+        .sort(period_col)
+        .collect()
+        .rename({period_col: "month"})
+        .to_dicts()
+    )
+
+    month_aggs = [
+        (
+            pl.when(pl.col(period_col) == month)
+            .then(pl.col("amount_usd"))
+            .otherwise(0.0)
+            .sum()
+            .round(2)
+            .alias(month)
+        )
+        for month in months
+    ]
+    matrix_df = (
+        scoped
+        .group_by(["source", "account"])
+        .agg([
+            *month_aggs,
+            pl.sum("amount_usd").round(2).alias("amount_usd"),
+            pl.sum("units").round(0).alias("units"),
+            pl.sum("raw_rows").alias("rows"),
+            pl.col("artist").n_unique().alias("artists"),
+            pl.col("title").n_unique().alias("titles"),
+        ])
+        .sort("amount_usd", descending=True)
+        .collect()
+    )
+    matrix = []
+    for row in matrix_df.to_dicts():
+        matrix.append({
+            "source": row["source"],
+            "account": row["account"],
+            "months": {month: float(row.get(month) or 0.0) for month in months},
+            "amount_usd": float(row.get("amount_usd") or 0.0),
+            "units": float(row.get("units") or 0.0),
+            "rows": int(row.get("rows") or 0),
+            "artists": int(row.get("artists") or 0),
+            "titles": int(row.get("titles") or 0),
+        })
+
+    youtube_scope = scoped.filter(
+        pl.any_horizontal([
+            pl.col("dsp").str.to_lowercase().str.contains("youtube", literal=True),
+            pl.col("store").str.to_lowercase().str.contains("youtube", literal=True),
+            pl.col("earning_type").str.to_lowercase().str.contains("youtube", literal=True),
+            pl.col("source_sheet").str.to_lowercase().str.contains("youtube", literal=True),
+        ])
+    )
+    youtube_totals = (
+        youtube_scope
+        .select([
+            pl.sum("amount_usd").round(2).alias("amount_usd"),
+            pl.sum("units").round(0).alias("units"),
+            pl.sum("raw_rows").alias("rows"),
+            pl.col("title").n_unique().alias("titles"),
+            pl.col("artist").n_unique().alias("artists"),
+        ])
+        .collect()
+        .to_dicts()[0]
+    )
+
+    return {
+        "report_personalization": personalization_state,
+        "period_basis": period_basis,
+        "period_column": period_col,
+        "period_months": months,
+        "keyword": search,
+        "totals": totals,
+        "monthly": monthly,
+        "matrix": matrix,
+        "rankings": {
+            "sources": rank_by("source"),
+            "dsp": rank_by("dsp"),
+            "store": rank_by("store"),
+            "territory": rank_by("territory"),
+            "sale_type": rank_by("sale_type"),
+            "artist": rank_by("artist"),
+            "title": rank_by("title"),
+            "label": rank_by("label"),
+        },
+        "youtube": {
+            "totals": youtube_totals,
+            "earning_type": rank_by("earning_type", frame=youtube_scope),
+            "asset_type": rank_by("asset_type", frame=youtube_scope),
+            "claim_type": rank_by("claim_type", frame=youtube_scope),
+            "title": rank_by("title", frame=youtube_scope),
+            "territory": rank_by("territory", frame=youtube_scope),
+        },
         "options": options,
     }
 
@@ -8694,6 +9857,8 @@ def finance_movements(
         option_where_parts.append("status = ?")
         option_params.append(selected_status)
     with booking_connect() as conn:
+        ensure_finance_movement_employee_columns(conn)
+        ensure_finance_account_entries_table(conn)
         scope_sql = apply_artist_scope_sql(conn, x_vpo_username, "finance_movements", params)
         option_scope_sql = apply_artist_scope_sql(conn, x_vpo_username, "finance_movements", option_params)
         where = f"WHERE {' AND '.join(where_parts)}" if where_parts else "WHERE 1 = 1"
@@ -8706,12 +9871,13 @@ def finance_movements(
             SELECT
                 id, movement_date, artist, business_area, movement_type, category,
                 project_id, project_name, concept, counterparty, paid_by,
+                paid_by_employee_id, paid_by_employee_name,
                 amount, currency, fx_rate, amount_ars,
                 paid_amount, paid_amount_ars, pending_amount_ars, payment_status, due_date,
                 recoverable,
                 recoverable_percent, recovery_method, artist_percent, producer_percent,
                 account_effect, status, source_type, source_id,
-                proof_refs_json, notes, created_at, updated_at
+                proof_refs_json, created_by, notes, created_at, updated_at
             FROM finance_staging_movements
             {where}
             ORDER BY movement_date DESC, id DESC
@@ -8770,14 +9936,72 @@ def finance_movements(
             """,
             distinct_artist_params,
         ).fetchall()
+        reimbursement_params: list = []
+        reimbursement_where = "WHERE origin_type = 'finance_employee_reimbursement'"
+        reimbursement_where += " AND status IN ('open', 'partial', 'observed')"
+        if selected_artist:
+            reimbursement_where += " AND artist = ?"
+            reimbursement_params.append(selected_artist)
+        reimbursement_where += apply_artist_scope_sql(conn, x_vpo_username, "finance_movements", reimbursement_params)
+        reimbursement_rows = conn.execute(
+            f"""
+            WITH applied AS (
+                SELECT account_entry_id, SUM(amount_ars) AS applied_amount_ars
+                FROM finance_account_applications
+                GROUP BY account_entry_id
+            )
+            SELECT
+                counterparty AS employee_name,
+                COUNT(*) AS rows,
+                SUM(
+                    CASE
+                        WHEN COALESCE(fae.amount_ars, 0) - COALESCE(applied.applied_amount_ars, 0) > 0
+                        THEN COALESCE(fae.amount_ars, 0) - COALESCE(applied.applied_amount_ars, 0)
+                        ELSE 0
+                    END
+                ) AS amount_ars,
+                MIN(entry_date) AS first_date,
+                MAX(entry_date) AS last_date
+            FROM finance_account_entries fae
+            LEFT JOIN applied ON applied.account_entry_id = fae.id
+            {reimbursement_where}
+            GROUP BY counterparty
+            ORDER BY counterparty
+            """,
+            reimbursement_params,
+        ).fetchall()
+        reimbursement_detail_rows = conn.execute(
+            f"""
+            WITH applied AS (
+                SELECT account_entry_id, SUM(amount_ars) AS applied_amount_ars
+                FROM finance_account_applications
+                GROUP BY account_entry_id
+            )
+            SELECT
+                fae.id, artist, counterparty AS employee_name, entry_date,
+                origin_id AS movement_id, concept, fae.amount_ars, status, notes,
+                COALESCE(applied.applied_amount_ars, 0) AS applied_amount_ars,
+                CASE
+                    WHEN COALESCE(fae.amount_ars, 0) - COALESCE(applied.applied_amount_ars, 0) > 0
+                    THEN COALESCE(fae.amount_ars, 0) - COALESCE(applied.applied_amount_ars, 0)
+                    ELSE 0
+                END AS balance_ars
+            FROM finance_account_entries fae
+            LEFT JOIN applied ON applied.account_entry_id = fae.id
+            {reimbursement_where}
+            ORDER BY entry_date DESC, id DESC
+            LIMIT 200
+            """,
+            reimbursement_params,
+        ).fetchall()
         movement_ids = [int(row["id"]) for row in rows]
         allocation_map = finance_allocation_rows_for_ids(conn, movement_ids)
-        receipt_map = finance_receipt_rows_for_ids(conn, movement_ids)
+        document_map = finance_document_rows_for_ids(conn, movement_ids)
         movement_items = []
         for row in rows:
             item = finance_movement_item(row)
             item["allocation_lines"] = allocation_map.get(int(row["id"]), [])
-            item["receipt_detail"] = receipt_map.get(int(row["id"]))
+            item["document_detail"] = document_map.get(int(row["id"]))
             movement_items.append(item)
         artists = sorted(set([
             *filter_artists_by_scope(booking_artist_options(), conn, x_vpo_username, "finance_movements"),
@@ -8792,6 +10016,34 @@ def finance_movements(
         "items": movement_items,
         "projects": [dict(row) for row in projects],
         "project_options": [row["name"] for row in project_options],
+        "employee_reimbursements": {
+            "summary": [
+                {
+                    "employee_name": row["employee_name"],
+                    "rows": int(row["rows"] or 0),
+                    "amount_ars": float(row["amount_ars"] or 0),
+                    "first_date": row["first_date"],
+                    "last_date": row["last_date"],
+                }
+                for row in reimbursement_rows
+            ],
+            "items": [
+                {
+                    "id": int(row["id"]),
+                    "artist": row["artist"],
+                    "employee_name": row["employee_name"],
+                    "entry_date": row["entry_date"],
+                    "movement_id": int(row["movement_id"] or 0),
+                    "concept": row["concept"],
+                    "amount_ars": float(row["amount_ars"] or 0),
+                    "applied_amount_ars": float(row["applied_amount_ars"] or 0),
+                    "balance_ars": float(row["balance_ars"] or 0),
+                    "status": row["status"],
+                    "notes": row["notes"],
+                }
+                for row in reimbursement_detail_rows
+            ],
+        },
         "summary": {
             "rows": sum(int(row["rows"] or 0) for row in summary_rows),
             "amount_ars": sum(float(row["amount_ars"] or 0) for row in summary_rows),
@@ -8814,13 +10066,15 @@ def create_finance_movement(
     init_booking_db()
     now = datetime.now().isoformat(timespec="seconds")
     amount_ars = finance_amount_ars(request.amount, request.currency, request.fx_rate)
-    validate_finance_receipt_request(request)
+    validate_finance_document_request(request)
     paid_amount = request.amount if request.paid_amount is None else request.paid_amount
     paid_amount_ars = finance_amount_ars(paid_amount, request.currency, request.fx_rate)
     pending_amount_ars = max(amount_ars - paid_amount_ars, 0.0)
     payment_status = finance_payment_status(amount_ars, paid_amount_ars, request.payment_status)
 
     with booking_connect() as conn:
+        ensure_finance_movement_employee_columns(conn)
+        ensure_finance_account_entries_table(conn)
         movement_artist = clean_booking_artist(request.artist) or request.artist.strip()
         require_module_permission(
             conn,
@@ -8836,20 +10090,26 @@ def create_finance_movement(
                 "payroll_compensation",
                 "create",
             )
+        paid_by_employee = None
+        if request.paid_by == "empleado":
+            paid_by_employee = finance_employee_option_from_id(conn, request.paid_by_employee_id)
+            if paid_by_employee is None:
+                raise HTTPException(status_code=400, detail="Elegí el empleado que pagó el gasto.")
         project_id, project_name = resolve_finance_project(conn, request, now)
         cursor = conn.execute(
             """
             INSERT INTO finance_staging_movements (
                 movement_date, artist, business_area, movement_type, category,
                 project_id, project_name, concept, counterparty, paid_by,
+                paid_by_employee_id, paid_by_employee_name,
                 amount, currency, fx_rate, amount_ars,
                 paid_amount, paid_amount_ars, pending_amount_ars, payment_status, due_date,
                 recoverable,
                 recoverable_percent, recovery_method, artist_percent, producer_percent,
                 account_effect, status, source_type, source_id,
-                proof_refs_json, notes, created_at, updated_at
+                proof_refs_json, created_by, notes, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 request.movement_date,
@@ -8862,6 +10122,8 @@ def create_finance_movement(
                 request.concept.strip(),
                 clean_optional_text(request.counterparty),
                 request.paid_by,
+                paid_by_employee["id"] if paid_by_employee else None,
+                paid_by_employee["display_name"] if paid_by_employee else None,
                 request.amount,
                 request.currency,
                 request.fx_rate,
@@ -8881,6 +10143,7 @@ def create_finance_movement(
                 request.source_type,
                 clean_optional_text(request.source_id),
                 json.dumps(request.proof_refs, ensure_ascii=False),
+                clean_username(x_vpo_username or "") or None,
                 clean_optional_text(request.notes),
                 now,
                 now,
@@ -8888,7 +10151,17 @@ def create_finance_movement(
         )
         movement_id = int(cursor.lastrowid)
         replace_finance_movement_allocations(conn, movement_id, request, amount_ars, now)
-        receipt_detail = replace_finance_receipt_detail(conn, movement_id, request, amount_ars, now, x_vpo_username)
+        replace_employee_reimbursement_account_entry(
+            conn,
+            movement_id,
+            request,
+            amount_ars,
+            paid_amount_ars,
+            paid_by_employee,
+            now,
+        )
+        replace_finance_account_applications(conn, movement_id, request, amount_ars, now, x_vpo_username)
+        document_detail = replace_finance_document_detail(conn, movement_id, request, amount_ars, now, x_vpo_username)
         row = conn.execute(
             """
             SELECT *
@@ -8899,7 +10172,7 @@ def create_finance_movement(
         ).fetchone()
         item = finance_movement_item(row)
         item["allocation_lines"] = finance_allocation_rows_for_ids(conn, [movement_id]).get(movement_id, [])
-        item["receipt_detail"] = receipt_detail
+        item["document_detail"] = document_detail
 
     return {
         "item": item,
@@ -8917,13 +10190,16 @@ def update_finance_movement(
     init_booking_db()
     now = datetime.now().isoformat(timespec="seconds")
     amount_ars = finance_amount_ars(request.amount, request.currency, request.fx_rate)
-    validate_finance_receipt_request(request)
+    validate_finance_document_request(request)
     paid_amount = request.amount if request.paid_amount is None else request.paid_amount
     paid_amount_ars = finance_amount_ars(paid_amount, request.currency, request.fx_rate)
     pending_amount_ars = max(amount_ars - paid_amount_ars, 0.0)
     payment_status = finance_payment_status(amount_ars, paid_amount_ars, request.payment_status)
 
     with booking_connect() as conn:
+        ensure_finance_movement_employee_columns(conn)
+        ensure_finance_account_entries_table(conn)
+        ensure_finance_account_applications_table(conn)
         existing = conn.execute(
             "SELECT id, artist, status FROM finance_staging_movements WHERE id = ?",
             (movement_id,),
@@ -8957,6 +10233,11 @@ def update_finance_movement(
                 "payroll_compensation",
                 "edit",
             )
+        paid_by_employee = None
+        if request.paid_by == "empleado":
+            paid_by_employee = finance_employee_option_from_id(conn, request.paid_by_employee_id)
+            if paid_by_employee is None:
+                raise HTTPException(status_code=400, detail="Elegí el empleado que pagó el gasto.")
 
         project_id, project_name = resolve_finance_project(conn, request, now)
         conn.execute(
@@ -8972,6 +10253,8 @@ def update_finance_movement(
                 concept = ?,
                 counterparty = ?,
                 paid_by = ?,
+                paid_by_employee_id = ?,
+                paid_by_employee_name = ?,
                 amount = ?,
                 currency = ?,
                 fx_rate = ?,
@@ -9006,6 +10289,8 @@ def update_finance_movement(
                 request.concept.strip(),
                 clean_optional_text(request.counterparty),
                 request.paid_by,
+                paid_by_employee["id"] if paid_by_employee else None,
+                paid_by_employee["display_name"] if paid_by_employee else None,
                 request.amount,
                 request.currency,
                 request.fx_rate,
@@ -9031,30 +10316,40 @@ def update_finance_movement(
             ),
         )
         replace_finance_movement_allocations(conn, movement_id, request, amount_ars, now)
-        receipt_detail = replace_finance_receipt_detail(conn, movement_id, request, amount_ars, now, x_vpo_username)
+        replace_employee_reimbursement_account_entry(
+            conn,
+            movement_id,
+            request,
+            amount_ars,
+            paid_amount_ars,
+            paid_by_employee,
+            now,
+        )
+        replace_finance_account_applications(conn, movement_id, request, amount_ars, now, x_vpo_username)
+        document_detail = replace_finance_document_detail(conn, movement_id, request, amount_ars, now, x_vpo_username)
         row = conn.execute(
             "SELECT * FROM finance_staging_movements WHERE id = ?",
             (movement_id,),
         ).fetchone()
         item = finance_movement_item(row)
         item["allocation_lines"] = finance_allocation_rows_for_ids(conn, [movement_id]).get(movement_id, [])
-        item["receipt_detail"] = receipt_detail
+        item["document_detail"] = document_detail
 
     return {
         "item": item,
     }
 
 
-@app.get("/finance/receipts/{receipt_id}/pdf")
-def finance_receipt_pdf(
-    receipt_id: int,
+@app.get("/finance/documents/{document_id}/pdf")
+def finance_document_pdf(
+    document_id: int,
     x_vpo_api_key: str | None = Header(default=None),
     x_vpo_username: str | None = Header(default=None),
 ) -> Response:
     require_api_key(x_vpo_api_key)
     init_booking_db()
     with booking_connect() as conn:
-        ensure_finance_receipts_table(conn)
+        ensure_finance_documents_table(conn)
         row = conn.execute(
             """
             SELECT
@@ -9065,15 +10360,15 @@ def finance_receipt_pdf(
                 m.category,
                 m.concept AS movement_concept,
                 m.notes AS movement_notes
-            FROM finance_receipts r
+            FROM finance_documents r
             JOIN finance_staging_movements m ON m.id = r.movement_id
             WHERE r.id = ?
             """,
-            (receipt_id,),
+            (document_id,),
         ).fetchone()
         if not row:
-            raise HTTPException(status_code=404, detail="Recibo no encontrado.")
-        receipt = finance_receipt_item(row)
+            raise HTTPException(status_code=404, detail="Documento financiero no encontrado.")
+        document = finance_document_item(row)
         movement = {
             "artist": row["movement_artist"],
             "business_area": row["business_area"],
@@ -9090,8 +10385,8 @@ def finance_receipt_pdf(
             artist=clean_booking_artist(row["movement_artist"]) or row["movement_artist"],
         )
 
-    pdf_bytes = finance_receipt_pdf_bytes(receipt, movement)
-    filename = f"recibo_{int(receipt['receipt_number']):06d}.pdf"
+    pdf_bytes = finance_document_pdf_bytes(document, movement)
+    filename = f"documento_financiero_{int(document['document_number']):06d}.pdf"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -9342,7 +10637,11 @@ def employee_finance_options(
     with operational_connect() as conn:
         ensure_employee_compensation_columns(conn)
         require_module_permission(conn, x_vpo_username, "finance_movements", "access")
-        require_module_permission(conn, x_vpo_username, "payroll_compensation", "access")
+        payroll_permission = user_module_permission(conn, x_vpo_username, "payroll_compensation")
+        can_view_compensation = bool(
+            payroll_permission.get("allowed")
+            and payroll_permission.get("can_access")
+        )
         rows = conn.execute(
             db_sql(
                 conn,
@@ -9374,10 +10673,10 @@ def employee_finance_options(
             items.append({
                 "id": row["id"],
                 "display_name": row["display_name"],
-                "compensation_type": row["compensation_type"] or "none",
-                "salary_amount": float(row["salary_amount"] or 0),
-                "salary_currency": row["salary_currency"] or "ARS",
-                "salary_frequency": row["salary_frequency"] or "monthly",
+                "compensation_type": (row["compensation_type"] or "none") if can_view_compensation else "none",
+                "salary_amount": float(row["salary_amount"] or 0) if can_view_compensation else 0.0,
+                "salary_currency": (row["salary_currency"] or "ARS") if can_view_compensation else "ARS",
+                "salary_frequency": (row["salary_frequency"] or "monthly") if can_view_compensation else "monthly",
                 "active": bool(row["active"]),
                 "functions": [item["function_code"] for item in functions],
                 "created_at": row["created_at"],

@@ -56,3 +56,18 @@ Campos relevantes conservados:
 El total de `song_level_dashgo.amount_usd` debe cerrar contra `standardized_raw_dashgo.amount_usd`.
 
 Tambien debe cerrar contra el pipeline viejo en el reporte por statement.
+
+## Evidencia para DSP y monetizacion
+
+La clasificacion usa `Store`, `Product Type` y `Use Type`. Para Spotify estan
+validados por negocio:
+
+- `P`: Premium, plan individual.
+- `FAM6`: Premium, plan familiar.
+- `DUO`: Premium, plan duo.
+- `A`: Ads.
+- `PDS`: significado pendiente; debe permanecer `Unknown`.
+
+YouTube distingue Store Premium, Ads, Shorts, Audio Tier y ajustes. `Use Type`
+permite separar UGC de partner-provided cuando viene informado. No se debe
+inventar Art Track o video oficial si la fila no lo demuestra.

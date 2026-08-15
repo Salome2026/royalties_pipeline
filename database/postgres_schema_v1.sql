@@ -573,6 +573,8 @@ CREATE TABLE IF NOT EXISTS finance_movements (
     concept text,
     counterparty text,
     paid_by text,
+    paid_by_employee_id bigint REFERENCES employees(id) ON DELETE SET NULL,
+    paid_by_employee_name text,
     amount numeric(18, 6) NOT NULL DEFAULT 0,
     currency text NOT NULL DEFAULT 'ARS',
     fx_rate numeric(18, 6),
@@ -586,6 +588,7 @@ CREATE TABLE IF NOT EXISTS finance_movements (
     source_type text,
     source_id text,
     proof_refs_json jsonb,
+    created_by text,
     paid_amount numeric(18, 6) NOT NULL DEFAULT 0,
     paid_amount_ars numeric(18, 6) NOT NULL DEFAULT 0,
     pending_amount_ars numeric(18, 6) NOT NULL DEFAULT 0,
@@ -600,6 +603,7 @@ CREATE TABLE IF NOT EXISTS finance_movements (
 
 CREATE INDEX IF NOT EXISTS idx_finance_movements_artist_date ON finance_movements(artist, movement_date DESC);
 CREATE INDEX IF NOT EXISTS idx_finance_movements_project ON finance_movements(project_name, artist);
+CREATE INDEX IF NOT EXISTS idx_finance_movements_paid_by_employee ON finance_movements(paid_by_employee_id, movement_date DESC);
 
 CREATE TABLE IF NOT EXISTS finance_movement_allocations (
     id bigserial PRIMARY KEY,
@@ -620,16 +624,16 @@ CREATE TABLE IF NOT EXISTS finance_movement_allocations (
 
 CREATE INDEX IF NOT EXISTS idx_finance_movement_allocations_movement ON finance_movement_allocations(movement_id);
 
-CREATE SEQUENCE IF NOT EXISTS finance_receipts_receipt_number_seq;
+CREATE SEQUENCE IF NOT EXISTS finance_documents_document_number_seq;
 
-CREATE TABLE IF NOT EXISTS finance_receipts (
+CREATE TABLE IF NOT EXISTS finance_documents (
     id bigserial PRIMARY KEY,
     movement_id bigint NOT NULL UNIQUE REFERENCES finance_movements(id) ON DELETE CASCADE,
-    receipt_number bigint NOT NULL UNIQUE DEFAULT nextval('finance_receipts_receipt_number_seq'),
-    receipt_date date NOT NULL,
-    receipt_kind text NOT NULL DEFAULT 'sena_show',
+    document_number bigint NOT NULL UNIQUE DEFAULT nextval('finance_documents_document_number_seq'),
+    document_date date NOT NULL,
+    document_type text NOT NULL DEFAULT 'show_deposit_receipt',
     issuer_company text NOT NULL DEFAULT 'VPO Corp',
-    received_from text NOT NULL,
+    counterparty_name text NOT NULL,
     amount numeric(18, 6) NOT NULL DEFAULT 0,
     currency text NOT NULL DEFAULT 'ARS',
     fx_rate numeric(18, 6),
@@ -646,14 +650,14 @@ CREATE TABLE IF NOT EXISTS finance_receipts (
     created_by text,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT finance_receipts_kind_chk CHECK (receipt_kind IN ('sena_show')),
-    CONSTRAINT finance_receipts_currency_chk CHECK (currency IN ('ARS', 'USD')),
-    CONSTRAINT finance_receipts_vat_mode_chk CHECK (vat_mode IN ('no_aplica', 'mas_iva', 'iva_incluido')),
-    CONSTRAINT finance_receipts_status_chk CHECK (status IN ('borrador', 'emitido', 'anulado', 'aplicado'))
+    CONSTRAINT finance_documents_type_chk CHECK (document_type IN ('show_deposit_receipt', 'payment_order', 'collection_receipt')),
+    CONSTRAINT finance_documents_currency_chk CHECK (currency IN ('ARS', 'USD')),
+    CONSTRAINT finance_documents_vat_mode_chk CHECK (vat_mode IN ('no_aplica', 'mas_iva', 'iva_incluido')),
+    CONSTRAINT finance_documents_status_chk CHECK (status IN ('borrador', 'emitido', 'anulado', 'aplicado'))
 );
 
-CREATE INDEX IF NOT EXISTS idx_finance_receipts_date ON finance_receipts(receipt_date DESC, id DESC);
-CREATE INDEX IF NOT EXISTS idx_finance_receipts_show_date ON finance_receipts(show_date);
+CREATE INDEX IF NOT EXISTS idx_finance_documents_date ON finance_documents(document_date DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_finance_documents_show_date ON finance_documents(show_date);
 
 CREATE TABLE IF NOT EXISTS finance_movement_lines (
     id bigserial PRIMARY KEY,
@@ -717,6 +721,7 @@ CREATE TABLE IF NOT EXISTS finance_account_entries (
     id bigserial PRIMARY KEY,
     artist text,
     counterparty text,
+    counterparty_employee_id bigint REFERENCES employees(id) ON DELETE SET NULL,
     entry_date date NOT NULL,
     origin_type text NOT NULL,
     origin_id bigint,
@@ -730,6 +735,28 @@ CREATE TABLE IF NOT EXISTS finance_account_entries (
     CONSTRAINT finance_account_direction_chk CHECK (direction IN ('artist_owes_indyana', 'indyana_owes_artist', 'third_party_owes_indyana', 'indyana_owes_third_party')),
     CONSTRAINT finance_account_status_chk CHECK (status IN ('open', 'partial', 'settled', 'void', 'observed'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_finance_account_entries_counterparty ON finance_account_entries(counterparty, entry_date DESC);
+CREATE INDEX IF NOT EXISTS idx_finance_account_entries_employee ON finance_account_entries(counterparty_employee_id, entry_date DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_finance_account_employee_reimbursement_origin
+    ON finance_account_entries(origin_type, origin_id)
+    WHERE origin_type = 'finance_employee_reimbursement';
+
+CREATE TABLE IF NOT EXISTS finance_account_applications (
+    id bigserial PRIMARY KEY,
+    account_entry_id bigint NOT NULL REFERENCES finance_account_entries(id) ON DELETE CASCADE,
+    payment_movement_id bigint NOT NULL REFERENCES finance_movements(id) ON DELETE CASCADE,
+    application_date date NOT NULL,
+    amount_ars numeric(18, 6) NOT NULL,
+    notes text,
+    created_by text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT finance_account_applications_amount_chk CHECK (amount_ars > 0),
+    UNIQUE (account_entry_id, payment_movement_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_finance_account_applications_entry ON finance_account_applications(account_entry_id);
+CREATE INDEX IF NOT EXISTS idx_finance_account_applications_movement ON finance_account_applications(payment_movement_id);
 
 -- =========================================================
 -- Catalogo / digitales / decisiones humanas
@@ -754,19 +781,39 @@ CREATE TABLE IF NOT EXISTS catalog_label_overrides (
 );
 
 CREATE TABLE IF NOT EXISTS distributor_account_policies (
-    id bigserial PRIMARY KEY,
+    policy_id text PRIMARY KEY,
     source text NOT NULL,
     account text NOT NULL,
-    source_sheet text NOT NULL,
-    revenue_basis text,
-    include_in_cash_view boolean NOT NULL DEFAULT true,
-    include_in_catalog_view boolean NOT NULL DEFAULT true,
-    include_in_statement_view boolean NOT NULL DEFAULT true,
-    amount_role text NOT NULL DEFAULT 'generation',
-    notes text,
+    display_name text NOT NULL,
+    policy_payload jsonb NOT NULL,
+    report_net_adjustment_pct numeric(7,4) NOT NULL DEFAULT 0
+        CHECK (report_net_adjustment_pct >= 0 AND report_net_adjustment_pct <= 100),
     active boolean NOT NULL DEFAULT true,
+    policy_version bigint NOT NULL DEFAULT 1,
+    updated_by text,
+    created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (source, account, source_sheet, revenue_basis)
+    UNIQUE (source, account)
+);
+
+CREATE TABLE IF NOT EXISTS distributor_policy_settings (
+    singleton_id smallint PRIMARY KEY DEFAULT 1 CHECK (singleton_id = 1),
+    personalization_enabled boolean NOT NULL DEFAULT false,
+    amount_basis text NOT NULL DEFAULT 'net_amount_after_distributor',
+    scope text NOT NULL DEFAULT 'royalty_reports',
+    policy_version bigint NOT NULL DEFAULT 1,
+    updated_by text,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS distributor_policy_audit (
+    id bigserial PRIMARY KEY,
+    policy_version bigint NOT NULL,
+    action text NOT NULL,
+    changed_by text,
+    before_json jsonb,
+    after_json jsonb NOT NULL,
+    changed_at timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS custom_report_configs (

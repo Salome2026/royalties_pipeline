@@ -12,9 +12,9 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 try:
-    from lib.catalog_report_filter import filter_reportable_catalog
+    from lib.catalog_report_filter import filter_reportable_generation
 except ModuleNotFoundError:
-    from scripts.lib.catalog_report_filter import filter_reportable_catalog
+    from scripts.lib.catalog_report_filter import filter_reportable_generation
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -543,7 +543,7 @@ def build_fuga_gusty_contract_report(
 ) -> Path:
     raw = prepare_base(raw_path, start_month, end_month)
     if raw.height:
-        raw = filter_reportable_catalog(raw.lazy(), set(raw.columns)).collect()
+        raw = filter_reportable_generation(raw.lazy(), set(raw.columns)).collect()
     onerpm_map = build_onerpm_map(raw_path)
     df = classify_fuga(raw, onerpm_map)
 

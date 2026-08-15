@@ -81,3 +81,12 @@ Orchard moderno + Altafonte legacy = total source orchard
 ```
 
 El song-level debe cerrar contra standardized.
+
+## Evidencia para DSP y monetizacion
+
+Orchard moderno usa `STORE`, `SERVICE DETAIL`, `TRANSACTION TYPE`,
+`TRANSACTION SUBTYPE` y `ROYALTY TYPE`. Permite separar suscripcion/ads y, para
+YouTube, Art Tracks & Music Videos, Content ID, partner-provided, UGC y Shorts.
+
+Altafonte legacy no tiene esa granularidad. Sus filas deben conservar
+`classification_status = unknown`; no se completa Store por inferencia.

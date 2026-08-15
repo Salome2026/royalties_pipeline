@@ -12,6 +12,11 @@ import polars as pl
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+try:
+    from lib.catalog_report_filter import filter_reportable_generation
+except ModuleNotFoundError:
+    from scripts.lib.catalog_report_filter import filter_reportable_generation
+
 
 BASE = Path(r"C:\royalties_pipeline")
 MARTS_DIR = BASE / "warehouse" / "marts"
@@ -160,6 +165,7 @@ def prepared_rows(end_month: str | None = None) -> pl.DataFrame:
         | pl.col("_isrc_text").str.split("|").list.eval(pl.element().is_in(list(isrcs))).list.any()
         | pl.col("_video_text").str.split("|").list.eval(pl.element().is_in(list(videos))).list.any()
     )
+    filtered = filter_reportable_generation(filtered.lazy(), set(raw.columns)).collect()
     if end_month:
         filtered = filtered.filter(col_text(schema, "statement_period") <= end_month)
 
@@ -183,8 +189,8 @@ def prepared_rows(end_month: str | None = None) -> pl.DataFrame:
             first_non_blank(schema, ["asset_isrc", "ISRC", "Asset ISRC"]).alias("ISRC"),
             first_non_blank(schema, ["video_id", "VideoId", "Video ID", "YOUTUBE VIDEO ID"]).alias("Video ID"),
             first_non_blank(schema, ["territory", "Territory", "Country", "COUNTRY"]).alias("Pais"),
-            first_non_blank(schema, ["dsp", "DSP", "Store", "STORE"]).alias("DSP"),
-            first_non_blank(schema, ["store_name", "Sale Store Name", "Store Name", "service_detail", "SERVICE DETAIL"]).alias("Store"),
+            first_non_blank(schema, ["dsp_normalized", "dsp", "DSP", "Store", "STORE"]).alias("DSP"),
+            first_non_blank(schema, ["store_report_label", "store_name", "Sale Store Name", "Store Name", "service_detail", "SERVICE DETAIL"]).alias("Store"),
             units_expr(schema).fill_null(0.0).alias("Unidades"),
             gross_usd.alias("Gross FUGA USD"),
             amount_real.alias("Ingreso real USD"),

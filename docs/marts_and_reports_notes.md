@@ -23,6 +23,7 @@ Archivos actuales:
 - `warehouse\marts\standardized_raw_onerpm.parquet`
 - `warehouse\marts\standardized_raw_orchard.parquet`
 - `warehouse\marts\standardized_raw_soundon.parquet`
+- `warehouse\marts\standardized_raw_ada.parquet`
 
 Objetivo:
 
@@ -54,6 +55,7 @@ Archivos actuales:
 - `warehouse\marts\song_level_onerpm.parquet`
 - `warehouse\marts\song_level_orchard.parquet`
 - `warehouse\marts\song_level_soundon.parquet`
+- `warehouse\marts\song_level_ada.parquet`
 
 Objetivo:
 
@@ -75,6 +77,76 @@ Outputs:
 - `warehouse\marts\song_level_all_sources.parquet`
 
 El consolidado incluye `mart_source_file` para saber de que mart individual vino cada fila.
+
+### Dimensiones normalizadas de DSP y tipo de ingreso
+
+`standardized_raw_all_sources.parquet` agrega dimensiones de reporte derivadas
+sin modificar los campos originales ni los importes:
+
+- `dsp_normalized`
+- `monetization_normalized`
+- `content_origin_normalized`
+- `plan_normalized`
+- `classification_status`
+- `store_report_label`
+
+La interpretacion se apoya en las columnas originales declaradas en
+`warehouse/registry/statement_source_dictionary.json`. Las politicas de cuenta
+siguen decidiendo si una fila representa generacion, caja, transferencia o
+auditoria. La normalizacion de Store/DSP nunca convierte Shares In & Out en
+generacion y nunca completa informacion que la fuente no demuestra.
+
+Los motores de reportes deben priorizar estas dimensiones y conservar los
+campos originales en el detalle cuando se necesite auditoria. No se deben crear
+normalizaciones particulares dentro de un reporte.
+
+### Mapa rector de identidad y resumen por tema
+
+Este mapa aplica a todos los reportes genericos de regalias, sin excepciones por
+artista o busqueda:
+
+1. **Ingest standardized**
+   - conserva todas las columnas originales;
+   - completa columnas canonicas comprobables (`asset_isrc`, `product_upc`,
+     `video_id`, `channel_id`, `track_statement_style`, `content_type`);
+   - no infiere un identificador que el archivo no demuestra.
+2. **Catalogo**
+   - resuelve aliases de ISRC, UPC y video hacia un `catalog_key` estable;
+   - nunca une dos ISRC validos diferentes solo por texto parecido.
+3. **Filtro del reporte**
+   - aplica las policies de generacion/caja y el estado activo del catalogo;
+   - agrega el `catalog_key` resuelto antes de resumir.
+4. **Resumen por tema**
+   - agrupa una sola vez por `catalog_key`;
+   - Store/DSP, territorio, monetizacion y origen de contenido no multiplican
+     temas;
+   - los codigos originales quedan como trazabilidad, no como clave economica.
+5. **Detalle**
+   - conserva filas y codigos de origen para poder explicar el total.
+
+La busqueda por palabras usa coincidencia literal normalizada: no distingue
+mayusculas y tolera espacios, guiones y guiones bajos. Por ejemplo,
+`superjunte` encuentra `Super Junte`. No se usa fuzzy matching ni se unen obras
+por similitud aproximada.
+
+Caso testigo validado el 2026-08-13:
+
+- busqueda: `superjunte` / `super junte`;
+- periodo: statement 2026-04 a 2026-06;
+- ambas variantes recuperan 10.665 filas y USD 3.074,282234;
+- el resumen anterior generaba 53 filas tecnicas por Store/tipo;
+- el resumen canonico genera 9 identidades y reconcilia con resumen mensual,
+  Store, territorio y detalle.
+
+### Regla YouTube: monetizacion y origen son dimensiones separadas
+
+- `Premium` / `Ads` describe como monetizo la fila.
+- `Music / Art Track`, `Video / Channel`, `UGC / Content ID` o `Shorts`
+  describe el origen del contenido.
+- Si el statement identifica explicitamente `YouTube Channel Income` o
+  `Partnered Channel`, el origen es `Video / Channel`, aunque el DSP o plan diga
+  `YouTube Music` o `Premium`.
+- Esta clasificacion no cambia importes ni identidad.
 
 ## Catalogo master
 
@@ -131,6 +203,40 @@ El reporte nuevo usa conversion FX; el viejo usaba `net_amount` directo.
 ## SoundOn Summary
 
 `Summary` no se carga al standardized principal. Solo se usa como control en `audit_soundon.py`.
+
+## Resumen operativo del dashboard de regalias
+
+`royalties_dashboard_summary.parquet` se construye desde
+`standardized_raw_all_sources.parquet` y aplica la misma policy de generacion,
+estado del catalogo que los reportes. Conserva el neto reportable base.
+
+La personalizacion porcentual no se materializa en este parquet. Dashboard y
+reportes leen la version vigente de Cloud SQL y aplican el ajuste al generar la
+respuesta o el archivo. Cambiar un porcentaje no requiere reconstruir ni
+publicar el mart.
+
+Control especifico:
+
+```powershell
+C:\royalties_pipeline\.venv\Scripts\python.exe C:\royalties_pipeline\scripts\qa\qa_distributor_policy_runtime.py
+```
+
+El control falla si reaparece el JSON operativo, si Cloud SQL no tiene policies
+activas o si el dashboard vuelve a guardar columnas de policy dentro del mart.
+
+Cuando el consolidado supera 256 MB, el cierre no agrupa el universo completo
+en memoria. Primero separa el standardized por `statement_period` en lotes
+acotados que preservan exactamente el schema; despues procesa cada mes con la
+misma funcion de negocio y une los resultados compactos.
+
+Reglas tecnicas obligatorias:
+
+- no renombrar columnas originales para facilitar la particion;
+- no usar una base SQL ni un pipeline alternativo para este cierre;
+- escribir los fragmentos solamente en `staging`;
+- reemplazar el dashboard vigente de forma atomica al finalizar;
+- limpiar todos los fragmentos aun cuando falle un periodo;
+- conservar el dashboard anterior si el nuevo cierre no termina.
 
 ## Auditorias recomendadas
 

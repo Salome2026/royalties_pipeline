@@ -42,6 +42,10 @@ La pantalla no trata todos los archivos que no matchean contra el mart como erro
 
 Solo `pending_real` bloquea la publicacion a cloud.
 
+Para ADA, un TXT con el texto `No Earning Activity for this Royalty Period`
+es un statement mensual recibido y revisado. Se clasifica `ignored_empty`, no
+genera filas economicas y no bloquea la publicacion.
+
 ## Estados
 
 - `ok`: el ultimo statement esta dentro de la tolerancia.
@@ -122,7 +126,6 @@ reportabilidad.
 
 - `song_level_all_sources.parquet`
 - `standardized_raw_all_sources.parquet`
-- `catalog_candidates.parquet`
 - `catalog_master.parquet`
 - `statement_summary_all_sources.parquet`
 - `digital_income_statement_summary.parquet`

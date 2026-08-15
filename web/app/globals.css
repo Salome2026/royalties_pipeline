@@ -350,6 +350,14 @@ label {
   color: var(--muted);
 }
 
+.inline-followup {
+  margin-top: 8px;
+}
+
+.compact-panel {
+  margin-top: 16px;
+}
+
 .field-help.danger-text {
   color: var(--danger);
   font-weight: 800;
@@ -994,6 +1002,66 @@ button:disabled:hover {
 
 .booking-grid {
   grid-template-columns: minmax(380px, 1fr) minmax(360px, .9fr);
+}
+
+.booking-mode-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  padding: 10px 12px 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.booking-mode-bar > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.booking-mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: min(100%, 390px);
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-soft);
+}
+
+.booking-mode-switch button {
+  width: 100%;
+  min-height: 36px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.booking-mode-switch button:hover:not(:disabled) {
+  background: #fff;
+  color: var(--ink);
+  transform: none;
+}
+
+.booking-mode-switch button.active,
+.booking-mode-switch button.active:hover {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 6px 14px rgba(15, 118, 110, .18);
+}
+
+.booking-mode-switch button:disabled {
+  cursor: not-allowed;
+  opacity: .38;
 }
 
 .artist-grid {
@@ -2561,6 +2629,398 @@ button:disabled:hover {
   color: var(--danger);
 }
 
+.royalties-dashboard-panel {
+  display: grid;
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid rgba(16, 32, 51, .08);
+  background:
+    linear-gradient(180deg, rgba(247, 250, 252, .92) 0, #fff 280px),
+    #fff;
+}
+
+.royalties-dashboard-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 18px;
+  min-height: 178px;
+  padding: 26px;
+  border: 1px solid rgba(16, 32, 51, .1);
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(16, 32, 51, .95), rgba(15, 118, 110, .88) 58%, rgba(217, 139, 43, .78)),
+    #102033;
+  color: #fff;
+  box-shadow: 0 20px 48px rgba(16, 32, 51, .18);
+}
+
+.royalties-dashboard-hero h1 {
+  margin: 8px 0 8px;
+  color: #fff;
+  font-size: 34px;
+  line-height: 1.05;
+  letter-spacing: 0;
+}
+
+.royalties-dashboard-hero p {
+  max-width: 760px;
+  margin: 0;
+  color: rgba(255, 255, 255, .78);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.royalties-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 9px;
+  border: 1px solid rgba(255, 255, 255, .26);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .1);
+  color: rgba(255, 255, 255, .86);
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.royalties-hero-actions {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+}
+
+.royalties-hero-actions span {
+  color: rgba(255, 255, 255, .74);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.royalties-hero-actions button {
+  width: auto;
+  min-height: 42px;
+  padding: 10px 16px;
+  background: #fff;
+  color: var(--brand);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, .18);
+}
+
+.royalties-hero-actions button:hover {
+  background: #f8fafc;
+  color: var(--brand);
+}
+
+.royalties-filterbar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.3fr) repeat(3, minmax(150px, .75fr)) minmax(180px, .9fr) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid rgba(16, 32, 51, .1);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 10px 26px rgba(16, 32, 51, .06);
+}
+
+.royalties-filterbar label {
+  display: block;
+  margin: 0 0 6px;
+  color: #475467;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.royalties-filterbar input,
+.royalties-filterbar select {
+  min-height: 42px;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.royalties-filterbar button {
+  width: auto;
+  min-height: 42px;
+  padding: 10px 15px;
+}
+
+.royalties-filterbar .period-field {
+  min-width: 0;
+}
+
+.royalties-tabs {
+  display: inline-flex;
+  width: fit-content;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(16, 32, 51, .1);
+  border-radius: 999px;
+  background: #edf3f0;
+}
+
+.royalties-tabs button {
+  width: auto;
+  min-height: 34px;
+  margin: 0;
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #475467;
+  box-shadow: none;
+  font-size: 12px;
+}
+
+.royalties-tabs button.active {
+  background: #fff;
+  color: var(--brand);
+  box-shadow: 0 8px 18px rgba(16, 32, 51, .12);
+}
+
+.royalties-tabs button:hover {
+  transform: none;
+  background: #fff;
+  color: var(--brand);
+}
+
+.royalties-kpi-grid {
+  display: grid;
+  grid-template-columns: 1.45fr repeat(5, minmax(128px, 1fr));
+  gap: 10px;
+}
+
+.royalties-kpi {
+  min-height: 96px;
+  padding: 14px;
+  border: 1px solid rgba(16, 32, 51, .09);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 10px 24px rgba(16, 32, 51, .055);
+}
+
+.royalties-kpi.primary {
+  background:
+    linear-gradient(135deg, rgba(15, 118, 110, .12), rgba(217, 139, 43, .12)),
+    #fff;
+  border-color: rgba(15, 118, 110, .24);
+}
+
+.royalties-kpi span,
+.royalties-kpi strong {
+  display: block;
+}
+
+.royalties-kpi span {
+  color: #667085;
+  font-size: 11px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.royalties-kpi strong {
+  margin-top: 10px;
+  color: var(--brand);
+  font-size: 24px;
+  line-height: 1.08;
+}
+
+.royalties-kpi.primary strong {
+  font-size: 30px;
+}
+
+.royalties-meta-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid rgba(16, 32, 51, .08);
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #667085;
+  font-size: 12px;
+}
+
+.royalties-meta-strip strong {
+  color: var(--brand);
+  font-weight: 850;
+}
+
+.royalties-section-title {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 4px;
+}
+
+.royalties-section-title h2 {
+  margin: 0 0 4px;
+  font-size: 19px;
+}
+
+.royalties-section-title p {
+  margin: 0;
+  color: #667085;
+  font-size: 13px;
+}
+
+.royalties-table-shell {
+  overflow: auto;
+  border: 1px solid rgba(16, 32, 51, .08);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(16, 32, 51, .06);
+}
+
+.royalties-matrix-table {
+  min-width: 860px;
+}
+
+.royalties-matrix-table th {
+  background: #102033;
+  color: #fff;
+  font-size: 11px;
+}
+
+.royalties-matrix-table td {
+  background: #fff;
+}
+
+.royalties-matrix-table tbody tr:nth-child(even) td {
+  background: #f8fafc;
+}
+
+.royalties-rank-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.royalties-rank-card {
+  min-height: 260px;
+  padding: 14px;
+  border: 1px solid rgba(16, 32, 51, .08);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(16, 32, 51, .06);
+}
+
+.royalties-card-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.royalties-card-title h2 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.royalties-card-title span {
+  color: #667085;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.royalties-empty {
+  padding: 18px 0;
+  color: #667085;
+  font-size: 13px;
+}
+
+.royalties-rank-list {
+  display: grid;
+  gap: 10px;
+}
+
+.royalties-rank-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 12px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #edf2f7;
+  border-radius: 12px;
+  background: #fbfcfe;
+}
+
+.royalties-rank-main {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 2px 8px;
+  min-width: 0;
+}
+
+.royalties-rank-index {
+  grid-row: span 2;
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: #edf3f0;
+  color: var(--accent-dark);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.royalties-rank-main strong {
+  overflow: hidden;
+  color: var(--brand);
+  font-size: 13px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.royalties-rank-main small {
+  color: #667085;
+  font-size: 11px;
+}
+
+.royalties-rank-value {
+  text-align: right;
+}
+
+.royalties-rank-value strong,
+.royalties-rank-value span {
+  display: block;
+}
+
+.royalties-rank-value strong {
+  color: var(--brand);
+  font-size: 13px;
+}
+
+.royalties-rank-value span {
+  color: #667085;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.royalties-rank-bar {
+  grid-column: 1 / -1;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e7edf4;
+}
+
+.royalties-rank-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--gold));
+}
+
+.youtube-kpis {
+  grid-template-columns: 1.4fr repeat(3, minmax(150px, 1fr));
+}
+
 @media (max-width: 820px) {
   .topbar {
     padding: 0 18px;
@@ -2609,6 +3069,11 @@ button:disabled:hover {
   .booking-suggestion,
   .artist-record-meta,
   .control-dashboard,
+  .royalties-dashboard-hero,
+  .royalties-filterbar,
+  .royalties-kpi-grid,
+  .youtube-kpis,
+  .royalties-rank-grid,
   .finance-kpi-grid,
   .finance-subgrid,
   .finance-story-grid,
@@ -2640,6 +3105,15 @@ button:disabled:hover {
     margin-top: 12px;
   }
 
+  .booking-mode-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .booking-mode-switch {
+    width: 100%;
+  }
+
   .period-controls,
   .period-meta {
     grid-template-columns: 1fr;
@@ -2647,6 +3121,44 @@ button:disabled:hover {
 
   .period-controls button {
     width: 100%;
+  }
+
+  .royalties-dashboard-panel {
+    padding: 12px;
+  }
+
+  .royalties-dashboard-hero {
+    min-height: 0;
+    padding: 20px;
+  }
+
+  .royalties-dashboard-hero h1 {
+    font-size: 28px;
+  }
+
+  .royalties-hero-actions {
+    justify-items: stretch;
+  }
+
+  .royalties-hero-actions button,
+  .royalties-filterbar button {
+    width: 100%;
+  }
+
+  .royalties-tabs {
+    width: 100%;
+  }
+
+  .royalties-tabs button {
+    flex: 1;
+  }
+
+  .royalties-rank-row {
+    grid-template-columns: 1fr;
+  }
+
+  .royalties-rank-value {
+    text-align: left;
   }
 
   .legend-row {

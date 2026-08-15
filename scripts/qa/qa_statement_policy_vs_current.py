@@ -40,12 +40,12 @@ from build_statement_report_from_mart import (
     build_source_sheet_totals,
     build_statement_report_new_variants,
 )
+from lib.distributor_policy_store import load_distributor_policy_document
 
 
 REGISTRY_DIR = BASE / "warehouse" / "registry"
 REPORTS_QA_DIR = BASE / "reports" / "qa"
 
-POLICIES_PATH = REGISTRY_DIR / "distributor_account_policies.json"
 CUTOFFS_PATH = REGISTRY_DIR / "contract_cutoffs.json"
 
 KEY_COLUMNS = ["source", "account", "artist", "statement_period"]
@@ -104,7 +104,7 @@ def current_new_statement_totals(standardized_path: Path = STANDARDIZED_ALL_PATH
 
 
 def policy_statement_totals(standardized_path: Path = STANDARDIZED_ALL_PATH) -> pd.DataFrame:
-    policies = read_json_entries(POLICIES_PATH)
+    policies = load_distributor_policy_document().get("entries", [])
     cutoffs = {
         entry.get("cutoff_id"): entry
         for entry in read_json_entries(CUTOFFS_PATH)

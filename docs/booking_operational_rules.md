@@ -4,6 +4,21 @@ Este documento registra reglas operativas aprendidas durante la migracion de boo
 No reemplaza al modelo de datos; baja criterios practicos para la carga rapida, la web
 y la conciliacion de cuentas corrientes.
 
+## Entrada operativa
+
+La tarjeta `Booking Indyana` es la unica entrada operativa general de booking. Arriba
+presenta un selector de dos modos:
+
+- `Booking individual`: show propio cargado directamente;
+- `Booking compartido`: evento madre con gastos compartidos y lineas o shows hijos.
+
+La seleccion es navegacion interna. No fusiona formularios, calculos, tablas ni
+guardados. La pantalla abre en modo individual y conserva por separado cualquier
+edicion iniciada en cada modo.
+
+Los permisos tambien permanecen separados: `booking` habilita el modo individual y
+`composite_booking` habilita el modo compartido. El acceso a uno no implica el otro.
+
 ## Principio General
 
 Todo show propio debe existir como show economico aunque la caja no la administre VPO.

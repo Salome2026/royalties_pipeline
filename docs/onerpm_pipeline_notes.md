@@ -23,8 +23,8 @@ Cada archivo suele tener hojas:
 - `scripts\ingest_onerpm_mawzrecords_incremental.py`: pipeline viejo MAWZ
 - `scripts\ingest_standardized_onerpm.py`: pipeline nuevo unificado
 - `scripts\build_song_level_onerpm.py`: mart agregado por tema
-- `scripts\audit_standardized_onerpm.py`: auditoria standardized
-- `scripts\audit_song_level_onerpm.py`: auditoria song-level
+- `scripts\audit_consolidated_marts.py`: cierre standardized vs song-level por fuente
+- `scripts\qa\qa_statement_policy_vs_current.py`: cierre de salida reportable contra policies
 
 ## Reglas por cuenta
 
@@ -80,13 +80,31 @@ FX:
 Masters:
 
 - `artist_statement_style`: se parsea desde `Artists`, tomando performers.
-- `asset_isrc`: `ISRC`
-- `track_statement_style`: `Track Title`
+- `asset_isrc`: primer ISRC valido de `ISRC`, `ID`, `Parent ID`.
+- `product_upc`: primer UPC valido de `UPC`, `Parent ID`.
+- `track_statement_style`: `Track Title` (o `Title` si el layout futuro no trae
+  `Track Title`).
+- `content_type`: `audio`.
+
+Youtube Channels:
+
+- `video_id`: `Video ID` valido de 11 caracteres.
+- `channel_id`: `Channel ID` valido.
+- `track_statement_style`: `Video Title`.
+- `artist_statement_style`: `Channel Name`.
+- `content_type`: `video`.
+- Nunca se guarda un Video ID como `asset_isrc`.
 
 Shares:
 
 - `artist_statement_style`: `Payer Name`
-- IDs posibles desde `ID` / `Parent ID`
+- `ID` se clasifica por forma: ISRC valido a `asset_isrc`, video id valido a
+  `video_id`.
+- `Parent ID` se clasifica por forma: UPC valido a `product_upc`, channel id
+  valido a `channel_id`.
+- `track_statement_style`: `Title`.
+- Estas columnas sirven para trazabilidad; la policy sigue decidiendo que
+  Shares es transferencia/caja/auditoria y no nueva generacion.
 
 ## Vistas de negocio
 
@@ -138,3 +156,22 @@ Impacto aproximado:
 - MAWZ Shares cierra contra viejo.
 - MAWZ Masters cierra contra viejo si se excluye la mejora 2024-02.
 - Henry cierra contra viejo si se compara `net_amount`.
+- `standardized_raw_all_sources` y `song_level_all_sources` cierran por fuente
+  dentro de tolerancia de coma flotante.
+- La salida de policies y la salida reportable actual cierran con diferencia
+  total USD 0,00.
+
+## Evidencia para DSP y monetizacion
+
+La clasificacion usa `source_sheet`, `Store`, `Product Type` y `Sale Type`.
+Spotify Ad Supported y YouTube Premium son explicitos. `Youtube Channels`
+identifica ingreso de canal/video; `Masters` identifica la base master, pero no
+autoriza a inferir UGC o video oficial si la fila no lo informa.
+
+En `Youtube Channels`, la hoja es evidencia explicita de origen
+`Video / Channel`. `YouTube Premium` sigue siendo la monetizacion y no debe
+reclasificar esa fila como `Music / Art Track`.
+
+Esta clasificacion no altera las vistas de negocio: `Shares In & Out` conserva
+su caracter de transferencia/caja/auditoria y nunca se suma como nueva
+generacion por tener un Store reconocible.

@@ -10,9 +10,9 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 try:
-    from lib.catalog_report_filter import filter_reportable_catalog
+    from lib.catalog_report_filter import apply_report_net_personalization, filter_reportable_generation
 except ModuleNotFoundError:
-    from scripts.lib.catalog_report_filter import filter_reportable_catalog
+    from scripts.lib.catalog_report_filter import apply_report_net_personalization, filter_reportable_generation
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -40,6 +40,8 @@ SEARCH_COLUMNS_STANDARDIZED = [
     "asset_isrc",
     "ISRC",
     "Track Title",
+    "Title",
+    "Video Title",
     "Asset Title",
     "Product Title",
     "track_statement_style",
@@ -48,6 +50,7 @@ SEARCH_COLUMNS_STANDARDIZED = [
     "asset_artist_statement",
     "Track Artists",
     "Artist Name",
+    "Channel Name",
     "Product Artist",
     "TRACK ARTIST",
     "TRACK",
@@ -111,6 +114,7 @@ CENTER = Alignment(horizontal="center", vertical="center")
 LEFT = Alignment(horizontal="left", vertical="center")
 
 DISPLAY_HEADERS = {
+    "distributor": "Distribuidora",
     "keywords": "Filtro",
     "mode": "Coincidencia",
     "period_basis": "Criterio periodo",
@@ -132,6 +136,8 @@ DISPLAY_HEADERS = {
     "report_territory": "Territorio",
     "report_code": "Codigo",
     "report_code_source": "Tipo codigo",
+    "original_codes": "Codigos originales",
+    "content_types": "Tipo de contenido",
     "asset_isrc": "ISRC",
     "track_statement_style": "Tema",
     "asset_title_statement": "Asset title",
@@ -266,16 +272,26 @@ def exclude_isrc_expr(columns: set[str], excluded_isrcs: list[str]) -> pl.Expr:
 
 def contains_expr(columns: set[str], search_columns: list[str], keyword: str) -> pl.Expr:
     exprs = []
+    normalized_keyword = re.sub(r"\s+", " ", keyword.strip().lower())
+    compact_keyword = re.sub(r"[\s_-]+", "", normalized_keyword)
 
     for col in search_columns:
         if col in columns:
-            exprs.append(
+            normalized_value = (
                 pl.col(col)
                 .cast(pl.Utf8)
                 .str.to_lowercase()
-                .str.contains(keyword.lower(), literal=True)
-                .fill_null(False)
+                .str.replace_all(r"\s+", " ")
+                .str.strip_chars()
             )
+            match = normalized_value.str.contains(normalized_keyword, literal=True)
+            if compact_keyword:
+                match = match | (
+                    normalized_value
+                    .str.replace_all(r"[\s_-]+", "")
+                    .str.contains(compact_keyword, literal=True)
+                )
+            exprs.append(match.fill_null(False))
 
     if not exprs:
         return pl.lit(False)
@@ -350,6 +366,168 @@ def add_report_code(lf: pl.LazyFrame, columns: set[str]) -> pl.LazyFrame:
         report_code_source_expr(columns).alias("report_code_source"),
         report_territory_expr(columns).alias("report_territory"),
     ])
+
+
+def _summary_text_expr(columns: set[str], names: list[str]) -> pl.Expr:
+    candidates = []
+    for name in names:
+        if name not in columns:
+            continue
+        value = pl.col(name).cast(pl.Utf8, strict=False).str.strip_chars()
+        candidates.append(pl.when(value.is_not_null() & (value != "")).then(value).otherwise(None))
+    if not candidates:
+        return pl.lit(None).cast(pl.Utf8)
+    return pl.coalesce(candidates)
+
+
+def build_track_summary_lf(base_lf: pl.LazyFrame) -> pl.LazyFrame:
+    """Build one economic row per resolved catalog identity."""
+    columns = set(base_lf.collect_schema().names())
+    title = _summary_text_expr(columns, ["track_statement_style", "asset_title_statement"])
+    raw_artist = _summary_text_expr(columns, ["artist_statement_style", "asset_artist_statement"])
+    artist = (
+        pl.when(
+            raw_artist.fill_null("").str.to_lowercase().str.replace_all(r"\s+", " ").str.strip_chars()
+            == title.fill_null("").str.to_lowercase().str.replace_all(r"\s+", " ").str.strip_chars()
+        )
+        .then(None)
+        .otherwise(raw_artist)
+    )
+    catalog_key = _summary_text_expr(columns, ["catalog_key"])
+    asset_isrc = _summary_text_expr(columns, ["asset_isrc"])
+    report_code = _summary_text_expr(columns, ["report_code"])
+    report_code_source = _summary_text_expr(columns, ["report_code_source"])
+
+    normalized_title = (
+        title.fill_null("").str.to_lowercase().str.replace_all(r"\s+", " ").str.strip_chars()
+    )
+    normalized_artist = (
+        artist.fill_null("").str.to_lowercase().str.replace_all(r"\s+", " ").str.strip_chars()
+    )
+    fallback_identity = (
+        pl.when(asset_isrc.is_not_null())
+        .then(pl.concat_str([pl.lit("ISRC:"), asset_isrc.str.to_uppercase()]))
+        .when(report_code.is_not_null())
+        .then(pl.concat_str([
+            pl.lit("CODE:"),
+            report_code_source.fill_null("unknown"),
+            pl.lit(":"),
+            report_code,
+        ]))
+        .otherwise(pl.concat_str([
+            pl.lit("TEXT:"),
+            normalized_title,
+            pl.lit("|"),
+            normalized_artist,
+        ]))
+    )
+    trusted_code = (
+        pl.when(
+            report_code.is_not_null()
+            & ~report_code_source.fill_null("").is_in(["Sale ID", "ID"])
+        )
+        .then(report_code)
+        .otherwise(None)
+    )
+
+    grouped = (
+        base_lf
+        .with_columns([
+            pl.coalesce([catalog_key, fallback_identity]).alias("_report_identity"),
+            title.alias("_summary_title"),
+            artist.alias("_summary_artist"),
+            trusted_code.alias("_trusted_original_code"),
+            report_code_source.alias("_summary_code_source"),
+            _summary_text_expr(columns, ["content_type"]).alias("_summary_content_type"),
+        ])
+        .group_by("_report_identity")
+        .agg([
+            pl.col("_summary_title")
+            .sort_by(pl.col("amount_usd").abs(), descending=True)
+            .drop_nulls()
+            .first()
+            .alias("track_statement_style"),
+            pl.col("_summary_artist")
+            .sort_by(pl.col("amount_usd").abs(), descending=True)
+            .drop_nulls()
+            .first()
+            .alias("artist_statement_style"),
+            pl.col("_trusted_original_code")
+            .drop_nulls()
+            .unique()
+            .sort()
+            .str.join(" | ")
+            .alias("original_codes"),
+            pl.col("_summary_content_type")
+            .drop_nulls()
+            .unique()
+            .sort()
+            .str.join(" | ")
+            .alias("content_types"),
+            pl.col("_trusted_original_code")
+            .sort_by(pl.col("amount_usd").abs(), descending=True)
+            .drop_nulls()
+            .first()
+            .alias("_best_original_code"),
+            pl.col("_summary_code_source")
+            .sort_by(pl.col("amount_usd").abs(), descending=True)
+            .drop_nulls()
+            .first()
+            .alias("_best_code_source"),
+            pl.sum("amount_usd").alias("amount_usd"),
+            pl.sum("units").alias("units"),
+            pl.min("period_month").alias("first_month"),
+            pl.max("period_month").alias("last_month"),
+        ])
+        .with_columns([
+            pl.when(pl.col("_report_identity").str.starts_with("ISRC:"))
+            .then(pl.col("_report_identity").str.replace(r"^ISRC:", ""))
+            .when(pl.col("_report_identity").str.starts_with("VIDEO:"))
+            .then(pl.col("_report_identity").str.replace(r"^VIDEO:", ""))
+            .when(pl.col("_report_identity").str.starts_with("UPC:"))
+            .then(pl.col("_report_identity").str.replace(r"^UPC:", ""))
+            .otherwise(pl.col("_best_original_code"))
+            .alias("report_code"),
+            pl.when(pl.col("_report_identity").str.starts_with("ISRC:"))
+            .then(pl.lit("ISRC"))
+            .when(pl.col("_report_identity").str.starts_with("VIDEO:"))
+            .then(pl.lit("Video ID"))
+            .when(pl.col("_report_identity").str.starts_with("UPC:"))
+            .then(pl.lit("UPC"))
+            .otherwise(pl.col("_best_code_source"))
+            .alias("report_code_source"),
+            pl.col("track_statement_style")
+            .fill_null("")
+            .str.to_lowercase()
+            .alias("_sort_tema"),
+            pl.col("track_statement_style")
+            .fill_null("")
+            .str.strip_chars()
+            .eq("")
+            .cast(pl.Int8)
+            .alias("_sort_tema_empty"),
+        ])
+        .sort([
+            "_sort_tema_empty",
+            "_sort_tema",
+            "track_statement_style",
+            "artist_statement_style",
+            "report_code",
+        ])
+        .select([
+            "track_statement_style",
+            "artist_statement_style",
+            "report_code",
+            "report_code_source",
+            "original_codes",
+            "content_types",
+            "amount_usd",
+            "units",
+            "first_month",
+            "last_month",
+        ])
+    )
+    return grouped
 
 
 def report_territory_expr(columns: set[str]) -> pl.Expr:
@@ -469,9 +647,14 @@ def normalize_store_expr(raw_store: pl.Expr) -> pl.Expr:
 
 def normalize_report_store(lf: pl.LazyFrame, columns: set[str]) -> pl.LazyFrame:
     raw_store = store_raw_expr(columns)
+    normalized_store = (
+        pl.col("store_report_label").cast(pl.Utf8, strict=False).str.strip_chars()
+        if "store_report_label" in columns
+        else normalize_store_expr(raw_store)
+    )
     return lf.with_columns([
         raw_store.alias("store_raw"),
-        normalize_store_expr(raw_store).alias("store"),
+        normalized_store.alias("store"),
     ])
 
 
@@ -560,9 +743,14 @@ def normalize_report_usage(lf: pl.LazyFrame, columns: set[str]) -> pl.LazyFrame:
         if "source_sheet" in columns
         else pl.lit(None).cast(pl.Utf8)
     )
+    normalized_usage = (
+        pl.col("content_origin_normalized").cast(pl.Utf8, strict=False).str.strip_chars()
+        if "content_origin_normalized" in columns
+        else normalize_usage_expr(raw_usage, raw_store, source_sheet)
+    )
     return lf.with_columns([
         raw_usage.alias("usage_raw"),
-        normalize_usage_expr(raw_usage, raw_store, source_sheet).alias("usage_type"),
+        normalized_usage.alias("usage_type"),
     ])
 
 
@@ -701,7 +889,8 @@ def build_report_tables(
                 ),
                 standardized_cols,
             )
-            .pipe(lambda frame: filter_reportable_catalog(frame, standardized_cols))
+            .pipe(lambda frame: filter_reportable_generation(frame, standardized_cols))
+            .pipe(lambda frame: apply_report_net_personalization(frame))
             .filter(raw_filter)
             .filter(exclude_isrc_expr(standardized_cols, excluded_isrcs))
             .select([
@@ -758,12 +947,13 @@ def build_report_tables(
 
         store_summary_lf = (
             statement_base_lf
-            .group_by(["store_raw", "usage_type"])
+            .group_by(["source", "store_raw", "usage_type"])
             .agg([
                 pl.sum("amount_usd").alias("amount_usd"),
                 pl.sum("units").alias("units"),
             ])
-            .sort(["store_raw", "usage_type"])
+            .sort(["source", "store_raw", "usage_type"])
+            .rename({"source": "distributor"})
         )
 
         territory_summary_lf = (
@@ -779,47 +969,7 @@ def build_report_tables(
             .sort("report_territory")
         )
 
-        track_summary_lf = (
-            statement_base_lf
-            .group_by([
-                "asset_isrc",
-                "report_code",
-                "report_code_source",
-                "track_statement_style",
-                "asset_title_statement",
-                "artist_statement_style",
-                "asset_artist_statement",
-                "content_type",
-                "store_raw",
-                "usage_type",
-            ])
-            .agg([
-                pl.sum("amount_usd").alias("amount_usd"),
-                pl.sum("units").alias("units"),
-                pl.min("period_month").alias("first_month"),
-                pl.max("period_month").alias("last_month"),
-            ])
-            .with_columns(
-                [
-                    pl.col("track_statement_style")
-                    .cast(pl.Utf8, strict=False)
-                    .fill_null("")
-                    .str.to_lowercase()
-                    .alias("_sort_tema"),
-                    (
-                        pl.col("track_statement_style")
-                        .cast(pl.Utf8, strict=False)
-                        .fill_null("")
-                        .str.strip_chars()
-                        == ""
-                    )
-                    .cast(pl.Int8)
-                    .alias("_sort_tema_empty"),
-                ]
-            )
-            .sort(["_sort_tema_empty", "_sort_tema", "track_statement_style", "artist_statement_style", "asset_isrc", "report_code"])
-            .drop(["_sort_tema_empty", "_sort_tema"])
-        )
+        track_summary_lf = build_track_summary_lf(statement_base_lf)
 
         raw_sample_lf = (
             add_report_code(
@@ -841,7 +991,8 @@ def build_report_tables(
                 ),
                 standardized_cols,
             )
-            .pipe(lambda frame: filter_reportable_catalog(frame, standardized_cols))
+            .pipe(lambda frame: filter_reportable_generation(frame, standardized_cols))
+            .pipe(lambda frame: apply_report_net_personalization(frame))
             .filter(raw_filter)
             .filter(exclude_isrc_expr(standardized_cols, excluded_isrcs))
             .select([
@@ -945,7 +1096,8 @@ def build_report_tables(
                 ),
                 song_cols,
             )
-            .pipe(lambda frame: filter_reportable_catalog(frame, song_cols))
+            .pipe(lambda frame: filter_reportable_generation(frame, song_cols))
+            .pipe(lambda frame: apply_report_net_personalization(frame))
             .filter(song_filter)
             .filter(exclude_isrc_expr(song_cols, excluded_isrcs))
             .with_columns(pl.col(period_column).cast(pl.Utf8).alias("period_month"))
@@ -984,46 +1136,7 @@ def build_report_tables(
         .sort("period_month")
     )
 
-    track_summary = (
-        song
-        .group_by([
-            "asset_isrc",
-            "report_code",
-            "report_code_source",
-            "report_territory",
-            "track_statement_style",
-            "asset_title_statement",
-            "artist_statement_style",
-            "asset_artist_statement",
-            "content_type",
-        ])
-        .agg([
-            pl.sum("amount_usd").alias("amount_usd"),
-            pl.sum("units").alias("units"),
-            pl.min("period_month").alias("first_month"),
-            pl.max("period_month").alias("last_month"),
-        ])
-        .with_columns(
-            [
-                pl.col("track_statement_style")
-                .cast(pl.Utf8, strict=False)
-                .fill_null("")
-                .str.to_lowercase()
-                .alias("_sort_tema"),
-                (
-                    pl.col("track_statement_style")
-                    .cast(pl.Utf8, strict=False)
-                    .fill_null("")
-                    .str.strip_chars()
-                    == ""
-                )
-                .cast(pl.Int8)
-                .alias("_sort_tema_empty"),
-            ]
-        )
-        .sort(["_sort_tema_empty", "_sort_tema", "track_statement_style", "artist_statement_style", "asset_isrc", "report_code"])
-        .drop(["_sort_tema_empty", "_sort_tema"])
-    )
+    track_summary = build_track_summary_lf(song.lazy()).collect()
 
     raw_sample = pl.DataFrame()
     store_summary = pl.DataFrame()
@@ -1052,19 +1165,21 @@ def build_report_tables(
                 ),
                 raw_cols,
             )
-            .pipe(lambda frame: filter_reportable_catalog(frame, raw_cols))
+            .pipe(lambda frame: filter_reportable_generation(frame, raw_cols))
+            .pipe(lambda frame: apply_report_net_personalization(frame))
             .filter(raw_filter)
             .filter(exclude_isrc_expr(raw_cols, excluded_isrcs))
         )
 
         store_summary = (
             raw_matches_lf
-            .group_by(["store_raw", "usage_type"])
+            .group_by(["source", "store_raw", "usage_type"])
             .agg([
                 pl.sum("amount_usd").alias("amount_usd"),
                 pl.sum("units").alias("units"),
             ])
-            .sort(["store_raw", "usage_type"])
+            .sort(["source", "store_raw", "usage_type"])
+            .rename({"source": "distributor"})
             .collect()
         )
 

@@ -18,11 +18,16 @@ La regla de esta fase es:
 El simulador visual de reglas se retiro de la pantalla para mantener el
 configurador limpio.
 
-No se borro la logica de negocio: la decision sigue viviendo en:
+No se borro la logica de negocio: la decision vive en:
 
-- `warehouse/registry/distributor_account_policies.json`
+- Cloud SQL: `distributor_account_policies` y `distributor_policy_settings`
 - `warehouse/registry/contract_cutoffs.json`
 - `warehouse/registry/catalog_status.parquet`
+
+Desde 2026-08-15 el JSON de policies dejo de ser una fuente operativa. El
+configurador, los reportes, el dashboard, el catalogo y las ingestas leen la
+misma version de Cloud SQL. Cada cambio de porcentaje incrementa
+`policy_version` y queda registrado en `distributor_policy_audit`.
 
 ### QA agregado
 
@@ -71,18 +76,18 @@ Diff total: `0.00`.
 
 `scripts/build_statement_report_from_mart.py` ahora, para `report_version="new"`:
 
-1. lee `distributor_account_policies.json`;
+1. lee la policy vigente desde Cloud SQL;
 2. lee `contract_cutoffs.json`;
 3. arma la vista statement desde esas reglas;
-4. si la politica no existe o no devuelve filas, cae al comportamiento anterior
-   hardcodeado como fallback tecnico.
+4. si la politica no existe, no cubre una hoja o no devuelve filas, falla de
+   manera explicita. No existe fallback hardcodeado.
 
 El reporte viejo no se modifico.
 
 ## Catalogo conectado
 
-Desde 2026-05-24, `scripts/build_catalog_master.py` tambien lee
-`distributor_account_policies.json` para separar generacion de transferencias.
+`scripts/build_catalog_master.py` tambien lee la policy de Cloud SQL para
+separar generacion de transferencias.
 
 La decision no vive en una policy nueva. Usa la misma policy de
 distribuidoras/cuentas:

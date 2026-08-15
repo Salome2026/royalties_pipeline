@@ -117,6 +117,21 @@ def from_soundon_filename(file_name: str) -> StatementPeriodInfo:
     )
 
 
+def from_ada_filename(file_name: str) -> StatementPeriodInfo:
+    match = re.search(r"_(\d{4})(\d{2})\d{2}(?:\s*\(\d+\))?\.txt$", file_name, flags=re.IGNORECASE)
+    if not match:
+        return StatementPeriodInfo(
+            period="unknown",
+            source="filename",
+            note="ADA filename did not end with statement date YYYYMMDD.",
+        )
+    return StatementPeriodInfo(
+        period=f"{match.group(1)}-{match.group(2)}",
+        source="filename",
+        note="ADA statement period inferred from filename ending YYYYMMDD and validated against Recdate Month ID.",
+    )
+
+
 def from_column(column_name: str, detail: str = "") -> tuple[str, str]:
     note = f"Statement period sourced from column '{column_name}'."
     if detail:

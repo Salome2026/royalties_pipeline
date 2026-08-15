@@ -37,3 +37,27 @@ export async function GET(request: NextRequest) {
   if (!response.ok) return apiError(response);
   return NextResponse.json(await response.json());
 }
+
+export async function PATCH(request: NextRequest) {
+  const config = await apiConfig("editor");
+  if ("error" in config) return config.error;
+
+  const payload = await request.json().catch(() => null);
+  if (!payload) {
+    return NextResponse.json({ error: "Payload invalido." }, { status: 400 });
+  }
+
+  const response = await fetch(`${config.apiUrl}/config/distributor-account-policies/personalization`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      "X-VPO-API-Key": config.apiKey,
+      "X-VPO-Username": config.user.username,
+    },
+    body: JSON.stringify(payload),
+    cache: "no-store",
+  });
+
+  if (!response.ok) return apiError(response);
+  return NextResponse.json(await response.json());
+}

@@ -1,4 +1,4 @@
-# Modelo financiero operativo VPO - rector v2
+﻿# Modelo financiero operativo VPO - rector v2
 
 Fecha: 2026-07-06
 
@@ -92,6 +92,61 @@ Ejemplos:
 - Un manager pago un gasto que correspondia a Indyana.
 - Un boliche transfirio una sena.
 - Se pago un sueldo.
+
+### 1.a Gasto pagado por empleado
+
+Cuando un empleado paga con plata propia un gasto que pertenece al negocio, no
+cambia la naturaleza economica del gasto.
+
+Ejemplo:
+
+- Lautaro paga combustible o ensayo para un proyecto de Candu;
+- el gasto sigue siendo `Label`, `Booking`, `Marketing` o el area que
+  corresponda;
+- el artista/proyecto conserva el costo;
+- Indyana reconoce una deuda de reintegro con Lautaro.
+
+Regla:
+
+- el usuario carga el gasto normalmente;
+- en `Quien pago` elige `Empleado`;
+- el sistema pide el empleado desde ABM, no texto libre;
+- el gasto queda imputado al artista/proyecto/area;
+- se genera automaticamente una entrada de cuenta corriente:
+  `Indyana debe a empleado`;
+- el importe a reintegrar es el `pagado real` convertido a ARS. Si `pagado real`
+  esta vacio, se asume el compromiso total del gasto;
+- el reintegro posterior debe cerrar esa cuenta corriente sin modificar el gasto
+  original.
+
+Esto evita mezclar dos verdades:
+
+- `que costo tuvo el artista/proyecto`;
+- `a quien le debe plata Indyana por haber financiado ese costo`.
+
+### 1.b Pago de reintegro a empleado
+
+Cuando Indyana le devuelve plata a un empleado por gastos que el empleado pago
+con fondos propios, no se carga otro gasto.
+
+El movimiento correcto es:
+
+- `Pago / cobro`;
+- categoria `Reintegro a empleado`;
+- empleado elegido desde el ABM;
+- importe real pagado;
+- aplicacion contra una o mas entradas abiertas de `Indyana debe a empleado`.
+
+Reglas:
+
+- el pago baja la cuenta corriente del empleado;
+- el gasto original no se modifica;
+- si el pago cubre todo el saldo, la entrada queda saldada;
+- si el pago cubre una parte, la entrada queda parcial;
+- si el pago sobra, el excedente no debe aplicarse automaticamente sin una
+  decision explicita;
+- el pago puede saldar gastos de distintos artistas/proyectos, porque la
+  imputacion economica ya vive en cada gasto original.
 
 ### 2. Cuenta corriente
 
@@ -399,7 +454,95 @@ Impacto:
 - baja o cierra cuenta corriente;
 - no modifica el show/proyecto original.
 
-### 3.a Seña de show con recibo
+### 3.a Documentos financieros PDF
+
+Un documento financiero es una constancia formal en PDF emitida desde un
+movimiento financiero real. No es una segunda caja, no es una segunda cuenta
+corriente y no reemplaza al movimiento original: lo documenta.
+
+Regla core:
+
+- todo documento financiero nace de un movimiento en `Movimientos Financieros`;
+- el documento guarda numero incremental, fecha, empresa emisora, contraparte,
+  importe, moneda, tipo de cambio, concepto, notas y datos de negocio cuando
+  correspondan;
+- la numeracion incremental es unica para todos los documentos financieros y
+  canonica de Postgres. No se calcula con `MAX(numero) + 1`;
+- el PDF se genera desde los datos guardados;
+- emitir el documento no aplica saldos automaticamente, salvo que el flujo de
+  negocio elegido tenga una aplicacion explicita aparte;
+- los documentos operativos viven en Cloud SQL/Postgres. No se crean tablas,
+  columnas ni fallback SQLite para esta funcionalidad.
+- un `Gasto / inversion` puede emitir una `Orden de pago` en PDF desde el mismo
+  movimiento. El documento copia concepto, contraparte, importe, moneda, tipo de
+  cambio, artista/proyecto y area del movimiento; no crea un segundo movimiento
+  ni convierte el gasto en pago/cobro.
+
+Tipos actuales:
+
+- `show_deposit_receipt`: recibo por seña de show. Se usa cuando un cliente,
+  boliche o productor entrega dinero para reservar un show.
+- `payment_order`: orden/comprobante de pago. Se usa cuando Indyana o una
+  empresa del grupo deja constancia de dinero pagado a una persona, proveedor,
+  artista, manager o tercero. Puede nacer desde `Pago / cobro` o desde un
+  `Gasto / inversion` cuando el usuario activa "Generar orden de pago PDF".
+- `collection_receipt`: comprobante de cobro. Se usa cuando entra dinero a una
+  empresa del grupo por un concepto que no es necesariamente sena de show.
+
+Los nombres visibles del PDF dependen del tipo:
+
+- recibo por seña de show: "Recibo";
+- orden/comprobante de pago: "Orden de pago";
+- comprobante de cobro: "Comprobante de cobro".
+
+Campos minimos comunes:
+
+- fecha;
+- empresa emisora;
+- contraparte: de quien se recibe o a quien se paga, segun el tipo;
+- importe, moneda y tipo de cambio;
+- concepto;
+- artista principal o unidad, cuando corresponda;
+- area del negocio;
+- notas/comprobantes;
+- tratamiento IVA interno si corresponde. No aparece en el PDF.
+
+Permisos:
+
+- un usuario con permiso de crear en Movimientos Financieros puede emitir
+  documentos financieros para los artistas/alcances que tenga habilitados;
+- corregir un documento emitido requiere permiso de editar en Movimientos
+  Financieros;
+- un usuario sin permiso de editar no puede modificar documentos ya emitidos,
+  ni siquiera los propios;
+- para abrir/descargar un PDF se requiere acceso al movimiento financiero y al
+  artista/unidad correspondiente.
+
+### 3.a.1 Orden de pago desde gasto / inversion
+
+Uso:
+
+- se carga un gasto real o inversion del negocio;
+- el usuario necesita dejar un comprobante formal en PDF;
+- no quiere cargar dos veces los mismos datos.
+
+Regla:
+
+- el movimiento sigue siendo `Gasto / inversion`;
+- el documento financiero asociado es `payment_order`;
+- la contraparte visible del PDF sale de "A quien se pago". Si el usuario quiere
+  otro texto para el PDF, puede completarlo en el bloque del documento;
+- el importe y la moneda del PDF son los del movimiento;
+- si la moneda es USD, el tipo de cambio sigue siendo obligatorio para registro
+  interno;
+- no se genera cuenta corriente ni aplicacion adicional por emitir el PDF.
+
+Limitacion actual:
+
+- para cargas con multiples conceptos no se genera orden de pago automatica. Se
+  debe cargar un concepto por movimiento cuando se necesita PDF.
+
+### 3.b Seña de show como documento financiero
 
 Uso:
 
@@ -410,35 +553,12 @@ Uso:
 Regla:
 
 - la seña se carga como `Pago / cobro` del area `booking`;
-- el tipo de aplicacion es `sena_show`;
+- el tipo de documento financiero es `show_deposit_receipt`;
 - el movimiento financiero representa caja real recibida;
-- el detalle del recibo vive en `finance_receipts`;
-- el recibo se numera de manera incremental;
-- la numeracion incremental es canonica de Postgres y debe ser atomica; no se
-  calcula con `MAX(numero) + 1` para evitar duplicados si dos usuarios emiten a
-  la vez;
+- el detalle del documento vive en `finance_documents`;
 - el PDF se genera desde los datos guardados, no desde texto suelto;
-- no se altera cachet, gasto, split ni estado del show hasta que exista una aplicacion explicita.
-- el artista del movimiento sale del artista principal del recibo.
-- un usuario con permiso de crear en Movimientos Financieros puede emitir
-  recibos, pero no puede editarlos despues, ni siquiera los que cargo;
-- corregir un recibo emitido requiere permiso de editar en Movimientos
-  Financieros. Sin ese permiso, el usuario solo puede abrir/descargar el PDF si
-  tiene acceso al movimiento;
-
-Campos minimos:
-
-- fecha;
-- importe, moneda y tipo de cambio;
-- de quien se recibe;
-- artista principal desde el ABM;
-- otros artistas del show desde el ABM, si corresponde;
-- fecha del show;
-- venue/lugar;
-- concepto;
-- tratamiento IVA: no aplica, mas IVA o IVA incluido. Es dato interno y no aparece en el PDF del recibo;
-- empresa emisora del recibo: VPO Corp, Indyana Records LLC, Carolina Vanesa Alvarez, Mawz SRL, Mawz Records LLC o Mawz Records SRL;
-- notas/comprobantes.
+- no se altera cachet, gasto, split ni estado del show hasta que exista una aplicacion explicita;
+- el artista del movimiento sale del artista principal del documento.
 
 Impacto:
 
@@ -448,10 +568,10 @@ Impacto:
 
 Regla multiartista:
 
-- una seña por un evento de dos o mas artistas genera un solo recibo;
-- el recibo guarda todos los artistas asociados;
+- una sena por un evento de dos o mas artistas genera un solo documento;
+- el documento guarda todos los artistas asociados;
 - no se duplica caja por artista;
-- no se reparte la seña automaticamente en esta etapa;
+- no se reparte la sena automaticamente en esta etapa;
 - el artista principal funciona como ancla administrativa para permisos y filtros;
 - la distribucion/aplicacion economica se resuelve despues desde Booking o Cuenta
   booking, cuando exista el show o la liquidacion correspondiente.
@@ -799,7 +919,7 @@ Hoy la carga de booking calcula:
 - cuanto recibio efectivamente el artista;
 - si quedo deuda del boliche;
 - si hay recuperos antes del split;
-- si hay señas o rendiciones.
+- si hay seÃ±as o rendiciones.
 
 La cuenta corriente de booking debe nacer de la diferencia entre:
 
@@ -832,21 +952,21 @@ Si un show quedo con saldo:
 - una compensacion con otro show debe quedar trazada;
 - un ajuste debe ser otro movimiento, no una edicion silenciosa del show.
 
-### Señas y rendiciones
+### SeÃ±as y rendiciones
 
-Las señas y rendiciones no cambian el split.
+Las seÃ±as y rendiciones no cambian el split.
 
 Solo reducen o aumentan lo que queda por cobrar/pagar.
 
 Ejemplos:
 
-- Indyana debia cobrar 300 y ya cobro seña de 200: queda por cobrar 100.
-- Artista debia cobrar 300 y ya cobro seña de 500: queda saldo a favor de
+- Indyana debia cobrar 300 y ya cobro seÃ±a de 200: queda por cobrar 100.
+- Artista debia cobrar 300 y ya cobro seÃ±a de 500: queda saldo a favor de
   Indyana por 200.
-- Indyana cobro una seña que excede su parte: puede generar deuda de Indyana
+- Indyana cobro una seÃ±a que excede su parte: puede generar deuda de Indyana
   al artista.
 
-### Liquidaciones compuestas
+### Booking compartido
 
 Las liquidaciones compuestas generan shows hijos. La cuenta corriente fina debe
 vivir en los hijos, porque los hijos son los shows reales de cada artista.
@@ -864,8 +984,8 @@ casos testigo de:
 
 - show simple con saldo a favor de Indyana;
 - show simple con saldo a favor del artista;
-- show con seña a Indyana;
-- show con seña al artista;
+- show con seÃ±a a Indyana;
+- show con seÃ±a al artista;
 - show con deuda de boliche;
 - show con recupero antes del split;
 - liquidacion compuesta con madre e hijas;
@@ -1061,6 +1181,7 @@ Debe poder:
 
 - cargar gastos de sus artistas;
 - adjuntar notas/comprobantes;
+- indicar que pago el gasto con plata propia y generar reintegro pendiente;
 - no ver saldos generales si no corresponde;
 - no aprobar sus propios movimientos salvo permiso especial.
 

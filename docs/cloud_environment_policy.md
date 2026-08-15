@@ -14,6 +14,8 @@ snapshots historicos y operacion viva.
   base viva.
 - Modulo nuevo operativo = Postgres-only. No se agrega schema, columnas ni
   fallback SQLite para funcionalidades nuevas.
+- Las policies editables de distribuidoras tambien son operacion viva: viven
+  exclusivamente en Cloud SQL. No se mantiene un JSON paralelo como fallback.
 - Los snapshots en GCS pueden existir para datos analiticos o catalogo, pero
   no reemplazan la base operativa.
 

@@ -2,6 +2,8 @@ from pathlib import Path
 
 import polars as pl
 
+from lib.store_taxonomy import add_store_dimensions
+
 
 BASE = Path(r"C:\royalties_pipeline")
 MARTS = BASE / "warehouse" / "marts"
@@ -15,6 +17,7 @@ STANDARDIZED_FILES = [
     MARTS / "standardized_raw_onerpm.parquet",
     MARTS / "standardized_raw_orchard.parquet",
     MARTS / "standardized_raw_soundon.parquet",
+    MARTS / "standardized_raw_ada.parquet",
 ]
 
 SONG_FILES = [
@@ -23,6 +26,7 @@ SONG_FILES = [
     MARTS / "song_level_onerpm.parquet",
     MARTS / "song_level_orchard.parquet",
     MARTS / "song_level_soundon.parquet",
+    MARTS / "song_level_ada.parquet",
 ]
 
 
@@ -46,7 +50,7 @@ def read_parts(paths: list[Path]) -> list[pl.DataFrame]:
     return parts
 
 
-def consolidate(paths: list[Path], output_path: Path):
+def consolidate(paths: list[Path], output_path: Path, add_reporting_dimensions: bool = False):
     parts = read_parts(paths)
 
     if not parts:
@@ -56,7 +60,11 @@ def consolidate(paths: list[Path], output_path: Path):
     print(f"  - Consolidando {len(parts)} parte(s)...")
 
     final = pl.concat(parts, how="diagonal_relaxed")
-    final.write_parquet(output_path)
+    if add_reporting_dimensions:
+        final = add_store_dimensions(final.lazy(), set(final.columns)).collect()
+    temporary_path = output_path.with_name(f"{output_path.name}.tmp")
+    final.write_parquet(temporary_path)
+    temporary_path.replace(output_path)
 
     print(f"  - OK: {output_path}")
     print(f"  - Filas: {final.height}")
@@ -69,7 +77,7 @@ def main():
     print("Generando marts consolidados...")
 
     print("\n=== STANDARDIZED ALL SOURCES ===")
-    consolidate(STANDARDIZED_FILES, STANDARDIZED_OUTPUT)
+    consolidate(STANDARDIZED_FILES, STANDARDIZED_OUTPUT, add_reporting_dimensions=True)
 
     print("\n=== SONG LEVEL ALL SOURCES ===")
     consolidate(SONG_FILES, SONG_OUTPUT)

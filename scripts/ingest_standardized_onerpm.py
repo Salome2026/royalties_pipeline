@@ -6,7 +6,15 @@ from pathlib import Path
 import polars as pl
 
 from lib.fx import get_monthly_fx, normalize_currency
+from lib.identity import (
+    coalesce_text_expr,
+    first_valid_isrc_expr,
+    first_valid_upc_expr,
+    first_valid_youtube_channel_id_expr,
+    first_valid_youtube_video_id_expr,
+)
 from lib.statement_period import from_onerpm_filename
+from lib.distributor_policy_store import load_distributor_policy_document
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -47,6 +55,29 @@ ACCOUNTS = {
         "use_shares_as_flags": False,
     },
 }
+
+
+def load_onerpm_policy_rules() -> dict[tuple[str, str], dict]:
+    payload = load_distributor_policy_document()
+    rules: dict[tuple[str, str], dict] = {}
+    for entry in payload.get("entries", []):
+        if str(entry.get("source") or "").strip().lower() != SOURCE:
+            continue
+        account = str(entry.get("account") or "").strip().lower()
+        for source_sheet, rule in (entry.get("sheet_rules") or {}).items():
+            if isinstance(rule, dict):
+                rules[(account, str(source_sheet or "").strip())] = rule
+
+    if not rules:
+        raise ValueError("Cloud SQL has no ONErpm sheet policies.")
+    return rules
+
+
+ONERPM_POLICY_RULES = load_onerpm_policy_rules()
+
+
+def policy_bool(value) -> bool:
+    return value is True
 
 
 def ensure_dirs():
@@ -224,6 +255,43 @@ def build_artist_statement_style_from_masters(df: pl.DataFrame) -> pl.DataFrame:
     return df.with_columns(pl.Series("artist_statement_style", result))
 
 
+def add_canonical_identity(df: pl.DataFrame, source_sheet: str) -> pl.DataFrame:
+    """Populate trusted common identifiers while preserving every raw column."""
+    schema = set(df.columns)
+
+    if source_sheet == SHEET_MASTERS:
+        return df.with_columns([
+            first_valid_isrc_expr(schema, ["ISRC", "ID", "Parent ID"]).alias("asset_isrc"),
+            first_valid_upc_expr(schema, ["UPC", "Parent ID"]).alias("product_upc"),
+            pl.lit(None).cast(pl.Utf8).alias("video_id"),
+            pl.lit(None).cast(pl.Utf8).alias("channel_id"),
+            coalesce_text_expr(schema, ["Track Title", "Title"]).alias("track_statement_style"),
+            pl.lit("audio").alias("content_type"),
+        ])
+
+    if source_sheet == SHEET_YOUTUBE_CHANNELS:
+        return df.with_columns([
+            first_valid_isrc_expr(schema, ["ISRC"]).alias("asset_isrc"),
+            first_valid_upc_expr(schema, ["UPC"]).alias("product_upc"),
+            first_valid_youtube_video_id_expr(schema, ["Video ID", "VideoId", "ID"]).alias("video_id"),
+            first_valid_youtube_channel_id_expr(schema, ["Channel ID", "Parent ID"]).alias("channel_id"),
+            coalesce_text_expr(schema, ["Video Title", "Title"]).alias("track_statement_style"),
+            pl.lit("video").alias("content_type"),
+        ])
+
+    if source_sheet == SHEET_SHARES:
+        return df.with_columns([
+            first_valid_isrc_expr(schema, ["ID", "ISRC"]).alias("asset_isrc"),
+            first_valid_upc_expr(schema, ["Parent ID", "UPC"]).alias("product_upc"),
+            first_valid_youtube_video_id_expr(schema, ["ID", "Video ID"]).alias("video_id"),
+            first_valid_youtube_channel_id_expr(schema, ["Parent ID", "Channel ID"]).alias("channel_id"),
+            coalesce_text_expr(schema, ["Title", "Track Title", "Video Title"]).alias("track_statement_style"),
+            pl.lit("transfer").alias("content_type"),
+        ])
+
+    raise ValueError(f"Hoja ONErpm sin regla de identidad canonica: {source_sheet!r}")
+
+
 def prepare_share_flags(df_shares: pl.DataFrame) -> pl.DataFrame:
     if df_shares.height == 0:
         return empty_share_flags()
@@ -384,24 +452,18 @@ def add_share_flags_to_masters(df_masters: pl.DataFrame, df_shares: pl.DataFrame
 
 
 def add_view_flags(df: pl.DataFrame, account: str, source_sheet: str) -> pl.DataFrame:
-    is_master = source_sheet == SHEET_MASTERS
-    is_share = source_sheet == SHEET_SHARES
-    is_youtube_channel = source_sheet == SHEET_YOUTUBE_CHANNELS
-    is_external_account = account in {"gusty_dj", "la_nueva_sangre"}
+    rule = ONERPM_POLICY_RULES.get((account, source_sheet))
+    if rule is None:
+        raise ValueError(
+            f"Falta policy ONErpm para account={account!r}, source_sheet={source_sheet!r}. "
+            "Actualizar la politica de distribuidoras en Cloud SQL antes de ingerir."
+        )
 
-    include_in_statement_view = account in ["henry_remix", "mawzrecords"]
-    include_in_cash_view = account in ["henry_remix", "mawzrecords"]
-    include_in_catalog_view = is_master or is_youtube_channel
-    possible_internal_transfer = account == "mawzrecords" and is_share
-
-    if is_external_account:
-        revenue_basis = "youtube_channel_earning_external_account" if is_youtube_channel else "master_earning_external_account"
-    elif is_youtube_channel:
-        revenue_basis = "youtube_channel_earning"
-    elif is_share:
-        revenue_basis = "share_transfer"
-    else:
-        revenue_basis = "master_earning"
+    revenue_basis = str(rule.get("revenue_basis") or "").strip()
+    include_in_statement_view = policy_bool(rule.get("statement_view"))
+    include_in_cash_view = policy_bool(rule.get("cash_view"))
+    include_in_catalog_view = policy_bool(rule.get("catalog_view"))
+    possible_internal_transfer = revenue_basis == "transfer"
 
     return df.with_columns([
         pl.lit(revenue_basis).alias("revenue_basis"),
@@ -446,6 +508,8 @@ def standardize_masters(
 
     if "Artists" in df.columns:
         df = df.rename({"Artists": "artists_raw"})
+
+    df = add_canonical_identity(df, SHEET_MASTERS)
 
     df = df.with_columns([
         pl.lit(SOURCE).alias("source"),
@@ -500,6 +564,8 @@ def standardize_shares(df: pl.DataFrame, file_path: Path, account: str, file_has
     if "Artists" in df.columns:
         df = df.rename({"Artists": "artists_raw"})
 
+    df = add_canonical_identity(df, SHEET_SHARES)
+
     df = df.with_columns([
         pl.lit(SOURCE).alias("source"),
         pl.lit(account).alias("account"),
@@ -550,6 +616,7 @@ def standardize_youtube_channels(df: pl.DataFrame, file_path: Path, account: str
         pl.coalesce([channel_name, video_title]).alias("artist_statement_style")
     )
     df = add_usd_conversion(df, statement_period)
+    df = add_canonical_identity(df, SHEET_YOUTUBE_CHANNELS)
 
     df = df.with_columns([
         pl.lit(SOURCE).alias("source"),
@@ -681,7 +748,9 @@ def main():
 
     print("\nConsolidando ONErpm...")
     final = pl.concat([pl.read_parquet(part) for part in parts], how="diagonal_relaxed")
-    final.write_parquet(OUTPUT_PATH)
+    temp_output = OUTPUT_PATH.with_suffix(".tmp.parquet")
+    final.write_parquet(temp_output)
+    temp_output.replace(OUTPUT_PATH)
 
     print("\nListo.")
     print(f"Archivo: {OUTPUT_PATH}")

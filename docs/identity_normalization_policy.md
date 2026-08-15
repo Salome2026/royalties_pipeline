@@ -105,6 +105,26 @@ Validated example:
 
 UPC and video aliases can map to ISRC when the relationship is unambiguous. This avoids duplicate catalog rows where a source has both metadata and money for the same work.
 
+## Report identity and traceability
+
+Reports must group economic rows by the canonical identity resolved through the
+catalog, not by the distributor's display code.
+
+Rules:
+
+1. Resolve every row to `catalog_key` through the shared catalog alias layer.
+2. Use that `catalog_key` as the grouping key in summaries by track.
+3. Keep distributor identifiers (`ISRC`, video id, asset reference, sale id,
+   track id) as traceability fields. They must not create additional summary
+   rows when they resolve to the same `catalog_key`.
+4. Never merge two valid, distinct ISRCs only because title and artist are
+   similar.
+5. Store, territory, monetization and content origin are analysis dimensions;
+   they do not form part of track identity.
+
+The visible `Resumen por tema` therefore has one row per resolved catalog item.
+The row detail remains available in the report for source-level audit.
+
 ## UPC to ISRC derived identity
 
 UPC-to-ISRC mapping is allowed only as a derived identity, never as a raw data
@@ -140,8 +160,12 @@ After changing identity rules:
 ## Current implementation
 
 - Shared identity expressions live in `scripts/lib/identity.py`.
+- ONErpm canonical identifiers are populated during
+  `scripts/ingest_standardized_onerpm.py`, before consolidated marts and reports.
 - ONErpm identity rules are applied in `scripts/build_song_level_onerpm.py`.
 - DashGo identity rules are applied in `scripts/build_song_level_dashgo.py`.
 - Catalog aliasing and key selection are applied in `scripts/build_catalog_master.py`.
 - Report output identity/status resolution is centralized in
   `scripts/lib/catalog_report_filter.py`.
+- Generic keyword royalty reports group their track summary by the resolved
+  `catalog_key`; source codes remain visible only as provenance.

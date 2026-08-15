@@ -1,8 +1,12 @@
-# Finanzas VPO - documento rector
+# Finanzas VPO - soporte de negocio
 
 Fecha: 2026-05-26
 
-Este documento manda sobre los documentos financieros mas tecnicos.
+Estado: soporte visual/tecnico e historial de decisiones.
+
+La regla operativa vigente esta en `finance_operational_model_v2.md`. Si este
+documento contradice `finance_operational_model_v2.md`, manda
+`finance_operational_model_v2.md`.
 
 Objetivo: que Finanzas Artista sea simple para operar y suficientemente fuerte
 para soportar booking, regalias, gastos, recuperables, proyectos y cuenta

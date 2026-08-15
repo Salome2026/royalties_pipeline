@@ -1,9 +1,70 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "created_at": "2026-05-23",
-  "mode": "seed_read_only",
-  "description": "Human-readable dictionary for original distributor statement sheets/files. This file explains what each original source means before deciding if it enters catalog, statement, cash, or audit views. It does not drive production reports yet.",
+  "mode": "production_dictionary",
+  "description": "Production dictionary for original distributor statement sheets/files and reporting dimensions. It explains each source before account policies decide whether rows enter catalog, statement, cash or audit views. Raw fields remain immutable.",
+  "reporting_dimensions": {
+    "version": 1,
+    "purpose": "Normalize distributor vocabulary once so every report can use the same DSP, monetization and content-origin dimensions without changing raw data or amounts.",
+    "output_columns": [
+      "dsp_normalized",
+      "monetization_normalized",
+      "content_origin_normalized",
+      "plan_normalized",
+      "classification_status",
+      "store_report_label"
+    ],
+    "classification_status_values": {
+      "exact": "The source explicitly supports DSP, monetization and origin.",
+      "partial": "The DSP is known but at least one secondary dimension is not explicit.",
+      "unknown": "The source does not provide enough evidence. No inference is allowed."
+    },
+    "source_evidence_columns": {
+      "fuga": ["DSP", "Sale Store Name", "Sale Type", "Sale User Type"],
+      "dashgo": ["Store", "Product Type", "Use Type"],
+      "onerpm": ["source_sheet", "Store", "Product Type", "Sale Type"],
+      "orchard": ["STORE", "SERVICE DETAIL", "TRANSACTION TYPE", "TRANSACTION SUBTYPE", "ROYALTY TYPE"],
+      "soundon": ["source_sheet", "Store Name", "Sales Type", "Sales Sub Type", "Royalty Type"]
+    },
+    "verified_source_rules": {
+      "dashgo_spotify_use_type": {
+        "P": {"monetization": "Premium", "plan": "Individual", "evidence": "Business validation 2026-08-12"},
+        "FAM6": {"monetization": "Premium", "plan": "Family", "evidence": "Business validation 2026-08-12"},
+        "DUO": {"monetization": "Premium", "plan": "Duo", "evidence": "Business validation 2026-08-12"},
+        "A": {"monetization": "Ads", "plan": "Advertising", "evidence": "Business validation 2026-08-12"},
+        "PDS": {"monetization": "Unknown", "plan": "Unknown", "evidence": "Meaning not yet validated"}
+      }
+    },
+    "guardrails": [
+      "Account policies continue to decide generation, cash, transfer and audit inclusion.",
+      "Shares In & Out never become generation because of store normalization.",
+      "Original distributor columns are preserved without rewriting.",
+      "Altafonte legacy remains Unknown when the original row lacks store evidence.",
+      "Unknown values remain Unknown; reports must not invent a more precise origin."
+    ]
+  },
   "entries": [
+    {
+      "source": "ada",
+      "account": "mawz",
+      "raw_sheet_or_file_type": "royalty_detail",
+      "human_name": "ADA royalty detail TXT",
+      "human_description": "Detalle mensual de ADA por ISRC, DSP, territorio, modalidad e importe. Los TXT sin actividad son statements validos pero no generan filas economicas.",
+      "business_meaning": "generation",
+      "amount_column": "Net Royalty Payable",
+      "currency_column": "USD (statement account currency)",
+      "period_column": "statement date in filename, validated with Start Period and End Period",
+      "artist_column": "Artist Name",
+      "title_column": "Project Title, fallback Product Title",
+      "identifier_columns": ["ISRC", "GPID", "Catalog Number", "Local Product Number"],
+      "default_catalog_view": true,
+      "default_statement_view": true,
+      "default_cash_view": true,
+      "decision_reason": "Net Royalty Payable is the real amount after ADA Deductible Fees. Royalty Payable and fees are retained separately for exact reconciliation.",
+      "known_risks": "Repdate Month ID is consumption/reporting activity and can precede the settlement month. Do not use it as statement_period. No-activity TXT files must not be treated as missing statements.",
+      "last_reviewed_at": "2026-08-13",
+      "reviewed_by": "ruben_codex"
+    },
     {
       "source": "fuga",
       "account": "indyana_records",
