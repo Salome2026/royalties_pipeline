@@ -1,6 +1,6 @@
 # Booking VPO - Reglas maestras
 
-Fecha: 2026-08-15
+Fecha: 2026-08-16
 
 Este documento es la referencia obligatoria antes de modificar booking. Si una idea nueva no entra aca, primero se actualiza este documento y recien despues se toca codigo.
 
@@ -44,6 +44,159 @@ Reglas obligatorias:
   cuenta corriente, comisiones y finanzas con la trazabilidad actual;
 - la unificacion visual no autoriza fallbacks, duplicacion de guardados ni rutas
   operativas paralelas.
+
+## Agenda como cabecera operativa
+
+La agenda no es otro modulo ni otra copia del show. Es una vista de la cabecera
+operativa comun `booking_events`.
+
+`booking_events` representa la agenda operativa del artista. Puede contener un show,
+un grupo de shows, un bloqueo de disponibilidad, una referencia logistica o un
+prospecto. Solo los registros de tipo `show` abren o vinculan una liquidacion.
+
+Tipos canonicos:
+
+- `show`: prestacion vendida o precargada que puede liquidarse;
+- `show_group`: agrupador visual de dos o mas shows relacionados; no liquida ni suma
+  dinero por si mismo;
+- `availability_block`: fecha en la que el artista no trabaja;
+- `logistics`: vuelo, traslado u otra referencia operativa sin liquidacion;
+- `prospect`: oportunidad aun no confirmada.
+
+Las liquidaciones actuales siguen especializadas:
+
+- un evento con un solo artista VPO abre o vincula un `booking_show` individual;
+- un evento con dos o mas artistas abre o vincula un `booking_composite_event` y sus
+  lineas;
+- una madre historica de Caserio se vincula como una unica cabecera compartida y sus
+  shows hijos no se duplican en Agenda;
+- la cantidad de artistas define el flujo por defecto, sin obligar al usuario a elegir
+  un motor contable;
+- agenda, Booking individual y Booking compartido deben compartir `event_id` y nunca
+  crear versiones independientes del mismo hecho.
+- los bloqueos, la logistica, los prospectos y los agrupadores nunca crean caja,
+  cuenta corriente, comisiones ni ingresos de Booking;
+- un grupo conserva una sola fila visible en Agenda y sus shows concretos como hijos
+  liquidables, evitando sumar el cachet del grupo y de los hijos al mismo tiempo.
+
+La carga inicial minima contiene:
+
+- fecha;
+- artista o artistas;
+- venue/evento;
+- ciudad;
+- cachet pactado;
+- moneda y tipo de cambio cuando corresponda;
+- responsable comercial y/o tour manager si se conoce;
+- seña opcional;
+- notas.
+
+La carga inicial no calcula ni confirma gastos, splits, pagos al artista, ingreso
+ganado por Indyana ni cierre. Esos hechos se completan en la liquidacion vinculada.
+
+### Estado inicial segun el tipo de agenda
+
+Un show vendido nace con dimensiones separadas:
+
+- estado comercial: `confirmado`;
+- estado operativo: `programado`;
+- estado de seña: `sin_sena`, `sena_parcial` o `sena_recibida`;
+- estado de liquidacion: `no_iniciada`.
+
+La seña no confirma ni cancela por si sola la venta. Un show puede estar confirmado
+con o sin seña. La seña es caja real y debe quedar trazada, pero no convierte el
+cachet en ingreso ganado ni cierra la liquidacion.
+
+En cabeceras reconstruidas desde historia se admite `no_informada` cuando no existe
+una entrega separada y comprobable. No equivale a `sin_sena` y no crea caja.
+
+Estados comerciales iniciales admitidos:
+
+- `confirmado`;
+- `cancelado`;
+- `prospecto`, solo para oportunidades todavia no vendidas;
+- `no_aplica`, para bloqueos, logistica y agrupadores.
+
+Los registros que no son shows usan liquidacion `no_aplica`. Un prospecto no se
+presenta como show confirmado. Un bloqueo usa estado operativo `bloqueado`; la
+logistica usa `informativo`. Estas dimensiones permiten compartir Agenda sin inventar
+hechos financieros.
+
+### Grupos de shows
+
+Cuando una contratacion comprende varias presentaciones relacionadas, Agenda muestra
+un `show_group` y conserva cada presentacion como un `show` hijo con su propia fecha,
+venue, cachet y futura liquidacion. `group_event_id` y `group_position` mantienen la
+relacion. El agrupador es visual y comercial: nunca es una madre economica de Booking
+compartido y nunca se suma junto con sus hijos en reportes.
+
+Ejemplo validado: `Teodolina las 2` se presenta como un grupo total de $19.000.000 y
+contiene dos shows individuales de $9.500.000 para Candu.
+
+### Trazabilidad de fuentes
+
+Una importacion conciliada no guarda referencias dentro de notas libres. Cada renglon
+de origen se registra en `booking_event_source_links`, que permite:
+
+- vincular un renglon a un evento existente sin duplicarlo;
+- vincular una misma referencia a varios shows, como un paquete o una celda resumida;
+- repetir una importacion de forma idempotente;
+- conservar el texto original sin convertirlo en regla economica.
+
+### Prevencion de duplicados
+
+Antes de guardar, el sistema debe buscar coincidencias en eventos y shows existentes.
+La comparacion considera:
+
+- fecha;
+- conjunto normalizado de artistas;
+- venue normalizado;
+- ciudad normalizada;
+- hora, cuando exista;
+- registro individual o compartido ya vinculado.
+
+Una coincidencia fuerte ofrece `Abrir existente` o `Continuar precarga`. No se crea un
+nuevo registro silenciosamente. No se usa una restriccion rigida solamente por fecha,
+artista y venue porque existen shows legitimos del mismo artista y venue nominal en
+ciudades distintas. Un administrador puede confirmar `Es otro show`, dejando nota de
+auditoria.
+
+Los usuarios sin permiso para ver historial reciben solo la informacion minima para
+evitar una duplicacion. No deben ver importes, caja ni liquidaciones fuera de su
+alcance.
+
+## Dashboard de Booking
+
+La tarjeta `Booking Indyana` abre un espacio de trabajo de pantalla completa. Dentro
+de esa superficie viven:
+
+- Inicio;
+- Agenda;
+- Nuevo show;
+- Liquidaciones;
+- Resumen por artista;
+- Detalle.
+
+La navegacion no duplica calculos. Agenda usa `booking_events`; Liquidaciones abre el
+motor individual o compartido que corresponda; Resumen y Detalle conservan sus fuentes
+operativas actuales.
+
+`Resumen booking` y `Detalle Booking` dejan de ser entradas principales separadas
+cuando el dashboard queda validado, pero conservan sus calculos, endpoints y permisos.
+El dashboard navega hacia esas mismas verdades; no las vuelve a calcular.
+
+En escritorio se prioriza calendario, proximos shows y alertas. En celular, la agenda
+se presenta como lista cronologica y no como un calendario de escritorio comprimido.
+
+Los indicadores iniciales deben ser operativos y accionables:
+
+- proximos shows;
+- pendientes de rendicion;
+- observados;
+- saldos abiertos.
+
+No se incorporan mapas hasta normalizar ubicaciones. Un elemento visual no puede
+mostrar precision geografica que los datos todavia no tienen.
 
 ## Liquidacion esperada
 

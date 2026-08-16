@@ -2,6 +2,7 @@
 
 import { FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
 import { PeriodControl } from "./components/PeriodControl";
+import { BookingDashboard, type BookingAgendaEvent } from "./components/BookingDashboard";
 import {
   isResolvedPeriodInvalid,
   resolvePeriod,
@@ -25,6 +26,7 @@ type WebUser = {
 
 type View = "menu" | "statement" | "royalties" | "custom-reports" | "participation" | "digital-income" | "royalties-dashboard" | "source-monitor" | "catalog" | "distributor-config" | "booking" | "booking-lab" | "booking-summary" | "commissions" | "booking-artist-summary" | "artist-finance" | "finance-movements" | "artists" | "employees" | "caserio";
 type BookingWorkspaceMode = "individual" | "shared";
+type BookingSurface = "dashboard" | "settlement";
 
 const VIEW_MODULE_KEYS: Partial<Record<View, string>> = {
   statement: "statement_reports",
@@ -2510,6 +2512,9 @@ export default function Home() {
   const [caserioLoading, setCaserioLoading] = useState(false);
   const [caserioEvents, setCaserioEvents] = useState<CaserioEvent[]>([]);
   const [compositeBookingEvents, setCompositeBookingEvents] = useState<BookingCompositeEvent[]>([]);
+  const [bookingSurface, setBookingSurface] = useState<BookingSurface>("dashboard");
+  const [bookingAgendaEventId, setBookingAgendaEventId] = useState<number | null>(null);
+  const [compositeBookingAgendaEventId, setCompositeBookingAgendaEventId] = useState<number | null>(null);
   const [compositeBookingLoading, setCompositeBookingLoading] = useState(false);
   const [compositeBookingEditingId, setCompositeBookingEditingId] = useState<number | null>(null);
   const [compositeBookingForm, setCompositeBookingForm] = useState<BookingCompositeForm>({
@@ -2615,7 +2620,7 @@ export default function Home() {
   }, [authenticated, view, participation]);
 
   useEffect(() => {
-    if (authenticated && view === "booking") {
+    if (authenticated && view === "booking" && bookingSurface === "settlement") {
       loadBookingArtists();
       if (bookingWorkspaceMode === "individual") {
         loadBookingShows();
@@ -2623,7 +2628,7 @@ export default function Home() {
         loadCompositeBookingEvents();
       }
     }
-  }, [authenticated, view, bookingWorkspaceMode]);
+  }, [authenticated, view, bookingWorkspaceMode, bookingSurface]);
 
   useEffect(() => {
     if (authenticated && view === "source-monitor") {
@@ -6121,6 +6126,7 @@ export default function Home() {
 
   function resetCompositeBookingForm() {
     setCompositeBookingEditingId(null);
+    setCompositeBookingAgendaEventId(null);
     setCompositeBookingForm({
       eventDate: new Date().toISOString().slice(0, 10),
       venue: "",
@@ -6205,6 +6211,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          booking_event_id: compositeBookingAgendaEventId,
           artist: line.artist,
           show_date: compositeBookingForm.eventDate,
           venue: compositeBookingForm.venue,
@@ -6268,6 +6275,7 @@ export default function Home() {
       method: compositeBookingEditingId ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        booking_event_id: compositeBookingAgendaEventId,
         event_date: compositeBookingForm.eventDate,
         venue: compositeBookingForm.venue,
         city: compositeBookingForm.city || null,
@@ -6985,6 +6993,7 @@ export default function Home() {
 
   function resetBookingForm() {
     setBookingEditingId(null);
+    setBookingAgendaEventId(null);
     setBookingForm((current) => ({
       ...current,
       artist: "",
@@ -7222,6 +7231,7 @@ export default function Home() {
       method: bookingEditingId ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        booking_event_id: bookingEditingId ? null : bookingAgendaEventId,
         artist: bookingForm.artist,
         show_date: bookingForm.showDate,
         venue: bookingForm.venue,
@@ -7363,7 +7373,99 @@ export default function Home() {
 
   function openBookingWorkspace() {
     setBookingWorkspaceMode(canAccessBookingMode("individual") ? "individual" : "shared");
+    setBookingSurface("dashboard");
     openView("booking");
+  }
+
+  function openBookingSettlements(mode: BookingWorkspaceMode) {
+    if (!canAccessBookingMode(mode)) return;
+    setBookingWorkspaceMode(mode);
+    setBookingSurface("settlement");
+    setMessage(null);
+  }
+
+  function startAgendaSettlement(item: BookingAgendaEvent) {
+    const sameCurrencyDeposits = (item.deposits || []).filter((deposit) => deposit.currency === item.currency);
+    const unassignedDeposits = sameCurrencyDeposits.filter((deposit) => !["indyana", "artista"].includes(deposit.received_by));
+    if (item.booking_mode === "individual") {
+      if (!canAccessBookingMode("individual")) return;
+      const artist = item.artists[0]?.artist || "";
+      setBookingEditingId(null);
+      setBookingAgendaEventId(item.id);
+      setBookingForm({
+        artist,
+        showDate: item.event_date,
+        venue: item.venue,
+        city: item.city || "",
+        tourManager: item.tour_manager || "",
+        seller: item.seller || "",
+        status: item.operational_status === "realizado" ? "realizado" : "pendiente",
+        currency: item.currency,
+        fxRate: item.fx_rate ? amountToInput(item.fx_rate) : "",
+        cachetAmount: amountToInput(item.contracted_cachet_amount),
+        venuePaymentIssue: false,
+        venueCollectedAmount: amountToInput(item.contracted_cachet_amount),
+        venueShortfallPolicy: "deuda_boliche",
+        venuePaymentNotes: "",
+        showExpenses: [],
+        cashMovements: sameCurrencyDeposits
+          .filter((deposit) => deposit.received_by === "indyana" || deposit.received_by === "artista")
+          .map((deposit) => ({
+            uid: `agenda-deposit-${deposit.id}-${Date.now()}`,
+            recipient: deposit.received_by === "artista" ? "artist" : "producer",
+            concept: "Seña registrada en Agenda",
+            amount: amountToInput(deposit.amount),
+            paymentMethod: deposit.payment_method,
+            paidBy: deposit.counterparty || "",
+            notes: `Agenda #${item.id}${deposit.notes ? ` · ${deposit.notes}` : ""}`,
+          })),
+        preSplitAdjustments: [],
+        directCommissions: [],
+        externalShares: [],
+        artistPaidAmount: "",
+        producerReceivedAmount: "",
+        artistPercent: "70",
+        producerPercent: "30",
+        bookingCommissionExempt: false,
+        bookingCommissionNotes: "",
+        artistAdjustments: [],
+        receiptRefs: sameCurrencyDeposits.flatMap((deposit) => deposit.proof_refs || []).join("\n"),
+        notes: [
+          `Precarga de Agenda #${item.id}.`,
+          item.notes || "",
+          unassignedDeposits.length ? `${unassignedDeposits.length} seña(s) requieren asignar su efecto económico al liquidar.` : "",
+        ].filter(Boolean).join("\n"),
+      });
+      openBookingSettlements("individual");
+      return;
+    }
+
+    if (!canAccessBookingMode("shared")) return;
+    const receivedByIndyana = sameCurrencyDeposits
+      .filter((deposit) => deposit.received_by === "indyana")
+      .reduce((total, deposit) => total + deposit.amount, 0);
+    setCompositeBookingEditingId(null);
+    setCompositeBookingAgendaEventId(item.id);
+    setCompositeBookingForm({
+      eventDate: item.event_date,
+      venue: item.venue,
+      city: item.city || "",
+      responsible: item.tour_manager || "",
+      grossAmount: amountToInput(item.contracted_cachet_amount),
+      currency: item.currency,
+      fxRate: item.fx_rate ? amountToInput(item.fx_rate) : "",
+      status: "borrador",
+      receivedAmount: receivedByIndyana ? amountToInput(receivedByIndyana) : "",
+      receiptRefs: sameCurrencyDeposits.flatMap((deposit) => deposit.proof_refs || []).join("\n"),
+      notes: [`Precarga de Agenda #${item.id}.`, item.notes || ""].filter(Boolean).join("\n"),
+      expenses: [],
+      lines: item.artists.map((artist) => ({
+        ...newCompositeBookingLine("artista_vpo"),
+        description: `${artist.artist} - ${item.venue}`,
+        artist: artist.artist,
+      })),
+    });
+    openBookingSettlements("shared");
   }
 
   function selectBookingMode(mode: BookingWorkspaceMode) {
@@ -8203,21 +8305,11 @@ export default function Home() {
                     <strong>Booking Indyana</strong>
                     <span>Shows individuales y eventos compartidos, con sus liquidaciones completas.</span>
                   </button>
-                  <button type="button" className={`menu-card ${canShowMenuView("booking-summary") ? "" : "menu-card-hidden"}`} onClick={() => openView("booking-summary")}>
-                    <span className="card-index">09</span>
-                    <strong>Resumen booking</strong>
-                    <span>Indyana bruto, comisiones aplicables y neto por artista y mes.</span>
-                  </button>
                   <button type="button" className={`menu-card ${canShowMenuView("commissions") ? "" : "menu-card-hidden"}`} onClick={() => openView("commissions")}>
                     <span className="card-index">10</span>
                     <strong>Comisiones</strong>
                     <span>Configuracion por empleado y liquidacion segun reglas aplicables.</span>
                   </button>
-              <button type="button" className={`menu-card ${canShowMenuView("booking-artist-summary") ? "" : "menu-card-hidden"}`} onClick={() => openView("booking-artist-summary")}>
-                <span className="card-index">11</span>
-                <strong>Detalle Booking</strong>
-                <span>Shows por fecha y venue, con cachet, ingreso artista e Indyana.</span>
-              </button>
               <button type="button" className={`menu-card ${canShowMenuView("catalog") ? "" : "menu-card-hidden"}`} onClick={() => openView("catalog")}>
                 <span className="card-index">12</span>
                 <strong>Catalogo General</strong>
@@ -10229,9 +10321,12 @@ export default function Home() {
                 <h1>Resumen booking</h1>
                 <p>Ingreso Indyana por artista y mes, comisiones aplicables y neto real de booking.</p>
               </div>
-              <button type="button" onClick={loadBookingSummary} disabled={bookingSummaryLoading}>
-                {bookingSummaryLoading ? "Actualizando..." : "Actualizar"}
-              </button>
+              <div className="button-row">
+                <button type="button" className="secondary" onClick={openBookingWorkspace}>Volver a Booking</button>
+                <button type="button" onClick={loadBookingSummary} disabled={bookingSummaryLoading}>
+                  {bookingSummaryLoading ? "Actualizando..." : "Actualizar"}
+                </button>
+              </div>
             </div>
 
             <div className="control-dashboard">
@@ -10680,6 +10775,7 @@ export default function Home() {
                 <p>Control show por show con fecha, venue, cachet total, ingreso artista e ingreso Indyana.</p>
               </div>
               <div className="button-row">
+                <button type="button" className="secondary" onClick={openBookingWorkspace}>Volver a Booking</button>
                 <button
                   type="button"
                   className="secondary"
@@ -13733,9 +13829,19 @@ export default function Home() {
           </section>
         )}
 
-        {view === "booking" && (
+        {view === "booking" && bookingSurface === "dashboard" && (
+          <BookingDashboard
+            onOpenSettlements={openBookingSettlements}
+            onOpenSummary={() => openView("booking-summary")}
+            onOpenDetail={() => openView("booking-artist-summary")}
+            onOpenCaserio={() => openView("caserio")}
+            onStartSettlement={startAgendaSettlement}
+          />
+        )}
+
+        {view === "booking" && bookingSurface === "settlement" && (
           <section className="booking-mode-bar" aria-label="Tipo de booking">
-            <span>Tipo de booking</span>
+            <button type="button" className="secondary" onClick={() => setBookingSurface("dashboard")}>Volver al centro de booking</button>
             <div className="booking-mode-switch" role="tablist" aria-label="Seleccionar tipo de booking">
               <button
                 type="button"
@@ -13761,7 +13867,7 @@ export default function Home() {
           </section>
         )}
 
-        {view === "booking" && bookingWorkspaceMode === "shared" && (
+        {view === "booking" && bookingSurface === "settlement" && bookingWorkspaceMode === "shared" && (
           <section className="panel wide-panel">
             <div className="section-heading">
               <div>
@@ -15097,7 +15203,7 @@ export default function Home() {
           </div>
         )}
 
-        {view === "booking" && bookingWorkspaceMode === "individual" && (
+        {view === "booking" && bookingSurface === "settlement" && bookingWorkspaceMode === "individual" && (
           <div className="grid booking-grid">
             <form className="panel" onSubmit={submitBooking}>
               <div className="section-heading compact">

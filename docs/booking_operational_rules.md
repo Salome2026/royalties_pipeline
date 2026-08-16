@@ -6,18 +6,21 @@ y la conciliacion de cuentas corrientes.
 
 ## Entrada operativa
 
-La tarjeta `Booking Indyana` es la unica entrada operativa general de booking. Arriba
-presenta un selector de dos modos:
+La tarjeta `Booking Indyana` es la unica entrada operativa general de booking. Abre el
+Centro de Booking, con Inicio, Agenda, Nuevo show, Liquidaciones, Resumen y Detalle.
 
-- `Booking individual`: show propio cargado directamente;
-- `Booking compartido`: evento madre con gastos compartidos y lineas o shows hijos.
+`Nuevo show` no le pide al usuario que elija un motor:
 
-La seleccion es navegacion interna. No fusiona formularios, calculos, tablas ni
-guardados. La pantalla abre en modo individual y conserva por separado cualquier
-edicion iniciada en cada modo.
+- un artista determina `Booking individual`;
+- dos o mas artistas determinan `Booking compartido`.
 
-Los permisos tambien permanecen separados: `booking` habilita el modo individual y
-`composite_booking` habilita el modo compartido. El acceso a uno no implica el otro.
+Al iniciar la liquidacion se abre el formulario especializado que ya corresponde. La
+unificacion es de navegacion y cabecera operativa; no fusiona formulas, tablas de
+liquidacion ni reglas economicas.
+
+Los permisos permanecen separados: `booking` habilita individual y
+`composite_booking` habilita compartido. Para crear un evento multiartista el usuario
+debe tener permiso y alcance sobre todos los artistas seleccionados.
 
 ## Principio General
 
@@ -36,19 +39,97 @@ balance o movimiento de cuenta corriente.
 
 ## Agenda y Precarga
 
-La agenda debe ser la base operativa futura.
+La agenda es la vista operativa de `booking_events`. No tiene una base paralela y no
+duplica shows. La misma cabecera distingue `show`, `show_group`,
+`availability_block`, `logistics` y `prospect`. Solo `show` entra al flujo de
+liquidacion.
 
 Flujo esperado:
 
-1. La agenda precarga fecha, artista, venue, cachet pactado, moneda, responsable y estado.
-2. La carga rapida completa rendicion: ingresos cobrados, gastos, pagos, comprobantes y
-   observaciones.
-3. El sistema calcula el resultado esperado segun la regla del artista.
-4. El usuario aprueba o corrige la caja real.
-5. Las diferencias quedan como balance o cuenta corriente.
+1. El usuario registra un show vendido con fecha, artistas, venue, ciudad, cachet,
+   moneda, responsables y seña opcional.
+2. El sistema busca coincidencias antes de guardar y permite continuar una precarga
+   existente.
+3. Un artista se vincula con Booking individual; dos o mas, con Booking compartido.
+4. La carga posterior completa rendicion: ingresos cobrados, gastos, pagos,
+   comprobantes y observaciones.
+5. El sistema calcula el resultado esperado segun la regla del artista.
+6. El usuario aprueba o corrige la caja real.
+7. Las diferencias quedan como balance o cuenta corriente.
 
 La agenda no es contabilidad final. Sirve como control de shows esperados, cancelados,
 sin rendir o pendientes de cobro.
+
+Un show vendido se muestra inicialmente como `Confirmado`. Internamente mantiene
+separados:
+
+- comercial: confirmado/cancelado;
+- operativo: programado/realizado;
+- seña: no informada para historia conciliada, sin seña, parcial o recibida;
+- liquidacion: no iniciada, pendiente, rendida, observada o cerrada.
+
+Los reportes de ingresos y comisiones no deben sumar eventos `programados` ni
+liquidaciones `no_iniciadas`. Una seña recibida aparece en caja, no como ingreso ganado
+del show.
+
+Los tipos no liquidables usan `settlement_status=no_aplica` y nunca alimentan caja,
+cuenta corriente, ingresos o comisiones. Un `show_group` tampoco suma importes: los
+reportes economicos leen exclusivamente sus shows hijos cuando estos sean liquidados.
+
+Los bloqueos y la logistica pueden estar asociados a un artista para prevenir choques
+de agenda. Los prospectos son visibles como tales y no se confunden con confirmados.
+Una importacion validada conserva su renglon original en
+`booking_event_source_links`; volver a ejecutar el mismo lote no crea copias.
+
+### Ubicacion rapida
+
+Agenda permite buscar por artista, venue, ciudad y responsable. Liquidaciones conserva
+su propio buscador operativo. Los estados visibles deben permitir encontrar rapidamente:
+
+- proximos;
+- sin rendir;
+- observados;
+- cancelados;
+- cerrados;
+- posibles duplicados.
+
+La busqueda de coincidencias se ejecuta durante la carga. Si encuentra un candidato,
+la accion primaria es abrirlo y continuar, no crear otro.
+
+La vista inicial de Agenda muestra `Proximos`, desde hoy hacia adelante y con el show
+mas cercano primero. `Este fin de semana` muestra viernes a domingo; `Pendientes de
+cierre` ordena lo vencido del mas antiguo al mas nuevo; `Historial` ordena del mas
+reciente al mas antiguo. El responsable visible es el tour manager guardado en Booking.
+Si el dato historico no existe, se muestra como no informado y no se completa por
+inferencia.
+
+Los hijos de un `show_group` se muestran dentro del agrupador y no como filas
+principales duplicadas. Cada hijo conserva su accion de liquidacion independiente.
+
+### Transicion del historico
+
+Los shows ya liquidados antes de la Agenda siguen visibles en Liquidaciones, Resumen y
+Detalle. La Agenda no copia sus liquidaciones: crea una cabecera y enlaza el registro
+economico existente.
+
+El backfill historico se ejecuta solamente despues de una conciliacion de solo lectura que:
+
+- trate cada evento compartido como una cabecera y no vuelva a contar sus shows hijos;
+- trate cada show individual independiente como una cabecera;
+- trate cada madre de Caserio como una cabecera y conserve sus shows VPO como hijas;
+- detecte coincidencias por fecha, artistas, venue y ciudad;
+- compare cantidades y casos testigo antes de escribir;
+- vincule IDs sin recalcular cachet, gastos, caja, splits, comisiones ni saldos.
+
+La conciliacion aprobada y aplicada el 2026-08-16 genero:
+
+- 655 cabeceras individuales;
+- 17 cabeceras de Booking compartido, con 33 shows hijos no duplicados;
+- 4 cabeceras de Caserio, con 8 shows hijos no duplicados;
+- 676 eventos de Agenda y 696 participaciones de artistas.
+
+Desde esa fecha, los indicadores del Centro de Booking incluyen la historia vinculada.
+Los reportes economicos continuan leyendo las liquidaciones vivas originales.
 
 ## Responsable de Caja
 

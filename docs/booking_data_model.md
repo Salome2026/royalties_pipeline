@@ -1,12 +1,14 @@
 # Booking Data Model
 
-Este documento baja el diseno conceptual de booking a datasets concretos. La primera
-implementacion puede ser con Parquet en `warehouse/booking` y mas adelante migrar a una
-base transaccional si la web de carga lo necesita.
+Este documento baja el diseno de booking a entidades operativas concretas. Las cargas
+nuevas viven exclusivamente en Cloud SQL/Postgres. Parquet puede conservarse para
+analitica o reportes pesados, pero no es una segunda base transaccional y SQLite no
+participa del flujo vivo.
 
 ## Convenciones
 
-- IDs internos en formato string estable.
+- Las tablas operativas Cloud SQL usan IDs `bigint` generados por la base.
+- Los IDs externos o de integraciones se conservan aparte y nunca reemplazan el ID interno.
 - Montos siempre guardados en moneda original, ARS y USD cuando aplique.
 - El tipo de cambio queda congelado en cada movimiento.
 - Las filas aprobadas no se editan silenciosamente: se corrigen con ajustes.
@@ -41,19 +43,112 @@ beneficiarios.
 
 ## booking_events
 
-Evento madre o unidad de negocio. Puede contener uno o varios shows.
+Cabecera operativa canonica de Agenda. Puede representar un show, un grupo, un bloqueo,
+logistica o un prospecto. No reemplaza la liquidacion economica.
 
 | Campo | Tipo | Obligatorio | Descripcion | Ejemplo |
 | --- | --- | --- | --- | --- |
-| event_id | string | si | ID interno | evt_caserio_2025_08_09 |
-| event_name | string | si | Nombre del evento | El Caserio |
+| id | bigint | si | ID interno generado | 55 |
+| event_type | string | si | show, show_group, availability_block, logistics, prospect | show |
 | event_date | date | si | Fecha principal | 2025-08-09 |
-| event_type | string | si | show, party, festival, partnership, production | partnership |
-| venue | string | no | Lugar | Club Son |
+| start_time | time | no | Hora del show si se conoce | 23:30 |
+| venue | string | si | Lugar o evento | Club Son |
 | city | string | no | Ciudad | Buenos Aires |
-| owner_entity | string | no | VPO, Indyana, Mawz, shared | shared |
-| status | string | si | planned, confirmed, settled, closed, cancelled | confirmed |
+| booking_mode | string | si | individual, shared | individual |
+| commercial_status | string | si | confirmado, cancelado, prospecto, no_aplica | confirmado |
+| operational_status | string | si | programado, realizado, bloqueado, informativo | programado |
+| deposit_status | string | si | no_informada, sin_sena, sena_parcial, sena_recibida | sin_sena |
+| settlement_status | string | si | no_iniciada, pendiente, rendida, observada, cerrada, no_aplica | no_iniciada |
+| contracted_cachet_amount | decimal | no | Cachet pactado inicial | 1500000 |
+| currency | string | si | ARS, USD | ARS |
+| fx_rate | decimal | no | Tipo de cambio congelado si aplica | 1500 |
+| tour_manager | string | no | Responsable operativo | Santiago Mareco |
+| seller | string | no | Responsable comercial | Marcelo |
+| group_event_id | bigint | no | Agrupador visual del show | 89 |
+| group_position | integer | no | Orden dentro del grupo | 1 |
+| duplicate_override | bool | si | Confirma que una coincidencia es otro show | false |
+| duplicate_override_notes | string | no | Justificacion del override | Segundo show en otra sede |
 | notes | string | no | Observaciones | Sociedad con Caserio |
+| created_by | string | si | Usuario creador | santiagod |
+| created_at | timestamp | si | Alta auditable | 2026-08-16T11:00:00Z |
+| updated_at | timestamp | si | Ultimo cambio | 2026-08-16T11:00:00Z |
+
+La agenda consulta esta tabla. No existe `booking_agenda_entries` como segunda verdad.
+
+Reglas:
+
+- solo `event_type=show` puede iniciar una liquidacion;
+- `show_group` no se suma en reportes y contiene shows hijos;
+- `availability_block`, `logistics` y `prospect` usan liquidacion `no_aplica`;
+- un show hijo siempre tiene `group_event_id` y `group_position` juntos;
+- el grupo no reemplaza una madre economica multiartista.
+
+## booking_event_source_links
+
+Trazabilidad entre una fila o celda de una fuente validada y la Agenda canonica.
+
+| Campo | Tipo | Obligatorio | Descripcion | Ejemplo |
+| --- | --- | --- | --- | --- |
+| id | bigint | si | ID interno | 501 |
+| event_id | bigint | si | Evento vinculado | 55 |
+| source_system | string | si | Origen estable | agenda_indyana_excel |
+| source_reference | string | si | Archivo, hoja y renglon | agenda_20260816:Agenda:166 |
+| source_role | string | si | imported, linked_existing, group_child | imported |
+| source_text | string | no | Texto original preservado | Teodolina las 2 x 9,5 |
+| source_payload_json | json | si | Datos estructurados de auditoria | {} |
+| created_by | string | si | Usuario o proceso | system_agenda_import |
+| created_at | timestamp | si | Alta auditable | 2026-08-16T18:00:00Z |
+
+La unicidad por evento, sistema y referencia hace que una importacion sea repetible.
+Una referencia puede vincular varios eventos cuando la fuente resume varios shows.
+
+## booking_event_artists
+
+Relacion ordenada entre evento y artistas. Permite agenda multiartista sin duplicar la
+cabecera comercial.
+
+| Campo | Tipo | Obligatorio | Descripcion | Ejemplo |
+| --- | --- | --- | --- | --- |
+| id | string | si | ID interno | bea_001 |
+| event_id | string | si | Evento | evt_2026_08_22_festival_norte |
+| artist_id | string | no | Artista del ABM | artist_virrshi |
+| artist_name | string | si | Snapshot legible | Virrshi |
+| position | integer | si | Orden visible | 1 |
+| created_at | timestamp | si | Auditoria | 2026-08-16T11:00:00Z |
+
+Reglas:
+
+- un artista activo genera `booking_mode=individual`;
+- dos o mas artistas generan `booking_mode=shared`;
+- el usuario debe tener alcance sobre todos los artistas seleccionados;
+- cambiar participantes antes de liquidar puede recalcular el modo;
+- luego de iniciar una liquidacion, un cambio de modo requiere permiso de aprobacion y
+  auditoria.
+
+## booking_event_deposits
+
+Senias efectivamente recibidas para el evento. Se modelan en filas separadas porque un
+show puede tener mas de una entrega, en fechas, monedas, receptores o medios distintos.
+
+| Campo | Tipo | Obligatorio | Descripcion | Ejemplo |
+| --- | --- | --- | --- | --- |
+| id | bigint | si | ID interno | 102 |
+| event_id | bigint | si | Evento asociado | 55 |
+| movement_date | date | si | Fecha real de la entrega | 2026-08-16 |
+| amount | decimal | si | Importe en moneda original | 500000 |
+| currency | string | si | ARS, USD | ARS |
+| fx_rate | decimal | no | Tipo de cambio congelado | 1500 |
+| received_by | string | si | indyana, artista, empleado, tercero | indyana |
+| payment_method | string | si | transferencia, efectivo, otro | transferencia |
+| counterparty | string | no | Quien entrego el dinero | Club Norte |
+| proof_refs_json | json | si | Comprobantes | [] |
+| notes | string | no | Observaciones | Primera seña |
+| created_by | string | si | Usuario creador | santiagod |
+| created_at | timestamp | si | Auditoria | 2026-08-16T11:00:00Z |
+
+Una seña es caja real vinculada al evento, pero no es ingreso ganado ni cierra la
+liquidacion. Al iniciar la liquidacion se reutiliza como movimiento de cobro; no se
+vuelve a cargar ni se duplica.
 
 ## booking_event_partners
 
@@ -76,17 +171,32 @@ Prestacion artistica concreta. Puede o no pertenecer a un evento madre.
 | Campo | Tipo | Obligatorio | Descripcion | Ejemplo |
 | --- | --- | --- | --- | --- |
 | show_id | string | si | ID interno | show_2025_08_09_virrshi |
-| event_id | string | no | Evento madre asociado | evt_caserio_2025_08_09 |
+| booking_event_id | bigint | si para nuevas cargas desde Agenda | Cabecera operativa asociada | 55 |
 | show_date | date | si | Fecha del show | 2025-08-09 |
 | primary_artist_id | string | si | Artista principal | artist_virrshi |
 | show_name | string | si | Evento / detalle | Animal - Neuquen |
 | venue | string | no | Lugar | Animal |
 | city | string | no | Ciudad | Neuquen |
-| status | string | si | planned, confirmed, rendered, review, approved, closed | confirmed |
+| status | string | si | pendiente, realizado, rendido, aprobado, cancelado, no_cobrado | pendiente |
 | tour_manager_id | string | no | TM asignado | person_luciano |
 | seller_id | string | no | Vendedor | person_colo |
 | booking_rule_id | string | no | Regla default | rule_70_30 |
 | notes | string | no | Observaciones |  |
+
+Los shows historicos pueden no tener `booking_event_id` hasta completar el backfill. Toda carga
+nueva desde Agenda debe tenerlo. El backfill no altera importes ni estados financieros.
+
+El backfill se ejecuta solo despues de aprobar un informe de conciliacion. Los eventos
+compartidos se migran desde su cabecera y sus shows hijos solo se vinculan; nunca se
+crea una segunda cabecera por cada hija. Los shows individuales independientes generan
+una cabecera. No se recalculan liquidaciones durante esa operacion.
+
+Las madres historicas de Caserio siguen la misma regla: una sola cabecera de Agenda
+apunta a `caserio_events`; sus shows VPO hijos conservan el vinculo mediante
+`caserio_event_lines.booking_show_id` y no generan cabeceras adicionales.
+
+Cuando la historia no permite reconstruir una seña separada con evidencia suficiente,
+la cabecera usa `deposit_status=no_informada`. No se interpreta como ausencia de seña.
 
 ## booking_show_participants
 

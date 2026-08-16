@@ -18,7 +18,7 @@ export async function GET() {
   if ("error" in config) return config.error;
 
   const response = await fetch(`${config.apiUrl}/booking/composite-events?limit=100`, {
-    headers: { "X-VPO-API-Key": config.apiKey },
+    headers: { "X-VPO-API-Key": config.apiKey, "X-VPO-Username": config.user.username },
     cache: "no-store",
   });
 
@@ -36,6 +36,7 @@ export async function POST(request: NextRequest) {
     headers: {
       "Content-Type": "application/json",
       "X-VPO-API-Key": config.apiKey,
+      "X-VPO-Username": config.user.username,
     },
     body: JSON.stringify(body),
   });
@@ -59,6 +60,7 @@ export async function PUT(request: NextRequest) {
     headers: {
       "Content-Type": "application/json",
       "X-VPO-API-Key": config.apiKey,
+      "X-VPO-Username": config.user.username,
     },
     body: JSON.stringify(body),
   });

@@ -22,6 +22,15 @@ Para cada caso se revisa:
 
 | Caso | Datos que carga el usuario | Calculos del sistema | Caja esperada | Saldos posibles | Hijo interno | Indyana ganado | Comision aplicable | Cierre | Reportes afectados |
 |---|---|---|---|---|---|---|---|---|---|
+| Show vendido sin seña | Fecha, artista, venue, ciudad, cachet y moneda | Crea evento confirmado/programado y precarga Booking individual | Sin caja | Ninguno hasta rendicion | No | No todavia | No todavia | No iniciado | Agenda, proximos shows |
+| Show vendido con seña | Igual + importe, receptor, metodo y comprobante | Crea evento y movimiento de caja vinculado; no liquida el show | Seña real recibida | Puede quedar saldo comercial, no cuenta corriente de cierre | No | No todavia | No todavia | No iniciado | Agenda, caja, recibos |
+| Evento vendido multiartista | Fecha, dos o mas artistas, venue, cachet y seña opcional | Crea una cabecera y precarga Booking compartido con participantes | Seña general o asignada si existe | Ninguno hasta rendicion | Al liquidar | No todavia | No todavia | No iniciado | Agenda, Booking compartido |
+| Posible duplicado | Fecha, artistas, venue y ciudad coincidentes | Ofrece abrir/continuar existente; no guarda silenciosamente | No cambia | No cambia | No | No | No | Conserva existente | Agenda, auditoria |
+| Bloqueo de disponibilidad | Fecha, artista, motivo | Crea `availability_block`; no crea Booking | Sin caja | Ninguno | No | No | No | No aplica | Agenda |
+| Logistica / vuelo | Fecha, artista, detalle | Crea `logistics`; no crea Booking | Sin caja | Ninguno | No | No | No | No aplica | Agenda |
+| Prospecto | Fecha tentativa, artista y detalle | Crea `prospect`; no se presenta como confirmado | Sin caja | Ninguno | No | No | No | No aplica | Agenda |
+| Grupo de shows | Contratacion con dos o mas presentaciones | Crea agrupador visual y shows hijos liquidables | Sin caja hasta cargar hechos | Por cada show hijo | No | No todavia | No todavia | Grupo no aplica; hijos no iniciados | Agenda, futuros shows |
+| Mismo artista y venue nominal en otra ciudad | Fecha y artista iguales; ciudad diferente | Advierte conflicto de agenda, pero permite otro evento | Segun carga | Segun cada evento | No | No hasta rendir | No hasta rendir | Independiente | Agenda, proximos shows |
 | Show simple 70/30 | Fecha, artista, venue, cachet, gastos, split 70/30, pagos/rendicion | Neto = cobrado - gastos; artista 70%; Indyana 30% | Caja artista + caja Indyana segun split | Artista, Indyana, boliche | No | Si | Segun reglas activas y exclusion general del show | Cierra si boliche, artista e Indyana estan saldados | Shows, resumen booking, comisiones |
 | Show simple 60/40 | Igual al show simple, split 60/40 | Neto y split 60/40 | Caja artista + Indyana | Artista, Indyana, boliche | No | Si | Segun reglas activas y exclusion general del show | Igual show simple | Shows, resumen booking, comisiones |
 | Show 100/0 | Artista, cachet, sin participacion Indyana | Todo al artista; Indyana 0 | Caja artista o salida completa | Artista/boliche | No | No o 0 | No | Cierra si el pago real coincide | Shows, control historico |
@@ -169,6 +178,7 @@ Splits raros y 0/0 del historico se conservan, pero no se usan para disenar regl
 4. Aneley con cuenta manager/familia.
 5. Laalo/Gusty show simple con seña.
 6. Caserio con Facu/Lazer.
+7. Backfill de Agenda: una cabecera por madre compartida o Caserio, sin cabecera para sus hijas.
 7. Historico 0/0.
 
 ## Pendientes de definicion
