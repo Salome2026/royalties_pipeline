@@ -637,7 +637,22 @@ export function BookingDashboard({
               <div className="booking-form-section-title"><span>1</span><div><h2>Qué querés agendar</h2><p>La pantalla muestra solamente los campos necesarios.</p></div></div>
               <div className="booking-entry-type-picker">
                 <button type="button" className={form.eventType === "show" ? "active" : ""} onClick={() => setForm((current) => ({ ...current, eventType: "show", groupChildren: [], hasDeposit: current.hasDeposit }))}>Un show</button>
-                <button type="button" className={form.eventType === "show_group" ? "active" : ""} onClick={() => setForm((current) => ({ ...current, eventType: "show_group", hasDeposit: false, groupChildren: current.groupChildren.length >= 2 ? current.groupChildren : [newGroupChild(current.eventDate), newGroupChild(current.eventDate)] }))}>Varios shows</button>
+                <button type="button" className={form.eventType === "show_group" ? "active" : ""} onClick={() => setForm((current) => ({
+                  ...current,
+                  eventType: "show_group",
+                  hasDeposit: false,
+                  groupChildren: current.groupChildren.length >= 2 ? current.groupChildren : [
+                    {
+                      eventDate: current.eventDate,
+                      startTime: current.startTime,
+                      venue: current.venue,
+                      city: current.city,
+                      cachet: current.cachet,
+                      notes: current.notes,
+                    },
+                    newGroupChild(current.eventDate),
+                  ],
+                }))}>Varios shows</button>
                 <button type="button" className={form.eventType === "availability_block" ? "active" : ""} onClick={() => setForm((current) => ({ ...current, eventType: "availability_block", groupChildren: [], hasDeposit: false }))}>No trabaja</button>
                 <button type="button" className={form.eventType === "logistics" ? "active" : ""} onClick={() => setForm((current) => ({ ...current, eventType: "logistics", groupChildren: [], hasDeposit: false }))}>Logística</button>
                 <button type="button" className={form.eventType === "prospect" ? "active" : ""} onClick={() => setForm((current) => ({ ...current, eventType: "prospect", groupChildren: [], hasDeposit: false }))}>Prospecto</button>

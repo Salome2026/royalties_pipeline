@@ -12365,8 +12365,6 @@ def update_booking_event(
         existing_type = str(existing_data["event_type"])
         if existing_type == "show_group" and request.event_type != "show_group":
             raise HTTPException(status_code=400, detail="Un grupo no se convierte en otro tipo; editá sus shows internos.")
-        if existing_type != "show_group" and request.event_type == "show_group":
-            raise HTTPException(status_code=400, detail="Para agrupar shows, creá una entrada de tipo Varios shows.")
         if request.deposit is not None:
             raise HTTPException(status_code=400, detail="Las señas existentes se administran desde su documento financiero.")
 

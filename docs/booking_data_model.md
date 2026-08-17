@@ -83,6 +83,8 @@ Reglas:
 
 - solo `event_type=show` puede iniciar una liquidacion;
 - `show_group` no se suma en reportes y contiene shows hijos;
+- una precarga `show` sin seña ni liquidacion puede convertirse en `show_group`
+  conservando la misma cabecera, su fuente y su auditoria;
 - `availability_block`, `logistics` y `prospect` usan liquidacion `no_aplica`;
 - un show hijo siempre tiene `group_event_id` y `group_position` juntos;
 - el grupo no reemplaza una madre economica multiartista.

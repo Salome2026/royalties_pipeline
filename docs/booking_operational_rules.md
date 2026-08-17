@@ -99,6 +99,10 @@ liquidado, Editar abre Liquidaciones. Un grupo puede sumar, quitar o reordenar h
 solo mientras sus hijos no esten liquidados. Todas las altas, cambios y eliminaciones
 quedan en `app_audit_log`.
 
+Al editar una precarga simple todavia no liquidada, elegir `Varios shows` reutiliza sus
+datos como primer hijo y agrega un segundo renglon. Guardar transforma la misma entrada
+en grupo; no duplica la precarga ni pierde el texto original importado.
+
 ### Ubicacion rapida
 
 Agenda permite buscar por artista, venue, ciudad y responsable. Liquidaciones conserva
