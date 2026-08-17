@@ -134,6 +134,23 @@ inferencia.
 Los hijos de un `show_group` se muestran dentro del agrupador y no como filas
 principales duplicadas. Cada hijo conserva su accion de liquidacion independiente.
 
+### Inicio: lista y calendario
+
+El Centro de Booking ocupa el ancho util completo y no se encierra dentro del
+contenedor de tarjetas del menu general. En Inicio, `Lista` y `Calendario` son dos
+lecturas de los mismos `booking_events`.
+
+El calendario mensual muestra solo artistas dentro de cada dia. Repite artistas
+distintos, compacta varias presentaciones del mismo artista como `xN` y limita la
+celda a tres nombres antes de mostrar `+N mas`. Para evitar doble conteo visual, no
+muestra el padre `show_group` junto con sus shows hijos. Al seleccionar un dia se ve
+el listado de artistas y cada renglon abre la edicion operativa existente.
+
+En pantallas angostas el calendario mantiene siete columnas, reemplaza los nombres
+por marcadores de estado y muestra debajo la lista legible del dia seleccionado. La
+vista `Lista` queda disponible para lectura cronologica y acciones rapidas. Ninguna de
+las dos vistas modifica liquidaciones, caja, comisiones ni cuenta corriente.
+
 ### Transicion del historico
 
 Los shows ya liquidados antes de la Agenda siguen visibles en Liquidaciones, Resumen y

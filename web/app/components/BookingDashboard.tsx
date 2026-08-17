@@ -16,6 +16,7 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
+import { BookingCalendar } from "./BookingCalendar";
 
 export type BookingAgendaArtist = {
   artist_id: number;
@@ -224,6 +225,7 @@ export function BookingDashboard({
   const [duplicateCandidates, setDuplicateCandidates] = useState<BookingDuplicateCandidate[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("upcoming");
+  const [overviewMode, setOverviewMode] = useState<"list" | "calendar">("calendar");
   const [artistToAdd, setArtistToAdd] = useState("");
   const [expandedGroups, setExpandedGroups] = useState<number[]>([]);
   const [editingEventId, setEditingEventId] = useState<number | null>(null);
@@ -314,6 +316,11 @@ export function BookingDashboard({
       .sort((left, right) => left.event_date.localeCompare(right.event_date))
       .slice(0, 6);
   }, [topLevelEvents]);
+
+  const calendarEvents = useMemo(
+    () => events.filter((event) => event.event_type !== "show_group"),
+    [events],
+  );
 
   function addArtist() {
     if (!artistToAdd || form.artists.includes(artistToAdd)) return;
@@ -607,28 +614,40 @@ export function BookingDashboard({
         {message && <div className={`booking-dashboard-message ${message.type}`}>{message.text}</div>}
 
         {section === "overview" && (
-          <>
+          <div className="booking-overview">
             <div className="booking-kpi-grid">
               <div><span>Shows cargados</span><strong>{summary.total}</strong><small>agenda operativa</small></div>
               <div><span>Próximos</span><strong>{summary.upcoming}</strong><small>confirmados</small></div>
               <div><span>Con seña</span><strong>{summary.with_deposit}</strong><small>caja registrada</small></div>
               <div><span>Sin liquidar</span><strong>{summary.not_started}</strong><small>requieren seguimiento</small></div>
             </div>
-            <div className="booking-dashboard-columns">
-              <section className="booking-dashboard-block booking-upcoming-block">
-                <div className="booking-block-heading"><div><span>Agenda</span><h2>Próximos shows</h2></div><button type="button" onClick={() => setSection("agenda")}>Ver agenda</button></div>
-                {loading && <p className="booking-empty">Cargando agenda...</p>}
-                {!loading && upcoming.length === 0 && <p className="booking-empty">No hay próximos shows cargados.</p>}
-                <div className="booking-agenda-list">{upcoming.map(renderEventRow)}</div>
-              </section>
-              <aside className="booking-dashboard-block booking-quick-panel">
-                <span>Acciones rápidas</span>
-                <button type="button" onClick={() => startNewEntry()}><CalendarPlus size={20} /><div><strong>Cargar agenda</strong><small>Show, grupo o bloqueo</small></div><ChevronRight size={17} /></button>
-                <button type="button" onClick={() => onOpenSettlements("individual")}><ClipboardCheck size={20} /><div><strong>Liquidar</strong><small>Individual o compartido</small></div><ChevronRight size={17} /></button>
-                <button type="button" onClick={onOpenSummary}><CircleDollarSign size={20} /><div><strong>Ver resultados</strong><small>Ingresos y comisiones</small></div><ChevronRight size={17} /></button>
-              </aside>
+            <div className="booking-overview-toolbar">
+              <div>
+                <span>Agenda</span>
+                <h2>{overviewMode === "calendar" ? "Calendario de artistas" : "Próximos shows"}</h2>
+              </div>
+              <div className="booking-view-switch" role="tablist" aria-label="Vista de agenda">
+                <button type="button" role="tab" aria-selected={overviewMode === "list"} className={overviewMode === "list" ? "active" : ""} onClick={() => setOverviewMode("list")}><ListFilter size={16} />Lista</button>
+                <button type="button" role="tab" aria-selected={overviewMode === "calendar"} className={overviewMode === "calendar" ? "active" : ""} onClick={() => setOverviewMode("calendar")}><CalendarDays size={16} />Calendario</button>
+              </div>
             </div>
-          </>
+            {loading && <p className="booking-empty">Cargando agenda...</p>}
+            {!loading && overviewMode === "calendar" && <BookingCalendar events={calendarEvents} onOpenEvent={startEditEvent} />}
+            {!loading && overviewMode === "list" && (
+              <div className="booking-dashboard-columns booking-list-overview">
+                <section className="booking-upcoming-block">
+                  {!upcoming.length && <p className="booking-empty">No hay próximos shows cargados.</p>}
+                  <div className="booking-agenda-list">{upcoming.map(renderEventRow)}</div>
+                </section>
+                <aside className="booking-quick-panel">
+                  <span>Acciones rápidas</span>
+                  <button type="button" onClick={() => startNewEntry()}><CalendarPlus size={20} /><div><strong>Cargar agenda</strong><small>Show, grupo o bloqueo</small></div><ChevronRight size={17} /></button>
+                  <button type="button" onClick={() => onOpenSettlements("individual")}><ClipboardCheck size={20} /><div><strong>Liquidar</strong><small>Individual o compartido</small></div><ChevronRight size={17} /></button>
+                  <button type="button" onClick={onOpenSummary}><CircleDollarSign size={20} /><div><strong>Ver resultados</strong><small>Ingresos y comisiones</small></div><ChevronRight size={17} /></button>
+                </aside>
+              </div>
+            )}
+          </div>
         )}
 
         {section === "agenda" && (

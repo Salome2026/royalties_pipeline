@@ -8240,7 +8240,7 @@ export default function Home() {
         </div>
       </header>
 
-      <main>
+      <main className={view === "booking" && bookingSurface === "dashboard" ? "booking-main" : undefined}>
         {message && <div className={`message ${message.type === "error" ? "error" : ""}`}>{message.text}</div>}
 
         {view === "menu" && (

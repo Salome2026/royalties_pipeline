@@ -222,8 +222,25 @@ operativas actuales.
 cuando el dashboard queda validado, pero conservan sus calculos, endpoints y permisos.
 El dashboard navega hacia esas mismas verdades; no las vuelve a calcular.
 
-En escritorio se prioriza calendario, proximos shows y alertas. En celular, la agenda
-se presenta como lista cronologica y no como un calendario de escritorio comprimido.
+Inicio es una superficie de trabajo de ancho completo: no se presenta como una tarjeta
+dentro de otra tarjeta ni vuelve a aplicar el contenedor general del menu. La navegacion
+lateral, los indicadores, la agenda y sus acciones pertenecen a un mismo dashboard.
+
+Inicio permite alternar entre `Lista` y `Calendario` sin cambiar datos ni reglas. La
+vista predeterminada es el calendario mensual. Sus reglas son:
+
+- cada celda muestra solamente el artista o conjunto de artistas del evento;
+- varios shows del mismo artista en un dia se compactan como `Artista xN`;
+- si hay artistas distintos el mismo dia, se muestran como entradas independientes;
+- el padre `show_group` no se vuelve a mostrar junto con sus hijos concretos;
+- un dia muestra hasta tres artistas y resume el resto como `+N mas`;
+- seleccionar un dia abre su detalle operativo y permite entrar a la misma edicion;
+- en celular se conserva el calendario de siete columnas con marcadores compactos y
+  el listado legible del dia debajo, sin comprimir nombres dentro de celdas angostas;
+- `Lista` conserva el acceso cronologico a proximos shows y acciones rapidas.
+
+El calendario es una vista de `booking_events`: no crea otra agenda, no calcula
+ingresos y no altera la liquidacion.
 
 Los indicadores iniciales deben ser operativos y accionables:
 
