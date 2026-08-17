@@ -283,7 +283,7 @@ export function BookingDashboard({
     const weekend = currentWeekendRange();
     return topLevelEvents
       .filter((event) => {
-        if (statusFilter === "upcoming" && (event.operational_status !== "programado" || event.commercial_status === "cancelado")) return false;
+        if (statusFilter === "upcoming" && event.commercial_status === "cancelado") return false;
         if (statusFilter === "upcoming" && event.event_date < today) return false;
         if (statusFilter === "weekend" && (event.event_date < weekend.start || event.event_date > weekend.end || event.commercial_status === "cancelado")) return false;
         if (statusFilter === "pending" && event.event_type !== "show") return false;

@@ -150,6 +150,10 @@ presenta como show confirmado. Un bloqueo usa estado operativo `bloqueado`; la
 logistica usa `informativo`. Estas dimensiones permiten compartir Agenda sin inventar
 hechos financieros.
 
+El filtro `Proximos` de Agenda incluye toda entrada futura no cancelada, sin exigir
+estado operativo `programado`. Por eso tambien muestra bloqueos, logistica y prospectos.
+El resumen `Proximos shows` conserva alcance exclusivo de shows y grupos.
+
 ### Grupos de shows
 
 Cuando una contratacion comprende varias presentaciones relacionadas, Agenda muestra

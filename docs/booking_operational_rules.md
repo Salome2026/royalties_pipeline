@@ -118,8 +118,10 @@ su propio buscador operativo. Los estados visibles deben permitir encontrar rapi
 La busqueda de coincidencias se ejecuta durante la carga. Si encuentra un candidato,
 la accion primaria es abrirlo y continuar, no crear otro.
 
-La vista inicial de Agenda muestra `Proximos`, desde hoy hacia adelante y con el show
-mas cercano primero. `Este fin de semana` muestra viernes a domingo; `Pendientes de
+La vista inicial de Agenda muestra `Proximos`, desde hoy hacia adelante y con la entrada
+mas cercana primero. Incluye shows, grupos, bloqueos, logistica y prospectos; el bloque
+breve `Proximos shows` del inicio conserva solamente shows y grupos. `Este fin de
+semana` muestra viernes a domingo; `Pendientes de
 cierre` ordena lo vencido del mas antiguo al mas nuevo; `Historial` ordena del mas
 reciente al mas antiguo. El responsable visible es el tour manager guardado en Booking.
 Si el dato historico no existe, se muestra como no informado y no se completa por
