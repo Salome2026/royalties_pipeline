@@ -663,6 +663,16 @@ class BookingAgendaDepositRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=1000)
 
 
+class BookingAgendaGroupChildRequest(BaseModel):
+    id: int | None = Field(default=None, ge=1)
+    event_date: str = Field(..., min_length=10, max_length=10)
+    start_time: str | None = Field(default=None, max_length=5)
+    venue: str = Field(..., min_length=1, max_length=180)
+    city: str | None = Field(default=None, max_length=120)
+    contracted_cachet_amount: float = Field(default=0.0, ge=0.0)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
 class BookingAgendaEventRequest(BaseModel):
     event_type: Literal["show", "show_group", "availability_block", "logistics", "prospect"] = "show"
     event_date: str = Field(..., min_length=10, max_length=10)
@@ -679,6 +689,7 @@ class BookingAgendaEventRequest(BaseModel):
     duplicate_override: bool = False
     duplicate_override_notes: str | None = Field(default=None, max_length=1000)
     notes: str | None = Field(default=None, max_length=2000)
+    group_children: list[BookingAgendaGroupChildRequest] = Field(default_factory=list, max_length=20)
 
 
 ParticipationPreset = Literal["last_month", "last_3_months", "last_year", "all_history", "custom"]
@@ -12030,6 +12041,24 @@ def create_booking_event(
     start_time = validate_booking_start_time(request.start_time)
     venue = request.venue.strip()
     city = clean_optional_text(request.city)
+    group_children: list[dict] = []
+    if request.event_type == "show_group":
+        if len(request.group_children) < 2:
+            raise HTTPException(status_code=400, detail="Un grupo necesita al menos dos shows.")
+        for child in request.group_children:
+            group_children.append({
+                "id": child.id,
+                "event_date": validate_iso_date(child.event_date),
+                "start_time": validate_booking_start_time(child.start_time),
+                "venue": child.venue.strip(),
+                "city": clean_optional_text(child.city),
+                "contracted_cachet_amount": float(child.contracted_cachet_amount),
+                "notes": clean_optional_text(child.notes),
+            })
+        event_date = min(child["event_date"] for child in group_children)
+        start_time = None
+    elif request.group_children:
+        raise HTTPException(status_code=400, detail="Los shows internos solo corresponden a un grupo.")
     requested_artists = [clean_booking_artist(value) for value in request.artists]
     requested_artists = [value for value in requested_artists if value]
     unique_artist_keys = []
@@ -12041,7 +12070,12 @@ def create_booking_event(
         raise HTTPException(status_code=400, detail="Elegí al menos un artista.")
     if request.duplicate_override and not clean_optional_text(request.duplicate_override_notes):
         raise HTTPException(status_code=400, detail="Explicá por qué la coincidencia corresponde a otro show.")
-    if request.currency == "USD" and request.contracted_cachet_amount > 0 and not request.fx_rate:
+    event_cachet = (
+        sum(child["contracted_cachet_amount"] for child in group_children)
+        if request.event_type == "show_group"
+        else float(request.contracted_cachet_amount)
+    )
+    if request.currency == "USD" and event_cachet > 0 and not request.fx_rate:
         raise HTTPException(status_code=400, detail="Para un caché en USD falta el tipo de cambio.")
     if request.event_type != "show" and request.deposit is not None:
         raise HTTPException(status_code=400, detail="Solo un show puede registrar una seña.")
@@ -12061,13 +12095,21 @@ def create_booking_event(
         for artist in selected_names:
             require_module_permission(conn, username, module_key, "create", artist=artist)
 
-        duplicate_candidates = booking_duplicate_candidates(
-            conn,
-            event_date=event_date,
-            artists=selected_names,
-            venue=venue,
-            city=city,
-        ) if request.event_type in {"show", "show_group"} else []
+        duplicate_candidates: list[dict] = []
+        duplicate_targets = group_children if request.event_type == "show_group" else [{
+            "event_date": event_date,
+            "venue": venue,
+            "city": city,
+        }]
+        if request.event_type in {"show", "show_group"}:
+            for target in duplicate_targets:
+                duplicate_candidates.extend(booking_duplicate_candidates(
+                    conn,
+                    event_date=target["event_date"],
+                    artists=selected_names,
+                    venue=target["venue"],
+                    city=target["city"],
+                ))
         hard_duplicates = [item for item in duplicate_candidates if item["match"] == "duplicado"]
         if hard_duplicates and not request.duplicate_override:
             first = hard_duplicates[0]
@@ -12105,7 +12147,7 @@ def create_booking_event(
             deposits_for_status.append(deposit_payload)
 
         deposit_status = booking_event_deposit_status(
-            float(request.contracted_cachet_amount),
+            event_cachet,
             request.currency,
             deposits_for_status,
         )
@@ -12142,7 +12184,7 @@ def create_booking_event(
                 operational_status,
                 deposit_status,
                 settlement_status,
-                request.contracted_cachet_amount,
+                event_cachet,
                 request.currency,
                 request.fx_rate,
                 clean_optional_text(request.tour_manager),
@@ -12162,6 +12204,49 @@ def create_booking_event(
                 """,
                 (event_id, artist_row["id"], artist_row["stage_name"], position),
             )
+        child_ids: list[int] = []
+        if request.event_type == "show_group":
+            for group_position, child in enumerate(group_children, start=1):
+                child_row = conn.execute(
+                    """
+                    INSERT INTO booking_events (
+                        event_type, event_date, start_time, venue, city, booking_mode,
+                        commercial_status, operational_status, deposit_status, settlement_status,
+                        contracted_cachet_amount, currency, fx_rate, tour_manager, seller,
+                        group_event_id, group_position, notes, created_by
+                    )
+                    VALUES ('show', %s, %s, %s, %s, %s,
+                            'confirmado', 'programado', 'sin_sena', 'no_iniciada',
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (
+                        child["event_date"],
+                        child["start_time"],
+                        child["venue"],
+                        child["city"],
+                        booking_mode,
+                        child["contracted_cachet_amount"],
+                        request.currency,
+                        request.fx_rate,
+                        clean_optional_text(request.tour_manager),
+                        clean_optional_text(request.seller),
+                        event_id,
+                        group_position,
+                        child["notes"],
+                        username,
+                    ),
+                ).fetchone()
+                child_id = int(child_row["id"])
+                child_ids.append(child_id)
+                for position, artist_row in enumerate(selected_rows, start=1):
+                    conn.execute(
+                        """
+                        INSERT INTO booking_event_artists (event_id, artist_id, artist_name, position)
+                        VALUES (%s, %s, %s, %s)
+                        """,
+                        (child_id, artist_row["id"], artist_row["stage_name"], position),
+                    )
         if deposit_payload:
             conn.execute(
                 """
@@ -12207,6 +12292,7 @@ def create_booking_event(
                         "artists": selected_names,
                         "booking_mode": booking_mode,
                         "deposit_status": deposit_status,
+                        "group_children": child_ids,
                     },
                     ensure_ascii=False,
                 ),
@@ -12216,6 +12302,316 @@ def create_booking_event(
         item = booking_agenda_event_item(conn, event_id)
 
     return {"item": item, "warnings": [item for item in duplicate_candidates if item["match"] == "conflicto_agenda"]}
+
+
+@app.put("/booking/events/{event_id}")
+def update_booking_event(
+    event_id: int,
+    request: BookingAgendaEventRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    require_booking_agenda_postgres()
+    username = clean_username(x_vpo_username or "")
+    if not username:
+        raise HTTPException(status_code=401, detail="Falta el usuario que realiza la edición.")
+
+    with operational_connect() as conn:
+        existing = conn.execute(
+            """
+            SELECT e.*,
+                   EXISTS(SELECT 1 FROM booking_shows s WHERE s.booking_event_id = e.id) AS has_individual,
+                   EXISTS(SELECT 1 FROM booking_composite_events c WHERE c.booking_event_id = e.id) AS has_composite,
+                   EXISTS(SELECT 1 FROM caserio_events c WHERE c.booking_event_id = e.id) AS has_caserio
+            FROM booking_events e
+            WHERE e.id = %s
+            FOR UPDATE
+            """,
+            (event_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="La entrada de Agenda no existe.")
+        existing_data = dict(existing)
+        if existing_data["has_individual"] or existing_data["has_composite"] or existing_data["has_caserio"]:
+            raise HTTPException(
+                status_code=409,
+                detail="Este show ya tiene liquidación. Editalo desde Liquidaciones para mantener una sola verdad.",
+            )
+
+        requested_artists = [clean_booking_artist(value) for value in request.artists]
+        requested_artists = [value for value in requested_artists if value]
+        unique_artist_keys: list[str] = []
+        for artist in requested_artists:
+            key = artist.casefold()
+            if key not in unique_artist_keys:
+                unique_artist_keys.append(key)
+        if not unique_artist_keys:
+            raise HTTPException(status_code=400, detail="Elegí al menos un artista.")
+        artist_rows = conn.execute(
+            "SELECT id, stage_name FROM artists WHERE active = TRUE ORDER BY lower(stage_name)"
+        ).fetchall()
+        artist_lookup = {str(row["stage_name"]).casefold(): row for row in artist_rows}
+        missing = [artist for artist in requested_artists if artist.casefold() not in artist_lookup]
+        if missing:
+            raise HTTPException(status_code=400, detail=f"Artista no encontrado o inactivo: {', '.join(missing)}")
+        selected_rows = [artist_lookup[key] for key in unique_artist_keys]
+        selected_names = [str(row["stage_name"]) for row in selected_rows]
+        booking_mode = "individual" if len(selected_names) == 1 else "shared"
+        module_key = "booking" if booking_mode == "individual" else "composite_booking"
+        for artist in selected_names:
+            require_module_permission(conn, username, module_key, "edit", artist=artist)
+
+        existing_type = str(existing_data["event_type"])
+        if existing_type == "show_group" and request.event_type != "show_group":
+            raise HTTPException(status_code=400, detail="Un grupo no se convierte en otro tipo; editá sus shows internos.")
+        if existing_type != "show_group" and request.event_type == "show_group":
+            raise HTTPException(status_code=400, detail="Para agrupar shows, creá una entrada de tipo Varios shows.")
+        if request.deposit is not None:
+            raise HTTPException(status_code=400, detail="Las señas existentes se administran desde su documento financiero.")
+
+        venue = request.venue.strip()
+        city = clean_optional_text(request.city)
+        event_date = validate_iso_date(request.event_date)
+        start_time = validate_booking_start_time(request.start_time)
+        event_cachet = float(request.contracted_cachet_amount)
+        group_children: list[dict] = []
+        child_ids: list[int] = []
+
+        if request.event_type == "show_group":
+            if len(request.group_children) < 2:
+                raise HTTPException(status_code=400, detail="Un grupo necesita al menos dos shows.")
+            current_children = conn.execute(
+                """
+                SELECT child.*,
+                       EXISTS(SELECT 1 FROM booking_shows s WHERE s.booking_event_id = child.id) AS has_individual,
+                       EXISTS(SELECT 1 FROM booking_composite_events c WHERE c.booking_event_id = child.id) AS has_composite,
+                       EXISTS(SELECT 1 FROM caserio_events c WHERE c.booking_event_id = child.id) AS has_caserio
+                FROM booking_events child
+                WHERE child.group_event_id = %s
+                ORDER BY child.group_position
+                FOR UPDATE
+                """,
+                (event_id,),
+            ).fetchall()
+            current_by_id = {int(row["id"]): dict(row) for row in current_children}
+            if any(row["has_individual"] or row["has_composite"] or row["has_caserio"] for row in current_by_id.values()):
+                raise HTTPException(
+                    status_code=409,
+                    detail="El grupo tiene shows liquidados. Editá esos shows desde Liquidaciones.",
+                )
+            for child in request.group_children:
+                if child.id is not None and child.id not in current_by_id:
+                    raise HTTPException(status_code=400, detail="Uno de los shows no pertenece a este grupo.")
+                group_children.append({
+                    "id": child.id,
+                    "event_date": validate_iso_date(child.event_date),
+                    "start_time": validate_booking_start_time(child.start_time),
+                    "venue": child.venue.strip(),
+                    "city": clean_optional_text(child.city),
+                    "contracted_cachet_amount": float(child.contracted_cachet_amount),
+                    "notes": clean_optional_text(child.notes),
+                })
+            event_date = min(child["event_date"] for child in group_children)
+            start_time = None
+            event_cachet = sum(child["contracted_cachet_amount"] for child in group_children)
+
+            submitted_ids = {int(child["id"]) for child in group_children if child["id"] is not None}
+            removed_ids = set(current_by_id) - submitted_ids
+            if removed_ids:
+                conn.execute("DELETE FROM booking_events WHERE id = ANY(%s)", (list(removed_ids),))
+            for group_position, child in enumerate(group_children, start=1):
+                if child["id"] is None:
+                    inserted = conn.execute(
+                        """
+                        INSERT INTO booking_events (
+                            event_type, event_date, start_time, venue, city, booking_mode,
+                            commercial_status, operational_status, deposit_status, settlement_status,
+                            contracted_cachet_amount, currency, fx_rate, tour_manager, seller,
+                            group_event_id, group_position, notes, created_by
+                        )
+                        VALUES ('show', %s, %s, %s, %s, %s,
+                                'confirmado', 'programado', 'sin_sena', 'no_iniciada',
+                                %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id
+                        """,
+                        (
+                            child["event_date"], child["start_time"], child["venue"], child["city"], booking_mode,
+                            child["contracted_cachet_amount"], request.currency, request.fx_rate,
+                            clean_optional_text(request.tour_manager), clean_optional_text(request.seller),
+                            event_id, group_position, child["notes"], username,
+                        ),
+                    ).fetchone()
+                    child_id = int(inserted["id"])
+                else:
+                    child_id = int(child["id"])
+                    conn.execute(
+                        """
+                        UPDATE booking_events
+                        SET event_date = %s, start_time = %s, venue = %s, city = %s,
+                            booking_mode = %s, contracted_cachet_amount = %s,
+                            currency = %s, fx_rate = %s, tour_manager = %s, seller = %s,
+                            group_position = %s, notes = %s, updated_at = now()
+                        WHERE id = %s
+                        """,
+                        (
+                            child["event_date"], child["start_time"], child["venue"], child["city"], booking_mode,
+                            child["contracted_cachet_amount"], request.currency, request.fx_rate,
+                            clean_optional_text(request.tour_manager), clean_optional_text(request.seller),
+                            group_position, child["notes"], child_id,
+                        ),
+                    )
+                child_ids.append(child_id)
+                conn.execute("DELETE FROM booking_event_artists WHERE event_id = %s", (child_id,))
+                for position, artist_row in enumerate(selected_rows, start=1):
+                    conn.execute(
+                        """INSERT INTO booking_event_artists (event_id, artist_id, artist_name, position)
+                           VALUES (%s, %s, %s, %s)""",
+                        (child_id, artist_row["id"], artist_row["stage_name"], position),
+                    )
+        elif request.group_children:
+            raise HTTPException(status_code=400, detail="Los shows internos solo corresponden a un grupo.")
+
+        if request.currency == "USD" and event_cachet > 0 and not request.fx_rate:
+            raise HTTPException(status_code=400, detail="Para un caché en USD falta el tipo de cambio.")
+        if request.event_type != "show" and existing_data.get("deposit_status") not in {"no_informada", "sin_sena"}:
+            raise HTTPException(status_code=409, detail="No se puede cambiar el tipo porque la entrada tiene una seña.")
+
+        status_by_type = {
+            "show": ("confirmado", "programado", "no_iniciada"),
+            "show_group": ("no_aplica", "programado", "no_aplica"),
+            "availability_block": ("no_aplica", "bloqueado", "no_aplica"),
+            "logistics": ("no_aplica", "informativo", "no_aplica"),
+            "prospect": ("prospecto", "programado", "no_aplica"),
+        }
+        if request.event_type == existing_type:
+            commercial_status = existing_data["commercial_status"]
+            operational_status = existing_data["operational_status"]
+            settlement_status = existing_data["settlement_status"]
+        else:
+            commercial_status, operational_status, settlement_status = status_by_type[request.event_type]
+        deposit_status = existing_data["deposit_status"] if request.event_type == "show" else "no_informada"
+
+        before_json = json.dumps(existing_data, ensure_ascii=False, default=str)
+        conn.execute(
+            """
+            UPDATE booking_events
+            SET event_type = %s, event_date = %s, start_time = %s, venue = %s, city = %s,
+                booking_mode = %s, commercial_status = %s, operational_status = %s,
+                deposit_status = %s, settlement_status = %s,
+                contracted_cachet_amount = %s, currency = %s, fx_rate = %s,
+                tour_manager = %s, seller = %s, notes = %s, updated_at = now()
+            WHERE id = %s
+            """,
+            (
+                request.event_type, event_date, start_time, venue, city, booking_mode,
+                commercial_status, operational_status, deposit_status, settlement_status,
+                event_cachet, request.currency, request.fx_rate,
+                clean_optional_text(request.tour_manager), clean_optional_text(request.seller),
+                clean_optional_text(request.notes), event_id,
+            ),
+        )
+        conn.execute("DELETE FROM booking_event_artists WHERE event_id = %s", (event_id,))
+        for position, artist_row in enumerate(selected_rows, start=1):
+            conn.execute(
+                """INSERT INTO booking_event_artists (event_id, artist_id, artist_name, position)
+                   VALUES (%s, %s, %s, %s)""",
+                (event_id, artist_row["id"], artist_row["stage_name"], position),
+            )
+        conn.execute(
+            """
+            INSERT INTO app_audit_log (
+                actor_username, module_key, action, entity_table, entity_id,
+                before_json, after_json, notes
+            )
+            VALUES (%s, %s, 'update', 'booking_events', %s, %s, %s, %s)
+            """,
+            (
+                username, module_key, str(event_id), before_json,
+                json.dumps({
+                    "event_type": request.event_type,
+                    "event_date": event_date,
+                    "venue": venue,
+                    "artists": selected_names,
+                    "group_children": child_ids,
+                }, ensure_ascii=False),
+                "Edición desde Agenda de Booking.",
+            ),
+        )
+        item = booking_agenda_event_item(conn, event_id)
+
+    return {"item": item}
+
+
+@app.delete("/booking/events/{event_id}")
+def delete_booking_event(
+    event_id: int,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    require_booking_agenda_postgres()
+    username = clean_username(x_vpo_username or "")
+    if not username:
+        raise HTTPException(status_code=401, detail="Falta el usuario que realiza la eliminación.")
+    with operational_connect() as conn:
+        existing = conn.execute(
+            """
+            SELECT e.*,
+                   EXISTS(SELECT 1 FROM booking_shows s WHERE s.booking_event_id = e.id) AS has_individual,
+                   EXISTS(SELECT 1 FROM booking_composite_events c WHERE c.booking_event_id = e.id) AS has_composite,
+                   EXISTS(SELECT 1 FROM caserio_events c WHERE c.booking_event_id = e.id) AS has_caserio
+            FROM booking_events e WHERE e.id = %s FOR UPDATE
+            """,
+            (event_id,),
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(status_code=404, detail="La entrada de Agenda no existe.")
+        data = dict(existing)
+        if data["has_individual"] or data["has_composite"] or data["has_caserio"]:
+            raise HTTPException(status_code=409, detail="El show tiene liquidación y no se puede eliminar desde Agenda.")
+        artist_rows = conn.execute(
+            "SELECT artist_name FROM booking_event_artists WHERE event_id = %s ORDER BY position",
+            (event_id,),
+        ).fetchall()
+        artists = [str(row["artist_name"]) for row in artist_rows]
+        module_key = "booking" if data["booking_mode"] == "individual" else "composite_booking"
+        for artist in artists:
+            require_module_permission(conn, username, module_key, "edit", artist=artist)
+        child_links = conn.execute(
+            """
+            SELECT count(*) AS total
+            FROM booking_events child
+            WHERE child.group_event_id = %s
+              AND (
+                  EXISTS(SELECT 1 FROM booking_shows s WHERE s.booking_event_id = child.id)
+                  OR EXISTS(SELECT 1 FROM booking_composite_events c WHERE c.booking_event_id = child.id)
+                  OR EXISTS(SELECT 1 FROM caserio_events c WHERE c.booking_event_id = child.id)
+              )
+            """,
+            (event_id,),
+        ).fetchone()
+        if int(child_links["total"] or 0):
+            raise HTTPException(status_code=409, detail="El grupo contiene shows liquidados y no se puede eliminar.")
+        conn.execute(
+            """
+            INSERT INTO app_audit_log (
+                actor_username, module_key, action, entity_table, entity_id,
+                before_json, notes
+            )
+            VALUES (%s, %s, 'delete', 'booking_events', %s, %s, %s)
+            """,
+            (
+                username, module_key, str(event_id),
+                json.dumps(data, ensure_ascii=False, default=str),
+                "Eliminación desde Agenda de Booking.",
+            ),
+        )
+        if data["event_type"] == "show_group":
+            conn.execute("DELETE FROM booking_events WHERE group_event_id = %s", (event_id,))
+        conn.execute("DELETE FROM booking_events WHERE id = %s", (event_id,))
+
+    return {"deleted": True, "event_id": event_id}
 
 
 @app.get("/booking/composite-events")

@@ -86,6 +86,11 @@ Reglas:
 - `availability_block`, `logistics` y `prospect` usan liquidacion `no_aplica`;
 - un show hijo siempre tiene `group_event_id` y `group_position` juntos;
 - el grupo no reemplaza una madre economica multiartista.
+- el importe del grupo es la suma de los hijos y sirve solo para lectura operativa;
+- un hijo puede agregarse, editarse o quitarse desde el grupo mientras no tenga una
+  liquidacion vinculada;
+- las ediciones conservan `event_id` y escriben auditoria, sin modificar la fuente
+  importada.
 
 ## booking_event_source_links
 

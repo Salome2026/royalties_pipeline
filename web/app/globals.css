@@ -3471,7 +3471,7 @@ button:disabled:hover {
   min-height: 82px;
   padding: 10px;
   display: grid;
-  grid-template-columns: 52px minmax(0, 1fr) minmax(130px, auto) 34px;
+  grid-template-columns: 52px minmax(0, 1fr) minmax(130px, auto) auto;
   align-items: center;
   gap: 12px;
   border: 1px solid #e3e8ec;
@@ -3657,6 +3657,19 @@ button:disabled:hover {
   box-shadow: none;
 }
 
+.booking-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.booking-row-action.danger {
+  color: #a13f36;
+  background: #fff4f2;
+  border-color: #f0d2cd;
+}
+
 .booking-empty {
   margin: 0;
   padding: 34px 14px;
@@ -3698,6 +3711,84 @@ button:disabled:hover {
 
 .booking-new-form > .booking-dashboard-block {
   padding: 22px;
+}
+
+.booking-entry-type-picker {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.booking-entry-type-picker button {
+  min-height: 42px;
+  margin: 0;
+  padding: 8px 10px;
+  color: #52606d;
+  background: #f7f9fa;
+  border: 1px solid #dce3e8;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.booking-entry-type-picker button.active {
+  color: #164f49;
+  background: #e8f4f2;
+  border-color: #74aaa3;
+}
+
+.booking-group-editor {
+  display: grid;
+  gap: 12px;
+}
+
+.booking-group-editor article {
+  padding: 15px;
+  border: 1px solid #dce6e5;
+  border-radius: 6px;
+  background: #f8fbfa;
+}
+
+.booking-group-editor-heading {
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.booking-group-editor-heading button,
+.booking-add-group-child {
+  width: auto;
+  min-height: 34px;
+  margin: 0;
+  padding: 6px 10px;
+  color: #17665f;
+  background: #fff;
+  border: 1px solid #c9ddda;
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+.booking-group-editor-heading button {
+  width: 34px;
+  padding: 0;
+  color: #a13f36;
+}
+
+.booking-add-group-child {
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.booking-group-total {
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #174944;
+  background: #e8f4f2;
+  border-radius: 6px;
 }
 
 .booking-form-section-title {
@@ -4044,7 +4135,7 @@ button:disabled:hover {
   }
 
   .booking-agenda-row {
-    grid-template-columns: 46px minmax(0, 1fr) 34px;
+    grid-template-columns: 46px minmax(0, 1fr) auto;
   }
 
   .booking-date-tile {
@@ -4060,9 +4151,15 @@ button:disabled:hover {
     padding-left: 12px;
   }
 
-  .booking-row-action {
+  .booking-row-actions {
     grid-column: 3;
     grid-row: 1 / span 2;
+    align-self: center;
+    flex-direction: column;
+  }
+
+  .booking-entry-type-picker {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .booking-agenda-title {

@@ -10,7 +10,10 @@ import {
   ClipboardCheck,
   LayoutDashboard,
   ListFilter,
+  Pencil,
+  Plus,
   Search,
+  Trash2,
   Users,
 } from "lucide-react";
 
@@ -98,7 +101,29 @@ type BookingDashboardProps = {
 
 type DashboardSection = "overview" | "agenda" | "new";
 
+type AgendaEventType = BookingAgendaEvent["event_type"];
+
+type AgendaGroupChildForm = {
+  id?: number;
+  eventDate: string;
+  startTime: string;
+  venue: string;
+  city: string;
+  cachet: string;
+  notes: string;
+};
+
+const newGroupChild = (eventDate = localIsoDate()): AgendaGroupChildForm => ({
+  eventDate,
+  startTime: "",
+  venue: "",
+  city: "",
+  cachet: "",
+  notes: "",
+});
+
 const initialForm = () => ({
+  eventType: "show" as AgendaEventType,
   eventDate: new Date().toISOString().slice(0, 10),
   startTime: "",
   venue: "",
@@ -123,6 +148,7 @@ const initialForm = () => ({
   notes: "",
   duplicateOverride: false,
   duplicateOverrideNotes: "",
+  groupChildren: [] as AgendaGroupChildForm[],
 });
 
 function formatAmount(value: number, currency: "ARS" | "USD") {
@@ -200,6 +226,7 @@ export function BookingDashboard({
   const [statusFilter, setStatusFilter] = useState("upcoming");
   const [artistToAdd, setArtistToAdd] = useState("");
   const [expandedGroups, setExpandedGroups] = useState<number[]>([]);
+  const [editingEventId, setEditingEventId] = useState<number | null>(null);
   const [form, setForm] = useState(initialForm);
 
   async function loadDashboard() {
@@ -229,6 +256,8 @@ export function BookingDashboard({
 
   const mode = form.artists.length > 1 ? "shared" : "individual";
   const canCreate = mode === "individual" ? permissions?.individual.create : permissions?.shared.create;
+  const canEdit = mode === "individual" ? permissions?.individual.edit : permissions?.shared.edit;
+  const canSave = editingEventId ? canEdit : canCreate;
   const selectableArtists = useMemo(() => options.filter((option) => {
     if (form.artists.includes(option.artist)) return false;
     if (form.artists.length === 0) return option.can_individual || option.can_shared;
@@ -296,6 +325,71 @@ export function BookingDashboard({
     setForm((current) => ({ ...current, artists: current.artists.filter((value) => value !== artist) }));
   }
 
+  function startNewEntry(eventType: AgendaEventType = "show") {
+    const next = initialForm();
+    next.eventType = eventType;
+    if (eventType === "show_group") {
+      next.groupChildren = [newGroupChild(next.eventDate), newGroupChild(next.eventDate)];
+    }
+    setEditingEventId(null);
+    setForm(next);
+    setDuplicateCandidates([]);
+    setMessage(null);
+    setSection("new");
+  }
+
+  function startEditEvent(event: BookingAgendaEvent) {
+    const linked = Boolean(event.booking_show_id || event.composite_event_id || event.caserio_event_id);
+    if (linked) {
+      if (event.caserio_event_id) onOpenCaserio();
+      else onOpenSettlements(event.booking_mode);
+      return;
+    }
+    const children = childrenByGroup.get(event.id) || [];
+    setEditingEventId(event.id);
+    setForm({
+      ...initialForm(),
+      eventType: event.event_type,
+      eventDate: event.event_date,
+      startTime: event.start_time || "",
+      venue: event.venue,
+      city: event.city || "",
+      artists: event.artists.map((artist) => artist.artist),
+      cachet: event.contracted_cachet_amount ? String(event.contracted_cachet_amount) : "",
+      currency: event.currency,
+      fxRate: event.fx_rate ? String(event.fx_rate) : "",
+      tourManager: event.tour_manager || "",
+      seller: event.seller || "",
+      notes: event.notes || "",
+      groupChildren: children.map((child) => ({
+        id: child.id,
+        eventDate: child.event_date,
+        startTime: child.start_time || "",
+        venue: child.venue,
+        city: child.city || "",
+        cachet: child.contracted_cachet_amount ? String(child.contracted_cachet_amount) : "",
+        notes: child.notes || "",
+      })),
+    });
+    setDuplicateCandidates([]);
+    setMessage(null);
+    setSection("new");
+  }
+
+  function updateGroupChild(index: number, patch: Partial<AgendaGroupChildForm>) {
+    setForm((current) => ({
+      ...current,
+      groupChildren: current.groupChildren.map((child, childIndex) => childIndex === index ? { ...child, ...patch } : child),
+    }));
+  }
+
+  function removeGroupChild(index: number) {
+    setForm((current) => ({
+      ...current,
+      groupChildren: current.groupChildren.filter((_, childIndex) => childIndex !== index),
+    }));
+  }
+
   async function submitEvent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage(null);
@@ -304,15 +398,20 @@ export function BookingDashboard({
       setMessage({ type: "error", text: "Elegí al menos un artista." });
       return;
     }
-    if (!canCreate) {
-      setMessage({ type: "error", text: `No tenés permiso para crear Booking ${mode === "shared" ? "compartido" : "individual"}.` });
+    if (form.eventType === "show_group" && form.groupChildren.length < 2) {
+      setMessage({ type: "error", text: "Agregá al menos dos shows al grupo." });
+      return;
+    }
+    if (!canSave) {
+      setMessage({ type: "error", text: `No tenés permiso para ${editingEventId ? "editar" : "crear"} Booking ${mode === "shared" ? "compartido" : "individual"}.` });
       return;
     }
     setSaving(true);
-    const response = await fetch("/api/booking/events", {
-      method: "POST",
+    const response = await fetch(editingEventId ? `/api/booking/events/${editingEventId}` : "/api/booking/events", {
+      method: editingEventId ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        event_type: form.eventType,
         event_date: form.eventDate,
         start_time: form.startTime || null,
         venue: form.venue,
@@ -326,7 +425,7 @@ export function BookingDashboard({
         duplicate_override: form.duplicateOverride,
         duplicate_override_notes: form.duplicateOverrideNotes || null,
         notes: form.notes || null,
-        deposit: form.hasDeposit ? {
+        deposit: !editingEventId && form.eventType === "show" && form.hasDeposit ? {
           movement_date: form.depositDate,
           amount: Number(form.depositAmount || 0),
           currency: form.depositCurrency,
@@ -338,6 +437,15 @@ export function BookingDashboard({
           proof_refs: form.proofRefs.split(/\r?\n/).map((value) => value.trim()).filter(Boolean),
           notes: form.depositNotes || null,
         } : null,
+        group_children: form.eventType === "show_group" ? form.groupChildren.map((child) => ({
+          id: child.id || null,
+          event_date: child.eventDate,
+          start_time: child.startTime || null,
+          venue: child.venue,
+          city: child.city || null,
+          contracted_cachet_amount: Number(child.cachet || 0),
+          notes: child.notes || null,
+        })) : [],
       }),
     });
     const payload = await response.json().catch(() => ({}));
@@ -347,10 +455,25 @@ export function BookingDashboard({
       setMessage({ type: "error", text: payload.error || "No se pudo guardar el show." });
       return;
     }
+    const wasEditing = Boolean(editingEventId);
+    setEditingEventId(null);
     setForm(initialForm());
     setDuplicateCandidates([]);
-    setMessage({ type: "ok", text: `Show confirmado y enviado a Booking ${payload.item.booking_mode === "shared" ? "compartido" : "individual"}.` });
+    setMessage({ type: "ok", text: wasEditing ? "Entrada de Agenda actualizada." : form.eventType === "show_group" ? "Grupo de shows creado." : "Entrada de Agenda guardada." });
     setSection("agenda");
+    await loadDashboard();
+  }
+
+  async function deleteAgendaEvent(event: BookingAgendaEvent) {
+    if (!window.confirm(`Eliminar ${event.venue} de la Agenda?`)) return;
+    setMessage(null);
+    const response = await fetch(`/api/booking/events/${event.id}`, { method: "DELETE" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setMessage({ type: "error", text: payload.error || "No se pudo eliminar la entrada." });
+      return;
+    }
+    setMessage({ type: "ok", text: "Entrada eliminada de Agenda." });
     await loadDashboard();
   }
 
@@ -360,6 +483,7 @@ export function BookingDashboard({
     const isGroup = event.event_type === "show_group";
     const children = childrenByGroup.get(event.id) || [];
     const expanded = expandedGroups.includes(event.id);
+    const canEditEvent = event.booking_mode === "individual" ? permissions?.individual.edit : permissions?.shared.edit;
     const typeLabels: Record<BookingAgendaEvent["event_type"], string> = {
       show: event.booking_mode === "shared" ? "Show compartido" : "Show",
       show_group: `${event.group_count || children.length} shows`,
@@ -390,26 +514,38 @@ export function BookingDashboard({
               </>
             ) : <span className={`booking-status-chip ${event.commercial_status}`}>{statusLabel(event.commercial_status)}</span>}
           </div>
-          {(isShow || isGroup) ? (
-            <button
-              type="button"
-              className="booking-row-action"
-              onClick={() => {
-                if (isGroup) {
-                  setExpandedGroups((current) => current.includes(event.id) ? current.filter((id) => id !== event.id) : [...current, event.id]);
-                } else if (event.caserio_event_id) {
-                  onOpenCaserio();
-                } else if (linked) {
-                  onOpenSettlements(event.booking_mode);
-                } else {
-                  onStartSettlement(event);
-                }
-              }}
-              title={isGroup ? "Ver shows del grupo" : linked ? "Abrir liquidaciones" : "Iniciar liquidación"}
-            >
-              {isGroup && expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-            </button>
-          ) : <span className="booking-row-spacer" aria-hidden="true" />}
+          <div className="booking-row-actions">
+            {canEditEvent && (
+              <button type="button" className="booking-row-action" onClick={() => startEditEvent(event)} title={linked ? "Editar en liquidaciones" : "Editar entrada"}>
+                <Pencil size={17} />
+              </button>
+            )}
+            {canEditEvent && !linked && !event.group_event_id && (
+              <button type="button" className="booking-row-action danger" onClick={() => deleteAgendaEvent(event)} title="Eliminar entrada">
+                <Trash2 size={17} />
+              </button>
+            )}
+            {(isShow || isGroup) && (
+              <button
+                type="button"
+                className="booking-row-action"
+                onClick={() => {
+                  if (isGroup) {
+                    setExpandedGroups((current) => current.includes(event.id) ? current.filter((id) => id !== event.id) : [...current, event.id]);
+                  } else if (event.caserio_event_id) {
+                    onOpenCaserio();
+                  } else if (linked) {
+                    onOpenSettlements(event.booking_mode);
+                  } else {
+                    onStartSettlement(event);
+                  }
+                }}
+                title={isGroup ? "Ver shows del grupo" : linked ? "Abrir liquidaciones" : "Iniciar liquidación"}
+              >
+                {isGroup && expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+              </button>
+            )}
+          </div>
         </article>
         {isGroup && expanded && (
           <div className="booking-group-children">
@@ -430,7 +566,7 @@ export function BookingDashboard({
         <nav aria-label="Navegación Booking">
           <button type="button" className={section === "overview" ? "active" : ""} onClick={() => setSection("overview")}><LayoutDashboard size={18} />Inicio</button>
           <button type="button" className={section === "agenda" ? "active" : ""} onClick={() => setSection("agenda")}><CalendarDays size={18} />Agenda</button>
-          <button type="button" className={section === "new" ? "active" : ""} onClick={() => setSection("new")}><CalendarPlus size={18} />Nuevo show</button>
+          <button type="button" className={section === "new" ? "active" : ""} onClick={() => startNewEntry()}><CalendarPlus size={18} />Nueva entrada</button>
           <button type="button" onClick={() => onOpenSettlements("individual")}><ClipboardCheck size={18} />Liquidaciones</button>
           <button type="button" onClick={onOpenSummary}><CircleDollarSign size={18} />Resumen</button>
           <button type="button" onClick={onOpenDetail}><ListFilter size={18} />Detalle</button>
@@ -445,9 +581,9 @@ export function BookingDashboard({
         <header className="booking-dashboard-header">
           <div>
             <span className="booking-eyebrow">VPO Corp · Booking</span>
-            <h1>{section === "overview" ? "Centro de booking" : section === "agenda" ? "Agenda de shows" : "Confirmar nuevo show"}</h1>
+            <h1>{section === "overview" ? "Centro de booking" : section === "agenda" ? "Agenda de shows" : editingEventId ? "Editar agenda" : "Nueva entrada de agenda"}</h1>
           </div>
-          <button type="button" className="booking-primary-action" onClick={() => setSection("new")}><CalendarPlus size={17} />Nuevo show</button>
+          <button type="button" className="booking-primary-action" onClick={() => startNewEntry()}><CalendarPlus size={17} />Nueva entrada</button>
         </header>
 
         {message && <div className={`booking-dashboard-message ${message.type}`}>{message.text}</div>}
@@ -469,7 +605,7 @@ export function BookingDashboard({
               </section>
               <aside className="booking-dashboard-block booking-quick-panel">
                 <span>Acciones rápidas</span>
-                <button type="button" onClick={() => setSection("new")}><CalendarPlus size={20} /><div><strong>Cargar show</strong><small>Uno o varios artistas</small></div><ChevronRight size={17} /></button>
+                <button type="button" onClick={() => startNewEntry()}><CalendarPlus size={20} /><div><strong>Cargar agenda</strong><small>Show, grupo o bloqueo</small></div><ChevronRight size={17} /></button>
                 <button type="button" onClick={() => onOpenSettlements("individual")}><ClipboardCheck size={20} /><div><strong>Liquidar</strong><small>Individual o compartido</small></div><ChevronRight size={17} /></button>
                 <button type="button" onClick={onOpenSummary}><CircleDollarSign size={20} /><div><strong>Ver resultados</strong><small>Ingresos y comisiones</small></div><ChevronRight size={17} /></button>
               </aside>
@@ -498,17 +634,27 @@ export function BookingDashboard({
         {section === "new" && (
           <form className="booking-new-form" onSubmit={submitEvent}>
             <section className="booking-dashboard-block">
-              <div className="booking-form-section-title"><span>1</span><div><h2>Cuándo y dónde</h2><p>Los datos mínimos para identificar el show.</p></div></div>
+              <div className="booking-form-section-title"><span>1</span><div><h2>Qué querés agendar</h2><p>La pantalla muestra solamente los campos necesarios.</p></div></div>
+              <div className="booking-entry-type-picker">
+                <button type="button" className={form.eventType === "show" ? "active" : ""} onClick={() => setForm((current) => ({ ...current, eventType: "show", groupChildren: [], hasDeposit: current.hasDeposit }))}>Un show</button>
+                <button type="button" className={form.eventType === "show_group" ? "active" : ""} onClick={() => setForm((current) => ({ ...current, eventType: "show_group", hasDeposit: false, groupChildren: current.groupChildren.length >= 2 ? current.groupChildren : [newGroupChild(current.eventDate), newGroupChild(current.eventDate)] }))}>Varios shows</button>
+                <button type="button" className={form.eventType === "availability_block" ? "active" : ""} onClick={() => setForm((current) => ({ ...current, eventType: "availability_block", groupChildren: [], hasDeposit: false }))}>No trabaja</button>
+                <button type="button" className={form.eventType === "logistics" ? "active" : ""} onClick={() => setForm((current) => ({ ...current, eventType: "logistics", groupChildren: [], hasDeposit: false }))}>Logística</button>
+                <button type="button" className={form.eventType === "prospect" ? "active" : ""} onClick={() => setForm((current) => ({ ...current, eventType: "prospect", groupChildren: [], hasDeposit: false }))}>Prospecto</button>
+              </div>
+            </section>
+            <section className="booking-dashboard-block">
+              <div className="booking-form-section-title"><span>2</span><div><h2>{form.eventType === "show_group" ? "Nombre del grupo" : "Cuándo y dónde"}</h2><p>{form.eventType === "show_group" ? "Ejemplo: Teodolina las 2. Los shows se detallan más abajo." : "Los datos mínimos para ubicar la entrada."}</p></div></div>
               <div className="booking-form-grid four">
-                <label>Fecha<input type="date" value={form.eventDate} onChange={(event) => setForm((current) => ({ ...current, eventDate: event.target.value, depositDate: current.depositDate || event.target.value }))} required /></label>
-                <label>Hora<input type="time" value={form.startTime} onChange={(event) => setForm((current) => ({ ...current, startTime: event.target.value }))} /></label>
-                <label>Lugar / evento<input value={form.venue} onChange={(event) => setForm((current) => ({ ...current, venue: event.target.value }))} required placeholder="Venue o nombre del evento" /></label>
-                <label>Ciudad<input value={form.city} onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))} placeholder="Opcional" /></label>
+                {form.eventType !== "show_group" && <label>Fecha<input type="date" value={form.eventDate} onChange={(event) => setForm((current) => ({ ...current, eventDate: event.target.value, depositDate: current.depositDate || event.target.value }))} required /></label>}
+                {form.eventType !== "show_group" && <label>Hora<input type="time" value={form.startTime} onChange={(event) => setForm((current) => ({ ...current, startTime: event.target.value }))} /></label>}
+                <label>{form.eventType === "show_group" ? "Nombre del grupo" : form.eventType === "availability_block" ? "Motivo" : form.eventType === "logistics" ? "Vuelo / traslado" : "Lugar / evento"}<input value={form.venue} onChange={(event) => setForm((current) => ({ ...current, venue: event.target.value }))} required placeholder={form.eventType === "show_group" ? "Ej. Teodolina las 2" : "Nombre breve"} /></label>
+                {form.eventType !== "show_group" && <label>Ciudad<input value={form.city} onChange={(event) => setForm((current) => ({ ...current, city: event.target.value }))} placeholder="Opcional" /></label>}
               </div>
             </section>
 
             <section className="booking-dashboard-block">
-              <div className="booking-form-section-title"><span>2</span><div><h2>Quién se presenta</h2><p>El sistema define automáticamente Booking individual o compartido.</p></div></div>
+              <div className="booking-form-section-title"><span>3</span><div><h2>Artista</h2><p>La selección respeta los permisos del usuario.</p></div></div>
               <div className="booking-artist-picker">
                 <select value={artistToAdd} onChange={(event) => setArtistToAdd(event.target.value)}>
                   <option value="">Elegir artista</option>
@@ -523,16 +669,41 @@ export function BookingDashboard({
               {form.artists.length > 0 && <div className="booking-mode-result"><Users size={17} /><strong>{mode === "individual" ? "Booking individual" : "Booking compartido"}</strong><span>{mode === "individual" ? "1 artista" : `${form.artists.length} artistas`}</span></div>}
             </section>
 
-            <section className="booking-dashboard-block">
-              <div className="booking-form-section-title"><span>3</span><div><h2>Condiciones comerciales</h2><p>Podés completar solo lo confirmado hoy.</p></div></div>
+            {form.eventType === "show_group" && (
+              <section className="booking-dashboard-block">
+                <div className="booking-form-section-title"><span>4</span><div><h2>Shows del grupo</h2><p>Cada uno podrá liquidarse de manera independiente.</p></div></div>
+                <div className="booking-group-editor">
+                  {form.groupChildren.map((child, index) => (
+                    <article key={child.id || `new-${index}`}>
+                      <div className="booking-group-editor-heading">
+                        <strong>Show {index + 1}</strong>
+                        {form.groupChildren.length > 2 && <button type="button" onClick={() => removeGroupChild(index)} title="Quitar show"><Trash2 size={16} /></button>}
+                      </div>
+                      <div className="booking-form-grid four">
+                        <label>Fecha<input type="date" value={child.eventDate} onChange={(event) => updateGroupChild(index, { eventDate: event.target.value })} required /></label>
+                        <label>Hora<input type="time" value={child.startTime} onChange={(event) => updateGroupChild(index, { startTime: event.target.value })} /></label>
+                        <label>Lugar<input value={child.venue} onChange={(event) => updateGroupChild(index, { venue: event.target.value })} required placeholder="Venue" /></label>
+                        <label>Ciudad<input value={child.city} onChange={(event) => updateGroupChild(index, { city: event.target.value })} placeholder="Opcional" /></label>
+                        <label>Caché<input inputMode="decimal" value={child.cachet} onChange={(event) => updateGroupChild(index, { cachet: event.target.value })} placeholder="0" /></label>
+                      </div>
+                    </article>
+                  ))}
+                  <button type="button" className="booking-add-group-child" onClick={() => setForm((current) => ({ ...current, groupChildren: [...current.groupChildren, newGroupChild(current.groupChildren.at(-1)?.eventDate || current.eventDate)] }))}><Plus size={17} />Agregar otro show</button>
+                  <div className="booking-group-total"><span>Total del grupo</span><strong>{formatAmount(form.groupChildren.reduce((total, child) => total + Number(child.cachet || 0), 0), form.currency)}</strong></div>
+                </div>
+              </section>
+            )}
+
+            {(form.eventType === "show" || form.eventType === "show_group") && <section className="booking-dashboard-block">
+              <div className="booking-form-section-title"><span>{form.eventType === "show_group" ? "5" : "4"}</span><div><h2>Condiciones comerciales</h2><p>Podés completar solo lo confirmado hoy.</p></div></div>
               <div className="booking-form-grid four">
-                <label>Caché pactado<input inputMode="decimal" value={form.cachet} onChange={(event) => setForm((current) => ({ ...current, cachet: event.target.value }))} placeholder="0" /></label>
+                {form.eventType === "show" && <label>Caché pactado<input inputMode="decimal" value={form.cachet} onChange={(event) => setForm((current) => ({ ...current, cachet: event.target.value }))} placeholder="0" /></label>}
                 <label>Moneda<select value={form.currency} onChange={(event) => setForm((current) => ({ ...current, currency: event.target.value as "ARS" | "USD", depositCurrency: event.target.value as "ARS" | "USD" }))}><option value="ARS">ARS</option><option value="USD">USD</option></select></label>
                 {form.currency === "USD" && <label>Tipo de cambio<input inputMode="decimal" value={form.fxRate} onChange={(event) => setForm((current) => ({ ...current, fxRate: event.target.value }))} required /></label>}
                 <label>Tour manager<input value={form.tourManager} onChange={(event) => setForm((current) => ({ ...current, tourManager: event.target.value }))} placeholder="Opcional" /></label>
                 <label>Vendedor<input value={form.seller} onChange={(event) => setForm((current) => ({ ...current, seller: event.target.value }))} placeholder="Opcional" /></label>
               </div>
-              <label className="booking-toggle-line"><input type="checkbox" checked={form.hasDeposit} onChange={(event) => setForm((current) => ({ ...current, hasDeposit: event.target.checked, depositDate: current.eventDate }))} /><span>Ya recibimos una seña</span></label>
+              {form.eventType === "show" && !editingEventId && <label className="booking-toggle-line"><input type="checkbox" checked={form.hasDeposit} onChange={(event) => setForm((current) => ({ ...current, hasDeposit: event.target.checked, depositDate: current.eventDate }))} /><span>Ya recibimos una seña</span></label>}
               {form.hasDeposit && (
                 <div className="booking-deposit-panel">
                   <div className="booking-form-grid four">
@@ -549,7 +720,17 @@ export function BookingDashboard({
                 </div>
               )}
               <label>Notas<textarea value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Información útil para el equipo" /></label>
-            </section>
+            </section>}
+
+            {form.eventType !== "show" && form.eventType !== "show_group" && (
+              <section className="booking-dashboard-block">
+                <div className="booking-form-section-title"><span>4</span><div><h2>Detalle</h2><p>Información breve para que el equipo entienda la entrada.</p></div></div>
+                <div className="booking-form-grid four">
+                  <label>Responsable<input value={form.tourManager} onChange={(event) => setForm((current) => ({ ...current, tourManager: event.target.value }))} placeholder="Opcional" /></label>
+                </div>
+                <label>Notas<textarea value={form.notes} onChange={(event) => setForm((current) => ({ ...current, notes: event.target.value }))} placeholder="Información útil para el equipo" /></label>
+              </section>
+            )}
 
             {duplicateCandidates.length > 0 && (
               <section className="booking-duplicate-list" aria-label="Shows encontrados">
@@ -584,8 +765,8 @@ export function BookingDashboard({
             )}
 
             <div className="booking-form-actions">
-              <button type="button" onClick={() => setSection("agenda")}>Cancelar</button>
-              <button type="submit" className="booking-primary-action" disabled={saving || !canCreate}>{saving ? "Guardando..." : "Confirmar show"}</button>
+              <button type="button" onClick={() => { setEditingEventId(null); setForm(initialForm()); setSection("agenda"); }}>Cancelar</button>
+              <button type="submit" className="booking-primary-action" disabled={saving || !canSave}>{saving ? "Guardando..." : editingEventId ? "Guardar cambios" : form.eventType === "show_group" ? "Crear grupo" : "Guardar en agenda"}</button>
             </div>
           </form>
         )}

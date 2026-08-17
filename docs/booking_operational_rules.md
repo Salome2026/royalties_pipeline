@@ -87,6 +87,18 @@ de agenda. Los prospectos son visibles como tales y no se confunden con confirma
 Una importacion validada conserva su renglon original en
 `booking_event_source_links`; volver a ejecutar el mismo lote no crea copias.
 
+### Crear y editar grupos
+
+En `Nueva entrada`, el usuario puede elegir `Varios shows`. Indica un nombre operativo
+para el grupo y carga al menos dos shows internos. Los artistas, moneda y responsables
+son comunes; cada hijo conserva fecha, hora, lugar, ciudad y cachet propios. Agenda
+muestra una sola fila desplegable y calcula el total sin duplicarlo en reportes.
+
+El boton Editar modifica directamente entradas sin liquidacion. En un show ya
+liquidado, Editar abre Liquidaciones. Un grupo puede sumar, quitar o reordenar hijos
+solo mientras sus hijos no esten liquidados. Todas las altas, cambios y eliminaciones
+quedan en `app_audit_log`.
+
 ### Ubicacion rapida
 
 Agenda permite buscar por artista, venue, ciudad y responsable. Liquidaciones conserva

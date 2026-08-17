@@ -114,6 +114,19 @@ Un show vendido nace con dimensiones separadas:
 - estado de seña: `sin_sena`, `sena_parcial` o `sena_recibida`;
 - estado de liquidacion: `no_iniciada`.
 
+### Edicion operativa
+
+Toda entrada sin liquidacion vinculada puede editarse desde Agenda con permiso de
+edicion sobre sus artistas. La edicion conserva el mismo `event_id`, registra auditoria
+y nunca altera `booking_event_source_links`. Si el show ya tiene liquidacion, Agenda
+abre esa liquidacion: no mantiene un segundo formulario para el mismo hecho.
+
+Un usuario autorizado tambien puede crear y editar `show_group`. El grupo contiene dos
+o mas shows hijos con fecha, hora, venue, ciudad y cachet propios. El total visible del
+grupo se calcula como la suma de sus hijos; el grupo no genera liquidacion, caja,
+comision ni ingreso. Cada hijo se liquida de forma independiente. Agregar o quitar
+hijos se permite mientras ninguno tenga liquidacion vinculada.
+
 La seña no confirma ni cancela por si sola la venta. Un show puede estar confirmado
 con o sin seña. La seña es caja real y debe quedar trazada, pero no convierte el
 cachet en ingreso ganado ni cierra la liquidacion.
