@@ -13,11 +13,12 @@ async function apiError(response: Response) {
   return NextResponse.json({ error: detail }, { status: response.status });
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const config = await apiConfig();
   if ("error" in config) return config.error;
 
-  const response = await fetch(`${config.apiUrl}/booking/composite-events?limit=100`, {
+  const limit = request.nextUrl.searchParams.get("limit") || "1000";
+  const response = await fetch(`${config.apiUrl}/booking/composite-events?limit=${encodeURIComponent(limit)}`, {
     headers: { "X-VPO-API-Key": config.apiKey, "X-VPO-Username": config.user.username },
     cache: "no-store",
   });

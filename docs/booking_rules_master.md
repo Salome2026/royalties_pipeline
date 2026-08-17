@@ -116,10 +116,29 @@ Un show vendido nace con dimensiones separadas:
 
 ### Edicion operativa
 
-Toda entrada sin liquidacion vinculada puede editarse desde Agenda con permiso de
-edicion sobre sus artistas. La edicion conserva el mismo `event_id`, registra auditoria
-y nunca altera `booking_event_source_links`. Si el show ya tiene liquidacion, Agenda
-abre esa liquidacion: no mantiene un segundo formulario para el mismo hecho.
+Toda entrada futura sin liquidacion vinculada puede editarse desde Agenda con permiso
+de edicion sobre sus artistas. La edicion conserva el mismo `event_id`, registra
+auditoria y nunca altera `booking_event_source_links`. Si el show ya tiene
+liquidacion, Agenda abre esa liquidacion exacta: no mantiene un segundo formulario
+para el mismo hecho.
+
+La fecha y el vinculo determinan la accion del usuario:
+
+- show futuro sin liquidacion: abre la edicion operativa de Agenda;
+- show pasado sin liquidacion: abre una liquidacion nueva precargada y vinculada;
+- show pasado con liquidacion: abre la liquidacion exacta existente;
+- show futuro ya vinculado: abre la liquidacion exacta, porque el registro economico
+  ya es la verdad editable;
+- compromiso pasado no liquidable: queda en consulta y no vuelve a un formulario de
+  edicion;
+- grupo pasado: se despliega y cada show hijo se liquida por separado.
+
+Toda liquidacion nueva debe terminar vinculada a una cabecera `booking_events`. Si el
+usuario entra directamente por Liquidaciones, el guardado busca una coincidencia
+exacta por fecha, artistas, venue y ciudad. Una unica coincidencia se reutiliza; si no
+existe, la cabecera se crea dentro de la misma operacion. Varias coincidencias exactas
+o una liquidacion historica exacta sin vinculo bloquean el alta para evitar duplicados.
+No se crean liquidaciones nuevas independientes de Agenda.
 
 Un usuario autorizado tambien puede crear y editar `show_group`. El grupo contiene dos
 o mas shows hijos con fecha, hora, venue, ciudad y cachet propios. El total visible del

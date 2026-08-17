@@ -184,7 +184,7 @@ Prestacion artistica concreta. Puede o no pertenecer a un evento madre.
 | Campo | Tipo | Obligatorio | Descripcion | Ejemplo |
 | --- | --- | --- | --- | --- |
 | show_id | string | si | ID interno | show_2025_08_09_virrshi |
-| booking_event_id | bigint | si para nuevas cargas desde Agenda | Cabecera operativa asociada | 55 |
+| booking_event_id | bigint | si para toda carga nueva | Cabecera operativa asociada | 55 |
 | show_date | date | si | Fecha del show | 2025-08-09 |
 | primary_artist_id | string | si | Artista principal | artist_virrshi |
 | show_name | string | si | Evento / detalle | Animal - Neuquen |
@@ -196,8 +196,11 @@ Prestacion artistica concreta. Puede o no pertenecer a un evento madre.
 | booking_rule_id | string | no | Regla default | rule_70_30 |
 | notes | string | no | Observaciones |  |
 
-Los shows historicos pueden no tener `booking_event_id` hasta completar el backfill. Toda carga
-nueva desde Agenda debe tenerlo. El backfill no altera importes ni estados financieros.
+Los shows historicos pueden no tener `booking_event_id` hasta completar el backfill.
+Toda carga nueva, iniciada desde Agenda o directamente desde Liquidaciones, debe
+tenerlo. En una carga directa se reutiliza una coincidencia exacta no liquidada o se
+crea la cabecera dentro de la misma transaccion. El backfill no altera importes ni
+estados financieros.
 
 El backfill se ejecuta solo despues de aprobar un informe de conciliacion. Los eventos
 compartidos se migran desde su cabecera y sus shows hijos solo se vinculan; nunca se

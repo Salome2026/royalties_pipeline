@@ -98,6 +98,7 @@ type BookingDashboardProps = {
   onOpenDetail: () => void;
   onOpenCaserio: () => void;
   onStartSettlement: (event: BookingAgendaEvent) => void;
+  onOpenLinkedSettlement: (event: BookingAgendaEvent) => void;
 };
 
 type DashboardSection = "overview" | "agenda" | "new";
@@ -213,6 +214,7 @@ export function BookingDashboard({
   onOpenDetail,
   onOpenCaserio,
   onStartSettlement,
+  onOpenLinkedSettlement,
 }: BookingDashboardProps) {
   const [section, setSection] = useState<DashboardSection>("overview");
   const [events, setEvents] = useState<BookingAgendaEvent[]>([]);
@@ -347,9 +349,23 @@ export function BookingDashboard({
 
   function startEditEvent(event: BookingAgendaEvent) {
     const linked = Boolean(event.booking_show_id || event.composite_event_id || event.caserio_event_id);
-    if (linked) {
-      if (event.caserio_event_id) onOpenCaserio();
-      else onOpenSettlements(event.booking_mode);
+    const isPast = event.event_date < localIsoDate();
+    if (event.event_type === "show_group") {
+      if (isPast) {
+        setExpandedGroups((current) => current.includes(event.id) ? current.filter((id) => id !== event.id) : [...current, event.id]);
+        return;
+      }
+    } else if (event.event_type === "show") {
+      if (linked) {
+        onOpenLinkedSettlement(event);
+        return;
+      }
+      if (isPast) {
+        onStartSettlement(event);
+        return;
+      }
+    } else if (isPast) {
+      setMessage({ type: "ok", text: "Este compromiso pasado queda en consulta y no modifica una liquidación." });
       return;
     }
     const children = childrenByGroup.get(event.id) || [];
@@ -504,6 +520,7 @@ export function BookingDashboard({
 
   function renderEventRow(event: BookingAgendaEvent) {
     const linked = Boolean(event.booking_show_id || event.composite_event_id || event.caserio_event_id);
+    const isPast = event.event_date < localIsoDate();
     const isShow = event.event_type === "show";
     const isGroup = event.event_type === "show_group";
     const children = childrenByGroup.get(event.id) || [];
@@ -540,12 +557,12 @@ export function BookingDashboard({
             ) : <span className={`booking-status-chip ${event.commercial_status}`}>{statusLabel(event.commercial_status)}</span>}
           </div>
           <div className="booking-row-actions">
-            {canEditEvent && (
-              <button type="button" className="booking-row-action" onClick={() => startEditEvent(event)} title={linked ? "Editar en liquidaciones" : "Editar entrada"}>
+            {canEditEvent && !isPast && (
+              <button type="button" className="booking-row-action" onClick={() => startEditEvent(event)} title={linked ? "Abrir liquidación" : "Editar entrada futura"}>
                 <Pencil size={17} />
               </button>
             )}
-            {canEditEvent && !linked && !event.group_event_id && (
+            {canEditEvent && !isPast && !linked && !event.group_event_id && (
               <button type="button" className="booking-row-action danger" onClick={() => deleteAgendaEvent(event)} title="Eliminar entrada">
                 <Trash2 size={17} />
               </button>
@@ -557,15 +574,11 @@ export function BookingDashboard({
                 onClick={() => {
                   if (isGroup) {
                     setExpandedGroups((current) => current.includes(event.id) ? current.filter((id) => id !== event.id) : [...current, event.id]);
-                  } else if (event.caserio_event_id) {
-                    onOpenCaserio();
-                  } else if (linked) {
-                    onOpenSettlements(event.booking_mode);
                   } else {
-                    onStartSettlement(event);
+                    startEditEvent(event);
                   }
                 }}
-                title={isGroup ? "Ver shows del grupo" : linked ? "Abrir liquidaciones" : "Iniciar liquidación"}
+                title={isGroup ? "Ver shows del grupo" : linked ? "Abrir liquidación exacta" : isPast ? "Iniciar liquidación" : "Editar en Agenda"}
               >
                 {isGroup && expanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
               </button>

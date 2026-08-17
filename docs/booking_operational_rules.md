@@ -57,6 +57,16 @@ Flujo esperado:
 6. El usuario aprueba o corrige la caja real.
 7. Las diferencias quedan como balance o cuenta corriente.
 
+La navegacion respeta el momento del show. Un show futuro no liquidado abre Agenda
+para corregir sus datos operativos. Un show pasado no liquidado abre el formulario de
+liquidacion con sus datos precargados. Un show vinculado abre siempre su liquidacion
+exacta. Los compromisos pasados que no son shows quedan en consulta.
+
+Entrar directamente por Liquidaciones no crea un circuito alternativo. Al guardar, el
+sistema busca una unica entrada exacta de Agenda y la vincula; si no existe, crea su
+cabecera operativa en la misma transaccion. Desde ese momento Agenda y Liquidaciones
+son dos vistas del mismo show.
+
 La agenda no es contabilidad final. Sirve como control de shows esperados, cancelados,
 sin rendir o pendientes de cobro.
 

@@ -2515,6 +2515,9 @@ export default function Home() {
   const [bookingSurface, setBookingSurface] = useState<BookingSurface>("dashboard");
   const [bookingAgendaEventId, setBookingAgendaEventId] = useState<number | null>(null);
   const [compositeBookingAgendaEventId, setCompositeBookingAgendaEventId] = useState<number | null>(null);
+  const [bookingAgendaCandidates, setBookingAgendaCandidates] = useState<BookingAgendaEvent[]>([]);
+  const [bookingAgendaCandidateId, setBookingAgendaCandidateId] = useState("");
+  const [bookingAgendaCandidatesLoading, setBookingAgendaCandidatesLoading] = useState(false);
   const [compositeBookingLoading, setCompositeBookingLoading] = useState(false);
   const [compositeBookingEditingId, setCompositeBookingEditingId] = useState<number | null>(null);
   const [compositeBookingForm, setCompositeBookingForm] = useState<BookingCompositeForm>({
@@ -2622,6 +2625,7 @@ export default function Home() {
   useEffect(() => {
     if (authenticated && view === "booking" && bookingSurface === "settlement") {
       loadBookingArtists();
+      loadBookingAgendaCandidates();
       if (bookingWorkspaceMode === "individual") {
         loadBookingShows();
       } else {
@@ -5815,6 +5819,25 @@ export default function Home() {
     setCompositeBookingLoading(false);
   }
 
+  async function loadBookingAgendaCandidates() {
+    setBookingAgendaCandidatesLoading(true);
+    const response = await fetch("/api/booking/events?limit=1000", { cache: "no-store" });
+    if (response.ok) {
+      const data = await response.json();
+      const today = new Date();
+      const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+      const items = ((data.items || []) as BookingAgendaEvent[])
+        .filter((item) => item.event_type === "show")
+        .filter((item) => item.event_date <= todayKey)
+        .filter((item) => item.commercial_status !== "cancelado")
+        .filter((item) => !item.booking_show_id && !item.composite_event_id && !item.caserio_event_id)
+        .sort((left, right) => right.event_date.localeCompare(left.event_date) || right.id - left.id);
+      setBookingAgendaCandidates(items);
+      setBookingAgendaCandidateId((current) => items.some((item) => String(item.id) === current) ? current : "");
+    }
+    setBookingAgendaCandidatesLoading(false);
+  }
+
   function updateCompositeBookingField<K extends keyof BookingCompositeForm>(key: K, value: BookingCompositeForm[K]) {
     setCompositeBookingForm((current) => ({ ...current, [key]: value }));
   }
@@ -6264,6 +6287,7 @@ export default function Home() {
       setBookingItems((current) => [data.item, ...current].slice(0, 30));
       resetCompositeBookingForm();
       loadBookingShows();
+      loadBookingAgendaCandidates();
       setMessage({ type: "ok", text: "Show simple guardado desde beta. No se creo evento madre." });
       setCompositeBookingLoading(false);
       return;
@@ -6345,6 +6369,7 @@ export default function Home() {
     ));
     resetCompositeBookingForm();
     loadBookingShows();
+    loadBookingAgendaCandidates();
     setMessage({
       type: "ok",
       text: compositeBookingEditingId
@@ -7334,6 +7359,7 @@ export default function Home() {
     });
     setBookingVisibleCount(5);
     resetBookingForm();
+    loadBookingAgendaCandidates();
     setMessage({ type: "ok", text: bookingEditingId ? "Show actualizado correctamente." : "Show cargado correctamente." });
     setBookingLoading(false);
   }
@@ -7382,6 +7408,61 @@ export default function Home() {
     setBookingWorkspaceMode(mode);
     setBookingSurface("settlement");
     setMessage(null);
+  }
+
+  async function openLinkedAgendaSettlement(item: BookingAgendaEvent) {
+    if (item.caserio_event_id) {
+      openView("caserio");
+      setMessage({ type: "ok", text: `Evento Caserio #${item.caserio_event_id} vinculado desde Agenda.` });
+      return;
+    }
+
+    if (item.booking_mode === "individual" && item.booking_show_id) {
+      openBookingSettlements("individual");
+      setBookingLoading(true);
+      const response = await fetch(`/api/booking/${item.booking_show_id}`, { cache: "no-store" });
+      const data = await response.json().catch(() => ({}));
+      setBookingLoading(false);
+      if (!response.ok) {
+        setMessage({ type: "error", text: data.error || "No se pudo abrir la liquidación vinculada." });
+        return;
+      }
+      const show = data.item as BookingShow;
+      setBookingItems((current) => current.some((entry) => entry.id === show.id)
+        ? current.map((entry) => entry.id === show.id ? show : entry)
+        : [show, ...current]);
+      if (canEditModule("booking")) {
+        editBookingShow(show);
+      } else {
+        setBookingSearch(String(show.id));
+        setMessage({ type: "ok", text: `Liquidación #${show.id} abierta en modo consulta.` });
+      }
+      return;
+    }
+
+    if (item.booking_mode === "shared" && item.composite_event_id) {
+      openBookingSettlements("shared");
+      setCompositeBookingLoading(true);
+      const response = await fetch(`/api/booking/composite-events/${item.composite_event_id}`, { cache: "no-store" });
+      const data = await response.json().catch(() => ({}));
+      setCompositeBookingLoading(false);
+      if (!response.ok) {
+        setMessage({ type: "error", text: data.error || "No se pudo abrir la liquidación compartida vinculada." });
+        return;
+      }
+      const composite = data.item as BookingCompositeEvent;
+      setCompositeBookingEvents((current) => current.some((entry) => entry.id === composite.id)
+        ? current.map((entry) => entry.id === composite.id ? composite : entry)
+        : [composite, ...current]);
+      if (canEditModule("composite_booking")) {
+        editCompositeBookingEvent(composite);
+      } else {
+        setMessage({ type: "ok", text: `Liquidación compartida #${composite.id} abierta en modo consulta.` });
+      }
+      return;
+    }
+
+    setMessage({ type: "error", text: "La entrada figura vinculada, pero no tiene una liquidación identificable." });
   }
 
   function startAgendaSettlement(item: BookingAgendaEvent) {
@@ -7466,6 +7547,35 @@ export default function Home() {
       })),
     });
     openBookingSettlements("shared");
+  }
+
+  function renderBookingAgendaPrefill(mode: BookingWorkspaceMode) {
+    const candidates = bookingAgendaCandidates.filter((item) => item.booking_mode === mode);
+    const selected = candidates.find((item) => String(item.id) === bookingAgendaCandidateId);
+    return (
+      <div className="booking-agenda-prefill">
+        <div>
+          <strong>Continuar un show de Agenda</strong>
+          <small>{bookingAgendaCandidatesLoading ? "Buscando shows pendientes..." : `${candidates.length} show${candidates.length === 1 ? "" : "s"} sin liquidar`}</small>
+        </div>
+        <select
+          aria-label="Show pendiente de Agenda"
+          value={bookingAgendaCandidateId}
+          onChange={(event) => setBookingAgendaCandidateId(event.target.value)}
+          disabled={bookingAgendaCandidatesLoading || candidates.length === 0}
+        >
+          <option value="">Elegir show pendiente</option>
+          {candidates.map((item) => (
+            <option key={item.id} value={item.id}>
+              {item.event_date} · {item.artists.map((artist) => artist.artist).join(" + ")} · {item.venue}
+            </option>
+          ))}
+        </select>
+        <button type="button" onClick={() => selected && startAgendaSettlement(selected)} disabled={!selected}>
+          Usar precarga
+        </button>
+      </div>
+    );
   }
 
   function selectBookingMode(mode: BookingWorkspaceMode) {
@@ -13836,6 +13946,7 @@ export default function Home() {
             onOpenDetail={() => openView("booking-artist-summary")}
             onOpenCaserio={() => openView("caserio")}
             onStartSettlement={startAgendaSettlement}
+            onOpenLinkedSettlement={openLinkedAgendaSettlement}
           />
         )}
 
@@ -13886,6 +13997,15 @@ export default function Home() {
                   <p>Para eventos madre con gastos compartidos y shows internos de artistas VPO.</p>
                 </div>
               </div>
+
+              {!compositeBookingEditingId && renderBookingAgendaPrefill("shared")}
+              {!compositeBookingEditingId && (
+                <p className="field-help">
+                  {compositeBookingAgendaEventId
+                    ? `Vinculada a Agenda #${compositeBookingAgendaEventId}.`
+                    : "Si el show no existe en Agenda, se creará y vinculará al guardar."}
+                </p>
+              )}
 
               <div className="row">
                 <div>
@@ -15215,6 +15335,15 @@ export default function Home() {
                   <button type="button" onClick={resetBookingForm}>Cancelar edicion</button>
                 )}
               </div>
+
+              {!bookingEditingId && renderBookingAgendaPrefill("individual")}
+              {!bookingEditingId && (
+                <p className="field-help">
+                  {bookingAgendaEventId
+                    ? `Vinculada a Agenda #${bookingAgendaEventId}.`
+                    : "Si el show no existe en Agenda, se creará y vinculará al guardar."}
+                </p>
+              )}
 
               <div className="row">
                 <div>

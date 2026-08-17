@@ -1064,6 +1064,31 @@ button:disabled:hover {
   box-shadow: 0 6px 14px rgba(15, 118, 110, .18);
 }
 
+.booking-agenda-prefill {
+  display: grid;
+  grid-template-columns: minmax(190px, auto) minmax(260px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0 4px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.booking-agenda-prefill > div {
+  display: grid;
+  gap: 2px;
+}
+
+.booking-agenda-prefill small {
+  color: var(--muted);
+}
+
+.booking-agenda-prefill select,
+.booking-agenda-prefill button {
+  margin: 0;
+}
+
 .booking-mode-switch button:disabled {
   cursor: not-allowed;
   opacity: .38;
@@ -3116,6 +3141,14 @@ button:disabled:hover {
   }
 
   .booking-mode-switch {
+    width: 100%;
+  }
+
+  .booking-agenda-prefill {
+    grid-template-columns: 1fr;
+  }
+
+  .booking-agenda-prefill button {
     width: 100%;
   }
 
