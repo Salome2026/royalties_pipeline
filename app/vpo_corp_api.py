@@ -4124,22 +4124,67 @@ def sync_booking_event_from_show(conn: Any, show_id: int, item: dict, now: str) 
         else "programado"
     )
     event_commercial_status = "cancelado" if show_status == "cancelado" else "confirmado"
+    event_id = int(link["booking_event_id"])
     conn.execute(
         """
         UPDATE booking_events
-        SET commercial_status = ?,
+        SET event_date = ?,
+            venue = ?,
+            city = ?,
+            commercial_status = ?,
             operational_status = ?,
             settlement_status = ?,
+            contracted_cachet_amount = ?,
+            currency = ?,
+            fx_rate = ?,
+            tour_manager = ?,
+            seller = ?,
             updated_at = ?
         WHERE id = ?
         """,
         (
+            item.get("show_date"),
+            item.get("venue"),
+            item.get("city"),
             event_commercial_status,
             event_operational_status,
             event_settlement_status,
+            item.get("contracted_cachet_amount") or 0,
+            item.get("currency") or "ARS",
+            item.get("fx_rate"),
+            item.get("tour_manager"),
+            item.get("seller"),
             now,
-            link["booking_event_id"],
+            event_id,
         ),
+    )
+
+    artist_name = clean_booking_artist(item.get("artist"))
+    if not artist_name:
+        return
+    artist_row = conn.execute(
+        "SELECT id, stage_name FROM artists WHERE active = TRUE AND lower(stage_name) = lower(?)",
+        (artist_name,),
+    ).fetchone()
+    if artist_row is None:
+        return
+    current_artists = conn.execute(
+        "SELECT artist_id, artist_name FROM booking_event_artists WHERE event_id = ? ORDER BY position",
+        (event_id,),
+    ).fetchall()
+    if (
+        len(current_artists) == 1
+        and int(current_artists[0]["artist_id"]) == int(artist_row["id"])
+        and str(current_artists[0]["artist_name"]) == str(artist_row["stage_name"])
+    ):
+        return
+    conn.execute("DELETE FROM booking_event_artists WHERE event_id = ?", (event_id,))
+    conn.execute(
+        """
+        INSERT INTO booking_event_artists (event_id, artist_id, artist_name, position)
+        VALUES (?, ?, ?, 1)
+        """,
+        (event_id, artist_row["id"], artist_row["stage_name"]),
     )
 
 

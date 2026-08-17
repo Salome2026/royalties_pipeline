@@ -60,6 +60,12 @@ Flujo esperado:
 La agenda no es contabilidad final. Sirve como control de shows esperados, cancelados,
 sin rendir o pendientes de cobro.
 
+Una edicion posterior de la liquidacion vinculada actualiza tambien la cabecera de
+Agenda dentro de la misma operacion. Esto incluye fecha, venue, ciudad, artista,
+responsables, cachet, moneda, tipo de cambio y estados. El texto de la planilla de
+origen permanece separado para auditoria y nunca vuelve a imponerse sobre el dato
+operativo corregido.
+
 Un show vendido se muestra inicialmente como `Confirmado`. Internamente mantiene
 separados:
 

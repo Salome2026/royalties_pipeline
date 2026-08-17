@@ -75,6 +75,10 @@ logistica o un prospecto. No reemplaza la liquidacion economica.
 
 La agenda consulta esta tabla. No existe `booking_agenda_entries` como segunda verdad.
 
+Los campos identificatorios y economicos iniciales se mantienen sincronizados con la
+liquidacion vinculada. `booking_event_source_links.source_text` conserva el valor de
+origen y no reemplaza el valor operativo corregido de `booking_events`.
+
 Reglas:
 
 - solo `event_type=show` puede iniciar una liquidacion;

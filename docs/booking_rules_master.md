@@ -94,6 +94,17 @@ La carga inicial minima contiene:
 La carga inicial no calcula ni confirma gastos, splits, pagos al artista, ingreso
 ganado por Indyana ni cierre. Esos hechos se completan en la liquidacion vinculada.
 
+### Sincronizacion de un show vinculado
+
+Agenda y liquidacion son dos vistas del mismo show, no dos fichas independientes.
+Cuando una liquidacion individual vinculada se edita, `booking_events` debe reflejar
+en la misma transaccion la fecha, venue, ciudad, artista, responsables, cachet,
+moneda, tipo de cambio y estados vigentes. La referencia original importada se
+conserva sin cambios en `booking_event_source_links` como evidencia de conciliacion.
+
+Una correccion como `a revisar` a `30-30` debe verse inmediatamente en Agenda. No se
+crea otro evento, no se edita el texto fuente y no se espera una nueva importacion.
+
 ### Estado inicial segun el tipo de agenda
 
 Un show vendido nace con dimensiones separadas:
