@@ -3867,6 +3867,7 @@ button:disabled:hover {
   grid-template-columns: 52px minmax(0, 1fr) minmax(130px, auto) auto;
   align-items: center;
   gap: 12px;
+  color: #14202d;
   border: 1px solid #e3e8ec;
   border-radius: 6px;
   background: #fff;
@@ -3937,6 +3938,11 @@ button:disabled:hover {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.booking-agenda-title strong,
+.booking-agenda-money strong {
+  color: #14202d;
 }
 
 .booking-agenda-title strong,
