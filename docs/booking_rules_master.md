@@ -47,8 +47,24 @@ Reglas obligatorias:
 
 ## Agenda como cabecera operativa
 
-La agenda no es otro modulo ni otra copia del show. Es una vista de la cabecera
-operativa comun `booking_events`.
+La agenda no es otra copia del show ni otra fuente de datos. Es una vista de la
+cabecera operativa comun `booking_events`. En el ABM existe el permiso independiente
+`booking_agenda` para separar la operacion de agenda de la liquidacion economica.
+
+Permisos obligatorios:
+
+- `booking_agenda / Ver`: permite consultar toda la agenda; es el permiso inicial de
+  todos los empleados activos y no se limita por artista;
+- `booking_agenda / Cargar`: conserva la visualizacion y permite agregar shows,
+  grupos, bloqueos, logistica y prospectos;
+- `booking_agenda / Editar`: conserva visualizacion y carga, y permite modificar o
+  eliminar entradas futuras que aun no tienen liquidacion;
+- abrir una liquidacion existente exige `view_history` del permiso `booking` o
+  `composite_booking`, segun corresponda, y alcance sobre todos sus artistas;
+- iniciar una liquidacion exige `create` de `booking` o `composite_booking`, segun
+  corresponda, y alcance sobre todos sus artistas;
+- el permiso de Agenda nunca concede acceso implicito a importes, caja, cuenta
+  corriente o liquidaciones de Booking.
 
 `booking_events` representa la agenda operativa del artista. Puede contener un show,
 un grupo de shows, un bloqueo de disponibilidad, una referencia logistica o un
@@ -117,7 +133,7 @@ Un show vendido nace con dimensiones separadas:
 ### Edicion operativa
 
 Toda entrada futura sin liquidacion vinculada puede editarse desde Agenda con permiso
-de edicion sobre sus artistas. La edicion conserva el mismo `event_id`, registra
+`booking_agenda / Editar`. La edicion conserva el mismo `event_id`, registra
 auditoria y nunca altera `booking_event_source_links`. Si el show ya tiene
 liquidacion, Agenda abre esa liquidacion exacta: no mantiene un segundo formulario
 para el mismo hecho.

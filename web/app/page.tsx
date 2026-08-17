@@ -2606,6 +2606,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!authenticated || view !== "booking" || currentUserModuleAccess === null) return;
+    if (bookingSurface === "dashboard" && canAccessModule("booking_agenda")) return;
     if (canAccessBookingMode(bookingWorkspaceMode)) return;
     if (canAccessBookingMode("individual")) {
       setBookingWorkspaceMode("individual");
@@ -2614,7 +2615,7 @@ export default function Home() {
     } else {
       setView("menu");
     }
-  }, [authenticated, view, bookingWorkspaceMode, currentUserModuleAccess, currentUser?.role]);
+  }, [authenticated, view, bookingSurface, bookingWorkspaceMode, currentUserModuleAccess, currentUser?.role]);
 
   useEffect(() => {
     if (authenticated && view === "participation" && !participation) {
@@ -3474,7 +3475,7 @@ export default function Home() {
   function canShowMenuView(targetView: View) {
     if (targetView === "menu") return true;
     if (targetView === "booking") {
-      return canAccessBookingMode("individual") || canAccessBookingMode("shared");
+      return canAccessModule("booking_agenda") || canAccessBookingMode("individual") || canAccessBookingMode("shared");
     }
     const moduleKey = VIEW_MODULE_KEYS[targetView];
     return moduleKey ? canAccessModule(moduleKey) : false;
@@ -5733,16 +5734,9 @@ export default function Home() {
       const modules = (data.modules || []) as EmployeeModule[];
       setEmployeeForm((current) => current.permissions.length ? current : {
         ...current,
-        permissions: modules.map((module) => ({
-          module_key: module.module_key,
-          can_access: false,
-          can_create: false,
-          can_view_history: false,
-          can_edit: false,
-          can_approve: false,
-          scope: [],
-          notes: null,
-        })),
+        permissions: modules
+          .filter((module) => module.module_key !== "home")
+          .map(defaultEmployeePermission),
       });
     }
   }
@@ -6702,30 +6696,30 @@ export default function Home() {
   }
 
   function defaultEmployeePermissions() {
-    return employeeModules.filter((module) => module.module_key !== "home").map((module) => ({
+    return employeeModules
+      .filter((module) => module.module_key !== "home")
+      .map(defaultEmployeePermission);
+  }
+
+  function defaultEmployeePermission(module: EmployeeModule): EmployeePermission {
+    const agendaView = module.module_key === "booking_agenda";
+    return {
       module_key: module.module_key,
-      can_access: false,
+      can_access: agendaView,
       can_create: false,
-      can_view_history: false,
+      can_view_history: agendaView,
       can_edit: false,
       can_approve: false,
-      scope: [],
-      notes: null,
-    }));
+      scope: agendaView ? [{ scope_type: "all", scope_ref: "*" }] : [],
+      notes: agendaView ? "Acceso inicial de lectura a la Agenda Booking." : null,
+    };
   }
 
   function mergedEmployeePermissions(item?: EmployeeRecord) {
     const existing = new Map((item?.permissions || []).map((permission) => [permission.module_key, permission]));
-    return employeeModules.filter((module) => module.module_key !== "home").map((module) => existing.get(module.module_key) || {
-      module_key: module.module_key,
-      can_access: false,
-      can_create: false,
-      can_view_history: false,
-      can_edit: false,
-      can_approve: false,
-      scope: [],
-      notes: null,
-    });
+    return employeeModules
+      .filter((module) => module.module_key !== "home")
+      .map((module) => existing.get(module.module_key) || defaultEmployeePermission(module));
   }
 
   function updateEmployeeField<K extends keyof EmployeeForm>(key: K, value: EmployeeForm[K]) {
@@ -6782,7 +6776,7 @@ export default function Home() {
     const values = {
       can_access: level !== "none",
       can_create: ["create", "edit", "admin"].includes(level),
-      can_view_history: ["view", "edit", "admin"].includes(level),
+      can_view_history: ["view", "edit", "admin"].includes(level) || (moduleKey === "booking_agenda" && level === "create"),
       can_edit: ["edit", "admin"].includes(level),
       can_approve: level === "admin",
     };
@@ -13947,6 +13941,9 @@ export default function Home() {
             onOpenCaserio={() => openView("caserio")}
             onStartSettlement={startAgendaSettlement}
             onOpenLinkedSettlement={openLinkedAgendaSettlement}
+            canOpenSummary={canAccessModule("booking_summary")}
+            canOpenDetail={canAccessModule("booking_detail")}
+            canOpenCaserio={canAccessModule("caserio")}
           />
         )}
 
@@ -15136,7 +15133,7 @@ export default function Home() {
               <div className="section-heading compact">
                 <div>
                   <h2>Permisos por modulo</h2>
-                  <p>Inicio se habilita automaticamente si tiene acceso a algun modulo. Estos permisos todavia no bloquean pantallas.</p>
+                  <p>Inicio se habilita automaticamente si tiene acceso a algun modulo. Cada permiso se valida en pantalla y servidor.</p>
                 </div>
               </div>
               <div className="permission-level-list">
@@ -15146,13 +15143,21 @@ export default function Home() {
                   const usesArtistScope = permissionUsesArtistScope(permission);
                   const allArtists = permissionHasAllArtists(permission);
                   const selectedArtists = permissionArtistNames(permission);
-                  const levelHelp = {
-                    none: "No puede abrir el modulo.",
-                    view: "Puede entrar y ver historial.",
-                    create: "Puede entrar y cargar nuevo, sin historial amplio.",
-                    edit: "Puede ver historial, cargar y editar.",
-                    admin: "Puede hacer todo, incluyendo aprobar/cerrar.",
-                  }[level];
+                  const levelHelp = permission.module_key === "booking_agenda"
+                    ? {
+                        none: "No puede abrir la Agenda.",
+                        view: "Puede ver toda la Agenda.",
+                        create: "Puede ver y cargar entradas.",
+                        edit: "Puede ver, cargar y editar entradas.",
+                        admin: "Puede administrar toda la Agenda.",
+                      }[level]
+                    : {
+                        none: "No puede abrir el modulo.",
+                        view: "Puede entrar y ver historial.",
+                        create: "Puede entrar y cargar nuevo, sin historial amplio.",
+                        edit: "Puede ver historial, cargar y editar.",
+                        admin: "Puede hacer todo, incluyendo aprobar/cerrar.",
+                      }[level];
                   return (
                     <div className="permission-level-row" key={permission.module_key}>
                       <div>

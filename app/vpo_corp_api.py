@@ -2902,6 +2902,7 @@ APP_MODULES = [
     ("royalty_reports", "Reporte de regalias"),
     ("custom_reports", "Reportes Personalizados"),
     ("participation", "Participacion en distribuidoras"),
+    ("booking_agenda", "Agenda Booking"),
     ("booking", "Booking Indyana"),
     ("booking_lab", "Carga de Shows laboratorio"),
     ("booking_detail", "Detalle Booking"),
@@ -11682,6 +11683,22 @@ def create_employee_record(
         upsert_employee_user(conn, employee_id, request.username, request.user_role, request.user_active)
         if request.permissions is not None:
             upsert_employee_permissions(conn, employee_id, request.permissions)
+        if not request.permissions or not any(
+            permission.module_key == "booking_agenda" for permission in request.permissions
+        ):
+            upsert_employee_permissions(
+                conn,
+                employee_id,
+                [
+                    EmployeePermissionRequest(
+                        module_key="booking_agenda",
+                        can_access=True,
+                        can_view_history=True,
+                        scope=[{"scope_type": "all", "scope_ref": "*"}],
+                        notes="Acceso inicial de lectura a la Agenda Booking.",
+                    )
+                ],
+            )
         if display_name.casefold() == "ruben elkowich":
             grant_employee_all_permissions(conn, employee_id)
             upsert_employee_user(
@@ -12040,10 +12057,11 @@ def booking_event_options(
     require_api_key(x_vpo_api_key)
     require_booking_agenda_postgres()
     with operational_connect() as conn:
+        agenda_permission = require_module_permission(
+            conn, x_vpo_username, "booking_agenda", "view_history"
+        )
         individual_permission = user_module_permission(conn, x_vpo_username, "booking")
         shared_permission = user_module_permission(conn, x_vpo_username, "composite_booking")
-        if not individual_permission.get("allowed") and not shared_permission.get("allowed"):
-            raise HTTPException(status_code=403, detail="No tenes acceso a Booking.")
         artist_rows = conn.execute(
             "SELECT id, stage_name FROM artists WHERE active = TRUE ORDER BY lower(stage_name)"
         ).fetchall()
@@ -12053,19 +12071,24 @@ def booking_event_options(
         artist = str(row["stage_name"])
         can_individual = booking_permission_covers_artists(individual_permission, [artist])
         can_shared = booking_permission_covers_artists(shared_permission, [artist])
-        if can_individual or can_shared:
-            artists.append(
-                {
-                    "id": int(row["id"]),
-                    "artist": artist,
-                    "can_individual": can_individual,
-                    "can_shared": can_shared,
-                }
-            )
+        artists.append(
+            {
+                "id": int(row["id"]),
+                "artist": artist,
+                "can_individual": can_individual,
+                "can_shared": can_shared,
+            }
+        )
 
     return {
         "artists": artists,
         "permissions": {
+            "agenda": {
+                "access": bool(agenda_permission.get("allowed")),
+                "create": bool(agenda_permission.get("can_create")),
+                "view_history": bool(agenda_permission.get("can_view_history")),
+                "edit": bool(agenda_permission.get("can_edit")),
+            },
             "individual": {
                 "access": bool(individual_permission.get("allowed")),
                 "create": bool(individual_permission.get("can_create")),
@@ -12101,10 +12124,7 @@ def booking_events(
         raise HTTPException(status_code=400, detail="La fecha desde no puede ser posterior a la fecha hasta.")
 
     with operational_connect() as conn:
-        individual_permission = user_module_permission(conn, x_vpo_username, "booking")
-        shared_permission = user_module_permission(conn, x_vpo_username, "composite_booking")
-        if not individual_permission.get("allowed") and not shared_permission.get("allowed"):
-            raise HTTPException(status_code=403, detail="No tenes acceso a Booking.")
+        require_module_permission(conn, x_vpo_username, "booking_agenda", "view_history")
 
         where = []
         params: list[Any] = []
@@ -12174,11 +12194,6 @@ def booking_events(
     visible_items: list[dict] = []
     for raw_row in rows:
         item = dict(raw_row)
-        artists = item.get("artists") if isinstance(item.get("artists"), list) else []
-        artist_names = [str(artist.get("artist") or "") for artist in artists]
-        permission = individual_permission if item["booking_mode"] == "individual" else shared_permission
-        if not permission.get("can_view_history") or not booking_permission_covers_artists(permission, artist_names):
-            continue
         item["event_date"] = item["event_date"].isoformat() if hasattr(item["event_date"], "isoformat") else str(item["event_date"])
         if item.get("start_time") is not None:
             item["start_time"] = str(item["start_time"])[:5]
@@ -12266,6 +12281,7 @@ def create_booking_event(
         raise HTTPException(status_code=400, detail="Solo un show puede registrar una seña.")
 
     with operational_connect() as conn:
+        require_module_permission(conn, username, "booking_agenda", "create")
         artist_rows = conn.execute(
             "SELECT id, stage_name FROM artists WHERE active = TRUE ORDER BY lower(stage_name)"
         ).fetchall()
@@ -12276,9 +12292,7 @@ def create_booking_event(
         selected_rows = [artist_lookup[key] for key in unique_artist_keys]
         selected_names = [str(row["stage_name"]) for row in selected_rows]
         booking_mode = "individual" if len(selected_names) == 1 else "shared"
-        module_key = "booking" if booking_mode == "individual" else "composite_booking"
-        for artist in selected_names:
-            require_module_permission(conn, username, module_key, "create", artist=artist)
+        module_key = "booking_agenda"
 
         duplicate_candidates: list[dict] = []
         duplicate_targets = group_children if request.event_type == "show_group" else [{
@@ -12503,6 +12517,7 @@ def update_booking_event(
         raise HTTPException(status_code=401, detail="Falta el usuario que realiza la edición.")
 
     with operational_connect() as conn:
+        require_module_permission(conn, username, "booking_agenda", "edit")
         existing = conn.execute(
             """
             SELECT e.*,
@@ -12543,9 +12558,7 @@ def update_booking_event(
         selected_rows = [artist_lookup[key] for key in unique_artist_keys]
         selected_names = [str(row["stage_name"]) for row in selected_rows]
         booking_mode = "individual" if len(selected_names) == 1 else "shared"
-        module_key = "booking" if booking_mode == "individual" else "composite_booking"
-        for artist in selected_names:
-            require_module_permission(conn, username, module_key, "edit", artist=artist)
+        module_key = "booking_agenda"
 
         existing_type = str(existing_data["event_type"])
         if existing_type == "show_group" and request.event_type not in {"show_group", "show"}:
@@ -12784,6 +12797,7 @@ def delete_booking_event(
     if not username:
         raise HTTPException(status_code=401, detail="Falta el usuario que realiza la eliminación.")
     with operational_connect() as conn:
+        require_module_permission(conn, username, "booking_agenda", "edit")
         existing = conn.execute(
             """
             SELECT e.*,
@@ -12799,14 +12813,7 @@ def delete_booking_event(
         data = dict(existing)
         if data["has_individual"] or data["has_composite"] or data["has_caserio"]:
             raise HTTPException(status_code=409, detail="El show tiene liquidación y no se puede eliminar desde Agenda.")
-        artist_rows = conn.execute(
-            "SELECT artist_name FROM booking_event_artists WHERE event_id = %s ORDER BY position",
-            (event_id,),
-        ).fetchall()
-        artists = [str(row["artist_name"]) for row in artist_rows]
-        module_key = "booking" if data["booking_mode"] == "individual" else "composite_booking"
-        for artist in artists:
-            require_module_permission(conn, username, module_key, "edit", artist=artist)
+        module_key = "booking_agenda"
         child_links = conn.execute(
             """
             SELECT count(*) AS total

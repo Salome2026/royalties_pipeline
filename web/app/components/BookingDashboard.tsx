@@ -99,6 +99,9 @@ type BookingDashboardProps = {
   onOpenCaserio: () => void;
   onStartSettlement: (event: BookingAgendaEvent) => void;
   onOpenLinkedSettlement: (event: BookingAgendaEvent) => void;
+  canOpenSummary: boolean;
+  canOpenDetail: boolean;
+  canOpenCaserio: boolean;
 };
 
 type DashboardSection = "overview" | "agenda" | "new";
@@ -215,12 +218,15 @@ export function BookingDashboard({
   onOpenCaserio,
   onStartSettlement,
   onOpenLinkedSettlement,
+  canOpenSummary,
+  canOpenDetail,
+  canOpenCaserio,
 }: BookingDashboardProps) {
   const [section, setSection] = useState<DashboardSection>("overview");
   const [events, setEvents] = useState<BookingAgendaEvent[]>([]);
   const [summary, setSummary] = useState({ total: 0, upcoming: 0, with_deposit: 0, pending_settlement: 0, not_started: 0 });
   const [options, setOptions] = useState<BookingAgendaOption[]>([]);
-  const [permissions, setPermissions] = useState<{ individual: PermissionState; shared: PermissionState } | null>(null);
+  const [permissions, setPermissions] = useState<{ agenda: PermissionState; individual: PermissionState; shared: PermissionState } | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
@@ -259,14 +265,35 @@ export function BookingDashboard({
   }, []);
 
   const mode = form.artists.length > 1 ? "shared" : "individual";
-  const canCreate = mode === "individual" ? permissions?.individual.create : permissions?.shared.create;
-  const canEdit = mode === "individual" ? permissions?.individual.edit : permissions?.shared.edit;
-  const canSave = editingEventId ? canEdit : canCreate;
-  const selectableArtists = useMemo(() => options.filter((option) => {
-    if (form.artists.includes(option.artist)) return false;
-    if (form.artists.length === 0) return option.can_individual || option.can_shared;
-    return option.can_shared && form.artists.every((artist) => options.find((item) => item.artist === artist)?.can_shared);
-  }), [form.artists, options]);
+  const canCreateAgenda = Boolean(permissions?.agenda.create);
+  const canEditAgenda = Boolean(permissions?.agenda.edit);
+  const canSave = editingEventId ? canEditAgenda : canCreateAgenda;
+  const canOpenAnySettlement = Boolean(permissions?.individual.access || permissions?.shared.access);
+  const defaultSettlementMode = permissions?.individual.access ? "individual" : "shared";
+  const selectableArtists = useMemo(
+    () => options.filter((option) => !form.artists.includes(option.artist)),
+    [form.artists, options],
+  );
+
+  function settlementPermissionFor(event: BookingAgendaEvent) {
+    return event.booking_mode === "shared" ? permissions?.shared : permissions?.individual;
+  }
+
+  function settlementCoversArtists(event: BookingAgendaEvent) {
+    const flag = event.booking_mode === "shared" ? "can_shared" : "can_individual";
+    return event.artists.every((artist) => options.find((option) => option.artist === artist.artist)?.[flag]);
+  }
+
+  function canStartEventSettlement(event: BookingAgendaEvent) {
+    const permission = settlementPermissionFor(event);
+    return Boolean(permission?.create && settlementCoversArtists(event));
+  }
+
+  function canOpenEventSettlement(event: BookingAgendaEvent) {
+    if (event.caserio_event_id) return canOpenCaserio;
+    const permission = settlementPermissionFor(event);
+    return Boolean(permission?.view_history && settlementCoversArtists(event));
+  }
 
   const topLevelEvents = useMemo(() => events.filter((event) => !event.group_event_id), [events]);
   const childrenByGroup = useMemo(() => {
@@ -357,15 +384,27 @@ export function BookingDashboard({
       }
     } else if (event.event_type === "show") {
       if (linked) {
+        if (!canOpenEventSettlement(event)) {
+          setMessage({ type: "error", text: "Podés ver la Agenda, pero no tenés permiso para abrir esta liquidación." });
+          return;
+        }
         onOpenLinkedSettlement(event);
         return;
       }
       if (isPast) {
+        if (!canStartEventSettlement(event)) {
+          setMessage({ type: "error", text: "Podés ver la Agenda, pero no tenés permiso para iniciar esta liquidación." });
+          return;
+        }
         onStartSettlement(event);
         return;
       }
     } else if (isPast) {
       setMessage({ type: "ok", text: "Este compromiso pasado queda en consulta y no modifica una liquidación." });
+      return;
+    }
+    if (!canEditAgenda) {
+      setMessage({ type: "error", text: "Tenés permiso para ver la Agenda, pero no para editar entradas." });
       return;
     }
     const children = childrenByGroup.get(event.id) || [];
@@ -444,7 +483,7 @@ export function BookingDashboard({
       return;
     }
     if (!canSave) {
-      setMessage({ type: "error", text: `No tenés permiso para ${editingEventId ? "editar" : "crear"} Booking ${mode === "shared" ? "compartido" : "individual"}.` });
+      setMessage({ type: "error", text: `No tenés permiso para ${editingEventId ? "editar" : "cargar"} entradas de Agenda.` });
       return;
     }
     setSaving(true);
@@ -525,7 +564,8 @@ export function BookingDashboard({
     const isGroup = event.event_type === "show_group";
     const children = childrenByGroup.get(event.id) || [];
     const expanded = expandedGroups.includes(event.id);
-    const canEditEvent = event.booking_mode === "individual" ? permissions?.individual.edit : permissions?.shared.edit;
+    const canOpenSettlement = linked ? canOpenEventSettlement(event) : canStartEventSettlement(event);
+    const showNavigationAvailable = isGroup || (!isPast && canEditAgenda) || (isPast && canOpenSettlement) || (linked && canOpenSettlement);
     const typeLabels: Record<BookingAgendaEvent["event_type"], string> = {
       show: event.booking_mode === "shared" ? "Show compartido" : "Show",
       show_group: `${event.group_count || children.length} shows`,
@@ -557,17 +597,17 @@ export function BookingDashboard({
             ) : <span className={`booking-status-chip ${event.commercial_status}`}>{statusLabel(event.commercial_status)}</span>}
           </div>
           <div className="booking-row-actions">
-            {canEditEvent && !isPast && (
+            {canEditAgenda && !isPast && (
               <button type="button" className="booking-row-action" onClick={() => startEditEvent(event)} title={linked ? "Abrir liquidación" : "Editar entrada futura"}>
                 <Pencil size={17} />
               </button>
             )}
-            {canEditEvent && !isPast && !linked && !event.group_event_id && (
+            {canEditAgenda && !isPast && !linked && !event.group_event_id && (
               <button type="button" className="booking-row-action danger" onClick={() => deleteAgendaEvent(event)} title="Eliminar entrada">
                 <Trash2 size={17} />
               </button>
             )}
-            {(isShow || isGroup) && (
+            {(isShow || isGroup) && showNavigationAvailable && (
               <button
                 type="button"
                 className="booking-row-action"
@@ -604,10 +644,10 @@ export function BookingDashboard({
         <nav aria-label="Navegación Booking">
           <button type="button" className={section === "overview" ? "active" : ""} onClick={() => setSection("overview")}><LayoutDashboard size={18} />Inicio</button>
           <button type="button" className={section === "agenda" ? "active" : ""} onClick={() => setSection("agenda")}><CalendarDays size={18} />Agenda</button>
-          <button type="button" className={section === "new" ? "active" : ""} onClick={() => startNewEntry()}><CalendarPlus size={18} />Nueva entrada</button>
-          <button type="button" onClick={() => onOpenSettlements("individual")}><ClipboardCheck size={18} />Liquidaciones</button>
-          <button type="button" onClick={onOpenSummary}><CircleDollarSign size={18} />Resumen</button>
-          <button type="button" onClick={onOpenDetail}><ListFilter size={18} />Detalle</button>
+          {canCreateAgenda && <button type="button" className={section === "new" ? "active" : ""} onClick={() => startNewEntry()}><CalendarPlus size={18} />Nueva entrada</button>}
+          {canOpenAnySettlement && <button type="button" onClick={() => onOpenSettlements(defaultSettlementMode)}><ClipboardCheck size={18} />Liquidaciones</button>}
+          {canOpenSummary && <button type="button" onClick={onOpenSummary}><CircleDollarSign size={18} />Resumen</button>}
+          {canOpenDetail && <button type="button" onClick={onOpenDetail}><ListFilter size={18} />Detalle</button>}
         </nav>
         <div className="booking-dashboard-side-note">
           <span>Operación viva</span>
@@ -621,7 +661,7 @@ export function BookingDashboard({
             <span className="booking-eyebrow">VPO Corp · Booking</span>
             <h1>{section === "overview" ? "Centro de booking" : section === "agenda" ? "Agenda de shows" : editingEventId ? "Editar agenda" : "Nueva entrada de agenda"}</h1>
           </div>
-          <button type="button" className="booking-primary-action" onClick={() => startNewEntry()}><CalendarPlus size={17} />Nueva entrada</button>
+          {canCreateAgenda && <button type="button" className="booking-primary-action" onClick={() => startNewEntry()}><CalendarPlus size={17} />Nueva entrada</button>}
         </header>
 
         {message && <div className={`booking-dashboard-message ${message.type}`}>{message.text}</div>}
@@ -654,9 +694,9 @@ export function BookingDashboard({
                 </section>
                 <aside className="booking-quick-panel">
                   <span>Acciones rápidas</span>
-                  <button type="button" onClick={() => startNewEntry()}><CalendarPlus size={20} /><div><strong>Cargar agenda</strong><small>Show, grupo o bloqueo</small></div><ChevronRight size={17} /></button>
-                  <button type="button" onClick={() => onOpenSettlements("individual")}><ClipboardCheck size={20} /><div><strong>Liquidar</strong><small>Individual o compartido</small></div><ChevronRight size={17} /></button>
-                  <button type="button" onClick={onOpenSummary}><CircleDollarSign size={20} /><div><strong>Ver resultados</strong><small>Ingresos y comisiones</small></div><ChevronRight size={17} /></button>
+                  {canCreateAgenda && <button type="button" onClick={() => startNewEntry()}><CalendarPlus size={20} /><div><strong>Cargar agenda</strong><small>Show, grupo o bloqueo</small></div><ChevronRight size={17} /></button>}
+                  {canOpenAnySettlement && <button type="button" onClick={() => onOpenSettlements(defaultSettlementMode)}><ClipboardCheck size={20} /><div><strong>Liquidar</strong><small>Individual o compartido</small></div><ChevronRight size={17} /></button>}
+                  {canOpenSummary && <button type="button" onClick={onOpenSummary}><CircleDollarSign size={20} /><div><strong>Ver resultados</strong><small>Ingresos y comisiones</small></div><ChevronRight size={17} /></button>}
                 </aside>
               </div>
             )}
@@ -719,7 +759,7 @@ export function BookingDashboard({
             </section>
 
             <section className="booking-dashboard-block">
-              <div className="booking-form-section-title"><span>3</span><div><h2>Artista</h2><p>La selección respeta los permisos del usuario.</p></div></div>
+              <div className="booking-form-section-title"><span>3</span><div><h2>Artista</h2><p>Elegí uno o más artistas activos.</p></div></div>
               <div className="booking-artist-picker">
                 <select value={artistToAdd} onChange={(event) => setArtistToAdd(event.target.value)}>
                   <option value="">Elegir artista</option>

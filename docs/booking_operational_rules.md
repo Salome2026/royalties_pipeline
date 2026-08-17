@@ -420,3 +420,18 @@ Debe permitir:
 
 Los pendientes sin fecha o no cobrados deben ir a una hoja de alertas o pendientes, no
 sumar a ingresos reales.
+## Permisos de Agenda y liquidaciones
+
+La Agenda usa el modulo de permisos `booking_agenda`, aunque sigue viviendo dentro de
+la unica superficie de Booking y sobre la unica tabla `booking_events`.
+
+- todos los empleados activos comienzan con lectura de toda la Agenda;
+- `Ver` consulta la Agenda completa;
+- `Cargar` tambien permite crear entradas;
+- `Editar` tambien permite modificar y eliminar entradas futuras no liquidadas;
+- el alcance por artista no restringe Agenda;
+- iniciar o abrir liquidaciones se valida por separado contra `booking` o
+  `composite_booking` y sus alcances por artista.
+
+La interfaz oculta las acciones no autorizadas y la API vuelve a validar cada accion.
+La ausencia de un boton nunca reemplaza el control del servidor.
