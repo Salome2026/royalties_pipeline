@@ -103,6 +103,10 @@ Al editar una precarga simple todavia no liquidada, elegir `Varios shows` reutil
 datos como primer hijo y agrega un segundo renglon. Guardar transforma la misma entrada
 en grupo; no duplica la precarga ni pierde el texto original importado.
 
+Al editar un grupo de dos presentaciones, quitar una convierte el formulario en `Un show`
+con los datos de la presentacion restante. Guardar reutiliza la misma cabecera y conserva
+la trazabilidad. La accion no esta disponible si algun hijo ya tiene seña o liquidacion.
+
 ### Ubicacion rapida
 
 Agenda permite buscar por artista, venue, ciudad y responsable. Liquidaciones conserva

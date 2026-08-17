@@ -131,6 +131,11 @@ Una precarga `show` sin liquidacion ni seña puede convertirse en `show_group` s
 otra cabecera: conserva su `event_id`, auditoria y fuente original, y crea los shows
 hijos debajo. Si ya existe liquidacion o seña, la conversion se bloquea.
 
+La relacion tambien funciona en sentido inverso. Si un grupo futuro queda con una sola
+presentacion, se convierte en `show` sobre la misma cabecera. Toma fecha, lugar, ciudad,
+cachet y nota del hijo restante; conserva las fuentes y deja auditados los hijos
+anteriores. La reduccion se bloquea si algun hijo tiene seña o liquidacion.
+
 La seña no confirma ni cancela por si sola la venta. Un show puede estar confirmado
 con o sin seña. La seña es caja real y debe quedar trazada, pero no convierte el
 cachet en ingreso ganado ni cierra la liquidacion.

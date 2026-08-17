@@ -12363,8 +12363,8 @@ def update_booking_event(
             require_module_permission(conn, username, module_key, "edit", artist=artist)
 
         existing_type = str(existing_data["event_type"])
-        if existing_type == "show_group" and request.event_type != "show_group":
-            raise HTTPException(status_code=400, detail="Un grupo no se convierte en otro tipo; editá sus shows internos.")
+        if existing_type == "show_group" and request.event_type not in {"show_group", "show"}:
+            raise HTTPException(status_code=400, detail="Un grupo solo puede mantenerse como grupo o quedar como un show.")
         if request.deposit is not None:
             raise HTTPException(status_code=400, detail="Las señas existentes se administran desde su documento financiero.")
 
@@ -12375,6 +12375,49 @@ def update_booking_event(
         event_cachet = float(request.contracted_cachet_amount)
         group_children: list[dict] = []
         child_ids: list[int] = []
+        collapsed_children: list[dict] = []
+
+        if existing_type == "show_group" and request.event_type == "show":
+            current_children = conn.execute(
+                """
+                SELECT child.*,
+                       EXISTS(SELECT 1 FROM booking_shows s WHERE s.booking_event_id = child.id) AS has_individual,
+                       EXISTS(SELECT 1 FROM booking_composite_events c WHERE c.booking_event_id = child.id) AS has_composite,
+                       EXISTS(SELECT 1 FROM caserio_events c WHERE c.booking_event_id = child.id) AS has_caserio,
+                       EXISTS(SELECT 1 FROM booking_event_deposits d WHERE d.event_id = child.id) AS has_deposit
+                FROM booking_events child
+                WHERE child.group_event_id = %s
+                ORDER BY child.group_position
+                FOR UPDATE
+                """,
+                (event_id,),
+            ).fetchall()
+            collapsed_children = [dict(row) for row in current_children]
+            if any(
+                row["has_individual"] or row["has_composite"] or row["has_caserio"] or row["has_deposit"]
+                for row in collapsed_children
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="El grupo tiene shows con liquidación o seña y no puede reducirse desde Agenda.",
+                )
+            collapsed_child_ids = [int(row["id"]) for row in collapsed_children]
+            if collapsed_child_ids:
+                conn.execute(
+                    """
+                    INSERT INTO booking_event_source_links (
+                        event_id, source_system, source_reference, source_role,
+                        source_text, source_payload_json, created_by, created_at
+                    )
+                    SELECT %s, source_system, source_reference, source_role,
+                           source_text, source_payload_json, created_by, created_at
+                    FROM booking_event_source_links
+                    WHERE event_id = ANY(%s)
+                    ON CONFLICT (event_id, source_system, source_reference) DO NOTHING
+                    """,
+                    (event_id, collapsed_child_ids),
+                )
+                conn.execute("DELETE FROM booking_events WHERE id = ANY(%s)", (collapsed_child_ids,))
 
         if request.event_type == "show_group":
             if len(request.group_children) < 2:
@@ -12490,7 +12533,10 @@ def update_booking_event(
             commercial_status, operational_status, settlement_status = status_by_type[request.event_type]
         deposit_status = existing_data["deposit_status"] if request.event_type == "show" else "no_informada"
 
-        before_json = json.dumps(existing_data, ensure_ascii=False, default=str)
+        audit_before = dict(existing_data)
+        if collapsed_children:
+            audit_before["group_children"] = collapsed_children
+        before_json = json.dumps(audit_before, ensure_ascii=False, default=str)
         conn.execute(
             """
             UPDATE booking_events
@@ -12533,7 +12579,7 @@ def update_booking_event(
                     "artists": selected_names,
                     "group_children": child_ids,
                 }, ensure_ascii=False),
-                "Edición desde Agenda de Booking.",
+                "Grupo reducido a un show desde Agenda." if collapsed_children else "Edición desde Agenda de Booking.",
             ),
         )
         item = booking_agenda_event_item(conn, event_id)

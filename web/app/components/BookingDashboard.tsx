@@ -384,10 +384,28 @@ export function BookingDashboard({
   }
 
   function removeGroupChild(index: number) {
-    setForm((current) => ({
-      ...current,
-      groupChildren: current.groupChildren.filter((_, childIndex) => childIndex !== index),
-    }));
+    setForm((current) => {
+      const remaining = current.groupChildren.filter((_, childIndex) => childIndex !== index);
+      if (remaining.length === 1) {
+        const show = remaining[0];
+        return {
+          ...current,
+          eventType: "show",
+          eventDate: show.eventDate,
+          startTime: show.startTime,
+          venue: show.venue,
+          city: show.city,
+          cachet: show.cachet,
+          notes: show.notes,
+          groupChildren: [],
+          hasDeposit: false,
+        };
+      }
+      return { ...current, groupChildren: remaining };
+    });
+    if (form.groupChildren.length === 2) {
+      setMessage({ type: "ok", text: "Quedó una sola presentación. Al guardar, el grupo se convertirá en un show." });
+    }
   }
 
   async function submitEvent(event: FormEvent<HTMLFormElement>) {
@@ -692,7 +710,7 @@ export function BookingDashboard({
                     <article key={child.id || `new-${index}`}>
                       <div className="booking-group-editor-heading">
                         <strong>Show {index + 1}</strong>
-                        {form.groupChildren.length > 2 && <button type="button" onClick={() => removeGroupChild(index)} title="Quitar show"><Trash2 size={16} /></button>}
+                        {form.groupChildren.length > 1 && <button type="button" onClick={() => removeGroupChild(index)} title="Quitar show"><Trash2 size={16} /></button>}
                       </div>
                       <div className="booking-form-grid four">
                         <label>Fecha<input type="date" value={child.eventDate} onChange={(event) => updateGroupChild(index, { eventDate: event.target.value })} required /></label>
