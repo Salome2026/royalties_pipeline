@@ -20,6 +20,11 @@ El menu de la web se controla por permisos de modulo/artista desde la base
 operativa. No usar variables de entorno para ocultar tarjetas por fuera de los
 permisos.
 
+Cada tarjeta configurable debe estar registrada en el catalogo canonico
+`app_modules` mediante una migracion de produccion antes de exponerse en el
+ABM. La interfaz y la clave foranea de `module_permissions` deben compartir la
+misma lista; un modulo presente solo en codigo no se considera operativo.
+
 ## Administracion de usuarios
 
 Los usuarios pertenecen al modelo operativo:
