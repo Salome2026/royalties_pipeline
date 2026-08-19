@@ -13,8 +13,10 @@ from openpyxl.utils import get_column_letter
 
 try:
     from lib.catalog_report_filter import apply_report_net_personalization, current_catalog_status_path, with_catalog_report_status
+    from lib.store_taxonomy import ensure_store_dimensions
 except ModuleNotFoundError:
     from scripts.lib.catalog_report_filter import apply_report_net_personalization, current_catalog_status_path, with_catalog_report_status
+    from scripts.lib.store_taxonomy import ensure_store_dimensions
 
 BASE = Path(r"C:\royalties_pipeline")
 MARTS_DIR = BASE / "warehouse" / "marts"
@@ -620,6 +622,7 @@ def classified_rows(end_month: str) -> pl.DataFrame:
         raise FileNotFoundError(f"No existe {STANDARDIZED_ONERPM_PATH}")
 
     lf = pl.scan_parquet(STANDARDIZED_ONERPM_PATH)
+    lf = ensure_store_dimensions(lf, set(lf.collect_schema().names()))
     schema = lf.collect_schema()
     schema_names = set(schema.names())
 
@@ -636,7 +639,10 @@ def classified_rows(end_month: str) -> pl.DataFrame:
             first_text(schema, ["ISRC", "asset_isrc"]).alias("_isrc"),
             first_text(schema, ["UPC", "asset_upc"]).alias("_upc"),
             first_text(schema, ["Video ID", "ID", "Parent ID"]).alias("_video_id"),
-            first_text(schema, ["Store"]).alias("_dsp_store"),
+            first_text(schema, ["store_report_label"]).alias("_dsp_store"),
+            first_text(schema, ["monetization_normalized"]).alias("_monetization"),
+            first_text(schema, ["content_origin_normalized"]).alias("_content_origin"),
+            first_text(schema, ["plan_normalized"]).alias("_plan"),
             first_text(schema, ["Territory"]).alias("_territory"),
             amount_expr(schema).alias("_amount_usd"),
             col_or_null(schema, "Quantity", pl.Float64).alias("_units"),
@@ -802,6 +808,9 @@ def granular_onerpm_rows(rows: pl.DataFrame, *, hide_zero_amounts: bool = False)
             "metadata_status",
             "_territory",
             "_dsp_store",
+            "_monetization",
+            "_content_origin",
+            "_plan",
         ])
         .agg([
             pl.sum("_amount_usd").alias("Ingresos USD"),
@@ -824,6 +833,9 @@ def granular_onerpm_rows(rows: pl.DataFrame, *, hide_zero_amounts: bool = False)
             "metadata_status": "Metadata",
             "_territory": "Pais",
             "_dsp_store": "DSP / Store",
+            "_monetization": "Monetizacion",
+            "_content_origin": "Origen contenido",
+            "_plan": "Plan",
         })
         .sort("Ingresos USD", descending=True)
     )
@@ -941,6 +953,7 @@ def fuga_candidate_rows(end_month: str, *, hide_zero_amounts: bool = False) -> p
         return pd.DataFrame()
 
     lf = pl.scan_parquet(STANDARDIZED_FUGA_PATH)
+    lf = ensure_store_dimensions(lf, set(lf.collect_schema().names()))
     schema = lf.collect_schema()
     schema_names = set(schema.names())
     string_cols = [
@@ -1083,6 +1096,7 @@ def granular_fuga_rows(end_month: str, *, hide_zero_amounts: bool = False) -> pd
         return pd.DataFrame()
 
     lf = pl.scan_parquet(STANDARDIZED_FUGA_PATH)
+    lf = ensure_store_dimensions(lf, set(lf.collect_schema().names()))
     schema = lf.collect_schema()
     schema_names = set(schema.names())
     string_cols = [
@@ -1110,7 +1124,10 @@ def granular_fuga_rows(end_month: str, *, hide_zero_amounts: bool = False) -> pd
             first_text(schema, ["asset_isrc", "Asset ISRC"]).alias("_isrc"),
             first_text(schema, ["product_upc", "Product UPC"]).alias("UPC"),
             pl.lit(None).cast(pl.Utf8).alias("Video ID"),
-            first_text(schema, ["dsp", "DSP", "store_name", "Sale Store Name"]).alias("DSP / Store"),
+            first_text(schema, ["store_report_label"]).alias("DSP / Store"),
+            first_text(schema, ["monetization_normalized"]).alias("Monetizacion"),
+            first_text(schema, ["content_origin_normalized"]).alias("Origen contenido"),
+            first_text(schema, ["plan_normalized"]).alias("Plan"),
             first_text(schema, ["territory", "Territory"]).alias("Pais"),
             amount_expr(schema).alias("_amount_usd"),
             pl.coalesce([
@@ -1133,6 +1150,9 @@ def granular_fuga_rows(end_month: str, *, hide_zero_amounts: bool = False) -> pd
             "Video ID",
             "Pais",
             "DSP / Store",
+            "Monetizacion",
+            "Origen contenido",
+            "Plan",
         ])
         .agg([
             pl.col("_isrc").drop_nulls().unique().sort().str.join(" | ").alias("ISRC original"),
@@ -1198,6 +1218,9 @@ def granular_fuga_rows(end_month: str, *, hide_zero_amounts: bool = False) -> pd
             "Origen",
             "Pais",
             "DSP / Store",
+            "Monetizacion",
+            "Origen contenido",
+            "Plan",
             "Ingresos USD",
             "Unidades",
             "Filas",

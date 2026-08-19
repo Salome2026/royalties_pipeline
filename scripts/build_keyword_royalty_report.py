@@ -11,8 +11,10 @@ from openpyxl.utils import get_column_letter
 
 try:
     from lib.catalog_report_filter import apply_report_net_personalization, filter_reportable_generation
+    from lib.store_taxonomy import build_normalized_store_summary
 except ModuleNotFoundError:
     from scripts.lib.catalog_report_filter import apply_report_net_personalization, filter_reportable_generation
+    from scripts.lib.store_taxonomy import build_normalized_store_summary
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -145,6 +147,12 @@ DISPLAY_HEADERS = {
     "asset_artist_statement": "Asset artist",
     "content_type": "Tipo de contenido",
     "store_raw": "Store original",
+    "dsp_normalized": "DSP / Store",
+    "monetization_normalized": "Monetizacion",
+    "content_origin_normalized": "Origen",
+    "plan_normalized": "Plan",
+    "classification_status": "Clasificacion",
+    "store_report_label": "Store normalizado",
     "usage_type": "Tipo",
     "first_month": "Desde",
     "last_month": "Hasta",
@@ -908,6 +916,12 @@ def build_report_tables(
                     "artist_statement_style",
                     "asset_artist_statement",
                     "content_type",
+                    "dsp_normalized",
+                    "monetization_normalized",
+                    "content_origin_normalized",
+                    "plan_normalized",
+                    "classification_status",
+                    "store_report_label",
                     "store_raw",
                     "usage_type",
                     "amount_usd",
@@ -945,16 +959,10 @@ def build_report_tables(
             .sort("period_month")
         )
 
-        store_summary_lf = (
-            statement_base_lf
-            .group_by(["source", "store_raw", "usage_type"])
-            .agg([
-                pl.sum("amount_usd").alias("amount_usd"),
-                pl.sum("units").alias("units"),
-            ])
-            .sort(["source", "store_raw", "usage_type"])
-            .rename({"source": "distributor"})
-        )
+        store_summary_lf = build_normalized_store_summary(
+            statement_base_lf,
+            set(statement_base_lf.collect_schema().names()),
+        ).rename({"source": "distributor"})
 
         territory_summary_lf = (
             statement_base_lf
@@ -1005,6 +1013,12 @@ def build_report_tables(
                     "report_code_source",
                     "asset_isrc",
                     "report_territory",
+                    "dsp_normalized",
+                    "monetization_normalized",
+                    "content_origin_normalized",
+                    "plan_normalized",
+                    "classification_status",
+                    "store_report_label",
                     "store_raw",
                     "usage_type",
                     "amount_usd",
@@ -1172,13 +1186,10 @@ def build_report_tables(
         )
 
         store_summary = (
-            raw_matches_lf
-            .group_by(["source", "store_raw", "usage_type"])
-            .agg([
-                pl.sum("amount_usd").alias("amount_usd"),
-                pl.sum("units").alias("units"),
-            ])
-            .sort(["source", "store_raw", "usage_type"])
+            build_normalized_store_summary(
+                raw_matches_lf,
+                set(raw_matches_lf.collect_schema().names()),
+            )
             .rename({"source": "distributor"})
             .collect()
         )
@@ -1209,6 +1220,12 @@ def build_report_tables(
                     "report_code_source",
                     "asset_isrc",
                     "report_territory",
+                    "dsp_normalized",
+                    "monetization_normalized",
+                    "content_origin_normalized",
+                    "plan_normalized",
+                    "classification_status",
+                    "store_report_label",
                     "store_raw",
                     "usage_type",
                     "amount_usd",

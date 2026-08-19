@@ -14,9 +14,11 @@ from openpyxl.utils import get_column_letter
 try:
     from lib.catalog_report_filter import current_catalog_status_path, with_catalog_report_status
     from lib.distributor_policy_store import load_distributor_policy_document
+    from lib.store_taxonomy import ensure_store_dimensions
 except ModuleNotFoundError:
     from scripts.lib.catalog_report_filter import current_catalog_status_path, with_catalog_report_status
     from scripts.lib.distributor_policy_store import load_distributor_policy_document
+    from scripts.lib.store_taxonomy import ensure_store_dimensions
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -325,7 +327,7 @@ def classified_rows(end_month: str) -> pl.DataFrame:
     if not SONG_LEVEL_PATH.exists():
         raise FileNotFoundError(f"No existe {SONG_LEVEL_PATH}")
 
-    lf = pl.scan_parquet(SONG_LEVEL_PATH)
+    lf = ensure_store_dimensions(pl.scan_parquet(SONG_LEVEL_PATH))
     schema = lf.collect_schema()
     schema_dict = {name: dtype for name, dtype in zip(schema.names(), schema.dtypes())}
     schema_names = set(schema.names())
@@ -347,7 +349,10 @@ def classified_rows(end_month: str) -> pl.DataFrame:
         first_text(schema_dict, ["asset_isrc"]).alias("_isrc"),
         pl.lit(None).cast(pl.Utf8).alias("_upc"),
         first_text(schema_dict, ["video_id", "Video ID", "VideoId"]).alias("_video_id"),
-        col_or_null(schema_dict, "content_type").alias("_dsp_store"),
+        col_or_null(schema_dict, "store_report_label").alias("_dsp_store"),
+        col_or_null(schema_dict, "monetization_normalized").alias("_monetization"),
+        col_or_null(schema_dict, "content_origin_normalized").alias("_content_origin"),
+        col_or_null(schema_dict, "plan_normalized").alias("_plan"),
         pl.lit(None).cast(pl.Utf8).alias("_territory"),
         amount_expr(schema_dict).alias("_amount_usd"),
         units_expr(schema_dict).alias("_units"),
@@ -490,6 +495,9 @@ def granular_rows(rows: pl.DataFrame, *, hide_zero_amounts: bool = False) -> pd.
             "Metadata",
             "_territory",
             "_dsp_store",
+            "_monetization",
+            "_content_origin",
+            "_plan",
         ])
         .agg([
             pl.sum("_amount_usd").alias("Ingresos USD"),
@@ -517,6 +525,9 @@ def granular_rows(rows: pl.DataFrame, *, hide_zero_amounts: bool = False) -> pd.
             "_video_id": "Video ID",
             "_territory": "Pais",
             "_dsp_store": "DSP / Store",
+            "_monetization": "Monetizacion",
+            "_content_origin": "Origen contenido",
+            "_plan": "Plan",
         })
         .sort("Ingresos USD", descending=True)
         .to_pandas()
@@ -537,7 +548,7 @@ def raw_country_dsp_rows(
         for value in reportable_assets.get("ISRC", pd.Series(dtype=object)).dropna().to_list()
         if str(value).strip()
     }
-    lf = pl.scan_parquet(RAW_ALL_PATH)
+    lf = ensure_store_dimensions(pl.scan_parquet(RAW_ALL_PATH))
     schema = lf.collect_schema()
     schema_dict = {name: dtype for name, dtype in zip(schema.names(), schema.dtypes())}
     schema_names = set(schema.names())
@@ -587,7 +598,12 @@ def raw_country_dsp_rows(
             raw_isrc.alias("ISRC"),
             first_text(schema_dict, ["product_upc", "UPC", "Product UPC"]).alias("UPC"),
             first_text(schema_dict, ["video_id", "Video ID", "VideoId", "ID", "Parent ID"]).alias("Video ID"),
-            first_text(schema_dict, ["DSP", "Sale Store Name", "Store", "store_name", "Store Name"]).alias("DSP / Store"),
+            col_or_null(schema_dict, "store_report_label").alias("DSP / Store"),
+            col_or_null(schema_dict, "dsp_normalized").alias("DSP normalizado"),
+            col_or_null(schema_dict, "monetization_normalized").alias("Monetizacion"),
+            col_or_null(schema_dict, "content_origin_normalized").alias("Origen contenido"),
+            col_or_null(schema_dict, "plan_normalized").alias("Plan"),
+            first_text(schema_dict, ["DSP", "Sale Store Name", "Store", "store_name", "Store Name"]).alias("Store original"),
             first_text(schema_dict, ["Territory", "territory", "Region", "SALE COUNTRY", "Sales Region", "Sales Country"]).alias("Pais"),
             amount_expr(schema_dict).alias("_amount_usd"),
             units_expr(schema_dict).alias("_units"),
@@ -615,6 +631,11 @@ def raw_country_dsp_rows(
             "Video ID",
             "Pais",
             "DSP / Store",
+            "DSP normalizado",
+            "Monetizacion",
+            "Origen contenido",
+            "Plan",
+            "Store original",
         ])
         .agg([
             pl.sum("_amount_usd").alias("Ingresos USD"),
@@ -687,6 +708,11 @@ def raw_country_dsp_rows(
             "Label normalizado",
             "Pais",
             "DSP / Store",
+            "DSP normalizado",
+            "Monetizacion",
+            "Origen contenido",
+            "Plan",
+            "Store original",
             "Ingresos USD",
             "Unidades",
             "Filas",

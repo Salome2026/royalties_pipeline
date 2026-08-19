@@ -100,6 +100,38 @@ Los motores de reportes deben priorizar estas dimensiones y conservar los
 campos originales en el detalle cuando se necesite auditoria. No se deben crear
 normalizaciones particulares dentro de un reporte.
 
+### Contrato obligatorio para resumen por Store/DSP
+
+Toda pantalla o Excel que resuma ingresos por plataforma debe partir de las
+filas reportables de `standardized_raw_all_sources.parquet` y agrupar por:
+
+- `source` cuando el informe necesita identificar la distribuidora;
+- `dsp_normalized`;
+- `monetization_normalized`;
+- `content_origin_normalized`;
+- `plan_normalized`.
+
+`store_report_label` es una etiqueta humana derivada de esas dimensiones. No
+reemplaza las columnas separadas cuando el plan o el origen forman parte del
+analisis. Los campos originales de Store, modalidad y uso se conservan en el
+detalle de auditoria, pero no gobiernan el resumen normalizado.
+
+La implementacion compartida vive en
+`scripts/lib/store_taxonomy.py::build_normalized_store_summary`. Los reportes
+no deben volver a agrupar por `store_raw`, `usage_type`, `Sale Type` ni otra
+columna original para construir un resumen por plataforma.
+
+Controles obligatorios:
+
+1. el total del resumen normalizado debe cerrar exactamente contra las filas
+   reportables que lo alimentan;
+2. una modalidad desconocida permanece `Unknown` y nunca se infiere;
+3. Spotify Premium y Ads no pueden colapsar en una sola fila cuando el crudo
+   las distingue;
+4. en YouTube, monetizacion y origen se mantienen como dimensiones distintas;
+5. el resumen por tema sigue agrupando por identidad de catalogo y no incorpora
+   Store/DSP como clave.
+
 ### Mapa rector de identidad y resumen por tema
 
 Este mapa aplica a todos los reportes genericos de regalias, sin excepciones por

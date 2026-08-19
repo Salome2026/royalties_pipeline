@@ -13,8 +13,10 @@ from openpyxl.utils import get_column_letter
 
 try:
     from lib.catalog_report_filter import apply_report_net_personalization, filter_reportable_generation
+    from lib.store_taxonomy import build_normalized_store_summary
 except ModuleNotFoundError:
     from scripts.lib.catalog_report_filter import apply_report_net_personalization, filter_reportable_generation
+    from scripts.lib.store_taxonomy import build_normalized_store_summary
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -333,6 +335,9 @@ def enrich_report_dimensions(df: pl.DataFrame) -> pl.DataFrame:
             coalesce_text_expr(columns, TERRITORY_FALLBACK_COLUMNS, "pais"),
             coalesce_text_expr(columns, DSP_FALLBACK_COLUMNS, "dsp"),
             coalesce_text_expr(columns, USAGE_FALLBACK_COLUMNS, "usage_type"),
+            coalesce_text_expr(columns, ["monetization_normalized"], "monetizacion"),
+            coalesce_text_expr(columns, ["content_origin_normalized"], "origen_contenido"),
+            coalesce_text_expr(columns, ["plan_normalized"], "plan"),
         ]
     )
 
@@ -505,6 +510,9 @@ def song_matches_from_raw(raw_df: pl.DataFrame) -> pd.DataFrame:
         "transaction_month",
         "pais",
         "dsp",
+        "monetizacion",
+        "origen_contenido",
+        "plan",
         "usage_type",
         "amount_usd",
         "units",
@@ -529,6 +537,9 @@ def song_matches_from_raw(raw_df: pl.DataFrame) -> pd.DataFrame:
         "transaction_month",
         "pais",
         "dsp",
+        "monetizacion",
+        "origen_contenido",
+        "plan",
         "usage_type",
     ]
 
@@ -721,13 +732,36 @@ def build_custom_title_report(
         )
     match_control = pd.DataFrame(control_rows)
 
+    store_summary = (
+        build_normalized_store_summary(
+            raw_df.lazy(),
+            set(raw_df.columns),
+            include_rows=True,
+        )
+        .collect()
+        .to_pandas()
+        if raw_df.height
+        else pd.DataFrame(
+            columns=[
+                "source",
+                "dsp_normalized",
+                "monetization_normalized",
+                "content_origin_normalized",
+                "plan_normalized",
+                "amount_usd",
+                "units",
+                "rows",
+            ]
+        )
+    )
+
     tables = {
         "overview": overview,
         "match_control": match_control,
         "source_summary": group_sum(raw_df, ["source", "account"]),
         "title_summary": title_summary(raw_df),
         "monthly_statement": group_sum(raw_df, ["statement_period"]),
-        "store_summary": group_sum(raw_df, ["dsp"]),
+        "store_summary": store_summary,
         "usage_summary": group_sum(raw_df, ["usage_type"]),
         "territory_summary": group_sum(raw_df, ["pais"]),
         "song_matches": song_matches_table,

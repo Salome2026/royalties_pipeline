@@ -68,21 +68,21 @@ CUSTOM_REPORT_TEMPLATES = [
     {
         "key": "los_anormales",
         "title": "Regalias Los Anormales",
-        "description": "Reporte validado por listado editable de temas/artistas, con summaries por fuente, titulo, statement, comercio, uso, pais y song matches.",
+        "description": "Reporte validado por listado editable de temas/artistas, con summaries por fuente, titulo, statement, DSP, monetizacion, origen, plan, pais y song matches.",
         "terms": DEFAULT_LOS_ANORMALES_TERMS,
         "enabled": True,
     },
     {
         "key": "gusty_fuga_contracts",
         "title": "Gusty Fuga contratos nuevo & viejo",
-        "description": "Reporte FUGA Gusty con separacion contractual nuevo/viejo segun mapa ONErpm/Motorcito. Usa fecha de statement y genera las hojas validadas de resumen, listado, mensual, store, territorio, content type, statement y detalle.",
+        "description": "Reporte FUGA Gusty con separacion contractual nuevo/viejo segun mapa ONErpm/Motorcito. Usa fecha de statement y aplica el resumen normalizado de DSP, monetizacion, origen y plan.",
         "terms": ["Gusty"],
         "enabled": True,
     },
     {
         "key": "la_nueva_sangre",
         "title": "La Nueva Sangre",
-        "description": "Reporte personalizado con capa de negocio: ingresos ONErpm, ingresos FUGA, excluidos Boxindanga, excluidos propios y analisis de YouTube.",
+        "description": "Reporte personalizado con capa de negocio: ingresos ONErpm, ingresos FUGA, exclusiones y detalle normalizado de DSP, monetizacion, origen y plan.",
         "terms": [],
         "enabled": True,
         "requires_terms": False,
@@ -8220,6 +8220,20 @@ def build_royalties_dashboard_summary_mart(
     lf = pl.scan_parquet(standardized_path)
     schema = lf.collect_schema()
     columns = set(schema.names())
+    required_store_dimensions = {
+        "dsp_normalized",
+        "monetization_normalized",
+        "content_origin_normalized",
+        "plan_normalized",
+        "classification_status",
+        "store_report_label",
+    }
+    missing_store_dimensions = sorted(required_store_dimensions - columns)
+    if missing_store_dimensions:
+        raise ValueError(
+            "El mart consolidado no cumple el contrato de Store/DSP normalizado. "
+            f"Faltan: {', '.join(missing_store_dimensions)}"
+        )
     needed_columns = {
         "source",
         "Fuente",
@@ -8412,19 +8426,8 @@ def build_royalties_dashboard_summary_mart(
     ])
     isrc = coalesce_text_expr(["asset_isrc", "isrc", "ISRC", "Track ISRC", "Asset ISRC"])
     upc = coalesce_text_expr(["upc", "UPC", "Product UPC", "Release UPC"])
-    dsp = coalesce_text_expr([
-        "dsp_normalized",
-        "dsp",
-        "DSP",
-        "store_name",
-        "store_raw",
-        "Store",
-        "Sale Store Name",
-        "STORE",
-        "Shop",
-        "Platform",
-    ])
-    store = coalesce_text_expr(["store_report_label", "Sale Store Name", "store_name", "store_raw", "Store", "DSP", "dsp"])
+    dsp = text_expr("dsp_normalized")
+    store = text_expr("store_report_label")
     territory = coalesce_text_expr(["territory", "Territory", "COUNTRY", "Country", "Sale Country", "Region"])
     sale_type = coalesce_text_expr(["Sale Type", "use_type", "Use Type", "usage_type", "usage_raw", "Product Type"])
     label = coalesce_text_expr([
@@ -8486,39 +8489,14 @@ def build_royalties_dashboard_summary_mart(
             store.alias("store"),
             territory.alias("territory"),
             sale_type.alias("sale_type"),
-            coalesce_text_expr(["monetization_normalized"]).alias("monetization_normalized"),
-            coalesce_text_expr(["content_origin_normalized"]).alias("content_origin_normalized"),
-            coalesce_text_expr(["plan_normalized"]).alias("plan_normalized"),
-            coalesce_text_expr(["classification_status"]).alias("classification_status"),
+            text_expr("monetization_normalized").alias("monetization_normalized"),
+            text_expr("content_origin_normalized").alias("content_origin_normalized"),
+            text_expr("plan_normalized").alias("plan_normalized"),
+            text_expr("classification_status").alias("classification_status"),
             label.alias("label"),
             search_variants.alias("_search_variants"),
             units.alias("units"),
             amount_usd.alias("_dashboard_amount_usd"),
-        ])
-        .with_columns([
-            pl.when(pl.col("content_origin_normalized") != "")
-            .then(pl.col("content_origin_normalized"))
-            .when(pl.col("store").str.to_lowercase().str.contains("youtube channel", literal=True))
-            .then(pl.lit("YouTube Channel Income"))
-            .when(pl.col("store").str.to_lowercase().str.contains("youtube ugc", literal=True))
-            .then(pl.lit("YouTube UGC"))
-            .when(pl.col("store").str.to_lowercase().str.contains("youtube art", literal=True) | pl.col("dsp").str.to_lowercase().str.contains("youtube music", literal=True))
-            .then(pl.lit("YouTube Art Track"))
-            .when(pl.col("dsp").str.to_lowercase().str.contains("youtube", literal=True) | pl.col("store").str.to_lowercase().str.contains("youtube", literal=True))
-            .then(pl.lit("YouTube Other"))
-            .otherwise(pl.lit("Other"))
-            .alias("earning_type"),
-            pl.when(pl.col("content_origin_normalized") != "")
-            .then(pl.col("content_origin_normalized"))
-            .when(pl.col("store").str.to_lowercase().str.contains("art track", literal=True) | pl.col("dsp").str.to_lowercase().str.contains("youtube music", literal=True))
-            .then(pl.lit("Art Track"))
-            .when(pl.col("store").str.to_lowercase().str.contains("channel", literal=True) | pl.col("source_sheet").str.to_lowercase().str.contains("youtube", literal=True))
-            .then(pl.lit("Music Video"))
-            .when(pl.col("sale_type").str.to_lowercase().str.contains("audio", literal=True) & ~pl.col("sale_type").str.to_lowercase().str.contains("video", literal=True))
-            .then(pl.lit("Sound Recording"))
-            .otherwise(pl.lit("Unknown"))
-            .alias("asset_type"),
-            pl.when(pl.col("sale_type") == "").then(pl.lit("Unknown")).otherwise(pl.col("sale_type")).alias("claim_type"),
         ])
         .with_columns([
             pl.when(pl.col("artist") == "").then(pl.lit("SIN ARTISTA")).otherwise(pl.col("artist")).alias("artist"),
@@ -8555,9 +8533,6 @@ def build_royalties_dashboard_summary_mart(
             "plan_normalized",
             "classification_status",
             "label",
-            "earning_type",
-            "asset_type",
-            "claim_type",
             "_search_variants",
         ])
         .agg([
@@ -8589,9 +8564,6 @@ def build_royalties_dashboard_summary_mart(
             "plan_normalized",
             "classification_status",
             "label",
-            "earning_type",
-            "asset_type",
-            "claim_type",
             pl.concat_str([
                 pl.col("artist"),
                 pl.col("title"),
@@ -8600,6 +8572,9 @@ def build_royalties_dashboard_summary_mart(
                 pl.col("video_id"),
                 pl.col("dsp"),
                 pl.col("store"),
+                pl.col("monetization_normalized"),
+                pl.col("content_origin_normalized"),
+                pl.col("plan_normalized"),
                 pl.col("label"),
                 pl.col("sale_type"),
                 pl.col("_search_variants"),
@@ -9190,6 +9165,9 @@ def royalties_dashboard(
                 "sources": [],
                 "dsp": [],
                 "store": [],
+                "monetization": [],
+                "content_origin": [],
+                "plan": [],
                 "territory": [],
                 "sale_type": [],
                 "artist": [],
@@ -9198,9 +9176,9 @@ def royalties_dashboard(
             },
             "youtube": {
                 "totals": empty_totals,
-                "earning_type": [],
-                "asset_type": [],
-                "claim_type": [],
+                "monetization": [],
+                "content_origin": [],
+                "plan": [],
                 "title": [],
                 "territory": [],
             },
@@ -9322,14 +9300,7 @@ def royalties_dashboard(
             "titles": int(row.get("titles") or 0),
         })
 
-    youtube_scope = scoped.filter(
-        pl.any_horizontal([
-            pl.col("dsp").str.to_lowercase().str.contains("youtube", literal=True),
-            pl.col("store").str.to_lowercase().str.contains("youtube", literal=True),
-            pl.col("earning_type").str.to_lowercase().str.contains("youtube", literal=True),
-            pl.col("source_sheet").str.to_lowercase().str.contains("youtube", literal=True),
-        ])
-    )
+    youtube_scope = scoped.filter(pl.col("dsp") == "YouTube")
     youtube_totals = (
         youtube_scope
         .select([
@@ -9356,6 +9327,9 @@ def royalties_dashboard(
             "sources": rank_by("source"),
             "dsp": rank_by("dsp"),
             "store": rank_by("store"),
+            "monetization": rank_by("monetization_normalized"),
+            "content_origin": rank_by("content_origin_normalized"),
+            "plan": rank_by("plan_normalized"),
             "territory": rank_by("territory"),
             "sale_type": rank_by("sale_type"),
             "artist": rank_by("artist"),
@@ -9364,9 +9338,9 @@ def royalties_dashboard(
         },
         "youtube": {
             "totals": youtube_totals,
-            "earning_type": rank_by("earning_type", frame=youtube_scope),
-            "asset_type": rank_by("asset_type", frame=youtube_scope),
-            "claim_type": rank_by("claim_type", frame=youtube_scope),
+            "monetization": rank_by("monetization_normalized", frame=youtube_scope),
+            "content_origin": rank_by("content_origin_normalized", frame=youtube_scope),
+            "plan": rank_by("plan_normalized", frame=youtube_scope),
             "title": rank_by("title", frame=youtube_scope),
             "territory": rank_by("territory", frame=youtube_scope),
         },

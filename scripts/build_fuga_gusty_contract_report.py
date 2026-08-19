@@ -13,8 +13,10 @@ from openpyxl.utils import get_column_letter
 
 try:
     from lib.catalog_report_filter import filter_reportable_generation
+    from lib.store_taxonomy import build_normalized_store_summary
 except ModuleNotFoundError:
     from scripts.lib.catalog_report_filter import filter_reportable_generation
+    from scripts.lib.store_taxonomy import build_normalized_store_summary
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -165,7 +167,13 @@ def prepare_base(path: Path, start_month: str | None, end_month: str | None) -> 
                 text_col("statement_period").alias("statement_period"),
                 text_col("transaction_month").alias("transaction_month"),
                 (text_col("content_type", "catalog") if "content_type" in columns else pl.lit("catalog")).alias("tipo_contenido"),
-                (text_col("dsp") if "dsp" in columns else pl.lit(None, dtype=pl.Utf8)).alias("dsp"),
+                (text_col("dsp_normalized") if "dsp_normalized" in columns else pl.lit(None, dtype=pl.Utf8)).alias("dsp_normalized"),
+                (text_col("monetization_normalized") if "monetization_normalized" in columns else pl.lit(None, dtype=pl.Utf8)).alias("monetization_normalized"),
+                (text_col("content_origin_normalized") if "content_origin_normalized" in columns else pl.lit(None, dtype=pl.Utf8)).alias("content_origin_normalized"),
+                (text_col("plan_normalized") if "plan_normalized" in columns else pl.lit(None, dtype=pl.Utf8)).alias("plan_normalized"),
+                (text_col("classification_status") if "classification_status" in columns else pl.lit(None, dtype=pl.Utf8)).alias("classification_status"),
+                (text_col("store_report_label") if "store_report_label" in columns else pl.lit(None, dtype=pl.Utf8)).alias("store_report_label"),
+                (text_col("dsp") if "dsp" in columns else pl.lit(None, dtype=pl.Utf8)).alias("dsp_original"),
                 (text_col("store_name") if "store_name" in columns else pl.lit(None, dtype=pl.Utf8)).alias("store_name"),
                 (text_col("sale_type") if "sale_type" in columns else pl.lit(None, dtype=pl.Utf8)).alias("sale_type"),
                 (text_col("sale_user_type") if "sale_user_type" in columns else pl.lit(None, dtype=pl.Utf8)).alias("sale_user_type"),
@@ -581,7 +589,13 @@ def build_fuga_gusty_contract_report(
         "artist_statement_style",
         "asset_artist_statement",
         "tipo_contenido",
-        "dsp",
+        "dsp_normalized",
+        "monetization_normalized",
+        "content_origin_normalized",
+        "plan_normalized",
+        "classification_status",
+        "store_report_label",
+        "dsp_original",
         "store_name",
         "territory",
         "sale_type",
@@ -605,12 +619,25 @@ def build_fuga_gusty_contract_report(
     else:
         detalle = pd.DataFrame(columns=detalle_group_cols + ["ingresos_usd", "ingresos_eur", "unidades", "filas_raw"])
 
+    store_summary = (
+        build_normalized_store_summary(
+            df.lazy(),
+            set(df.columns),
+            include_rows=True,
+            extra_group_columns=["contract_segment"],
+        )
+        .collect()
+        .to_pandas()
+        if df.height
+        else pd.DataFrame()
+    )
+
     tables = {
         "Resumen": overview,
         "Contrato Summary": group_sum(df, ["contract_segment", "match_method"]),
         "Listado": build_listado(df),
         "Mensual": group_sum(df, ["contract_segment", "statement_period", "transaction_month"]),
-        "Store Summary": group_sum(df, ["contract_segment", "dsp", "store_name", "sale_type", "sale_user_type"]),
+        "Store Summary": store_summary,
         "Territory Summary": group_sum(df, ["contract_segment", "territory"]),
         "Content Type": group_sum(df, ["contract_segment", "tipo_contenido"]),
         "Statement Summary": group_sum(df, ["contract_segment", "statement_period", "statement_type", "statement_file_name"]),

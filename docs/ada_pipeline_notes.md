@@ -70,6 +70,20 @@ la policy operativa de Cloud SQL; no se modifica durante la ingesta.
 `GPID` y `Catalog Number` no se reinterpretan como UPC. Los campos originales
 se preservan y no se infieren ISRC, UPC, artistas ni temas en el ingest.
 
+En el consolidado, ADA usa la taxonomia comun de Store/DSP. Caso testigo
+validado para Spotify:
+
+- `Dist Chan Desc = Subscription` -> monetizacion `Premium`;
+- `Dist Chan Desc = Ad Supported` -> monetizacion `Ads`;
+- `Payment Top - Up` y `Audit Recovery` permanecen `Unknown` mientras ADA no
+  demuestre una modalidad mas precisa;
+- el origen es `Audio / Master`;
+- el plan permanece `Unknown`, porque ADA no informa Individual, Family o Duo.
+
+Por lo tanto, ningun reporte debe agrupar ADA solamente bajo `Spotify`. Debe
+mostrar al menos la separacion Premium/Ads cuando el statement la demuestra,
+sin modificar `Dist Chan Desc`, `Price Desc` ni el resto de las columnas raw.
+
 ## Scripts y marts productivos
 
 - `scripts/ingest_standardized_ada.py`

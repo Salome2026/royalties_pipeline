@@ -12,6 +12,13 @@ DIMENSION_COLUMNS = [
     "store_report_label",
 ]
 
+STORE_SUMMARY_GROUP_COLUMNS = [
+    "dsp_normalized",
+    "monetization_normalized",
+    "content_origin_normalized",
+    "plan_normalized",
+]
+
 
 def _text(columns: set[str], name: str) -> pl.Expr:
     if name not in columns:
@@ -241,3 +248,71 @@ def add_store_dimensions(frame: pl.LazyFrame, columns: set[str] | None = None) -
         .alias("store_report_label")
     )
     return enriched.with_columns(report_label)
+
+
+def ensure_store_dimensions(
+    frame: pl.LazyFrame,
+    columns: set[str] | None = None,
+) -> pl.LazyFrame:
+    """Return the central report dimensions, deriving them only when absent."""
+    columns = columns or set(frame.collect_schema().names())
+    if set(DIMENSION_COLUMNS).issubset(columns):
+        return frame
+    return add_store_dimensions(frame, columns)
+
+
+def build_normalized_store_summary(
+    frame: pl.LazyFrame,
+    columns: set[str] | None = None,
+    *,
+    amount_column: str = "amount_usd",
+    units_column: str = "units",
+    include_source: bool = True,
+    include_rows: bool = False,
+    extra_group_columns: list[str] | None = None,
+) -> pl.LazyFrame:
+    """Aggregate reportable rows by the canonical Store/DSP dimensions."""
+    columns = columns or set(frame.collect_schema().names())
+    if amount_column not in columns:
+        raise ValueError(f"Falta la columna de importe requerida: {amount_column}")
+
+    normalized = ensure_store_dimensions(frame, columns)
+    normalized_columns = set(normalized.collect_schema().names())
+    group_columns = [
+        *(["source"] if include_source and "source" in normalized_columns else []),
+        *[
+            column
+            for column in (extra_group_columns or [])
+            if column in normalized_columns and column != "source"
+        ],
+        *STORE_SUMMARY_GROUP_COLUMNS,
+    ]
+    normalized = normalized.with_columns([
+        pl.when(
+            pl.col(column).is_null()
+            | (pl.col(column).cast(pl.Utf8, strict=False).str.strip_chars() == "")
+        )
+        .then(pl.lit("Unknown"))
+        .otherwise(pl.col(column).cast(pl.Utf8, strict=False).str.strip_chars())
+        .alias(column)
+        for column in STORE_SUMMARY_GROUP_COLUMNS
+    ])
+
+    aggregations = [pl.sum(amount_column).alias("amount_usd")]
+    if units_column in normalized_columns:
+        aggregations.append(
+            pl.col(units_column)
+            .cast(pl.Float64, strict=False)
+            .fill_null(0.0)
+            .sum()
+            .alias("units")
+        )
+    if include_rows:
+        aggregations.append(pl.len().alias("rows"))
+
+    return (
+        normalized
+        .group_by(group_columns)
+        .agg(aggregations)
+        .sort(group_columns)
+    )

@@ -172,8 +172,24 @@ Cuando el rango es historico completo ambos criterios pueden converger, pero
 para rangos parciales son lecturas distintas y deben mantenerse explicitamente.
 
 La subvista YouTube no cambia el criterio de negocio. Solo toma las filas ya
-reportables cuyo DSP/store/source sheet corresponde a YouTube y las agrupa por
-earning type, asset type, claim type, territorio y asset.
+reportables cuyo `dsp_normalized` es YouTube y las agrupa por monetizacion,
+origen de contenido, plan, territorio y asset. Estas dimensiones salen del
+contrato central de `scripts/lib/store_taxonomy.py`; el dashboard no reconstruye
+`earning type`, `asset type` ni `claim type` con reglas propias.
+
+Toda vista del dashboard o Excel que presente un resumen por Store/DSP debe usar
+las columnas canonicas del consolidado:
+
+- `dsp_normalized`;
+- `monetization_normalized`;
+- `content_origin_normalized`;
+- `plan_normalized`;
+- `store_report_label` como etiqueta humana.
+
+Los Store y tipos originales permanecen disponibles para detalle y auditoria,
+pero no son claves del resumen presentado. Cambiar la forma de clasificar una
+fuente se resuelve una sola vez en la taxonomia central y luego se reconstruye
+el mart del dashboard.
 
 Los importes del mart del dashboard conservan la precision original durante
 todas las agrupaciones. El redondeo a dos decimales se aplica solamente al

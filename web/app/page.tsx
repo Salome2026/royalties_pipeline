@@ -1236,6 +1236,9 @@ type RoyaltiesDashboardData = {
     sources: RoyaltiesDashboardRank[];
     dsp: RoyaltiesDashboardRank[];
     store: RoyaltiesDashboardRank[];
+    monetization: RoyaltiesDashboardRank[];
+    content_origin: RoyaltiesDashboardRank[];
+    plan: RoyaltiesDashboardRank[];
     territory: RoyaltiesDashboardRank[];
     sale_type: RoyaltiesDashboardRank[];
     artist: RoyaltiesDashboardRank[];
@@ -1244,9 +1247,9 @@ type RoyaltiesDashboardData = {
   };
   youtube: {
     totals: { amount_usd: number; units: number; rows: number; titles: number; artists: number };
-    earning_type: RoyaltiesDashboardRank[];
-    asset_type: RoyaltiesDashboardRank[];
-    claim_type: RoyaltiesDashboardRank[];
+    monetization: RoyaltiesDashboardRank[];
+    content_origin: RoyaltiesDashboardRank[];
+    plan: RoyaltiesDashboardRank[];
     title: RoyaltiesDashboardRank[];
     territory: RoyaltiesDashboardRank[];
   };
@@ -9013,6 +9016,9 @@ export default function Home() {
                 {renderRoyaltiesRankTable("Top Revenue by Artist", royaltiesDashboard?.rankings.artist || [])}
                 {renderRoyaltiesRankTable("Top Revenue by DSP", royaltiesDashboard?.rankings.dsp || [])}
                 {renderRoyaltiesRankTable("Top Revenue by Store", royaltiesDashboard?.rankings.store || [])}
+                {renderRoyaltiesRankTable("Ingresos por monetizacion", royaltiesDashboard?.rankings.monetization || [])}
+                {renderRoyaltiesRankTable("Ingresos por origen", royaltiesDashboard?.rankings.content_origin || [])}
+                {renderRoyaltiesRankTable("Ingresos por plan", royaltiesDashboard?.rankings.plan || [])}
                 {renderRoyaltiesRankTable("Sales per Territory", royaltiesDashboard?.rankings.territory || [])}
                 {renderRoyaltiesRankTable("Top Revenue by Label", royaltiesDashboard?.rankings.label || [])}
               </div>
@@ -9039,9 +9045,9 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="royalties-rank-grid">
-                  {renderRoyaltiesRankTable("Net Revenue by Earning Type", royaltiesDashboard?.youtube.earning_type || [])}
-                  {renderRoyaltiesRankTable("Net Revenue by Asset Type", royaltiesDashboard?.youtube.asset_type || [])}
-                  {renderRoyaltiesRankTable("Net Revenue by Claim Type", royaltiesDashboard?.youtube.claim_type || [])}
+                  {renderRoyaltiesRankTable("Ingresos por monetizacion", royaltiesDashboard?.youtube.monetization || [])}
+                  {renderRoyaltiesRankTable("Ingresos por origen", royaltiesDashboard?.youtube.content_origin || [])}
+                  {renderRoyaltiesRankTable("Ingresos por plan", royaltiesDashboard?.youtube.plan || [])}
                   {renderRoyaltiesRankTable("Revenue by Territory", royaltiesDashboard?.youtube.territory || [])}
                   {renderRoyaltiesRankTable("Top YouTube Assets", royaltiesDashboard?.youtube.title || [])}
                 </div>
