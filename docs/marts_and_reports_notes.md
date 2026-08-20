@@ -78,6 +78,12 @@ Outputs:
 
 El consolidado incluye `mart_source_file` para saber de que mart individual vino cada fila.
 
+Una distribuidora puede aportar varias cuentas al mismo mart individual. ADA,
+por ejemplo, conserva `mawz` e `indyana_records` dentro de
+`standardized_raw_ada.parquet` y `song_level_ada.parquet`. Todos los reportes y
+selectores deben distinguirlas por `source + account`; no se crean marts ni
+reglas de reporte paralelas por cuenta.
+
 ### Dimensiones normalizadas de DSP y tipo de ingreso
 
 `standardized_raw_all_sources.parquet` agrega dimensiones de reporte derivadas

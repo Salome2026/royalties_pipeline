@@ -66,6 +66,27 @@
       "reviewed_by": "ruben_codex"
     },
     {
+      "source": "ada",
+      "account": "indyana_records",
+      "raw_sheet_or_file_type": "royalty_detail",
+      "human_name": "ADA Indyana Records royalty detail TXT",
+      "human_description": "Detalle mensual de la cuenta ADA 99500 / Indyana Records LLC por ISRC, DSP, territorio, modalidad e importe.",
+      "business_meaning": "generation",
+      "amount_column": "Net Royalty Payable",
+      "currency_column": "USD (statement account currency)",
+      "period_column": "statement date in filename, validated with Start Period and End Period",
+      "artist_column": "Artist Name",
+      "title_column": "Project Title, fallback Product Title",
+      "identifier_columns": ["ISRC", "GPID", "Catalog Number", "Local Product Number"],
+      "default_catalog_view": true,
+      "default_statement_view": true,
+      "default_cash_view": true,
+      "decision_reason": "Net Royalty Payable is the real amount after ADA Deductible Fees. The original Account 99500 identifies Indyana Records and remains preserved in raw columns.",
+      "known_risks": "Repdate Month ID can precede the statement month. Account 99500 must not be merged with ADA Mawz account 99205.",
+      "last_reviewed_at": "2026-08-20",
+      "reviewed_by": "ruben_codex"
+    },
+    {
       "source": "fuga",
       "account": "indyana_records",
       "raw_sheet_or_file_type": "standard_statement_csv",

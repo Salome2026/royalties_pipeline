@@ -46,6 +46,11 @@ Para ADA, un TXT con el texto `No Earning Activity for this Royalty Period`
 es un statement mensual recibido y revisado. Se clasifica `ignored_empty`, no
 genera filas economicas y no bloquea la publicacion.
 
+ADA se monitorea por cuenta. `ADA / Mawz` y `ADA / Indyana Records` tienen
+carpetas y continuidad independientes, aunque `Procesar nuevos` reconstruye el
+mart ADA compartido para ambas y el resumen visual vuelve a filtrarse por la
+cuenta seleccionada.
+
 ## Estados
 
 - `ok`: el ultimo statement esta dentro de la tolerancia.
@@ -103,6 +108,10 @@ se reconstruye desde la API, debe quedar actualizado antes de publicar. No debe
 quedar mas viejo que los marts de ingreso que alimentan esa pantalla.
 
 Para ONErpm, el script procesa las subcuentas configuradas juntas porque comparten el mismo mart `standardized_raw_onerpm.parquet`. El resumen visual se filtra por la cuenta elegida, por ejemplo `henry_remix`.
+
+ADA sigue el mismo principio multi-cuenta: un solo ingestor y un solo mart por
+distribuidora, con `account` canónico por fila. No se crean scripts separados por
+Mawz o Indyana Records.
 
 Si un archivo ONErpm existe en `input_raw` pero no tiene filas en las hojas que esa cuenta carga al mart, se muestra como ignorado por regla y no como pendiente. Ejemplo: cuentas externas tipo Gusty o La Nueva Sangre pueden tener `Shares In & Out` sin `Masters`/`Youtube Channels`; esos shares quedan para auditoria/flags, pero no son filas de ingreso.
 

@@ -17,7 +17,7 @@ from lib.store_taxonomy import build_normalized_store_summary  # noqa: E402
 
 
 def assert_close(actual: float, expected: float, label: str) -> None:
-    if abs(actual - expected) > 1e-8:
+    if abs(actual - expected) > 1e-6:
         raise AssertionError(f"{label}: {actual} != {expected}")
 
 

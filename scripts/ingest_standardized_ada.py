@@ -1,5 +1,5 @@
 import hashlib
-import re
+import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -11,18 +11,46 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.append(str(SCRIPT_DIR))
 
 from lib.statement_period import from_ada_filename
+from lib.distributor_policy_store import load_distributor_policy_document
 
 
 BASE = Path(r"C:\royalties_pipeline")
-INPUT_DIR = BASE / "input_raw" / "ada" / "mawz"
+INPUT_ROOT = BASE / "input_raw" / "ada"
 OUTPUT_PATH = BASE / "warehouse" / "marts" / "standardized_raw_ada.parquet"
-TEMP_DIR = BASE / "staging" / "standardized_raw_parts" / "ada" / "mawz"
+TEMP_DIR = BASE / "staging" / "standardized_raw_parts" / "ada"
 
 SOURCE = "ada"
-ACCOUNT = "mawz"
 STATEMENT_TYPE = "ada_royalty_detail"
 SOURCE_SHEET = "royalty_detail"
 NO_ACTIVITY_MESSAGE = "No Earning Activity for this Royalty Period"
+
+ACCOUNTS = {
+    "mawz": {
+        "input_directory": "mawz",
+        "original_account": "99205",
+    },
+    "indyana_records": {
+        "input_directory": "Indyana Records",
+        "original_account": "99500",
+    },
+}
+
+
+def load_ada_policy_rules() -> dict[tuple[str, str], dict]:
+    payload = load_distributor_policy_document()
+    rules: dict[tuple[str, str], dict] = {}
+    for entry in payload.get("entries", []):
+        if str(entry.get("source") or "").strip().lower() != SOURCE:
+            continue
+        account = str(entry.get("account") or "").strip().lower()
+        for source_sheet, rule in (entry.get("sheet_rules") or {}).items():
+            if isinstance(rule, dict):
+                rules[(account, str(source_sheet or "").strip())] = rule
+    return rules
+
+
+def policy_bool(value) -> bool:
+    return value is True
 
 
 def sha256_file(path: Path) -> str:
@@ -75,7 +103,13 @@ def read_statement(path: Path) -> pl.DataFrame | None:
     return clean_columns(frame)
 
 
-def standardize(frame: pl.DataFrame, path: Path) -> pl.DataFrame:
+def standardize(
+    frame: pl.DataFrame,
+    path: Path,
+    account: str,
+    expected_original_account: str,
+    policy_rule: dict,
+) -> pl.DataFrame:
     columns = set(frame.columns)
     required = {
         "Repdate Month ID",
@@ -91,6 +125,16 @@ def standardize(frame: pl.DataFrame, path: Path) -> pl.DataFrame:
     missing = sorted(required - columns)
     if missing:
         raise ValueError(f"Faltan columnas requeridas ADA: {missing}")
+
+    original_accounts = {
+        str(value).strip()
+        for value in frame.get_column("Account").drop_nulls().unique().to_list()
+    }
+    if original_accounts != {expected_original_account}:
+        raise ValueError(
+            f"La carpeta ADA/{account} esperaba Account={expected_original_account}, "
+            f"pero {path.name} contiene {sorted(original_accounts)}"
+        )
 
     statement = from_ada_filename(path.name)
     if statement.period == "unknown":
@@ -113,6 +157,9 @@ def standardize(frame: pl.DataFrame, path: Path) -> pl.DataFrame:
     gross = decimal_expr("Royalty Payable", columns)
     fees = decimal_expr("Deductible Fees", columns)
     net = decimal_expr("Net Royalty Payable", columns)
+    revenue_basis = str(policy_rule.get("revenue_basis") or "").strip()
+    if not revenue_basis:
+        raise ValueError(f"La policy ADA/{account}/{SOURCE_SHEET} no define revenue_basis.")
 
     return frame.with_columns([
         net.alias("amount_usd"),
@@ -148,14 +195,14 @@ def standardize(frame: pl.DataFrame, path: Path) -> pl.DataFrame:
         decimal_expr("Sale Units", columns).alias("units"),
 
         pl.lit(SOURCE).alias("source"),
-        pl.lit(ACCOUNT).alias("account"),
+        pl.lit(account).alias("account"),
         pl.lit(STATEMENT_TYPE).alias("statement_type"),
         pl.lit(SOURCE_SHEET).alias("source_sheet"),
-        pl.lit("generation").alias("revenue_basis"),
-        pl.lit(True).alias("include_in_cash_view"),
-        pl.lit(True).alias("include_in_catalog_view"),
-        pl.lit(True).alias("include_in_statement_view"),
-        pl.lit(False).alias("possible_internal_transfer"),
+        pl.lit(revenue_basis).alias("revenue_basis"),
+        pl.lit(policy_bool(policy_rule.get("cash_view"))).alias("include_in_cash_view"),
+        pl.lit(policy_bool(policy_rule.get("catalog_view"))).alias("include_in_catalog_view"),
+        pl.lit(policy_bool(policy_rule.get("statement_view"))).alias("include_in_statement_view"),
+        pl.lit(revenue_basis == "transfer").alias("possible_internal_transfer"),
 
         pl.lit(path.name).alias("statement_file_name"),
         pl.lit(str(path)).alias("statement_file_path"),
@@ -166,32 +213,56 @@ def standardize(frame: pl.DataFrame, path: Path) -> pl.DataFrame:
 
 def main() -> None:
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if TEMP_DIR.exists():
+        shutil.rmtree(TEMP_DIR)
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-    files = sorted(INPUT_DIR.glob("*.txt"))
-    if not files:
-        raise FileNotFoundError(f"No hay statements ADA en {INPUT_DIR}")
+    policy_rules = load_ada_policy_rules()
 
     parts: list[Path] = []
     empty_periods: list[str] = []
-    print(f"ADA standardized ingest: {len(files)} statements")
+    statement_count = 0
 
-    for path in files:
-        statement = from_ada_filename(path.name)
-        frame = read_statement(path)
-        if frame is None:
-            empty_periods.append(statement.period)
-            print(f"  {statement.period}: sin actividad")
-            continue
+    for account, config in ACCOUNTS.items():
+        input_dir = INPUT_ROOT / str(config["input_directory"])
+        files = sorted(input_dir.glob("*.txt"))
+        if not files:
+            raise FileNotFoundError(f"No hay statements ADA/{account} en {input_dir}")
 
-        standardized = standardize(frame, path)
-        part_path = TEMP_DIR / f"{path.stem}.parquet"
-        standardized.write_parquet(part_path)
-        parts.append(part_path)
-        print(
-            f"  {statement.period}: {standardized.height} filas | "
-            f"USD {standardized['amount_usd'].sum():.8f}"
-        )
+        policy_rule = policy_rules.get((account, SOURCE_SHEET))
+        if policy_rule is None:
+            raise ValueError(
+                f"Falta policy ADA para account={account!r}, source_sheet={SOURCE_SHEET!r}. "
+                "Actualizar la politica de distribuidoras en Cloud SQL antes de ingerir."
+            )
+
+        account_temp_dir = TEMP_DIR / account
+        account_temp_dir.mkdir(parents=True, exist_ok=True)
+        statement_count += len(files)
+        print(f"ADA/{account}: {len(files)} statements")
+
+        for path in files:
+            statement = from_ada_filename(path.name)
+            frame = read_statement(path)
+            if frame is None:
+                empty_periods.append(f"{account}/{statement.period}")
+                print(f"  {statement.period}: sin actividad")
+                continue
+
+            standardized = standardize(
+                frame,
+                path,
+                account,
+                str(config["original_account"]),
+                policy_rule,
+            )
+            part_path = account_temp_dir / f"{path.stem}.parquet"
+            standardized.write_parquet(part_path)
+            parts.append(part_path)
+            print(
+                f"  {statement.period}: {standardized.height} filas | "
+                f"USD {standardized['amount_usd'].sum():.8f}"
+            )
 
     if not parts:
         raise ValueError("Todos los statements ADA estan vacios; no se genero el mart.")
@@ -202,6 +273,8 @@ def main() -> None:
     temporary_output.replace(OUTPUT_PATH)
 
     print(f"Archivo: {OUTPUT_PATH}")
+    print(f"Cuentas: {len(ACCOUNTS)}")
+    print(f"Statements revisados: {statement_count}")
     print(f"Statements con movimientos: {len(parts)}")
     print(f"Statements sin actividad: {len(empty_periods)} ({', '.join(empty_periods)})")
     print(f"Filas: {final.height}")
