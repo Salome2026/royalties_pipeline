@@ -8,8 +8,16 @@ export async function POST(request: NextRequest) {
   if ("error" in config) return config.error;
 
   const body = await request.json();
-  const output = body.output === "google_sheet" ? "google_sheet" : "excel";
-  const endpoint = output === "google_sheet" ? "reports/google-sheet" : "reports/keyword";
+  const output = body.output === "google_sheet"
+    ? "google_sheet"
+    : body.output === "executive_pdf"
+      ? "executive_pdf"
+      : "excel";
+  const endpoint = output === "google_sheet"
+    ? "reports/google-sheet"
+    : output === "executive_pdf"
+      ? "reports/executive"
+      : "reports/keyword";
   delete body.output;
 
   const response = await fetch(`${config.apiUrl}/${endpoint}`, {
@@ -41,12 +49,14 @@ export async function POST(request: NextRequest) {
   const buffer = await response.arrayBuffer();
   const disposition = response.headers.get("content-disposition") || "";
   const filenameMatch = disposition.match(/filename="?([^"]+)"?/i);
-  const filename = filenameMatch?.[1] || "vpo_corp_report.xlsx";
+  const filename = filenameMatch?.[1] || (output === "executive_pdf" ? "vpo_corp_report.pdf" : "vpo_corp_report.xlsx");
 
   return new NextResponse(buffer, {
     status: 200,
     headers: {
-      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Type": output === "executive_pdf"
+        ? "application/pdf"
+        : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "Content-Disposition": `attachment; filename="${filename}"`,
     },
   });

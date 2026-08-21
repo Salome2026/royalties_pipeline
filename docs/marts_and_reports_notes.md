@@ -228,6 +228,43 @@ La documentacion completa de los criterios viejo/nuevo esta en:
 
 - `docs\statement_report_notes.md`
 
+## Reporte de regalias: salidas detallada y ejecutiva
+
+La tarjeta `Reporte de regalias` es una unica entrada de negocio con dos
+formatos de salida:
+
+- `Excel detallado`: conserva las hojas y el comportamiento operativo vigente;
+- `PDF ejecutivo`: resume el mismo alcance en una sola pagina.
+
+El formato no modifica el universo economico. Ambas salidas deben aplicar, en
+este orden:
+
+1. periodo elegido y base temporal (`statement_period` o `transaction_month`);
+2. filtro opcional por distribuidora y cuenta;
+3. busqueda por tema, artista, ISRC u otros campos declarados por el motor;
+4. policies de generacion de cada distribuidora/cuenta;
+5. estado activo/inactivo y `include_in_reports` del catalogo;
+6. personalizacion porcentual vigente de reportes, cuando este habilitada.
+
+El PDF ejecutivo muestra solamente el neto reportable final en USD. No expone
+bruto, comision de la distribuidora, porcentaje de ajuste VPO ni columnas
+tecnicas. Incluye total, periodo efectivo, unidades, catalogo con ingresos,
+alcance, evolucion mensual, principales plataformas y principales temas.
+
+Reglas de seleccion:
+
+- distribuidora vacia significa todas;
+- cuenta vacia significa todas las cuentas de la distribuidora elegida;
+- en PDF la busqueda puede quedar vacia y significa todo el alcance;
+- en Excel la busqueda sigue siendo obligatoria para conservar el contrato
+  operativo ya validado;
+- un PDF sin coincidencias no se genera como documento en cero: devuelve una
+  explicacion al usuario.
+
+La fuente de identidad del resumen por tema sigue siendo `catalog_key`; Store,
+DSP, territorio y modalidad nunca multiplican una obra. El PDF es una vista de
+presentacion y no crea un mart, policy ni catalogo paralelo.
+
 ## Diferencias conocidas contra reporte viejo
 
 ### ONErpm MAWZ

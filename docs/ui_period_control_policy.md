@@ -36,7 +36,8 @@ El sistema no debe interpretar `2026-03` a `2026-04` como `1 de marzo` a
 
 ## Perfiles por tarjeta
 
-- `monthly_report`: reportes de regalias por keyword. Un mes solo es mes puntual.
+- `monthly_report`: reportes de regalias en Excel o PDF ejecutivo. Un mes solo
+  es mes puntual y el selector se comparte entre ambos formatos.
 - `custom_report`: reportes personalizados. Si el template tiene desde/hasta, un
   mes solo es mes puntual; si el template es acumulado, se usa `until_month`.
 - `preset_or_range`: vistas con presets y rango custom, como Participacion en

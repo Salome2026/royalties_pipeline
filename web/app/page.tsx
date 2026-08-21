@@ -1,8 +1,11 @@
 "use client";
 
+import Image from "next/image";
 import { FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
+import { FileSpreadsheet, FileText } from "lucide-react";
 import { PeriodControl } from "./components/PeriodControl";
 import { BookingDashboard, type BookingAgendaEvent } from "./components/BookingDashboard";
+import { VpoHome } from "./components/VpoHome";
 import {
   isResolvedPeriodInvalid,
   resolvePeriod,
@@ -128,6 +131,19 @@ type CustomReportOptions = {
   templates: CustomReportTemplate[];
   sources: string[];
   source_accounts: CustomReportSourceAccount[];
+};
+
+type RoyaltyReportOutput = "excel" | "executive_pdf";
+
+type RoyaltyReportSourceAccount = {
+  source: string;
+  account: string;
+  display_name: string;
+};
+
+type RoyaltyReportOptions = {
+  sources: string[];
+  source_accounts: RoyaltyReportSourceAccount[];
 };
 
 type CustomReportSavedState = {
@@ -2359,6 +2375,10 @@ export default function Home() {
   const [periodBasis, setPeriodBasis] = useState("transaction_month");
   const [mode, setMode] = useState("any");
   const [rawLimit, setRawLimit] = useState("5000");
+  const [royaltyReportOutput, setRoyaltyReportOutput] = useState<RoyaltyReportOutput>("excel");
+  const [royaltyReportOptions, setRoyaltyReportOptions] = useState<RoyaltyReportOptions | null>(null);
+  const [royaltyReportSource, setRoyaltyReportSource] = useState("");
+  const [royaltyReportAccount, setRoyaltyReportAccount] = useState("");
   const [statementMinTotal, setStatementMinTotal] = useState("0");
   const [statementIncludeZeros, setStatementIncludeZeros] = useState(false);
   const [statementReportVersion, setStatementReportVersion] = useState("legacy");
@@ -2645,6 +2665,12 @@ export default function Home() {
   }, [authenticated, view]);
 
   useEffect(() => {
+    if (authenticated && view === "royalties" && !royaltyReportOptions) {
+      loadRoyaltyReportOptions();
+    }
+  }, [authenticated, view, royaltyReportOptions]);
+
+  useEffect(() => {
     if (authenticated && view === "catalog") {
       loadCatalog();
     }
@@ -2815,6 +2841,11 @@ export default function Home() {
       };
     });
   }, [financeMovementForm.artist, financeMovementForm.businessArea, financeMovementForm.movementType, currentUser?.role, currentUserPermissions]);
+
+  const royaltyReportAccountOptions = useMemo(() => {
+    if (!royaltyReportOptions || !royaltyReportSource) return [];
+    return royaltyReportOptions.source_accounts.filter((item) => item.source === royaltyReportSource);
+  }, [royaltyReportOptions, royaltyReportSource]);
 
   const digitalIncomeAccountOptions = useMemo(() => {
     if (!digitalIncome) return [];
@@ -3874,7 +3905,7 @@ export default function Home() {
     setLoading(false);
   }
 
-  function buildPayload(output: "excel" | "google_sheet") {
+  function buildPayload(output: "excel" | "google_sheet" | "executive_pdf") {
     const period = resolvePeriod(selectionFromMonths(startMonth, endMonth), "monthly_report");
     return {
       keywords: keywords.split(/[;,]/).map((item) => item.trim()).filter(Boolean),
@@ -3883,9 +3914,21 @@ export default function Home() {
       period_basis: periodBasis,
       mode,
       raw_limit: Number(rawLimit) || 0,
+      source: royaltyReportSource || null,
+      account: royaltyReportAccount || null,
       refresh_cache: false,
       output,
     };
+  }
+
+  async function loadRoyaltyReportOptions() {
+    const response = await fetch("/api/report-options", { cache: "no-store" });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({ error: "No se pudieron cargar las distribuidoras." }));
+      setMessage({ type: "error", text: data.error || "No se pudieron cargar las distribuidoras." });
+      return;
+    }
+    setRoyaltyReportOptions(await response.json());
   }
 
   function validatePeriod() {
@@ -3924,6 +3967,42 @@ export default function Home() {
     }
     setLastFile("Descarga directa iniciada");
     setMessage({ type: "ok", text: "Reporte solicitado. La descarga se abre directo desde Cloud Run." });
+    setLoading(false);
+  }
+
+  async function generateExecutivePdf() {
+    setMessage(null);
+    setLastFile("");
+    setLastSheetUrl("");
+    if (!validatePeriod()) return;
+    setLoading(true);
+
+    const response = await fetch("/api/report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(buildPayload("executive_pdf")),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({ error: "No se pudo generar el PDF ejecutivo." }));
+      setMessage({ type: "error", text: data.error || "No se pudo generar el PDF ejecutivo." });
+      setLoading(false);
+      return;
+    }
+
+    const blob = await response.blob();
+    const disposition = response.headers.get("content-disposition") || "";
+    const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
+    const filename = filenameMatch?.[1] || "reporte_ejecutivo_regalias.pdf";
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    setLastFile(filename);
+    setMessage({ type: "ok", text: "PDF ejecutivo generado correctamente." });
     setLoading(false);
   }
 
@@ -7384,6 +7463,10 @@ export default function Home() {
 
   function submitRoyalties(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (royaltyReportOutput === "executive_pdf") {
+      generateExecutivePdf();
+      return;
+    }
     generateExcel();
   }
 
@@ -7586,8 +7669,7 @@ export default function Home() {
       <div className="login">
         <section className="panel">
           <div className="login-brand">
-            <span className="brand-vpo">VPO</span>
-            <span className="brand-corp">Corp</span>
+            <Image className="login-logo" src="/vpo-logo.png" alt="VPO Corp" width={2539} height={1298} priority />
           </div>
           <p>Validando sesion...</p>
         </section>
@@ -7600,10 +7682,9 @@ export default function Home() {
       <div className="login">
         <form className="panel" onSubmit={login}>
           <div className="login-brand">
-            <span className="brand-vpo">VPO</span>
-            <span className="brand-corp">Corp</span>
+            <Image className="login-logo" src="/vpo-logo.png" alt="VPO Corp" width={2539} height={1298} priority />
           </div>
-          <p className="login-copy">Sistema privado de reportes de regalias digitales.</p>
+          <p className="login-copy">Centro de control · acceso interno</p>
           {message && <div className={`message ${message.type === "error" ? "error" : ""}`}>{message.text}</div>}
           <label htmlFor="username">Usuario</label>
           <input id="username" value={username} onChange={(event) => setUsername(event.target.value)} autoComplete="username" required />
@@ -7620,8 +7701,7 @@ export default function Home() {
       <div className="login">
         <form className="panel" onSubmit={changeOwnPassword}>
           <div className="login-brand">
-            <span className="brand-vpo">VPO</span>
-            <span className="brand-corp">Corp</span>
+            <Image className="login-logo" src="/vpo-logo.png" alt="VPO Corp" width={2539} height={1298} priority />
           </div>
           <p className="login-copy">Tenes que cambiar la contrasena default antes de ingresar.</p>
           {message && <div className={`message ${message.type === "error" ? "error" : ""}`}>{message.text}</div>}
@@ -8332,128 +8412,31 @@ export default function Home() {
   }
 
   return (
-    <div className="shell">
-      <header className="topbar">
+    <div className={`shell ${view === "menu" ? "home-shell" : ""}`}>
+      {view !== "menu" && <header className="topbar">
         <div className="brand" aria-label="VPO Corp">
-          <span className="brand-vpo">VPO</span>
-          <span className="brand-corp">Corp</span>
+          <Image className="topbar-logo" src="/vpo-logo.png" alt="VPO Corp" width={2539} height={1298} priority />
         </div>
         <div className="top-actions">
           {currentUser && (
             <span className="session-pill">{currentUser.username} · {currentUser.role}</span>
           )}
-          {view !== "menu" && <button type="button" onClick={() => openView("menu")}>Menu</button>}
+          <button type="button" onClick={() => openView("menu")}>Menu</button>
           <button type="button" onClick={logout}>Salir</button>
         </div>
-      </header>
+      </header>}
 
-      <main className={view === "booking" && bookingSurface === "dashboard" ? "booking-main" : undefined}>
+      <main className={view === "menu" ? "home-main" : view === "booking" && bookingSurface === "dashboard" ? "booking-main" : undefined}>
         {message && <div className={`message ${message.type === "error" ? "error" : ""}`}>{message.text}</div>}
 
         {view === "menu" && (
-          <>
-            <section className="home-hero">
-              <div>
-                <div className="hero-brand">
-                  <span className="brand-vpo">VPO</span>
-                  <span className="brand-corp">Corp</span>
-                </div>
-                <p>Royalty intelligence para reportes, statements y participacion digital.</p>
-              </div>
-              <div className="hero-stats">
-                <span>Marts publicados</span>
-                <strong>Live</strong>
-              </div>
-            </section>
-
-            <div className="menu-grid">
-                  <button type="button" className={`menu-card ${canShowMenuView("statement") ? "" : "menu-card-hidden"}`} onClick={() => openView("statement")}>
-                    <span className="card-index">01</span>
-                    <strong>Reporte por statement</strong>
-                    <span>Totales por artista, statement y distribuidora.</span>
-                  </button>
-                  <button type="button" className={`menu-card ${canShowMenuView("royalties") ? "" : "menu-card-hidden"}`} onClick={() => openView("royalties")}>
-                    <span className="card-index">02</span>
-                    <strong>Reporte de regalias</strong>
-                    <span>Busqueda por palabra clave, periodo, Excel o Google Sheets.</span>
-                  </button>
-                  <button type="button" className={`menu-card ${canShowMenuView("custom-reports") ? "" : "menu-card-hidden"}`} onClick={() => openView("custom-reports")}>
-                    <span className="card-index">03</span>
-                    <strong>Reportes Personalizados</strong>
-                    <span>Plantillas especiales con fechas, listado editable y distribuidoras.</span>
-                  </button>
-                  <button type="button" className={`menu-card ${canShowMenuView("participation") ? "" : "menu-card-hidden"}`} onClick={() => openView("participation")}>
-                    <span className="card-index">04</span>
-                    <strong>Participacion en distribuidoras</strong>
-                    <span>Torta simple por fuente, guardada desde marts publicados.</span>
-                  </button>
-                  <button type="button" className={`menu-card ${canShowMenuView("digital-income") ? "" : "menu-card-hidden"}`} onClick={() => openView("digital-income")}>
-                    <span className="card-index">05</span>
-                    <strong>Ingresos Digitales</strong>
-                    <span>Ingresos reales por statement, distribuidora, subcompañía y artista.</span>
-                  </button>
-                  <button type="button" className={`menu-card ${canShowMenuView("royalties-dashboard") ? "" : "menu-card-hidden"}`} onClick={() => openView("royalties-dashboard")}>
-                    <span className="card-index">06</span>
-                    <strong>Dashboard Regalias</strong>
-                    <span>Vista ejecutiva multi-distribuidora con capa de negocio y YouTube.</span>
-                  </button>
-                  <button type="button" className={`menu-card ${canShowMenuView("source-monitor") ? "" : "menu-card-hidden"}`} onClick={() => openView("source-monitor")}>
-                    <span className="card-index">06</span>
-                    <strong>Control de distribuidoras</strong>
-                    <span>Ultimo statement cargado, raw pendiente y alertas operativas.</span>
-                  </button>
-                  <button type="button" className={`menu-card ${canShowMenuView("distributor-config") ? "" : "menu-card-hidden"}`} onClick={() => openView("distributor-config")}>
-                    <span className="card-index">07</span>
-                    <strong>Configurador distribuidoras</strong>
-                    <span>Politicas read-only, diccionario de statements y fechas contractuales.</span>
-                  </button>
-                  <button type="button" className={`menu-card ${canShowMenuView("booking") ? "" : "menu-card-hidden"}`} onClick={openBookingWorkspace}>
-                    <span className="card-index">08</span>
-                    <strong>Booking Indyana</strong>
-                    <span>Shows individuales y eventos compartidos, con sus liquidaciones completas.</span>
-                  </button>
-                  <button type="button" className={`menu-card ${canShowMenuView("commissions") ? "" : "menu-card-hidden"}`} onClick={() => openView("commissions")}>
-                    <span className="card-index">10</span>
-                    <strong>Comisiones</strong>
-                    <span>Configuracion por empleado y liquidacion segun reglas aplicables.</span>
-                  </button>
-              <button type="button" className={`menu-card ${canShowMenuView("catalog") ? "" : "menu-card-hidden"}`} onClick={() => openView("catalog")}>
-                <span className="card-index">12</span>
-                <strong>Catalogo General</strong>
-                <span>Base de temas, ISRC, artistas, distribuidoras y estado activo/inactivo.</span>
-              </button>
-                  <button type="button" className={`menu-card ${canShowMenuView("artist-finance") ? "" : "menu-card-hidden"}`} onClick={() => openView("artist-finance")}>
-                    <span className="card-index">13</span>
-                    <strong>Finanzas Artista</strong>
-                    <span>Vista de lectura: cuenta corriente, booking, inversiones y recuperables.</span>
-                  </button>
-                  <button type="button" className={`menu-card ${canShowMenuView("finance-movements") ? "" : "menu-card-hidden"}`} onClick={() => openView("finance-movements")}>
-                    <span className="card-index">14</span>
-                    <strong>Movimientos financieros</strong>
-                    <span>Carga staging de gastos, inversiones, recuperos y ajustes por artista.</span>
-                  </button>
-                  <button type="button" className={`menu-card ${canShowMenuView("artists") ? "" : "menu-card-hidden"}`} onClick={() => openView("artists")}>
-                    <span className="card-index">15</span>
-                    <strong>ABM de artistas</strong>
-                    <span>Ficha legal, contacto y datos base para booking.</span>
-                  </button>
-                  <button type="button" className={`menu-card ${canShowMenuView("employees") ? "" : "menu-card-hidden"}`} onClick={() => openView("employees")}>
-                    <span className="card-index">16</span>
-                    <strong>ABM de empleados</strong>
-                    <span>Equipo VPO, funciones y base para permisos por modulo.</span>
-                  </button>
-                  <button type="button" className={`menu-card ${canShowMenuView("caserio") ? "" : "menu-card-hidden"}`} onClick={() => openView("caserio")}>
-                    <span className="card-index">17</span>
-                    <strong>El Caserio</strong>
-                    <span>Eventos sociedad, artistas externos y shows VPO vinculados.</span>
-                  </button>
-                  <button type="button" className={`menu-card ${canShowMenuView("booking-lab") ? "" : "menu-card-hidden"}`} onClick={() => openView("booking-lab")}>
-                    <span className="card-index">18</span>
-                    <strong>Carga de Shows laboratorio</strong>
-                    <span>Flujo dinamico sin guardar: simple, reglas especiales y eventos con varios artistas.</span>
-                  </button>
-            </div>
-          </>
+          <VpoHome
+            username={currentUser?.username || "usuario"}
+            role={currentUser?.role || "viewer"}
+            canShow={(targetView) => canShowMenuView(targetView as View)}
+            onOpen={(targetView) => targetView === "booking" ? openBookingWorkspace() : openView(targetView as View)}
+            onLogout={logout}
+          />
         )}
 
         {view === "statement" && (
@@ -8504,8 +8487,35 @@ export default function Home() {
           <div className="grid">
             <form className="panel" onSubmit={submitRoyalties}>
               <h1>Reporte de regalias</h1>
+
+              <label>Formato</label>
+              <div className="report-format-switch" role="group" aria-label="Formato del reporte">
+                <button
+                  type="button"
+                  className={royaltyReportOutput === "excel" ? "active" : ""}
+                  onClick={() => setRoyaltyReportOutput("excel")}
+                >
+                  <FileSpreadsheet size={18} aria-hidden="true" />
+                  Excel detallado
+                </button>
+                <button
+                  type="button"
+                  className={royaltyReportOutput === "executive_pdf" ? "active" : ""}
+                  onClick={() => setRoyaltyReportOutput("executive_pdf")}
+                >
+                  <FileText size={18} aria-hidden="true" />
+                  PDF ejecutivo
+                </button>
+              </div>
+
               <label htmlFor="keywords">Palabras clave</label>
-              <input id="keywords" value={keywords} onChange={(event) => setKeywords(event.target.value)} placeholder="gusty dj, juli savioli" required />
+              <input
+                id="keywords"
+                value={keywords}
+                onChange={(event) => setKeywords(event.target.value)}
+                placeholder={royaltyReportOutput === "executive_pdf" ? "Opcional: artista, tema o ISRC" : "gusty dj, juli savioli"}
+                required={royaltyReportOutput === "excel"}
+              />
 
               <PeriodControl
                 id="royalty_period"
@@ -8522,26 +8532,69 @@ export default function Home() {
                 <option value="statement_period">Liquidacion / mes de statement</option>
               </select>
 
-              <label htmlFor="mode">Coincidencia</label>
-              <select id="mode" value={mode} onChange={(event) => setMode(event.target.value)}>
-                <option value="any">Cualquier palabra</option>
-                <option value="all">Todas las palabras</option>
-              </select>
+              {royaltyReportOutput === "executive_pdf" && (
+                <div className="report-scope-grid">
+                  <div>
+                    <label htmlFor="royalty_report_source">Distribuidora</label>
+                    <select
+                      id="royalty_report_source"
+                      value={royaltyReportSource}
+                      onChange={(event) => {
+                        setRoyaltyReportSource(event.target.value);
+                        setRoyaltyReportAccount("");
+                      }}
+                    >
+                      <option value="">Todas</option>
+                      {(royaltyReportOptions?.sources || []).map((source) => (
+                        <option value={source} key={source}>{source.toUpperCase()}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label htmlFor="royalty_report_account">Cuenta</label>
+                    <select
+                      id="royalty_report_account"
+                      value={royaltyReportAccount}
+                      disabled={!royaltyReportSource}
+                      onChange={(event) => setRoyaltyReportAccount(event.target.value)}
+                    >
+                      <option value="">Todas</option>
+                      {royaltyReportAccountOptions.map((item) => (
+                        <option value={item.account} key={`${item.source}:${item.account}`}>{item.display_name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
 
-              <label htmlFor="raw_limit">Filas raw maximas</label>
-              <input id="raw_limit" type="number" min="0" max="50000" value={rawLimit} onChange={(event) => setRawLimit(event.target.value)} />
+              {royaltyReportOutput === "excel" && (
+                <>
+                  <label htmlFor="mode">Coincidencia</label>
+                  <select id="mode" value={mode} onChange={(event) => setMode(event.target.value)}>
+                    <option value="any">Cualquier palabra</option>
+                    <option value="all">Todas las palabras</option>
+                  </select>
 
-              <button type="submit" disabled={loading || googleLoading}>{loading ? "Generando..." : "Descargar Excel"}</button>
+                  <label htmlFor="raw_limit">Filas raw maximas</label>
+                  <input id="raw_limit" type="number" min="0" max="50000" value={rawLimit} onChange={(event) => setRawLimit(event.target.value)} />
+                </>
+              )}
+
+              <button type="submit" disabled={loading || googleLoading}>
+                {loading ? "Generando..." : royaltyReportOutput === "executive_pdf" ? "Descargar PDF" : "Descargar Excel"}
+              </button>
             </form>
 
             <div>
-              <section className="panel">
-                <h2>Google Sheets</h2>
-                <p>Crea el mismo reporte como spreadsheet editable en Google Drive.</p>
-                <button type="button" disabled={loading || googleLoading} onClick={createGoogleSheet}>
-                  {googleLoading ? "Creando..." : "Crear Google Sheet"}
-                </button>
-              </section>
+              {royaltyReportOutput === "excel" && (
+                <section className="panel">
+                  <h2>Google Sheets</h2>
+                  <p>Crea el mismo reporte como spreadsheet editable en Google Drive.</p>
+                  <button type="button" disabled={loading || googleLoading} onClick={createGoogleSheet}>
+                    {googleLoading ? "Creando..." : "Crear Google Sheet"}
+                  </button>
+                </section>
+              )}
 
               {lastFile && (
                 <section className="panel" style={{ marginTop: 24 }}>

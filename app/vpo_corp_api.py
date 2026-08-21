@@ -50,6 +50,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from build_keyword_royalty_report import build_report, build_report_tables, normalize_keywords  # noqa: E402
+from build_executive_royalty_pdf import build_executive_royalty_pdf  # noqa: E402
 from build_statement_report_from_mart import build_statement_report_from_mart  # noqa: E402
 from build_custom_title_royalty_report import (  # noqa: E402
     DEFAULT_LOS_ANORMALES_TERMS,
@@ -196,6 +197,17 @@ class KeywordReportRequest(BaseModel):
     period_basis: Literal["transaction_month", "statement_period"] = "transaction_month"
     mode: Literal["any", "all"] = "any"
     raw_limit: int = Field(default=5000, ge=0, le=50000)
+    refresh_cache: bool = False
+
+
+class ExecutiveRoyaltyReportRequest(BaseModel):
+    keywords: list[str] = Field(default_factory=list, max_length=100)
+    start_month: str | None = None
+    end_month: str | None = None
+    period_basis: Literal["transaction_month", "statement_period"] = "transaction_month"
+    mode: Literal["any", "all"] = "any"
+    source: str | None = Field(default=None, max_length=80)
+    account: str | None = Field(default=None, max_length=120)
     refresh_cache: bool = False
 
 
@@ -7474,6 +7486,121 @@ def keyword_report(
     return FileResponse(
         path=output_path,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=output_path.name,
+    )
+
+
+@app.get("/reports/royalty/options")
+def royalty_report_options(
+    refresh_cache: bool = False,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    marts = ensure_marts(refresh_cache=refresh_cache, filenames=[SONG_FILE])
+    base = pl.scan_parquet(marts[SONG_FILE])
+    available = (
+        base
+        .select(["source", "account"])
+        .filter(
+            pl.col("source").is_not_null()
+            & (pl.col("source").cast(pl.Utf8).str.strip_chars() != "")
+            & pl.col("account").is_not_null()
+            & (pl.col("account").cast(pl.Utf8).str.strip_chars() != "")
+        )
+        .unique()
+        .sort(["source", "account"])
+        .collect()
+        .to_dicts()
+    )
+    policy = load_distributor_policy_document()
+    display_names = {
+        (
+            str(entry.get("source") or "").strip().lower(),
+            str(entry.get("account") or "").strip().lower(),
+        ): str(entry.get("display_name") or "").strip()
+        for entry in policy.get("entries", [])
+    }
+    source_accounts = []
+    for row in available:
+        source = str(row.get("source") or "").strip()
+        account = str(row.get("account") or "").strip()
+        source_accounts.append({
+            "source": source,
+            "account": account,
+            "display_name": display_names.get((source.lower(), account.lower()))
+            or f"{source.upper()} / {account.replace('_', ' ').title()}",
+        })
+    return {
+        "sources": sorted({item["source"] for item in source_accounts}),
+        "source_accounts": source_accounts,
+    }
+
+
+@app.post("/reports/executive")
+def executive_royalty_report(
+    request: ExecutiveRoyaltyReportRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+) -> FileResponse:
+    require_api_key(x_vpo_api_key)
+    if request.start_month and request.end_month and request.start_month > request.end_month:
+        raise HTTPException(status_code=400, detail="start_month cannot be greater than end_month.")
+
+    keywords = normalize_keywords(request.keywords)
+    marts = ensure_marts(
+        refresh_cache=request.refresh_cache,
+        filenames=[SONG_FILE, STANDARDIZED_FILE, CATALOG_MASTER_FILE],
+    )
+    configure_catalog_report_env(marts)
+
+    policy = load_distributor_policy_document()
+    source = (request.source or "").strip().lower() or None
+    account = (request.account or "").strip().lower() or None
+    matching_policy = next(
+        (
+            entry
+            for entry in policy.get("entries", [])
+            if str(entry.get("source") or "").strip().lower() == source
+            and str(entry.get("account") or "").strip().lower() == account
+        ),
+        None,
+    )
+    if source and account:
+        scope_label = str((matching_policy or {}).get("display_name") or "").strip()
+        if not scope_label:
+            scope_label = f"{source.upper()} / {account.replace('_', ' ').title()}"
+    elif source:
+        scope_label = source.upper()
+    else:
+        scope_label = "Todas las distribuidoras"
+
+    tables = build_report_tables(
+        keywords=keywords,
+        mode=request.mode,
+        raw_limit=0,
+        start_month=request.start_month,
+        end_month=request.end_month,
+        period_basis=request.period_basis,
+        song_path=marts[SONG_FILE],
+        standardized_path=marts[STANDARDIZED_FILE],
+        source=source,
+        account=account,
+    )
+    try:
+        output_path = build_executive_royalty_pdf(
+            tables=tables,
+            output_dir=VPO_API_REPORTS_DIR,
+            scope_label=scope_label,
+            keywords=keywords,
+            period_basis=request.period_basis,
+            start_month=request.start_month,
+            end_month=request.end_month,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return FileResponse(
+        path=output_path,
+        media_type="application/pdf",
         filename=output_path.name,
     )
 

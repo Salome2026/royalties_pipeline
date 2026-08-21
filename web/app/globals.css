@@ -311,6 +311,45 @@ main.booking-main {
   align-items: start;
 }
 
+.report-format-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.report-format-switch button {
+  width: 100%;
+  min-height: 42px;
+  margin: 0;
+  padding: 9px 11px;
+  gap: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  box-shadow: none;
+  font-size: 13px;
+}
+
+.report-format-switch button:hover {
+  border-color: var(--line-strong);
+  background: var(--panel-soft);
+  color: var(--ink);
+  transform: none;
+  box-shadow: none;
+}
+
+.report-format-switch button.active {
+  border-color: rgba(15, 118, 110, .45);
+  background: rgba(15, 118, 110, .1);
+  color: var(--accent-dark);
+}
+
+.report-scope-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .panel {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -3051,6 +3090,720 @@ button:disabled:hover {
   grid-template-columns: 1.4fr repeat(3, minmax(150px, 1fr));
 }
 
+/* VPO application home */
+.shell.home-shell {
+  display: block;
+  min-height: 100vh;
+  background: #08080a;
+}
+
+main.home-main {
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
+}
+
+.home-main > .message {
+  position: fixed;
+  top: 18px;
+  right: 22px;
+  z-index: 90;
+  width: min(440px, calc(100vw - 44px));
+}
+
+.vpo-home-shell {
+  --home-bg: #08080a;
+  --home-layer: rgba(255, 255, 255, .025);
+  --home-layer-2: rgba(255, 255, 255, .045);
+  --home-layer-3: rgba(255, 255, 255, .075);
+  --home-border: rgba(255, 255, 255, .2);
+  --home-border-strong: rgba(255, 255, 255, .36);
+  --home-text: #f5f5f7;
+  --home-muted: #a9a9b0;
+  --home-cyan: #3fc6d1;
+  --home-blue: #8b9fd7;
+  --home-green: #8fb98a;
+  --home-amber: #c9a86a;
+  --home-coral: #c98a86;
+  min-height: 100vh;
+  padding: 18px;
+  display: grid;
+  grid-template-columns: 236px minmax(0, 1fr);
+  gap: 14px;
+  overflow: visible;
+  color: var(--home-text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Helvetica, Arial, sans-serif;
+  background:
+    radial-gradient(ellipse 900px 560px at 8% -10%, rgba(255, 255, 255, .07), transparent 60%),
+    radial-gradient(ellipse 1050px 720px at 100% 0%, rgba(63, 198, 209, .1), transparent 56%),
+    radial-gradient(ellipse 850px 520px at 48% 112%, rgba(112, 87, 174, .06), transparent 62%),
+    linear-gradient(180deg, #0d0d10 0%, var(--home-bg) 48%);
+  isolation: isolate;
+  position: relative;
+}
+
+.vpo-home-shell::before {
+  content: "";
+  position: fixed;
+  width: min(74vw, 980px);
+  aspect-ratio: 2539 / 1298;
+  top: -8vw;
+  right: -10vw;
+  z-index: 0;
+  background: url("/vpo-logo.png") center / contain no-repeat;
+  filter: grayscale(1) brightness(1.6);
+  opacity: .035;
+  pointer-events: none;
+  user-select: none;
+}
+
+.vpo-home-sidebar {
+  height: calc(100vh - 36px);
+  position: sticky;
+  top: 18px;
+  z-index: 30;
+  padding: 20px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  border: 1px solid var(--home-border);
+  border-radius: 20px;
+  background: linear-gradient(155deg, rgba(255, 255, 255, .18) 0%, rgba(255, 255, 255, .035) 48%, rgba(255, 255, 255, .008) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18), 0 28px 70px -24px rgba(0, 0, 0, .72);
+  backdrop-filter: blur(36px) saturate(1.7);
+  -webkit-backdrop-filter: blur(36px) saturate(1.7);
+}
+
+.vpo-home-brand {
+  min-height: 48px;
+  padding: 0 7px 18px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-bottom: 1px solid var(--home-border);
+}
+
+.vpo-home-brand-image {
+  width: 128px;
+  height: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 8px 22px rgba(63, 198, 209, .14));
+}
+
+.vpo-home-account div {
+  min-width: 0;
+  display: grid;
+}
+
+.vpo-home-sidebar nav {
+  display: grid;
+  gap: 8px;
+  padding: 18px 0;
+}
+
+.vpo-home-sidebar nav button,
+.vpo-home-account button,
+.vpo-home-nav-close,
+.vpo-home-menu-button {
+  width: auto;
+  margin: 0;
+  box-shadow: none;
+}
+
+.vpo-home-sidebar nav button {
+  min-height: 40px;
+  padding: 0 11px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #a9b3bd;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.vpo-home-sidebar nav button:hover,
+.vpo-home-sidebar nav button.is-active {
+  color: #fff;
+  border-color: var(--home-border);
+  background: linear-gradient(155deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, .025));
+}
+
+.vpo-home-sidebar nav button.is-active {
+  color: var(--home-cyan);
+  border-color: rgba(63, 198, 209, .38);
+  background: linear-gradient(155deg, rgba(63, 198, 209, .18), rgba(63, 198, 209, .035));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .1), 0 12px 28px -18px rgba(63, 198, 209, .65);
+}
+
+.vpo-home-nav-group {
+  display: grid;
+  gap: 3px;
+  margin-top: 9px;
+}
+
+.vpo-home-nav-group > span {
+  padding: 0 11px 5px;
+  color: #5f6a76;
+  font-size: 10px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.vpo-home-account {
+  min-height: 56px;
+  margin-top: auto;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--home-border);
+  border-radius: 14px;
+  background: linear-gradient(155deg, rgba(255, 255, 255, .15), rgba(255, 255, 255, .02));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .11);
+  backdrop-filter: blur(20px) saturate(1.7);
+}
+
+.vpo-home-avatar {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--home-cyan);
+  background: rgba(70, 201, 212, .12);
+  font-weight: 900;
+}
+
+.vpo-home-account strong {
+  overflow: hidden;
+  color: #f7f8f9;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vpo-home-account small {
+  color: var(--home-muted);
+  font-size: 10px;
+  text-transform: capitalize;
+}
+
+.vpo-home-account button,
+.vpo-home-nav-close,
+.vpo-home-menu-button {
+  min-height: 30px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  color: var(--home-muted);
+  background: transparent;
+}
+
+.vpo-home-account button:hover,
+.vpo-home-nav-close:hover,
+.vpo-home-menu-button:hover {
+  color: #fff;
+  background: var(--home-layer-3);
+}
+
+.vpo-home-nav-close,
+.vpo-home-menu-button,
+.vpo-home-scrim {
+  display: none;
+}
+
+.vpo-home-stage {
+  min-width: 0;
+  min-height: 100vh;
+  z-index: 1;
+  background: transparent;
+  position: relative;
+}
+
+.vpo-home-header {
+  min-height: 72px;
+  padding: 0 clamp(24px, 4vw, 64px);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border: 1px solid var(--home-border);
+  border-radius: 20px;
+  background: linear-gradient(155deg, rgba(255, 255, 255, .18), rgba(255, 255, 255, .025) 55%, rgba(255, 255, 255, .008));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .18), 0 18px 48px -24px rgba(0, 0, 0, .72);
+  position: sticky;
+  top: 18px;
+  z-index: 20;
+  backdrop-filter: blur(36px) saturate(1.7);
+  -webkit-backdrop-filter: blur(36px) saturate(1.7);
+}
+
+.vpo-home-header > div:first-of-type {
+  min-width: 0;
+}
+
+.vpo-home-header span,
+.vpo-home-eyebrow,
+.vpo-home-section-heading span {
+  color: var(--home-cyan);
+  font-size: 10px;
+  font-weight: 850;
+  text-transform: uppercase;
+}
+
+.vpo-home-header h1 {
+  margin: 3px 0 0;
+  color: #fff;
+  font-size: 20px;
+}
+
+.vpo-home-live {
+  min-height: 32px;
+  margin-left: auto;
+  padding: 0 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(79, 192, 141, .22);
+  border-radius: 999px;
+  color: #a9d9c2;
+  background: rgba(79, 192, 141, .07);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.vpo-home-live i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--home-green);
+  box-shadow: 0 0 0 4px rgba(79, 192, 141, .1);
+}
+
+main.vpo-home-content {
+  width: min(1460px, calc(100vw - 304px));
+  margin: 0 auto;
+  padding: 22px clamp(18px, 3vw, 44px) 42px;
+}
+
+.vpo-home-intro {
+  min-height: 168px;
+  padding: 30px clamp(24px, 3vw, 42px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 30px;
+  border: 1px solid var(--home-border);
+  border-radius: 24px;
+  background: linear-gradient(155deg, rgba(255, 255, 255, .25) 0%, rgba(255, 255, 255, .045) 50%, rgba(255, 255, 255, .012) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22), 0 28px 70px -26px rgba(0, 0, 0, .75);
+  backdrop-filter: blur(52px) saturate(1.7);
+  -webkit-backdrop-filter: blur(52px) saturate(1.7);
+  position: relative;
+  overflow: hidden;
+}
+
+.vpo-home-intro::after {
+  content: "";
+  width: 260px;
+  height: 1px;
+  position: absolute;
+  top: 0;
+  left: 42px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .8), transparent);
+  opacity: .7;
+}
+
+.vpo-home-intro h2 {
+  margin: 7px 0 8px;
+  color: #fff;
+  font-size: clamp(28px, 3.4vw, 46px);
+  line-height: 1.05;
+}
+
+.vpo-home-intro p {
+  max-width: 690px;
+  margin: 0;
+  color: var(--home-muted);
+  font-size: 14px;
+}
+
+.vpo-home-summary {
+  min-width: 220px;
+  padding: 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--home-cyan);
+  background: transparent;
+}
+
+.vpo-home-summary div {
+  display: grid;
+}
+
+.vpo-home-summary strong {
+  color: #eef2f4;
+  font-size: 12px;
+}
+
+.vpo-home-summary small {
+  color: var(--home-muted);
+  font-size: 10px;
+}
+
+.vpo-home-section {
+  padding-top: 34px;
+}
+
+.vpo-home-section-heading {
+  margin-bottom: 14px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.vpo-home-section-heading h2 {
+  margin: 3px 0 0;
+  color: #eef2f4;
+  font-size: 18px;
+}
+
+.vpo-home-section-heading > small {
+  color: #697582;
+  font-size: 10px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.vpo-home-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.vpo-home-card {
+  width: 100%;
+  min-height: 122px;
+  margin: 0;
+  padding: 16px;
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 20px;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--home-border);
+  border-radius: 20px;
+  color: var(--home-text);
+  background: linear-gradient(155deg, rgba(255, 255, 255, .2) 0%, rgba(255, 255, 255, .032) 52%, rgba(255, 255, 255, .008) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16), 0 18px 42px -24px rgba(0, 0, 0, .8);
+  text-align: left;
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(36px) saturate(1.7);
+  -webkit-backdrop-filter: blur(36px) saturate(1.7);
+  transition: transform .2s cubic-bezier(.16, 1, .3, 1), border-color .2s ease, box-shadow .2s ease;
+}
+
+.vpo-home-card.is-featured {
+  background: linear-gradient(155deg, rgba(255, 255, 255, .27) 0%, rgba(63, 198, 209, .055) 52%, rgba(255, 255, 255, .01) 100%);
+}
+
+.vpo-home-card::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--card-tone, var(--home-cyan));
+  opacity: .8;
+}
+
+.vpo-home-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(63, 198, 209, .52);
+  background: linear-gradient(155deg, rgba(255, 255, 255, .29), rgba(255, 255, 255, .055) 55%, rgba(63, 198, 209, .025));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22), 0 26px 54px -26px rgba(0, 0, 0, .86), 0 0 34px -20px rgba(63, 198, 209, .8);
+}
+
+.vpo-home-card.tone-cyan { --card-tone: var(--home-cyan); }
+.vpo-home-card.tone-blue { --card-tone: var(--home-blue); }
+.vpo-home-card.tone-green { --card-tone: var(--home-green); }
+.vpo-home-card.tone-amber { --card-tone: var(--home-amber); }
+.vpo-home-card.tone-coral { --card-tone: var(--home-coral); }
+
+.vpo-home-card-icon {
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--card-tone) 35%, transparent);
+  border-radius: 12px;
+  color: var(--card-tone);
+  background: color-mix(in srgb, var(--card-tone) 9%, transparent);
+}
+
+.vpo-home-card-copy {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.vpo-home-card-copy strong {
+  overflow: hidden;
+  color: #f6f8f9;
+  font-size: 13px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+}
+
+.vpo-home-card-copy small {
+  color: var(--home-muted);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.vpo-home-card-arrow {
+  color: #596570;
+  transition: transform .16s ease, color .16s ease;
+}
+
+.vpo-home-card:hover .vpo-home-card-arrow {
+  color: var(--card-tone);
+  transform: translateX(2px);
+}
+
+.vpo-home-footer {
+  margin-top: 36px;
+  padding-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  border-top: 1px solid rgba(255, 255, 255, .1);
+}
+
+/* Login shares the same visual material as the application shell. */
+.login {
+  overflow: hidden;
+  position: relative;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Helvetica, Arial, sans-serif;
+  background:
+    radial-gradient(ellipse 900px 560px at 8% -10%, rgba(255, 255, 255, .07), transparent 60%),
+    radial-gradient(ellipse 1000px 700px at 100% 0%, rgba(63, 198, 209, .1), transparent 56%),
+    radial-gradient(ellipse 800px 500px at 50% 110%, rgba(112, 87, 174, .06), transparent 62%),
+    linear-gradient(180deg, #0d0d10 0%, #08080a 48%);
+}
+
+.login::before {
+  content: "";
+  position: absolute;
+  width: min(82vw, 980px);
+  aspect-ratio: 2539 / 1298;
+  top: 50%;
+  left: 50%;
+  background: url("/vpo-logo.png") center / contain no-repeat;
+  filter: grayscale(1) brightness(1.55);
+  opacity: .045;
+  transform: translate(-50%, -54%);
+  pointer-events: none;
+}
+
+.login .panel {
+  z-index: 1;
+  border: 1px solid rgba(255, 255, 255, .3);
+  border-radius: 28px;
+  color: #f5f5f7;
+  background: linear-gradient(155deg, rgba(255, 255, 255, .3) 0%, rgba(255, 255, 255, .055) 50%, rgba(255, 255, 255, .014) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22), 0 34px 80px -26px rgba(0, 0, 0, .8);
+  backdrop-filter: blur(52px) saturate(1.7);
+  -webkit-backdrop-filter: blur(52px) saturate(1.7);
+}
+
+.login label {
+  color: #f5f5f7;
+}
+
+.login-brand {
+  align-items: center;
+}
+
+.login-logo {
+  display: block;
+  width: min(100%, 292px);
+  height: auto;
+  object-fit: contain;
+  filter: drop-shadow(0 16px 34px rgba(63, 198, 209, .17));
+}
+
+.topbar-logo {
+  display: block;
+  width: 112px;
+  height: auto;
+  object-fit: contain;
+}
+
+.login-copy,
+.login .panel > p {
+  color: #a9a9b0;
+}
+
+.login input {
+  color: #f5f5f7;
+  border-color: rgba(255, 255, 255, .2);
+  background: rgba(8, 8, 10, .48);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
+}
+
+.login input:focus {
+  border-color: rgba(63, 198, 209, .65);
+  box-shadow: 0 0 0 3px rgba(63, 198, 209, .1);
+}
+
+.login button[type="submit"] {
+  color: #f5f5f7;
+  border-color: rgba(220, 221, 226, .65);
+  background: linear-gradient(155deg, rgba(220, 221, 226, .42), rgba(220, 221, 226, .1) 50%, rgba(220, 221, 226, .025));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22), 0 18px 42px -24px rgba(0, 0, 0, .8);
+  backdrop-filter: blur(20px) saturate(1.7);
+}
+
+.login button[type="submit"]:hover {
+  transform: translateY(-1px);
+  border-color: rgba(63, 198, 209, .55);
+}
+
+.vpo-home-footer span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #697582;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+@media (max-width: 1180px) {
+  .vpo-home-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 820px) {
+  .vpo-home-shell {
+    display: block;
+    padding: 10px;
+  }
+
+  .vpo-home-sidebar {
+    width: min(284px, calc(100vw - 44px));
+    height: calc(100vh - 20px);
+    position: fixed;
+    inset: 10px auto 10px 10px;
+    z-index: 80;
+    transform: translateX(-102%);
+    transition: transform .2s ease;
+    box-shadow: 24px 0 60px rgba(0, 0, 0, .4);
+  }
+
+  .vpo-home-sidebar.is-open {
+    transform: translateX(0);
+  }
+
+  .vpo-home-nav-close,
+  .vpo-home-menu-button {
+    display: grid;
+  }
+
+  .vpo-home-nav-close {
+    margin-left: auto;
+  }
+
+  .vpo-home-scrim {
+    width: 100%;
+    min-height: 100vh;
+    margin: 0;
+    padding: 0;
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    border: 0;
+    border-radius: 0;
+    background: rgba(0, 0, 0, .62);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s ease;
+  }
+
+  .vpo-home-scrim.is-open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .vpo-home-header {
+    min-height: 70px;
+    padding: 0 18px;
+    top: 10px;
+    border-radius: 17px;
+  }
+
+  .vpo-home-menu-button {
+    width: 36px;
+    min-height: 36px;
+    border: 1px solid var(--home-border);
+  }
+
+  .vpo-home-header h1 {
+    font-size: 16px;
+  }
+
+  .vpo-home-live {
+    padding: 0 9px;
+    font-size: 0;
+  }
+
+  main.vpo-home-content {
+    width: 100%;
+    margin: 0;
+    padding: 20px 0 34px;
+  }
+
+  .vpo-home-intro {
+    min-height: 0;
+    display: block;
+    padding: 24px 20px;
+    border-radius: 20px;
+  }
+
+  .vpo-home-intro h2 {
+    font-size: 30px;
+  }
+
+  .vpo-home-summary {
+    width: 100%;
+    margin-top: 19px;
+  }
+
+  .vpo-home-section {
+    padding-top: 26px;
+  }
+
+  .vpo-home-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .vpo-home-footer {
+    display: grid;
+    gap: 10px;
+  }
+}
+
 @media (max-width: 820px) {
   .topbar {
     padding: 0 18px;
@@ -4722,5 +5475,12 @@ button:disabled:hover {
   .booking-duplicate-list > div {
     align-items: flex-start;
     flex-direction: column;
+  }
+}
+
+@media (max-width: 520px) {
+  .report-format-switch,
+  .report-scope-grid {
+    grid-template-columns: 1fr;
   }
 }

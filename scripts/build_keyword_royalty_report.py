@@ -314,6 +314,9 @@ def contains_expr(columns: set[str], search_columns: list[str], keyword: str) ->
 def build_filter(columns: set[str], search_columns: list[str], keywords: list[str], mode: str) -> pl.Expr:
     exprs = [contains_expr(columns, search_columns, keyword) for keyword in keywords]
 
+    if not exprs:
+        return pl.lit(True)
+
     result = exprs[0]
 
     for expr in exprs[1:]:
@@ -836,6 +839,27 @@ def add_period_filter(
     return lf
 
 
+def add_source_account_filter(
+    lf: pl.LazyFrame,
+    columns: set[str],
+    source: str | None,
+    account: str | None,
+) -> pl.LazyFrame:
+    source_value = (source or "").strip().lower()
+    account_value = (account or "").strip().lower()
+    if source_value and "source" in columns:
+        lf = lf.filter(
+            pl.col("source").cast(pl.Utf8, strict=False).str.to_lowercase().str.strip_chars()
+            == source_value
+        )
+    if account_value and "account" in columns:
+        lf = lf.filter(
+            pl.col("account").cast(pl.Utf8, strict=False).str.to_lowercase().str.strip_chars()
+            == account_value
+        )
+    return lf
+
+
 def style_workbook(writer):
     for ws in writer.book.worksheets:
         prepare_sheet(ws)
@@ -865,6 +889,8 @@ def build_report_tables(
     song_path: Path = SONG_PATH,
     standardized_path: Path = STANDARDIZED_PATH,
     exclude_isrcs: list[str] | None = None,
+    source: str | None = None,
+    account: str | None = None,
 ) -> dict[str, pd.DataFrame]:
     period_column = "statement_period" if period_basis == "statement_period" else "transaction_month"
     period_label = PERIOD_BASIS_LABELS.get(period_column, period_column)
@@ -883,7 +909,12 @@ def build_report_tables(
                     normalize_report_store(
                         normalize_report_units(
                             add_period_filter(
-                                pl.scan_parquet(standardized_path),
+                                add_source_account_filter(
+                                    pl.scan_parquet(standardized_path),
+                                    standardized_cols,
+                                    source,
+                                    account,
+                                ),
                                 standardized_cols,
                                 start_month,
                                 end_month,
@@ -985,7 +1016,16 @@ def build_report_tables(
                     normalize_report_store(
                         normalize_report_units(
                             add_period_filter(
-                                add_match_text(pl.scan_parquet(standardized_path), standardized_cols, SEARCH_COLUMNS_STANDARDIZED),
+                                add_match_text(
+                                    add_source_account_filter(
+                                        pl.scan_parquet(standardized_path),
+                                        standardized_cols,
+                                        source,
+                                        account,
+                                    ),
+                                    standardized_cols,
+                                    SEARCH_COLUMNS_STANDARDIZED,
+                                ),
                                 standardized_cols,
                                 start_month,
                                 end_month,
@@ -1100,7 +1140,16 @@ def build_report_tables(
             add_report_code(
                 normalize_report_units(
                     add_period_filter(
-                        add_match_text(pl.scan_parquet(song_path), song_cols, SEARCH_COLUMNS_SONG),
+                        add_match_text(
+                            add_source_account_filter(
+                                pl.scan_parquet(song_path),
+                                song_cols,
+                                source,
+                                account,
+                            ),
+                            song_cols,
+                            SEARCH_COLUMNS_SONG,
+                        ),
                         song_cols,
                         start_month,
                         end_month,
@@ -1165,7 +1214,16 @@ def build_report_tables(
                     normalize_report_store(
                         normalize_report_units(
                             add_period_filter(
-                                add_match_text(pl.scan_parquet(standardized_path), raw_cols, SEARCH_COLUMNS_STANDARDIZED),
+                                add_match_text(
+                                    add_source_account_filter(
+                                        pl.scan_parquet(standardized_path),
+                                        raw_cols,
+                                        source,
+                                        account,
+                                    ),
+                                    raw_cols,
+                                    SEARCH_COLUMNS_STANDARDIZED,
+                                ),
                                 raw_cols,
                                 start_month,
                                 end_month,
