@@ -12386,6 +12386,14 @@ export default function Home() {
                         </table>
                       </div>
                     )}
+                    <div className="button-row">
+                      <button type="submit" disabled={financeMovementLoading || !financeMovementCanSave}>
+                        {financeMovementLoading ? "Guardando..." : "Guardar reintegro"}
+                      </button>
+                    </div>
+                    {!financeMovementCanSave && (
+                      <p className="field-help">Necesitas permiso de crear en Movimientos financieros.</p>
+                    )}
                   </div>
                 </>
               ) : financeMovementIsFinancialDocumentFlow ? (
