@@ -168,10 +168,24 @@ Spotify Ad Supported y YouTube Premium son explicitos. `Youtube Channels`
 identifica ingreso de canal/video; `Masters` identifica la base master, pero no
 autoriza a inferir UGC o video oficial si la fila no lo informa.
 
+Dentro del mismo layout, ONErpm separa `Spotify Ad Supported` y
+`Spotify Discovery Mode`; por contrato de fuente, `Spotify` simple se clasifica
+como `Premium`. Del mismo modo, cuando `YouTube` simple convive con
+`Youtube Premium`, el primero se clasifica como `Ads`. Esta inferencia es
+exclusiva de ONErpm y no se traslada a otros DSP ni fuentes.
+
 En `Youtube Channels`, la hoja es evidencia explicita de origen
 `Video / Channel`. `YouTube Premium` sigue siendo la monetizacion y no debe
 reclasificar esa fila como `Music / Art Track`.
 
+`YouTube` dentro de `Masters` no demuestra por si solo Music, Channel o UGC y
+su origen queda `No informado`. `YouTube Audio Tier` conserva origen
+`Music / Art Track`; `Youtube Shorts Flat Fee`, origen `Shorts`. La
+monetizacion de esos dos casos queda `No informado` si otra columna no la
+demuestra.
+
 Esta clasificacion no altera las vistas de negocio: `Shares In & Out` conserva
 su caracter de transferencia/caja/auditoria y nunca se suma como nueva
 generacion por tener un Store reconocible.
+
+El contrato completo esta en `docs/store_dsp_taxonomy_policy.md`.

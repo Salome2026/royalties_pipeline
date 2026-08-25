@@ -189,11 +189,9 @@ def prepared_rows(end_month: str | None = None) -> pl.DataFrame:
             first_non_blank(schema, ["asset_isrc", "ISRC", "Asset ISRC"]).alias("ISRC"),
             first_non_blank(schema, ["video_id", "VideoId", "Video ID", "YOUTUBE VIDEO ID"]).alias("Video ID"),
             first_non_blank(schema, ["territory", "Territory", "Country", "COUNTRY"]).alias("Pais"),
-            first_non_blank(schema, ["dsp_normalized", "dsp", "DSP", "Store", "STORE"]).alias("DSP"),
-            first_non_blank(schema, ["store_report_label", "store_name", "Sale Store Name", "Store Name", "service_detail", "SERVICE DETAIL"]).alias("Store"),
+            first_non_blank(schema, ["dsp_normalized", "store_report_label", "dsp", "DSP", "Store", "STORE"]).alias("DSP / Store"),
             first_non_blank(schema, ["monetization_normalized"]).alias("Monetizacion"),
             first_non_blank(schema, ["content_origin_normalized"]).alias("Origen"),
-            first_non_blank(schema, ["plan_normalized"]).alias("Plan"),
             units_expr(schema).fill_null(0.0).alias("Unidades"),
             gross_usd.alias("Gross FUGA USD"),
             amount_real.alias("Ingreso real USD"),
@@ -212,11 +210,9 @@ def prepared_rows(end_month: str | None = None) -> pl.DataFrame:
             "ISRC",
             "Video ID",
             "Pais",
-            "DSP",
-            "Store",
+            "DSP / Store",
             "Monetizacion",
             "Origen",
-            "Plan",
             "Unidades",
             "Gross FUGA USD",
             "Ingreso real USD",
@@ -280,7 +276,7 @@ def summary_tables(df: pl.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, pd.Dat
         .to_pandas()
     )
     by_country_dsp = (
-        df.group_by(["Tema", "Artista", "ISRC", "Video ID", "Pais", "DSP", "Store", "Monetizacion", "Origen", "Plan"])
+        df.group_by(["Tema", "Artista", "ISRC", "Video ID", "Pais", "DSP", "Store", "Monetizacion", "Origen"])
         .agg(
             [
                 pl.col("Statement").min().alias("Primer statement"),

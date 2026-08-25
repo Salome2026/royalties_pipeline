@@ -150,9 +150,7 @@ DISPLAY_HEADERS = {
     "dsp_normalized": "DSP / Store",
     "monetization_normalized": "Monetizacion",
     "content_origin_normalized": "Origen",
-    "plan_normalized": "Plan",
     "classification_status": "Clasificacion",
-    "store_report_label": "Store normalizado",
     "usage_type": "Tipo",
     "first_month": "Desde",
     "last_month": "Hasta",
@@ -659,8 +657,8 @@ def normalize_store_expr(raw_store: pl.Expr) -> pl.Expr:
 def normalize_report_store(lf: pl.LazyFrame, columns: set[str]) -> pl.LazyFrame:
     raw_store = store_raw_expr(columns)
     normalized_store = (
-        pl.col("store_report_label").cast(pl.Utf8, strict=False).str.strip_chars()
-        if "store_report_label" in columns
+        pl.col("dsp_normalized").cast(pl.Utf8, strict=False).str.strip_chars()
+        if "dsp_normalized" in columns
         else normalize_store_expr(raw_store)
     )
     return lf.with_columns([
@@ -950,9 +948,7 @@ def build_report_tables(
                     "dsp_normalized",
                     "monetization_normalized",
                     "content_origin_normalized",
-                    "plan_normalized",
                     "classification_status",
-                    "store_report_label",
                     "store_raw",
                     "usage_type",
                     "amount_usd",
@@ -1056,9 +1052,7 @@ def build_report_tables(
                     "dsp_normalized",
                     "monetization_normalized",
                     "content_origin_normalized",
-                    "plan_normalized",
                     "classification_status",
-                    "store_report_label",
                     "store_raw",
                     "usage_type",
                     "amount_usd",
@@ -1281,9 +1275,7 @@ def build_report_tables(
                     "dsp_normalized",
                     "monetization_normalized",
                     "content_origin_normalized",
-                    "plan_normalized",
                     "classification_status",
-                    "store_report_label",
                     "store_raw",
                     "usage_type",
                     "amount_usd",

@@ -8,77 +8,233 @@ import polars as pl
 
 BASE = Path(__file__).resolve().parents[2]
 SCRIPTS = BASE / "scripts"
-MART_PATH = BASE / "warehouse" / "marts" / "standardized_raw_all_sources.parquet"
-
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from lib.store_taxonomy import build_normalized_store_summary  # noqa: E402
+from lib.store_taxonomy import (  # noqa: E402
+    NOT_REPORTED,
+    add_store_dimensions,
+    build_normalized_store_summary,
+)
 
 
-def assert_close(actual: float, expected: float, label: str) -> None:
-    if abs(actual - expected) > 1e-6:
-        raise AssertionError(f"{label}: {actual} != {expected}")
-
-
-def values_for(
-    summary: pl.DataFrame,
-    source: str,
-    dsp: str,
-    column: str,
-) -> set[str]:
-    return set(
-        summary
-        .filter(
-            (pl.col("source") == source)
-            & (pl.col("dsp_normalized") == dsp)
-        )
-        .get_column(column)
-        .to_list()
-    )
+CASES = [
+    {
+        "case": "ada_spotify_subscription",
+        "source": "ada",
+        "Digital Service Provider(DSP)": "Spotify",
+        "Dist Chan Desc": "Subscription",
+        "expected_dsp": "Spotify",
+        "expected_monetization": "Premium",
+        "expected_origin": "Audio / Master",
+    },
+    {
+        "case": "ada_youtube_ad",
+        "source": "ada",
+        "Digital Service Provider(DSP)": "YouTube",
+        "Dist Chan Desc": "Ad Supported",
+        "expected_dsp": "YouTube",
+        "expected_monetization": "Ads",
+        "expected_origin": NOT_REPORTED,
+    },
+    {
+        "case": "ada_youtube_music",
+        "source": "ada",
+        "Digital Service Provider(DSP)": "YouTube Music",
+        "Dist Chan Desc": "Subscription",
+        "expected_dsp": "YouTube",
+        "expected_monetization": "Premium",
+        "expected_origin": "Music / Art Track",
+    },
+    {
+        "case": "ada_audit_recovery",
+        "source": "ada",
+        "Digital Service Provider(DSP)": "Spotify",
+        "Dist Chan Desc": "Audit Recovery",
+        "expected_dsp": "Spotify",
+        "expected_monetization": "Adjustment",
+        "expected_origin": "Audio / Master",
+    },
+    {
+        "case": "dashgo_family",
+        "source": "dashgo",
+        "store_name": "Spotify",
+        "Use Type": "FAM6",
+        "expected_dsp": "Spotify",
+        "expected_monetization": "Premium",
+        "expected_origin": "Audio / Master",
+    },
+    {
+        "case": "dashgo_pds",
+        "source": "dashgo",
+        "store_name": "Spotify",
+        "Use Type": "PDS",
+        "expected_dsp": "Spotify",
+        "expected_monetization": NOT_REPORTED,
+        "expected_origin": "Audio / Master",
+    },
+    {
+        "case": "dashgo_youtube_ugc",
+        "source": "dashgo",
+        "store_name": "Youtube Premium",
+        "Use Type": "UGC",
+        "expected_dsp": "YouTube",
+        "expected_monetization": "Premium",
+        "expected_origin": "UGC / Content ID",
+    },
+    {
+        "case": "fuga_youtube_channel_ads",
+        "source": "fuga",
+        "DSP": "Youtube Ad Supported",
+        "Sale Store Name": "YouTube Channel Income",
+        "Sale User Type": "Ad-supported",
+        "expected_dsp": "YouTube",
+        "expected_monetization": "Ads",
+        "expected_origin": "Video / Channel",
+    },
+    {
+        "case": "fuga_tiktok_partner",
+        "source": "fuga",
+        "DSP": "TikTok",
+        "Sale Store Name": "TikTok Inc.",
+        "Sale User Type": "Partner-provided",
+        "expected_dsp": "TikTok",
+        "expected_monetization": NOT_REPORTED,
+        "expected_origin": "Audio Library / Partner Provided",
+    },
+    {
+        "case": "fuga_tiktok_ugc",
+        "source": "fuga",
+        "DSP": "TikTok",
+        "Sale Store Name": "TikTok Inc.",
+        "Sale User Type": "User generated content",
+        "expected_dsp": "TikTok",
+        "expected_monetization": NOT_REPORTED,
+        "expected_origin": "UGC / Content ID",
+    },
+    {
+        "case": "onerpm_spotify_plain",
+        "source": "onerpm",
+        "Store": "Spotify",
+        "source_sheet": "Masters",
+        "expected_dsp": "Spotify",
+        "expected_monetization": "Premium",
+        "expected_origin": "Audio / Master",
+    },
+    {
+        "case": "onerpm_youtube_plain_master",
+        "source": "onerpm",
+        "Store": "YouTube",
+        "source_sheet": "Masters",
+        "expected_dsp": "YouTube",
+        "expected_monetization": "Ads",
+        "expected_origin": NOT_REPORTED,
+    },
+    {
+        "case": "onerpm_youtube_channel_premium",
+        "source": "onerpm",
+        "Store": "Youtube Premium",
+        "source_sheet": "Youtube Channels",
+        "expected_dsp": "YouTube",
+        "expected_monetization": "Premium",
+        "expected_origin": "Video / Channel",
+    },
+    {
+        "case": "orchard_art_track_ads",
+        "source": "orchard",
+        "STORE_1": "YouTube Content ID",
+        "TRANSACTION TYPE": "Ad Supported Audio Streams from Art Track Videos",
+        "expected_dsp": "YouTube",
+        "expected_monetization": "Ads",
+        "expected_origin": "Music / Art Track",
+    },
+    {
+        "case": "orchard_ugc_premium",
+        "source": "orchard",
+        "STORE_1": "YouTube Art Tracks & Music Videos",
+        "TRANSACTION TYPE": "Subscription Audio Streams from UGC",
+        "expected_dsp": "YouTube",
+        "expected_monetization": "Premium",
+        "expected_origin": "UGC / Content ID",
+    },
+    {
+        "case": "altafonte_legacy",
+        "source": "orchard",
+        "statement_type": "altafonte_legacy",
+        "expected_dsp": NOT_REPORTED,
+        "expected_monetization": NOT_REPORTED,
+        "expected_origin": NOT_REPORTED,
+    },
+    {
+        "case": "soundon_spotify_ads",
+        "source": "soundon",
+        "Store Name": "Spotify",
+        "Sales Sub Type": "AD_SUPPORTED",
+        "expected_dsp": "Spotify",
+        "expected_monetization": "Ads",
+        "expected_origin": "Audio / Master",
+    },
+    {
+        "case": "soundon_youtube_combined",
+        "source": "soundon",
+        "Store Name": "YouTube Music / Content ID",
+        "Sales Sub Type": "INDIVIDUAL",
+        "expected_dsp": "YouTube",
+        "expected_monetization": "Premium",
+        "expected_origin": NOT_REPORTED,
+    },
+    {
+        "case": "soundon_tiktok_pgc",
+        "source": "soundon",
+        "Store Name": "TikTok",
+        "Sales Sub Type": "PGC",
+        "expected_dsp": "TikTok",
+        "expected_monetization": NOT_REPORTED,
+        "expected_origin": "Audio Library / Partner Provided",
+    },
+]
 
 
 def main() -> None:
-    if not MART_PATH.exists():
-        raise FileNotFoundError(MART_PATH)
+    rows = []
+    for index, case in enumerate(CASES, start=1):
+        row = dict(case)
+        row["amount_usd"] = float(index)
+        row["units"] = index
+        rows.append(row)
 
-    base = pl.scan_parquet(MART_PATH)
-    columns = set(base.collect_schema().names())
-    summary = build_normalized_store_summary(base, columns).collect()
+    frame = pl.from_dicts(rows, infer_schema_length=None)
+    classified = add_store_dimensions(frame.lazy(), set(frame.columns)).collect()
+    if "plan_normalized" in classified.columns:
+        raise AssertionError("La taxonomia nueva no debe producir plan_normalized")
 
-    base_totals = (
-        base.group_by("source")
-        .agg(pl.sum("amount_usd").alias("amount_usd"))
-        .collect()
-        .sort("source")
-    )
-    summary_totals = (
-        summary.group_by("source")
-        .agg(pl.sum("amount_usd").alias("amount_usd"))
-        .sort("source")
-    )
-    for row in base_totals.join(summary_totals, on="source", suffix="_summary").iter_rows(named=True):
-        assert_close(
-            float(row["amount_usd_summary"]),
-            float(row["amount_usd"]),
-            f"total {row['source']}",
+    for row in classified.iter_rows(named=True):
+        expected = (
+            row["expected_dsp"],
+            row["expected_monetization"],
+            row["expected_origin"],
         )
+        actual = (
+            row["dsp_normalized"],
+            row["monetization_normalized"],
+            row["content_origin_normalized"],
+        )
+        if actual != expected:
+            raise AssertionError(f"{row['case']}: {actual} != {expected}")
 
-    ada_spotify = values_for(summary, "ada", "Spotify", "monetization_normalized")
-    if not {"Premium", "Ads"}.issubset(ada_spotify):
-        raise AssertionError(f"ADA Spotify no separa Premium/Ads: {sorted(ada_spotify)}")
+    summary = build_normalized_store_summary(
+        classified.lazy(),
+        set(classified.columns),
+        include_rows=True,
+    ).collect()
+    if "plan_normalized" in summary.columns:
+        raise AssertionError("El resumen no debe agrupar ni presentar Plan")
+    if abs(float(summary["amount_usd"].sum()) - float(classified["amount_usd"].sum())) > 1e-9:
+        raise AssertionError("El resumen cambio el total de ingresos")
+    if abs(float(summary["units"].sum()) - float(classified["units"].sum())) > 1e-9:
+        raise AssertionError("El resumen cambio el total de unidades")
 
-    fuga_youtube = values_for(summary, "fuga", "YouTube", "content_origin_normalized")
-    expected_youtube_origins = {"Music / Art Track", "Video / Channel", "UGC / Content ID"}
-    if not expected_youtube_origins.issubset(fuga_youtube):
-        raise AssertionError(f"FUGA YouTube perdio origenes: {sorted(fuga_youtube)}")
-
-    dashgo_spotify = values_for(summary, "dashgo", "Spotify", "plan_normalized")
-    expected_plans = {"Individual", "Family", "Duo", "Advertising"}
-    if not expected_plans.issubset(dashgo_spotify):
-        raise AssertionError(f"DashGo Spotify perdio planes: {sorted(dashgo_spotify)}")
-
-    print("OK: resumen Store/DSP normalizado reconcilia y conserva categorias.")
+    print(f"OK: {len(CASES)} casos rectores y reconciliacion sin Plan.")
 
 
 if __name__ == "__main__":

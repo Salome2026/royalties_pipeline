@@ -137,3 +137,11 @@ FUGA usa `DSP`, `Sale Store Name`, `Sale Type` y `Sale User Type`. Es la fuente
 mas completa para separar Premium/Ads y, en YouTube, Art Track/Music, Channel
 Income, UGC y Manual Claim. La clasificacion es derivada: todos esos campos
 originales permanecen disponibles para auditoria.
+
+Family, Duo, Student y Bundle se agrupan como monetizacion `Premium`; no se
+presenta una columna `Plan`. En plataformas sociales, `User generated content`
+se clasifica como `UGC / Content ID` y `Partner-provided` como
+`Audio Library / Partner Provided`; el nombre TikTok o Meta por si solo no
+autoriza a clasificar todo como UGC.
+
+El mapa completo es `docs/store_dsp_taxonomy_policy.md`.

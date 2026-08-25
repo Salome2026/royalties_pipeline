@@ -52,6 +52,7 @@ estado cerrado/pendiente, validar contra `booking_rules_master.md` y
 - [Normalizacion de identidad](identity_normalization_policy.md)
 - [Reporte por statement](statement_report_notes.md)
 - [Marts and reports](marts_and_reports_notes.md)
+- [Taxonomia rectora de DSP, monetizacion y origen](store_dsp_taxonomy_policy.md)
 - [Statement period policy](statement_period_policy.md)
 - [Control de distribuidoras](source_monitor_notes.md)
 - [Configurador distribuidoras - integracion con policies](distributor_configurator_phase4_policy_integration.md)

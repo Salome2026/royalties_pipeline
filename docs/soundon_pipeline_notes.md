@@ -68,7 +68,13 @@ Actualmente vienen vacios. El script esta preparado para leerlos si en el futuro
 ## Evidencia para DSP y monetizacion
 
 La clasificacion usa `Store Name`, `Sales Type`, `Sales Sub Type` y
-`Royalty Type`. Spotify permite separar planes Premium, Ads y Trial. SoundOn
-informa YouTube como `YouTube Music / Content ID`: la monetizacion puede ser
+`Royalty Type`. Spotify permite separar Premium, Ads y Trial. Individual,
+Family, Duo, Student y Bundle se agrupan como `Premium` y no se muestran como
+una columna `Plan`. `AD_SUPPORTED` se clasifica como `Ads`. SoundOn informa
+YouTube como `YouTube Music / Content ID`: la monetizacion puede ser
 explicita, pero Music y UGC no siempre se pueden separar. En esos casos el
-origen queda parcial o no especificado, sin inferencias.
+origen queda `No informado`, sin inferencias. En TikTok/Meta, `UGC` se presenta
+como `UGC / Content ID`; `PGC` o contenido provisto se presenta como
+`Audio Library / Partner Provided`.
+
+El contrato completo esta en `docs/store_dsp_taxonomy_policy.md`.

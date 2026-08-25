@@ -337,7 +337,6 @@ def enrich_report_dimensions(df: pl.DataFrame) -> pl.DataFrame:
             coalesce_text_expr(columns, USAGE_FALLBACK_COLUMNS, "usage_type"),
             coalesce_text_expr(columns, ["monetization_normalized"], "monetizacion"),
             coalesce_text_expr(columns, ["content_origin_normalized"], "origen_contenido"),
-            coalesce_text_expr(columns, ["plan_normalized"], "plan"),
         ]
     )
 
@@ -512,7 +511,6 @@ def song_matches_from_raw(raw_df: pl.DataFrame) -> pd.DataFrame:
         "dsp",
         "monetizacion",
         "origen_contenido",
-        "plan",
         "usage_type",
         "amount_usd",
         "units",
@@ -539,7 +537,6 @@ def song_matches_from_raw(raw_df: pl.DataFrame) -> pd.DataFrame:
         "dsp",
         "monetizacion",
         "origen_contenido",
-        "plan",
         "usage_type",
     ]
 
@@ -649,7 +646,6 @@ def build_custom_title_report(
             "dsp_normalized",
             "monetization_normalized",
             "content_origin_normalized",
-            "plan_normalized",
             "classification_status",
             "store_report_label",
             "store",
@@ -747,7 +743,6 @@ def build_custom_title_report(
                 "dsp_normalized",
                 "monetization_normalized",
                 "content_origin_normalized",
-                "plan_normalized",
                 "amount_usd",
                 "units",
                 "rows",

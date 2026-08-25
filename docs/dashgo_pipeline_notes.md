@@ -68,6 +68,14 @@ validados por negocio:
 - `A`: Ads.
 - `PDS`: significado pendiente; debe permanecer `Unknown`.
 
+Individual, familiar y duo son evidencia raw, pero el resumen visible los
+agrupa bajo monetizacion `Premium`; no existe una columna `Plan`. Los codigos
+promocionales explicitamente identificables se clasifican como `Trial / Promo`.
+
 YouTube distingue Store Premium, Ads, Shorts, Audio Tier y ajustes. `Use Type`
 permite separar UGC de partner-provided cuando viene informado. No se debe
 inventar Art Track o video oficial si la fila no lo demuestra.
+
+UGC se presenta como `UGC / Content ID`; partner-provided como
+`Audio Library / Partner Provided`. El contrato completo esta en
+`docs/store_dsp_taxonomy_policy.md`.

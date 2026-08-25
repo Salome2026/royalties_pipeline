@@ -92,9 +92,13 @@ sin modificar los campos originales ni los importes:
 - `dsp_normalized`
 - `monetization_normalized`
 - `content_origin_normalized`
-- `plan_normalized`
 - `classification_status`
 - `store_report_label`
+
+Si `plan_normalized` aparece en un mart ya construido, es un campo obsoleto que
+debe desaparecer en la proxima reconstruccion. Desde esta policy ningun
+consumidor puede presentarlo ni usarlo para agrupar; no se mantiene una ruta de
+compatibilidad. La regla completa vive en `docs/store_dsp_taxonomy_policy.md`.
 
 La interpretacion se apoya en las columnas originales declaradas en
 `warehouse/registry/statement_source_dictionary.json`. Las politicas de cuenta
@@ -114,13 +118,13 @@ filas reportables de `standardized_raw_all_sources.parquet` y agrupar por:
 - `source` cuando el informe necesita identificar la distribuidora;
 - `dsp_normalized`;
 - `monetization_normalized`;
-- `content_origin_normalized`;
-- `plan_normalized`.
+- `content_origin_normalized`.
 
-`store_report_label` es una etiqueta humana derivada de esas dimensiones. No
-reemplaza las columnas separadas cuando el plan o el origen forman parte del
-analisis. Los campos originales de Store, modalidad y uso se conservan en el
-detalle de auditoria, pero no gobiernan el resumen normalizado.
+`store_report_label` es una etiqueta humana derivada de esas dimensiones. Los
+campos originales de Store, modalidad, uso y subtipo de plan se conservan en el
+detalle de auditoria cuando hagan falta, pero no gobiernan el resumen
+normalizado. Individual, Family, Duo, Student y Bundle se resumen como
+monetizacion `Premium` y no multiplican filas.
 
 La implementacion compartida vive en
 `scripts/lib/store_taxonomy.py::build_normalized_store_summary`. Los reportes
@@ -131,12 +135,16 @@ Controles obligatorios:
 
 1. el total del resumen normalizado debe cerrar exactamente contra las filas
    reportables que lo alimentan;
-2. una modalidad desconocida permanece `Unknown` y nunca se infiere;
+2. una modalidad no demostrable permanece internamente desconocida y se muestra
+   al usuario como `No informado`;
 3. Spotify Premium y Ads no pueden colapsar en una sola fila cuando el crudo
    las distingue;
 4. en YouTube, monetizacion y origen se mantienen como dimensiones distintas;
-5. el resumen por tema sigue agrupando por identidad de catalogo y no incorpora
-   Store/DSP como clave.
+5. TikTok/Meta partner-provided no se clasifica automaticamente como UGC;
+6. el resumen por tema sigue agrupando por identidad de catalogo y no incorpora
+   Store/DSP como clave;
+7. el mapa por fuente y las inferencias permitidas son exclusivamente las de
+   `docs/store_dsp_taxonomy_policy.md`.
 
 ### Mapa rector de identidad y resumen por tema
 
@@ -182,8 +190,8 @@ Caso testigo validado el 2026-08-13:
 - `Music / Art Track`, `Video / Channel`, `UGC / Content ID` o `Shorts`
   describe el origen del contenido.
 - Si el statement identifica explicitamente `YouTube Channel Income` o
-  `Partnered Channel`, el origen es `Video / Channel`, aunque el DSP o plan diga
-  `YouTube Music` o `Premium`.
+  `Partnered Channel`, el origen es `Video / Channel`, aunque el DSP o la
+  monetizacion diga `YouTube Music` o `Premium`.
 - Esta clasificacion no cambia importes ni identidad.
 
 ## Catalogo master

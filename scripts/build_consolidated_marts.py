@@ -30,7 +30,7 @@ SONG_FILES = [
 ]
 
 
-def read_parts(paths: list[Path]) -> list[pl.DataFrame]:
+def read_parts(paths: list[Path]) -> list[pl.LazyFrame]:
     parts = []
 
     for path in paths:
@@ -40,9 +40,8 @@ def read_parts(paths: list[Path]) -> list[pl.DataFrame]:
 
         print(f"  - Leyendo: {path.name}")
 
-        part = (
-            pl.read_parquet(path)
-            .with_columns(pl.lit(path.name).alias("mart_source_file"))
+        part = pl.scan_parquet(path).with_columns(
+            pl.lit(path.name).alias("mart_source_file")
         )
 
         parts.append(part)
@@ -61,16 +60,32 @@ def consolidate(paths: list[Path], output_path: Path, add_reporting_dimensions: 
 
     final = pl.concat(parts, how="diagonal_relaxed")
     if add_reporting_dimensions:
-        final = add_store_dimensions(final.lazy(), set(final.columns)).collect()
+        final = add_store_dimensions(final, set(final.collect_schema().names()))
     temporary_path = output_path.with_name(f"{output_path.name}.tmp")
-    final.write_parquet(temporary_path)
+    if temporary_path.exists():
+        temporary_path.unlink()
+    final.sink_parquet(
+        temporary_path,
+        compression="zstd",
+        engine="streaming",
+    )
     temporary_path.replace(output_path)
 
+    result = pl.scan_parquet(output_path)
+    schema = set(result.collect_schema().names())
+    metrics = result.select([
+        pl.len().alias("rows"),
+        *(
+            [pl.sum("amount_usd").alias("amount_usd")]
+            if "amount_usd" in schema
+            else []
+        ),
+    ]).collect()
     print(f"  - OK: {output_path}")
-    print(f"  - Filas: {final.height}")
+    print(f"  - Filas: {metrics['rows'][0]}")
 
-    if "amount_usd" in final.columns:
-        print(f"  - Total amount_usd: {final['amount_usd'].sum()}")
+    if "amount_usd" in metrics.columns:
+        print(f"  - Total amount_usd: {metrics['amount_usd'][0]}")
 
 
 def main():

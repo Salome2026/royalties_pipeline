@@ -352,7 +352,6 @@ def classified_rows(end_month: str) -> pl.DataFrame:
         col_or_null(schema_dict, "store_report_label").alias("_dsp_store"),
         col_or_null(schema_dict, "monetization_normalized").alias("_monetization"),
         col_or_null(schema_dict, "content_origin_normalized").alias("_content_origin"),
-        col_or_null(schema_dict, "plan_normalized").alias("_plan"),
         pl.lit(None).cast(pl.Utf8).alias("_territory"),
         amount_expr(schema_dict).alias("_amount_usd"),
         units_expr(schema_dict).alias("_units"),
@@ -497,7 +496,6 @@ def granular_rows(rows: pl.DataFrame, *, hide_zero_amounts: bool = False) -> pd.
             "_dsp_store",
             "_monetization",
             "_content_origin",
-            "_plan",
         ])
         .agg([
             pl.sum("_amount_usd").alias("Ingresos USD"),
@@ -527,7 +525,6 @@ def granular_rows(rows: pl.DataFrame, *, hide_zero_amounts: bool = False) -> pd.
             "_dsp_store": "DSP / Store",
             "_monetization": "Monetizacion",
             "_content_origin": "Origen contenido",
-            "_plan": "Plan",
         })
         .sort("Ingresos USD", descending=True)
         .to_pandas()
@@ -602,7 +599,6 @@ def raw_country_dsp_rows(
             col_or_null(schema_dict, "dsp_normalized").alias("DSP normalizado"),
             col_or_null(schema_dict, "monetization_normalized").alias("Monetizacion"),
             col_or_null(schema_dict, "content_origin_normalized").alias("Origen contenido"),
-            col_or_null(schema_dict, "plan_normalized").alias("Plan"),
             first_text(schema_dict, ["DSP", "Sale Store Name", "Store", "store_name", "Store Name"]).alias("Store original"),
             first_text(schema_dict, ["Territory", "territory", "Region", "SALE COUNTRY", "Sales Region", "Sales Country"]).alias("Pais"),
             amount_expr(schema_dict).alias("_amount_usd"),
@@ -634,7 +630,6 @@ def raw_country_dsp_rows(
             "DSP normalizado",
             "Monetizacion",
             "Origen contenido",
-            "Plan",
             "Store original",
         ])
         .agg([
@@ -711,7 +706,6 @@ def raw_country_dsp_rows(
             "DSP normalizado",
             "Monetizacion",
             "Origen contenido",
-            "Plan",
             "Store original",
             "Ingresos USD",
             "Unidades",

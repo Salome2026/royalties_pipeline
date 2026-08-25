@@ -170,7 +170,6 @@ def prepare_base(path: Path, start_month: str | None, end_month: str | None) -> 
                 (text_col("dsp_normalized") if "dsp_normalized" in columns else pl.lit(None, dtype=pl.Utf8)).alias("dsp_normalized"),
                 (text_col("monetization_normalized") if "monetization_normalized" in columns else pl.lit(None, dtype=pl.Utf8)).alias("monetization_normalized"),
                 (text_col("content_origin_normalized") if "content_origin_normalized" in columns else pl.lit(None, dtype=pl.Utf8)).alias("content_origin_normalized"),
-                (text_col("plan_normalized") if "plan_normalized" in columns else pl.lit(None, dtype=pl.Utf8)).alias("plan_normalized"),
                 (text_col("classification_status") if "classification_status" in columns else pl.lit(None, dtype=pl.Utf8)).alias("classification_status"),
                 (text_col("store_report_label") if "store_report_label" in columns else pl.lit(None, dtype=pl.Utf8)).alias("store_report_label"),
                 (text_col("dsp") if "dsp" in columns else pl.lit(None, dtype=pl.Utf8)).alias("dsp_original"),
@@ -592,9 +591,7 @@ def build_fuga_gusty_contract_report(
         "dsp_normalized",
         "monetization_normalized",
         "content_origin_normalized",
-        "plan_normalized",
         "classification_status",
-        "store_report_label",
         "dsp_original",
         "store_name",
         "territory",
@@ -631,6 +628,16 @@ def build_fuga_gusty_contract_report(
         if df.height
         else pd.DataFrame()
     )
+    store_summary = store_summary.rename(columns={
+        "source": "Distribuidora",
+        "contract_segment": "Contrato",
+        "dsp_normalized": "DSP / Store",
+        "monetization_normalized": "Monetizacion",
+        "content_origin_normalized": "Origen",
+        "amount_usd": "Ingresos USD",
+        "units": "Unidades",
+        "rows": "Filas",
+    })
 
     tables = {
         "Resumen": overview,

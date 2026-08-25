@@ -92,14 +92,19 @@ validado para Spotify:
 
 - `Dist Chan Desc = Subscription` -> monetizacion `Premium`;
 - `Dist Chan Desc = Ad Supported` -> monetizacion `Ads`;
-- `Payment Top - Up` y `Audit Recovery` permanecen `Unknown` mientras ADA no
-  demuestre una modalidad mas precisa;
-- el origen es `Audio / Master`;
-- el plan permanece `Unknown`, porque ADA no informa Individual, Family o Duo.
+- `Ad Channel` -> monetizacion `Ads`;
+- `Payment Top - Up` y `Audit Recovery` -> `Adjustment`;
+- el origen es `Audio / Master` para Spotify y DSP de audio;
+- `YouTube Music` -> origen `Music / Art Track`;
+- `YouTube` generico queda con origen `No informado` si no existe otra evidencia;
+- ADA no informa un plan comercial y ese dato no forma parte del resumen.
 
 Por lo tanto, ningun reporte debe agrupar ADA solamente bajo `Spotify`. Debe
 mostrar al menos la separacion Premium/Ads cuando el statement la demuestra,
 sin modificar `Dist Chan Desc`, `Price Desc` ni el resto de las columnas raw.
+
+El contrato completo y los valores visibles se definen en
+`docs/store_dsp_taxonomy_policy.md`.
 
 ## Scripts y marts productivos
 

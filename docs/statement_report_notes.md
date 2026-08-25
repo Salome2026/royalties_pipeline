@@ -173,7 +173,7 @@ para rangos parciales son lecturas distintas y deben mantenerse explicitamente.
 
 La subvista YouTube no cambia el criterio de negocio. Solo toma las filas ya
 reportables cuyo `dsp_normalized` es YouTube y las agrupa por monetizacion,
-origen de contenido, plan, territorio y asset. Estas dimensiones salen del
+origen de contenido, territorio y asset. Estas dimensiones salen del
 contrato central de `scripts/lib/store_taxonomy.py`; el dashboard no reconstruye
 `earning type`, `asset type` ni `claim type` con reglas propias.
 
@@ -183,8 +183,12 @@ las columnas canonicas del consolidado:
 - `dsp_normalized`;
 - `monetization_normalized`;
 - `content_origin_normalized`;
-- `plan_normalized`;
 - `store_report_label` como etiqueta humana.
+
+`Plan` no es una dimension visible ni una clave de agrupacion. Los planes
+Individual, Family, Duo, Student y Bundle se informan como monetizacion
+`Premium`. El mapa rector obligatorio es
+`docs/store_dsp_taxonomy_policy.md`.
 
 Los Store y tipos originales permanecen disponibles para detalle y auditoria,
 pero no son claves del resumen presentado. Cambiar la forma de clasificar una

@@ -642,7 +642,6 @@ def classified_rows(end_month: str) -> pl.DataFrame:
             first_text(schema, ["store_report_label"]).alias("_dsp_store"),
             first_text(schema, ["monetization_normalized"]).alias("_monetization"),
             first_text(schema, ["content_origin_normalized"]).alias("_content_origin"),
-            first_text(schema, ["plan_normalized"]).alias("_plan"),
             first_text(schema, ["Territory"]).alias("_territory"),
             amount_expr(schema).alias("_amount_usd"),
             col_or_null(schema, "Quantity", pl.Float64).alias("_units"),
@@ -810,7 +809,6 @@ def granular_onerpm_rows(rows: pl.DataFrame, *, hide_zero_amounts: bool = False)
             "_dsp_store",
             "_monetization",
             "_content_origin",
-            "_plan",
         ])
         .agg([
             pl.sum("_amount_usd").alias("Ingresos USD"),
@@ -835,7 +833,6 @@ def granular_onerpm_rows(rows: pl.DataFrame, *, hide_zero_amounts: bool = False)
             "_dsp_store": "DSP / Store",
             "_monetization": "Monetizacion",
             "_content_origin": "Origen contenido",
-            "_plan": "Plan",
         })
         .sort("Ingresos USD", descending=True)
     )
@@ -1127,7 +1124,6 @@ def granular_fuga_rows(end_month: str, *, hide_zero_amounts: bool = False) -> pd
             first_text(schema, ["store_report_label"]).alias("DSP / Store"),
             first_text(schema, ["monetization_normalized"]).alias("Monetizacion"),
             first_text(schema, ["content_origin_normalized"]).alias("Origen contenido"),
-            first_text(schema, ["plan_normalized"]).alias("Plan"),
             first_text(schema, ["territory", "Territory"]).alias("Pais"),
             amount_expr(schema).alias("_amount_usd"),
             pl.coalesce([
@@ -1152,7 +1148,6 @@ def granular_fuga_rows(end_month: str, *, hide_zero_amounts: bool = False) -> pd
             "DSP / Store",
             "Monetizacion",
             "Origen contenido",
-            "Plan",
         ])
         .agg([
             pl.col("_isrc").drop_nulls().unique().sort().str.join(" | ").alias("ISRC original"),
@@ -1220,7 +1215,6 @@ def granular_fuga_rows(end_month: str, *, hide_zero_amounts: bool = False) -> pd
             "DSP / Store",
             "Monetizacion",
             "Origen contenido",
-            "Plan",
             "Ingresos USD",
             "Unidades",
             "Filas",

@@ -88,5 +88,14 @@ Orchard moderno usa `STORE`, `SERVICE DETAIL`, `TRANSACTION TYPE`,
 `TRANSACTION SUBTYPE` y `ROYALTY TYPE`. Permite separar suscripcion/ads y, para
 YouTube, Art Tracks & Music Videos, Content ID, partner-provided, UGC y Shorts.
 
+Subscription se clasifica como `Premium`, Ad Supported como `Ads` y las
+deducciones, fraude, streams no calificados y promociones negativas como
+`Adjustment`. En YouTube manda la evidencia mas precisa de Transaction Type:
+Art Track, Partnered Channel, UGC o Shorts; el nombre `Content ID` por si solo
+no debe pisar un Art Track explicitamente informado.
+
 Altafonte legacy no tiene esa granularidad. Sus filas deben conservar
 `classification_status = unknown`; no se completa Store por inferencia.
+
+No se presenta una columna `Plan`. El contrato completo esta en
+`docs/store_dsp_taxonomy_policy.md`.
