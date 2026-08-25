@@ -5,13 +5,18 @@ import polars as pl
 
 NOT_REPORTED = "No informado"
 
-DIMENSION_COLUMNS = [
+BUSINESS_DIMENSION_COLUMNS = [
     "dsp_normalized",
     "monetization_normalized",
     "content_origin_normalized",
+]
+
+DERIVED_DIMENSION_COLUMNS = [
     "classification_status",
     "store_report_label",
 ]
+
+DIMENSION_COLUMNS = BUSINESS_DIMENSION_COLUMNS + DERIVED_DIMENSION_COLUMNS
 
 STORE_SUMMARY_GROUP_COLUMNS = [
     "dsp_normalized",
@@ -50,6 +55,20 @@ def _contains_any(value: pl.Expr, terms: list[str]) -> pl.Expr:
     for term in terms:
         result = result | value.str.contains(term, literal=True)
     return result
+
+
+def _classification_status_from_dimensions() -> pl.Expr:
+    return (
+        pl.when(pl.col("dsp_normalized") == NOT_REPORTED)
+        .then(pl.lit("unknown"))
+        .when(
+            (pl.col("monetization_normalized") == NOT_REPORTED)
+            | (pl.col("content_origin_normalized") == NOT_REPORTED)
+        )
+        .then(pl.lit("partial"))
+        .otherwise(pl.lit("exact"))
+        .alias("classification_status")
+    )
 
 
 def add_store_dimensions(frame: pl.LazyFrame, columns: set[str] | None = None) -> pl.LazyFrame:
@@ -234,14 +253,9 @@ def add_store_dimensions(frame: pl.LazyFrame, columns: set[str] | None = None) -
     enriched = frame.with_columns([dsp, monetization, origin])
     legacy = statement_type.str.contains("altafonte", literal=True)
     status = (
-        pl.when(legacy | (pl.col("dsp_normalized") == NOT_REPORTED))
+        pl.when(legacy)
         .then(pl.lit("unknown"))
-        .when(
-            (pl.col("monetization_normalized") == NOT_REPORTED)
-            | (pl.col("content_origin_normalized") == NOT_REPORTED)
-        )
-        .then(pl.lit("partial"))
-        .otherwise(pl.lit("exact"))
+        .otherwise(_classification_status_from_dimensions())
         .alias("classification_status")
     )
     return enriched.with_columns([
@@ -254,10 +268,26 @@ def ensure_store_dimensions(
     frame: pl.LazyFrame,
     columns: set[str] | None = None,
 ) -> pl.LazyFrame:
-    """Return canonical dimensions and replace any obsolete Plan-era taxonomy."""
+    """Return canonical dimensions without reinterpreting resolved business data."""
     columns = columns or set(frame.collect_schema().names())
-    if set(DIMENSION_COLUMNS).issubset(columns) and "plan_normalized" not in columns:
-        return frame
+    if set(BUSINESS_DIMENSION_COLUMNS).issubset(columns):
+        if "plan_normalized" in columns:
+            frame = frame.drop("plan_normalized")
+
+        frame = frame.with_columns([
+            pl.when(
+                pl.col(column).is_null()
+                | (pl.col(column).cast(pl.Utf8, strict=False).str.strip_chars() == "")
+            )
+            .then(pl.lit(NOT_REPORTED))
+            .otherwise(pl.col(column).cast(pl.Utf8, strict=False).str.strip_chars())
+            .alias(column)
+            for column in BUSINESS_DIMENSION_COLUMNS
+        ])
+        return frame.with_columns([
+            _classification_status_from_dimensions(),
+            pl.col("dsp_normalized").alias("store_report_label"),
+        ])
     return add_store_dimensions(frame, columns)
 
 

@@ -92,6 +92,12 @@ para no perder filas de `Youtube Channels` que no traen `Track Title`. Las hojas
 marcadas como transferencia, por ejemplo ONErpm `Shares In & Out`, no entran en
 la generacion aunque coincidan por titulo o artista.
 
+Ambos criterios tambien deben usar exactamente la misma clasificacion de
+DSP/Store, monetizacion y origen. El criterio de periodo solamente decide que
+filas entran por fecha. Si un flujo reduce columnas antes de agrupar, debe
+preservar las dimensiones normalizadas existentes; la falta de
+`store_report_label` o `classification_status` no autoriza a reinterpretarlas.
+
 La hoja `Resumen por tema` usa una fila por `catalog_key` resuelto. No agrupa por
 Store/DSP, territorio, uso ni tipo de contenido, porque esas son dimensiones de
 analisis y no identidades distintas. Los identificadores originales se conservan
@@ -183,7 +189,10 @@ las columnas canonicas del consolidado:
 - `dsp_normalized`;
 - `monetization_normalized`;
 - `content_origin_normalized`;
-- `store_report_label` como etiqueta humana.
+
+`store_report_label` y `classification_status` son metadatos derivados, no
+requisitos para considerar valida una clasificacion ya resuelta. Pueden
+reconstruirse desde las dimensiones canonicas sin volver a leer evidencia raw.
 
 `Plan` no es una dimension visible ni una clave de agrupacion. Los planes
 Individual, Family, Duo, Student y Bundle se informan como monetizacion

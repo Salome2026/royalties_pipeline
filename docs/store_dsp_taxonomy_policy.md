@@ -33,6 +33,28 @@ consumidores del mart, pero su valor es solamente el nombre limpio de
 `DSP / Store`. No concatena monetizacion, origen ni ningun plan, y nunca debe
 aparecer como una segunda columna visible junto a `DSP / Store`.
 
+## Capas del contrato
+
+La taxonomia tiene tres capas que no se pueden confundir:
+
+1. `Evidencia cruda`: columnas originales de cada distribuidora. Solo esta capa
+   permite interpretar por primera vez una fila.
+2. `Dimensiones de negocio`: `dsp_normalized`, `monetization_normalized` y
+   `content_origin_normalized`. Cuando las tres existen, la clasificacion ya
+   esta resuelta y debe conservarse sin reinterpretacion.
+3. `Metadatos derivados`: `classification_status` y `store_report_label`. Se
+   pueden reconstruir desde las dimensiones de negocio sin volver a consultar
+   ni inferir evidencia cruda.
+
+La ausencia de un metadato derivado nunca invalida las dimensiones de negocio
+ni habilita una nueva clasificacion. Si un reporte proyecta un subconjunto de
+columnas y elimina `store_report_label`, el alias se vuelve a derivar desde
+`dsp_normalized`; no se recalculan DSP, monetizacion u origen.
+
+Solo se interpreta desde evidencia cruda cuando falta al menos una de las tres
+dimensiones de negocio. Esa interpretacion ocurre en la taxonomia central antes
+de que un reporte reduzca columnas, agrupe o presente resultados.
+
 ## Valores canonicos
 
 ### Monetizacion
@@ -214,6 +236,8 @@ UGC sin otra columna que lo demuestre.
 - El detalle tampoco muestra una columna normalizada `Plan`.
 - Ningun reporte implementa diccionarios propios. Toda clasificacion sale de la
   taxonomia central.
+- Los criterios `statement_period` y `transaction_month` cambian el corte
+  temporal, pero no la clasificacion de una misma fila.
 
 ## Validaciones obligatorias
 
@@ -226,11 +250,15 @@ Antes de publicar un cambio de taxonomia:
 5. YouTube debe conservar monetizacion y origen como dimensiones independientes;
 6. TikTok/Meta partner-provided no puede convertirse automaticamente en UGC;
 7. Altafonte legacy debe continuar sin granularidad inventada;
-8. reportes Excel y dashboard deben producir la misma agrupacion para el mismo alcance.
+8. reportes Excel y dashboard deben producir la misma agrupacion para el mismo alcance;
+9. una proyeccion que conserve las tres dimensiones de negocio y quite aliases
+   o evidencia cruda debe mantener la clasificacion original;
+10. se deben inspeccionar los valores agrupados, no solamente encabezados,
+    importes y unidades.
 
-## Alcance de implementacion posterior
+## Implementacion vigente
 
-Este documento gobierna la siguiente etapa, pero no la ejecuta. La aplicacion
-posterior debe actualizar la taxonomia central, sus pruebas, los marts derivados,
-los reportes y el dashboard en ese orden. No se crean rutas de compatibilidad ni
-reglas paralelas por reporte.
+La implementacion unica vive en `scripts/lib/store_taxonomy.py`. Los marts,
+reportes y dashboards deben consumirla sin reglas paralelas ni rutas de
+compatibilidad. Un cambio de clasificacion se implementa primero aqui, luego en
+sus pruebas rectoras y finalmente se propaga a los artefactos derivados.

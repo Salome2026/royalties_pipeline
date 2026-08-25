@@ -15,6 +15,7 @@ from lib.store_taxonomy import (  # noqa: E402
     NOT_REPORTED,
     add_store_dimensions,
     build_normalized_store_summary,
+    ensure_store_dimensions,
 )
 
 
@@ -195,7 +196,71 @@ CASES = [
 ]
 
 
+def validate_reduced_preclassified_frame() -> None:
+    frame = pl.DataFrame([
+        {
+            "source": "fuga",
+            "amount_usd": 10.0,
+            "units": 100,
+            "dsp_normalized": "YouTube",
+            "monetization_normalized": "Ads",
+            "content_origin_normalized": "Video / Channel",
+            "classification_status": "exact",
+            "plan_normalized": "Individual",
+        },
+        {
+            "source": "onerpm",
+            "amount_usd": 20.0,
+            "units": 200,
+            "dsp_normalized": "Spotify",
+            "monetization_normalized": "Premium",
+            "content_origin_normalized": "Audio / Master",
+            "classification_status": None,
+            "plan_normalized": "Family",
+        },
+    ])
+    normalized = ensure_store_dimensions(frame.lazy(), set(frame.columns)).collect()
+
+    if "plan_normalized" in normalized.columns:
+        raise AssertionError("Una proyeccion reducida debe eliminar Plan sin reclasificar")
+    actual = normalized.select([
+        "dsp_normalized",
+        "monetization_normalized",
+        "content_origin_normalized",
+        "classification_status",
+        "store_report_label",
+    ]).rows()
+    expected = [
+        ("YouTube", "Ads", "Video / Channel", "exact", "YouTube"),
+        ("Spotify", "Premium", "Audio / Master", "exact", "Spotify"),
+    ]
+    if actual != expected:
+        raise AssertionError(f"La proyeccion reducida reinterpretó dimensiones: {actual}")
+
+    summary = build_normalized_store_summary(
+        frame.lazy(),
+        set(frame.columns),
+        include_rows=True,
+    ).collect()
+    summary_keys = set(summary.select([
+        "source",
+        "dsp_normalized",
+        "monetization_normalized",
+        "content_origin_normalized",
+    ]).rows())
+    expected_keys = {
+        ("fuga", "YouTube", "Ads", "Video / Channel"),
+        ("onerpm", "Spotify", "Premium", "Audio / Master"),
+    }
+    if summary_keys != expected_keys:
+        raise AssertionError(f"El resumen reinterpretó dimensiones resueltas: {summary_keys}")
+    if abs(float(summary["amount_usd"].sum()) - 30.0) > 1e-9:
+        raise AssertionError("El resumen reducido cambio el total de ingresos")
+
+
 def main() -> None:
+    validate_reduced_preclassified_frame()
+
     rows = []
     for index, case in enumerate(CASES, start=1):
         row = dict(case)
@@ -234,7 +299,10 @@ def main() -> None:
     if abs(float(summary["units"].sum()) - float(classified["units"].sum())) > 1e-9:
         raise AssertionError("El resumen cambio el total de unidades")
 
-    print(f"OK: {len(CASES)} casos rectores y reconciliacion sin Plan.")
+    print(
+        f"OK: {len(CASES)} casos rectores, proyeccion reducida "
+        "y reconciliacion sin Plan."
+    )
 
 
 if __name__ == "__main__":

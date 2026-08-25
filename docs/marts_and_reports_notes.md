@@ -95,6 +95,11 @@ sin modificar los campos originales ni los importes:
 - `classification_status`
 - `store_report_label`
 
+Las primeras tres columnas son dimensiones de negocio. Las dos ultimas son
+metadatos derivados: `classification_status` describe la precision y
+`store_report_label` replica el nombre limpio del DSP. La ausencia de un
+metadato no permite recalcular dimensiones de negocio ya presentes.
+
 Si `plan_normalized` aparece en un mart ya construido, es un campo obsoleto que
 debe desaparecer en la proxima reconstruccion. Desde esta policy ningun
 consumidor puede presentarlo ni usarlo para agrupar; no se mantiene una ruta de
@@ -125,6 +130,12 @@ campos originales de Store, modalidad, uso y subtipo de plan se conservan en el
 detalle de auditoria cuando hagan falta, pero no gobiernan el resumen
 normalizado. Individual, Family, Duo, Student y Bundle se resumen como
 monetizacion `Premium` y no multiplican filas.
+
+Un consumidor puede proyectar un frame reducido para agrupar o exportar. Si el
+frame conserva `dsp_normalized`, `monetization_normalized` y
+`content_origin_normalized`, esas clasificaciones son definitivas. Los aliases
+o estados faltantes se derivan de ellas; no se vuelve a interpretar desde un
+frame que ya no contiene la evidencia cruda completa.
 
 La implementacion compartida vive en
 `scripts/lib/store_taxonomy.py::build_normalized_store_summary`. Los reportes
