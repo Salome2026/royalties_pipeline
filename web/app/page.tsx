@@ -6,6 +6,14 @@ import { FileSpreadsheet, FileText } from "lucide-react";
 import { PeriodControl } from "./components/PeriodControl";
 import { BookingDashboard, type BookingAgendaEvent } from "./components/BookingDashboard";
 import { VpoHome } from "./components/VpoHome";
+import { useSession } from "./shared/auth/useSession";
+import type { ModulePermission as EmployeePermission } from "./shared/auth/types";
+import {
+  canShowView,
+  moduleForBookingMode,
+  type BookingWorkspaceMode,
+  type View,
+} from "./shared/navigation/views";
 import {
   isResolvedPeriodInvalid,
   resolvePeriod,
@@ -20,38 +28,7 @@ type Message = {
   text: string;
 };
 
-type WebUser = {
-  username: string;
-  role: "viewer" | "editor" | "admin";
-  canEdit: boolean;
-  mustChangePassword?: boolean;
-};
-
-type View = "menu" | "statement" | "royalties" | "custom-reports" | "participation" | "digital-income" | "royalties-dashboard" | "source-monitor" | "catalog" | "distributor-config" | "booking" | "booking-lab" | "booking-summary" | "commissions" | "booking-artist-summary" | "artist-finance" | "finance-movements" | "artists" | "employees" | "caserio";
-type BookingWorkspaceMode = "individual" | "shared";
 type BookingSurface = "dashboard" | "settlement";
-
-const VIEW_MODULE_KEYS: Partial<Record<View, string>> = {
-  statement: "statement_reports",
-  royalties: "royalty_reports",
-  "custom-reports": "custom_reports",
-  participation: "participation",
-  "digital-income": "digital_income",
-  "royalties-dashboard": "royalties_dashboard",
-  "source-monitor": "source_monitor",
-  "distributor-config": "distributor_config",
-  booking: "booking",
-  "booking-lab": "booking_lab",
-  "booking-summary": "booking_summary",
-  commissions: "booking_commissions",
-  "booking-artist-summary": "booking_detail",
-  "artist-finance": "artist_finance",
-  "finance-movements": "finance_movements",
-  artists: "artists",
-  employees: "employees",
-  caserio: "caserio",
-  catalog: "catalog",
-};
 
 type ParticipationItem = {
   source: string;
@@ -377,17 +354,6 @@ type BookingArtistForm = {
   address: string;
   notes: string;
   active: boolean;
-};
-
-type EmployeePermission = {
-  module_key: string;
-  can_access: boolean;
-  can_create: boolean;
-  can_view_history: boolean;
-  can_edit: boolean;
-  can_approve: boolean;
-  scope: Array<Record<string, string>>;
-  notes: string | null;
 };
 
 type EmployeeUser = {
@@ -2354,13 +2320,23 @@ function applyResolvedPeriod(
 }
 
 export default function Home() {
-  const [authenticated, setAuthenticated] = useState(false);
-  const [checkingSession, setCheckingSession] = useState(true);
+  const {
+    authenticated,
+    checkingSession,
+    currentUser,
+    moduleAccess: currentUserModuleAccess,
+    permissions: currentUserPermissions,
+    login: authenticate,
+    logout: endSession,
+    changePassword,
+    canAccessModule,
+    currentModulePermission,
+    canCreateModule,
+    canEditModule,
+    canApproveModule,
+  } = useSession();
   const [view, setView] = useState<View>("menu");
   const [bookingWorkspaceMode, setBookingWorkspaceMode] = useState<BookingWorkspaceMode>("individual");
-  const [currentUser, setCurrentUser] = useState<WebUser | null>(null);
-  const [currentUserModuleAccess, setCurrentUserModuleAccess] = useState<string[] | null>(null);
-  const [currentUserPermissions, setCurrentUserPermissions] = useState<EmployeePermission[] | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
@@ -2601,28 +2577,6 @@ export default function Home() {
     receiptRefs: "",
     notes: "",
   });
-
-  useEffect(() => {
-    fetch("/api/session")
-      .then((response) => response.json())
-      .then((data) => {
-        setAuthenticated(Boolean(data.authenticated));
-        setCurrentUser(data.user || null);
-      })
-      .catch(() => {
-        setAuthenticated(false);
-        setCurrentUser(null);
-      })
-      .finally(() => setCheckingSession(false));
-  }, []);
-
-  useEffect(() => {
-    if (authenticated && currentUser) {
-      loadCurrentUserPermissions();
-    } else {
-      setCurrentUserModuleAccess(null);
-    }
-  }, [authenticated, currentUser?.username, currentUser?.role]);
 
   useEffect(() => {
     if (!authenticated || view !== "booking" || currentUserModuleAccess === null) return;
@@ -3497,51 +3451,12 @@ export default function Home() {
     ].some((value) => String(value || "").toLowerCase().includes(query)));
   }, [employeeRecords, employeeSearch]);
 
-  function canAccessModule(moduleKey: string) {
-    if (currentUser?.role === "admin") return true;
-    const allowed = currentUserModuleAccess ?? [];
-    return allowed.includes("*") || allowed.includes(moduleKey);
-  }
-
   function canShowMenuView(targetView: View) {
-    if (targetView === "menu") return true;
-    if (targetView === "booking") {
-      return canAccessModule("booking_agenda") || canAccessBookingMode("individual") || canAccessBookingMode("shared");
-    }
-    const moduleKey = VIEW_MODULE_KEYS[targetView];
-    return moduleKey ? canAccessModule(moduleKey) : false;
+    return canShowView(targetView, canAccessModule);
   }
 
   function canAccessBookingMode(mode: BookingWorkspaceMode) {
-    return canAccessModule(mode === "individual" ? "booking" : "composite_booking");
-  }
-
-  function currentModulePermission(moduleKey: string) {
-    if (currentUser?.role === "admin") {
-      return {
-        module_key: moduleKey,
-        can_access: true,
-        can_create: true,
-        can_view_history: true,
-        can_edit: true,
-        can_approve: true,
-        scope: [{ scope_type: "all", scope_ref: "*" }],
-        notes: null,
-      } as EmployeePermission;
-    }
-    return (currentUserPermissions || []).find((permission) => permission.module_key === moduleKey) || null;
-  }
-
-  function canCreateModule(moduleKey: string) {
-    return Boolean(currentModulePermission(moduleKey)?.can_create);
-  }
-
-  function canEditModule(moduleKey: string) {
-    return Boolean(currentModulePermission(moduleKey)?.can_edit);
-  }
-
-  function canApproveModule(moduleKey: string) {
-    return Boolean(currentModulePermission(moduleKey)?.can_approve);
+    return canAccessModule(moduleForBookingMode(mode));
   }
 
   const caserioPreview = useMemo(() => {
@@ -3837,32 +3752,19 @@ export default function Home() {
     event.preventDefault();
     setMessage(null);
     setLoading(true);
-
-    const response = await fetch("/api/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    });
-
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({ error: "No se pudo ingresar." }));
-      setMessage({ type: "error", text: data.error || "No se pudo ingresar." });
+    const result = await authenticate(username, password);
+    if (!result.ok) {
+      setMessage({ type: "error", text: result.error });
       setLoading(false);
       return;
     }
-
-    const data = await response.json();
-    setAuthenticated(true);
-    setCurrentUser(data.user || null);
     setUsername("");
     setPassword("");
     setLoading(false);
   }
 
   async function logout() {
-    await fetch("/api/logout", { method: "POST" });
-    setAuthenticated(false);
-    setCurrentUser(null);
+    await endSession();
     setUsername("");
     setPassword("");
     setCurrentPassword("");
@@ -3882,19 +3784,12 @@ export default function Home() {
       return;
     }
     setLoading(true);
-    const response = await fetch("/api/change-password", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ currentPassword, newPassword }),
-    });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({ error: "No se pudo cambiar la contrasena." }));
-      setMessage({ type: "error", text: data.error || "No se pudo cambiar la contrasena." });
+    const result = await changePassword(currentPassword, newPassword);
+    if (!result.ok) {
+      setMessage({ type: "error", text: result.error });
       setLoading(false);
       return;
     }
-    const data = await response.json();
-    setCurrentUser(data.user || (currentUser ? { ...currentUser, mustChangePassword: false } : null));
     setCurrentPassword("");
     setNewPassword("");
     setNewPasswordConfirm("");
@@ -5844,35 +5739,6 @@ export default function Home() {
       setMessage({ type: "error", text: data.error || "No se pudieron cargar los empleados para comisiones." });
     }
     setCommissionEmployeesLoading(false);
-  }
-
-  async function loadCurrentUserPermissions() {
-    if (!currentUser) {
-      setCurrentUserModuleAccess(null);
-      setCurrentUserPermissions(null);
-      return;
-    }
-    if (currentUser.role === "admin") {
-      setCurrentUserModuleAccess(["*"]);
-      setCurrentUserPermissions(null);
-      return;
-    }
-
-    const response = await fetch("/api/me/permissions", { cache: "no-store" });
-    if (!response.ok) {
-      setCurrentUserModuleAccess([]);
-      setCurrentUserPermissions([]);
-      return;
-    }
-    const data = await response.json();
-    const permissions = (data.permissions || []) as EmployeePermission[];
-    const access = permissions
-      .filter((permission) => permission.can_access)
-      .map((permission) => permission.module_key)
-      .filter((moduleKey) => moduleKey !== "home");
-
-    setCurrentUserPermissions(permissions);
-    setCurrentUserModuleAccess(access);
   }
 
   async function loadCaserioEvents() {

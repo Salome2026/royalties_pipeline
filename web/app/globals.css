@@ -3632,6 +3632,8 @@ main.vpo-home-content {
 
 .login-brand {
   align-items: center;
+  justify-content: center;
+  width: 100%;
 }
 
 .login-logo {
