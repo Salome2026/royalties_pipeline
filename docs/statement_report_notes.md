@@ -85,6 +85,13 @@ La regla comun de generacion reportable aplica antes de agrupar reportes de
 regalias por keywords, reportes personalizados de titulos y variantes nuevas del
 reporte por statement.
 
+La personalizacion porcentual se aplica sobre el neto real despues de la
+distribuidora y produce el unico importe presentable del reporte. El Excel
+detallado, tanto por `statement_period` como por `transaction_month`, muestra
+`Ingresos USD` ya personalizado y no exporta `net_amount`, `net_amount_usd`, el
+porcentaje aplicado ni una segunda cifra previa al ajuste. Esos datos siguen
+disponibles solamente para auditoria interna y control de caja.
+
 En reportes de regalias por keyword, el criterio `statement_period` y el criterio
 `transaction_month` deben usar la misma definicion de generacion reportable. La
 busqueda en crudos incluye campos de video como `Video Title` y `Channel Name`

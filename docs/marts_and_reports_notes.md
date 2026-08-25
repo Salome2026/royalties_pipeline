@@ -265,10 +265,21 @@ este orden:
 5. estado activo/inactivo y `include_in_reports` del catalogo;
 6. personalizacion porcentual vigente de reportes, cuando este habilitada.
 
-El PDF ejecutivo muestra solamente el neto reportable final en USD. No expone
-bruto, comision de la distribuidora, porcentaje de ajuste VPO ni columnas
-tecnicas. Incluye total, periodo efectivo, unidades, catalogo con ingresos,
-alcance, evolucion mensual, principales plataformas y principales temas.
+Todo formato entregable muestra solamente el neto reportable final en USD. Esto
+incluye el PDF ejecutivo y todas las hojas del Excel detallado. Ninguna salida
+presentable expone bruto, neto real anterior al ajuste, comision de la
+distribuidora, porcentaje de ajuste VPO ni otra columna que permita comparar el
+importe anterior con el final.
+
+La hoja `detalle` del Excel puede conservar trazabilidad descriptiva, moneda de
+origen y tipo de cambio, pero su unica columna economica reportable es
+`amount_usd`, presentada como `Ingresos USD`. `net_amount`, `net_amount_usd` y
+otros importes internos permanecen en los marts para auditoria y en las vistas
+internas que correspondan; nunca se exportan en el reporte de regalias.
+
+El PDF ejecutivo incluye total, periodo efectivo, unidades, catalogo con
+ingresos, alcance, evolucion mensual, principales plataformas y principales
+temas.
 
 Reglas de seleccion:
 

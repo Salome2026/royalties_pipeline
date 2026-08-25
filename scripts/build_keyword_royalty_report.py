@@ -158,7 +158,6 @@ DISPLAY_HEADERS = {
     "revenue_basis": "Base ingreso",
     "match_text": "Texto coincidente",
     "statement_period": "Periodo statement",
-    "net_amount": "Importe neto original",
     "currency_original": "Moneda original",
     "fx_to_usd_rate": "FX USD",
     "store_name": "Tienda",
@@ -167,6 +166,58 @@ DISPLAY_HEADERS = {
     "hoja": "Hoja",
     "contenido": "Contenido",
     "resultado": "Resultado",
+}
+
+PUBLIC_DETAIL_COLUMNS = [
+    "statement_period",
+    "transaction_month",
+    "artist_statement_style",
+    "track_statement_style",
+    "report_code",
+    "report_code_source",
+    "asset_isrc",
+    "report_territory",
+    "dsp_normalized",
+    "monetization_normalized",
+    "content_origin_normalized",
+    "classification_status",
+    "store_raw",
+    "usage_type",
+    "amount_usd",
+    "currency_original",
+    "fx_to_usd_rate",
+    "units",
+    "territory",
+    "statement_file_name",
+    "match_text",
+    "source",
+    "account",
+]
+
+STATEMENT_DETAIL_METADATA_COLUMNS = [
+    "catalog_key",
+    "catalog_business_status",
+]
+
+DERIVED_DETAIL_COLUMNS = {
+    "match_text",
+    "store",
+    "store_raw",
+    "usage_type",
+    "usage_raw",
+    "report_code",
+    "report_code_source",
+    "report_territory",
+    "catalog_key",
+    "catalog_business_status",
+}
+
+PRIVATE_REPORT_AMOUNT_COLUMNS = {
+    "gross_amount",
+    "gross_amount_usd",
+    "net_amount",
+    "net_amount_usd",
+    "policy_report_net_adjustment_pct",
 }
 
 PERIOD_BASIS_LABELS = {
@@ -767,6 +818,28 @@ def display_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
     return dataframe.rename(columns={col: DISPLAY_HEADERS.get(col, col) for col in dataframe.columns})
 
 
+def public_detail_columns(
+    source_columns: set[str],
+    *,
+    include_statement_metadata: bool = False,
+) -> list[str]:
+    wanted = list(PUBLIC_DETAIL_COLUMNS)
+    if include_statement_metadata:
+        wanted.extend(STATEMENT_DETAIL_METADATA_COLUMNS)
+    selected = [
+        column
+        for column in wanted
+        if column in source_columns or column in DERIVED_DETAIL_COLUMNS
+    ]
+    exposed_private = PRIVATE_REPORT_AMOUNT_COLUMNS.intersection(selected)
+    if exposed_private:
+        raise RuntimeError(
+            "El detalle publico intenta exponer importes internos: "
+            + ", ".join(sorted(exposed_private))
+        )
+    return selected
+
+
 def prepare_sheet(ws):
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
@@ -779,7 +852,6 @@ def prepare_sheet(ws):
     amount_headers = {
         "amount_usd",
         "song_level_amount_usd",
-        "net_amount",
         "Ingresos USD",
         "Importe neto",
     }
@@ -1039,37 +1111,10 @@ def build_report_tables(
             .pipe(lambda frame: apply_report_net_personalization(frame))
             .filter(raw_filter)
             .filter(exclude_isrc_expr(standardized_cols, excluded_isrcs))
-            .select([
-                col for col in [
-                    "statement_period",
-                    "transaction_month",
-                    "artist_statement_style",
-                    "track_statement_style",
-                    "report_code",
-                    "report_code_source",
-                    "asset_isrc",
-                    "report_territory",
-                    "dsp_normalized",
-                    "monetization_normalized",
-                    "content_origin_normalized",
-                    "classification_status",
-                    "store_raw",
-                    "usage_type",
-                    "amount_usd",
-                    "net_amount",
-                    "currency_original",
-                    "fx_to_usd_rate",
-                    "units",
-                    "territory",
-                    "statement_file_name",
-                    "match_text",
-                    "catalog_key",
-                    "catalog_business_status",
-                    "source",
-                    "account",
-                ]
-                if col in standardized_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory", "catalog_key", "catalog_business_status"}
-            ])
+            .select(public_detail_columns(
+                standardized_cols,
+                include_statement_metadata=True,
+            ))
             .limit(raw_limit)
         )
 
@@ -1262,35 +1307,7 @@ def build_report_tables(
 
         raw_sample = (
             raw_matches_lf
-            .select([
-                col for col in [
-                    "statement_period",
-                    "transaction_month",
-                    "artist_statement_style",
-                    "track_statement_style",
-                    "report_code",
-                    "report_code_source",
-                    "asset_isrc",
-                    "report_territory",
-                    "dsp_normalized",
-                    "monetization_normalized",
-                    "content_origin_normalized",
-                    "classification_status",
-                    "store_raw",
-                    "usage_type",
-                    "amount_usd",
-                    "net_amount",
-                    "currency_original",
-                    "fx_to_usd_rate",
-                    "units",
-                    "territory",
-                    "statement_file_name",
-                    "match_text",
-                    "source",
-                    "account",
-                ]
-                if col in raw_cols or col in {"match_text", "store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory"}
-            ])
+            .select(public_detail_columns(raw_cols))
             .limit(raw_limit)
             .collect()
         )
