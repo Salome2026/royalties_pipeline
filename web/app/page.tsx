@@ -7815,7 +7815,7 @@ export default function Home() {
   }
 
   return (
-    <div className={`shell ${view === "menu" ? "home-shell" : ""}`}>
+    <div className={`shell ${view === "menu" ? "home-shell" : ""} ${view === "employees" ? "employee-shell" : ""}`}>
       {view !== "menu" && <header className="topbar">
         <div className="brand" aria-label="VPO Corp">
           <Image className="topbar-logo" src="/vpo-logo.png" alt="VPO Corp" width={2539} height={1298} priority />
@@ -7829,7 +7829,7 @@ export default function Home() {
         </div>
       </header>}
 
-      <main className={view === "menu" ? "home-main" : view === "booking" && bookingSurface === "dashboard" ? "booking-main" : undefined}>
+      <main className={view === "menu" ? "home-main" : view === "booking" && bookingSurface === "dashboard" ? "booking-main" : view === "employees" ? "employee-main" : undefined}>
         {message && <div className={`message ${message.type === "error" ? "error" : ""}`}>{message.text}</div>}
 
         {view === "menu" && (

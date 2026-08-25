@@ -1,6 +1,7 @@
 "use client";
 
 import type { FormEvent } from "react";
+import { BadgeDollarSign, Contact, KeyRound, Save, ShieldCheck, UserRound, X } from "lucide-react";
 import { PermissionsEditor } from "./PermissionsEditor";
 import { DEFAULT_EMPLOYEE_FUNCTIONS, type PermissionLevel } from "./model";
 import type { EmployeeFormState, EmployeeModuleDefinition } from "./types";
@@ -42,107 +43,138 @@ export function EmployeeForm({
   }
 
   return (
-    <form className="panel" onSubmit={submit}>
-      <div className="section-heading compact">
-        <div>
-          <h1>{editingId ? `Editando empleado #${editingId}` : "ABM de empleados"}</h1>
-          <p>Equipo VPO, funciones y base para permisos por modulo.</p>
+    <form className="employee-editor" onSubmit={submit}>
+      <header className="employee-editor-header">
+        <div className="employee-editor-title">
+          <span className="employee-editor-icon"><UserRound size={19} /></span>
+          <div>
+            <small>{editingId ? `Empleado #${editingId}` : "Nueva ficha"}</small>
+            <h2>{editingId ? form.displayName || "Editar empleado" : "Nuevo empleado"}</h2>
+          </div>
         </div>
-        {editingId && <button type="button" onClick={onCancel}>Cancelar</button>}
-      </div>
+        {editingId && <button className="employees-icon-button" type="button" onClick={onCancel} title="Cancelar edicion" aria-label="Cancelar edicion"><X size={17} /></button>}
+      </header>
 
-      <label htmlFor="employee_display_name">Nombre</label>
-      <input id="employee_display_name" value={form.displayName} onChange={(event) => onFieldChange("displayName", event.target.value)} required />
-
-      <div className="row">
-        <div>
-          <label htmlFor="employee_cuit">CUIT / CUIL</label>
-          <input id="employee_cuit" value={form.cuit} onChange={(event) => onFieldChange("cuit", event.target.value)} />
-        </div>
-        <div>
-          <label htmlFor="employee_phone">Telefono</label>
-          <input id="employee_phone" value={form.phone} onChange={(event) => onFieldChange("phone", event.target.value)} />
-        </div>
-      </div>
-
-      <label htmlFor="employee_email">Email</label>
-      <input id="employee_email" type="email" value={form.email} onChange={(event) => onFieldChange("email", event.target.value)} />
-
-      <label htmlFor="employee_address">Domicilio</label>
-      <input id="employee_address" value={form.address} onChange={(event) => onFieldChange("address", event.target.value)} />
-
-      <div className="section-heading compact"><div><h2>Funciones</h2><p>Un empleado puede tener mas de una funcion.</p></div></div>
-      <div className="checkbox-grid">
-        {(functionOptions.length ? functionOptions : DEFAULT_EMPLOYEE_FUNCTIONS).map((functionName) => (
-          <label className="checkbox-field" key={functionName}>
-            <input type="checkbox" checked={form.functions.includes(functionName)} onChange={() => onFunctionToggle(functionName)} />
-            {functionName}
-          </label>
-        ))}
-      </div>
-
-      <div className="section-heading compact"><div><h2>Compensacion</h2><p>Esto guarda la condicion pactada. El pago real se carga en Movimientos Financieros.</p></div></div>
-      <div className="row three">
-        <div>
-          <label htmlFor="employee_compensation_type">Modelo</label>
-          <select id="employee_compensation_type" value={form.compensationType} onChange={(event) => onFieldChange("compensationType", event.target.value as EmployeeFormState["compensationType"])}>
-            <option value="none">Sin compensacion fija</option>
-            <option value="salary">Salario mensual</option>
-            <option value="salary_plus_booking_commission">Salario + comision booking</option>
-            <option value="booking_commission_only">Solo comision booking</option>
-          </select>
-        </div>
-        {form.compensationType !== "none" && form.compensationType !== "booking_commission_only" && (
-          <>
-            <div>
-              <label htmlFor="employee_salary_amount">Salario pactado</label>
-              <input id="employee_salary_amount" inputMode="decimal" value={form.salaryAmount} onChange={(event) => onFieldChange("salaryAmount", event.target.value)} placeholder="Importe mensual" />
+      <div className="employee-editor-content">
+        <section className="employee-form-section">
+          <div className="employee-form-section-title"><Contact size={17} /><div><h3>Datos personales</h3><span>Identificacion y contacto</span></div></div>
+          <div className="employee-form-grid employee-form-grid-two">
+            <div className="employee-field employee-field-wide">
+              <label htmlFor="employee_display_name">Nombre</label>
+              <input id="employee_display_name" value={form.displayName} onChange={(event) => onFieldChange("displayName", event.target.value)} required />
             </div>
-            <div>
-              <label htmlFor="employee_salary_currency">Moneda</label>
-              <select id="employee_salary_currency" value={form.salaryCurrency} onChange={(event) => onFieldChange("salaryCurrency", event.target.value as "ARS" | "USD")}>
-                <option value="ARS">ARS</option><option value="USD">USD</option>
+            <div className="employee-field">
+              <label htmlFor="employee_cuit">CUIT / CUIL</label>
+              <input id="employee_cuit" value={form.cuit} onChange={(event) => onFieldChange("cuit", event.target.value)} />
+            </div>
+            <div className="employee-field">
+              <label htmlFor="employee_phone">Telefono</label>
+              <input id="employee_phone" value={form.phone} onChange={(event) => onFieldChange("phone", event.target.value)} />
+            </div>
+            <div className="employee-field">
+              <label htmlFor="employee_email">Email</label>
+              <input id="employee_email" type="email" value={form.email} onChange={(event) => onFieldChange("email", event.target.value)} />
+            </div>
+            <div className="employee-field">
+              <label htmlFor="employee_address">Domicilio</label>
+              <input id="employee_address" value={form.address} onChange={(event) => onFieldChange("address", event.target.value)} />
+            </div>
+          </div>
+        </section>
+
+        <section className="employee-form-section">
+          <div className="employee-form-section-title"><BadgeDollarSign size={17} /><div><h3>Funcion y compensacion</h3><span>Condicion pactada con VPO</span></div></div>
+          <div className="employee-function-grid">
+            {(functionOptions.length ? functionOptions : DEFAULT_EMPLOYEE_FUNCTIONS).map((functionName) => (
+              <label className="employee-choice" key={functionName}>
+                <input type="checkbox" checked={form.functions.includes(functionName)} onChange={() => onFunctionToggle(functionName)} />
+                <span>{functionName}</span>
+              </label>
+            ))}
+          </div>
+          <div className="employee-form-grid employee-form-grid-three">
+            <div className="employee-field">
+              <label htmlFor="employee_compensation_type">Modelo</label>
+              <select id="employee_compensation_type" value={form.compensationType} onChange={(event) => onFieldChange("compensationType", event.target.value as EmployeeFormState["compensationType"])}>
+                <option value="none">Sin compensacion fija</option>
+                <option value="salary">Salario mensual</option>
+                <option value="salary_plus_booking_commission">Salario + comision booking</option>
+                <option value="booking_commission_only">Solo comision booking</option>
               </select>
             </div>
-          </>
-        )}
-      </div>
-      {form.compensationType !== "none" && (
-        <><label htmlFor="employee_salary_notes">Notas de compensacion</label><textarea id="employee_salary_notes" value={form.salaryNotes} onChange={(event) => onFieldChange("salaryNotes", event.target.value)} placeholder="Ej: parte fija, financiacion externa, condicion pendiente" /></>
-      )}
-      <p className="field-help">Las comisiones variables de booking se configuran en la tarjeta Comisiones. Este bloque no crea pagos automaticos.</p>
+            {form.compensationType !== "none" && form.compensationType !== "booking_commission_only" && (
+              <>
+                <div className="employee-field">
+                  <label htmlFor="employee_salary_amount">Salario pactado</label>
+                  <input id="employee_salary_amount" inputMode="decimal" value={form.salaryAmount} onChange={(event) => onFieldChange("salaryAmount", event.target.value)} placeholder="Importe mensual" />
+                </div>
+                <div className="employee-field">
+                  <label htmlFor="employee_salary_currency">Moneda</label>
+                  <select id="employee_salary_currency" value={form.salaryCurrency} onChange={(event) => onFieldChange("salaryCurrency", event.target.value as "ARS" | "USD")}>
+                    <option value="ARS">ARS</option><option value="USD">USD</option>
+                  </select>
+                </div>
+              </>
+            )}
+          </div>
+          {form.compensationType !== "none" && (
+            <div className="employee-field employee-field-spaced">
+              <label htmlFor="employee_salary_notes">Notas de compensacion</label>
+              <textarea id="employee_salary_notes" value={form.salaryNotes} onChange={(event) => onFieldChange("salaryNotes", event.target.value)} placeholder="Condiciones particulares" />
+            </div>
+          )}
+          <p className="employee-inline-note">Los pagos reales se registran en Movimientos Financieros.</p>
+        </section>
 
-      <div className="section-heading compact"><div><h2>Usuario web</h2><p>Este usuario ya es la base operativa de login local/cloud.</p></div></div>
-      <div className="row three">
-        <div><label htmlFor="employee_username">Usuario</label><input id="employee_username" value={form.username} onChange={(event) => onFieldChange("username", event.target.value)} placeholder="salomef" /></div>
-        <div>
-          <label htmlFor="employee_user_role">Rol global</label>
-          <select id="employee_user_role" value={form.userRole} onChange={(event) => onFieldChange("userRole", event.target.value as EmployeeFormState["userRole"])}>
-            <option value="viewer">Viewer</option><option value="editor">Editor</option><option value="admin">Admin</option>
-          </select>
-        </div>
-        <label className="checkbox-field"><input type="checkbox" checked={form.userActive} onChange={(event) => onFieldChange("userActive", event.target.checked)} />Usuario activo</label>
-      </div>
-      <div className="row">
-        <div><label htmlFor="employee_new_password">Establecer contrasena</label><input id="employee_new_password" type="password" value={form.newPassword} onChange={(event) => onFieldChange("newPassword", event.target.value)} placeholder="Dejar vacio para no cambiar" autoComplete="new-password" /></div>
-        <label className="checkbox-field"><input type="checkbox" checked={form.mustChangePassword} onChange={(event) => onFieldChange("mustChangePassword", event.target.checked)} />Pedir cambio al ingresar</label>
-      </div>
-      <p className="field-help">Default inicial: Indyana2026!. Si estableces esa clave, deja marcado pedir cambio.</p>
+        <section className="employee-form-section">
+          <div className="employee-form-section-title"><KeyRound size={17} /><div><h3>Acceso al sistema</h3><span>Usuario y seguridad</span></div></div>
+          <div className="employee-form-grid employee-form-grid-three">
+            <div className="employee-field">
+              <label htmlFor="employee_username">Usuario</label>
+              <input id="employee_username" value={form.username} onChange={(event) => onFieldChange("username", event.target.value)} placeholder="salomef" />
+            </div>
+            <div className="employee-field">
+              <label htmlFor="employee_user_role">Rol global</label>
+              <select id="employee_user_role" value={form.userRole} onChange={(event) => onFieldChange("userRole", event.target.value as EmployeeFormState["userRole"])}>
+                <option value="viewer">Viewer</option><option value="editor">Editor</option><option value="admin">Admin</option>
+              </select>
+            </div>
+            <label className="employee-toggle-field"><input type="checkbox" checked={form.userActive} onChange={(event) => onFieldChange("userActive", event.target.checked)} /><span>Usuario activo</span></label>
+            <div className="employee-field">
+              <label htmlFor="employee_new_password">Establecer contrasena</label>
+              <input id="employee_new_password" type="password" value={form.newPassword} onChange={(event) => onFieldChange("newPassword", event.target.value)} placeholder="Sin cambios" autoComplete="new-password" />
+            </div>
+            <label className="employee-toggle-field"><input type="checkbox" checked={form.mustChangePassword} onChange={(event) => onFieldChange("mustChangePassword", event.target.checked)} /><span>Pedir cambio al ingresar</span></label>
+          </div>
+        </section>
 
-      <div className="section-heading compact"><div><h2>Permisos por modulo</h2><p>Inicio se habilita automaticamente si tiene acceso a algun modulo. Cada permiso se valida en pantalla y servidor.</p></div></div>
-      <PermissionsEditor
-        permissions={form.permissions}
-        modules={modules}
-        artists={artists}
-        onLevelChange={onPermissionLevelChange}
-        onArtistModeChange={onPermissionArtistModeChange}
-        onArtistToggle={onPermissionArtistToggle}
-      />
+        <section className="employee-form-section employee-permissions-section">
+          <div className="employee-form-section-title"><ShieldCheck size={17} /><div><h3>Permisos por modulo</h3><span>Acceso y alcance por artista</span></div></div>
+          <PermissionsEditor
+            permissions={form.permissions}
+            modules={modules}
+            artists={artists}
+            onLevelChange={onPermissionLevelChange}
+            onArtistModeChange={onPermissionArtistModeChange}
+            onArtistToggle={onPermissionArtistToggle}
+          />
+        </section>
 
-      <label htmlFor="employee_notes">Notas</label>
-      <textarea id="employee_notes" value={form.notes} onChange={(event) => onFieldChange("notes", event.target.value)} />
-      <label className="checkbox-field"><input type="checkbox" checked={form.active} onChange={(event) => onFieldChange("active", event.target.checked)} />Activo</label>
-      <button type="submit" disabled={loading}>{loading ? "Guardando..." : editingId ? "Guardar cambios" : "Crear empleado"}</button>
+        <section className="employee-form-section employee-form-section-final">
+          <div className="employee-form-grid employee-form-grid-two">
+            <div className="employee-field employee-field-wide">
+              <label htmlFor="employee_notes">Notas internas</label>
+              <textarea id="employee_notes" value={form.notes} onChange={(event) => onFieldChange("notes", event.target.value)} />
+            </div>
+            <label className="employee-toggle-field"><input type="checkbox" checked={form.active} onChange={(event) => onFieldChange("active", event.target.checked)} /><span>Empleado activo</span></label>
+          </div>
+        </section>
+      </div>
+
+      <footer className="employee-editor-footer">
+        <span>{editingId ? "Los cambios se aplican al guardar." : "La ficha se crea con los permisos seleccionados."}</span>
+        <button className="employee-save-button" type="submit" disabled={loading}><Save size={17} />{loading ? "Guardando..." : editingId ? "Guardar cambios" : "Crear empleado"}</button>
+      </footer>
     </form>
   );
 }

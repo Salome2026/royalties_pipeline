@@ -51,6 +51,7 @@ Implementacion canonica:
 - `web/app/features/employees/model.ts`
 - `web/app/features/employees/types.ts`
 - componentes visuales dentro de `web/app/features/employees/`
+- estilos de la vista dentro de `web/app/features/employees/employees.css`
 
 La normalizacion de alcance por artista vive en
 `web/app/shared/auth/permissions.ts` porque tambien la usan Comisiones y
