@@ -38,13 +38,30 @@ Implementacion canonica:
 `page.tsx` puede consumir esta base, pero no debe volver a implementar esas
 reglas internamente.
 
+## Etapa 2: ABM Empleados
+
+El ABM de empleados es responsable de su carga, edicion, compensacion pactada,
+usuario web y permisos. La pantalla principal solo decide si muestra el modulo.
+
+Implementacion canonica:
+
+- `web/app/features/employees/EmployeesModule.tsx`
+- `web/app/features/employees/useEmployees.ts`
+- `web/app/features/employees/api.ts`
+- `web/app/features/employees/model.ts`
+- `web/app/features/employees/types.ts`
+- componentes visuales dentro de `web/app/features/employees/`
+
+La normalizacion de alcance por artista vive en
+`web/app/shared/auth/permissions.ts` porque tambien la usan Comisiones y
+Movimientos Financieros.
+
 ## Orden de extraccion posterior
 
-1. ABM Empleados.
-2. Artistas y configuracion de comisiones.
-3. Booking y agenda.
-4. Finanzas y documentos financieros.
-5. Regalias, catalogo y distribuidoras.
+1. Artistas y configuracion de comisiones.
+2. Booking y agenda.
+3. Finanzas y documentos financieros.
+4. Regalias, catalogo y distribuidoras.
 
 Cada etapa debe cerrar con compilacion, validacion de permisos y comprobacion de
 que no existen dos implementaciones para la misma responsabilidad.
