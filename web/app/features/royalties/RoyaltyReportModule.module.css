@@ -1,0 +1,395 @@
+.workspace {
+  width: min(100%, 1180px);
+  margin: 0 auto;
+  padding: 36px 30px 48px;
+  color: #f3f7f7;
+}
+
+.intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.intro > div:last-child {
+  min-width: 0;
+}
+
+.intro span {
+  color: #65d9c8;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.intro h1 {
+  margin: 5px 0 7px;
+  color: #ffffff;
+  font-size: 1.8rem;
+  line-height: 1.15;
+}
+
+.intro p {
+  max-width: 720px;
+  margin: 0;
+  color: #aebcc4;
+  line-height: 1.55;
+}
+
+.icon {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
+  place-items: center;
+  border: 1px solid rgba(101, 217, 200, 0.32);
+  border-radius: 8px;
+  background: rgba(20, 144, 128, 0.15);
+  color: #65d9c8;
+}
+
+.surface {
+  overflow: visible;
+  border: 1px solid rgba(164, 188, 199, 0.18);
+  border-radius: 8px;
+  background: rgba(10, 23, 35, 0.83);
+  box-shadow: 0 22px 55px rgba(0, 0, 0, 0.23);
+  backdrop-filter: blur(18px);
+}
+
+.formatBand {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px 22px;
+  border-bottom: 1px solid rgba(164, 188, 199, 0.14);
+}
+
+.formatBand > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.formatBand strong,
+.sectionTitle strong {
+  color: #eef4f5;
+  font-size: 0.86rem;
+}
+
+.formatBand span,
+.sectionTitle span {
+  color: #879ba6;
+  font-size: 0.74rem;
+}
+
+.segmented {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(145px, 1fr));
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(164, 188, 199, 0.16);
+  border-radius: 8px;
+  background: rgba(2, 11, 18, 0.5);
+}
+
+.segmented button {
+  display: inline-flex;
+  width: auto;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #94a5ae;
+  font: inherit;
+  font-size: 0.77rem;
+  font-weight: 800;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.segmented button:hover {
+  background: rgba(255, 255, 255, 0.045);
+  color: #eaf1f2;
+  transform: none;
+}
+
+.segmented button.active {
+  background: rgba(29, 158, 140, 0.2);
+  color: #69dfcd;
+  box-shadow: inset 0 0 0 1px rgba(105, 223, 205, 0.25);
+}
+
+.body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(300px, 0.8fr);
+}
+
+.primaryFields,
+.secondaryFields {
+  display: grid;
+  align-content: start;
+  gap: 20px;
+  padding: 24px 22px 26px;
+}
+
+.secondaryFields {
+  border-left: 1px solid rgba(164, 188, 199, 0.14);
+  background: rgba(3, 13, 21, 0.24);
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  color: #65d9c8;
+}
+
+.sectionTitle > div {
+  display: grid;
+  gap: 4px;
+}
+
+.field,
+.periodField {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.field label,
+.periodField :global(.period-control > label) {
+  color: #dfe8eb;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.field label em {
+  margin-left: 6px;
+  color: #7f95a0;
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.field input,
+.field select {
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 12px;
+  border: 1px solid rgba(164, 188, 199, 0.23);
+  border-radius: 7px;
+  outline: none;
+  background: rgba(3, 12, 20, 0.72);
+  color: #f8fbfb;
+  font: inherit;
+  font-size: 0.84rem;
+}
+
+.field input:focus,
+.field select:focus {
+  border-color: #4fc9b6;
+  box-shadow: 0 0 0 3px rgba(79, 201, 182, 0.13);
+}
+
+.field select:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.field small,
+.periodField :global(.field-help) {
+  margin: 0;
+  color: #7f95a0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.periodField :global(.period-trigger) {
+  border-color: rgba(164, 188, 199, 0.23);
+  background: rgba(3, 12, 20, 0.72);
+  color: #f8fbfb;
+}
+
+.periodField :global(.period-trigger strong) {
+  color: #f8fbfb;
+}
+
+.periodField :global(.period-trigger:hover) {
+  border-color: #4fc9b6;
+  background: rgba(8, 27, 36, 0.92);
+}
+
+.periodField :global(.period-popover) {
+  border-color: rgba(164, 188, 199, 0.28);
+  background: #101e2a;
+  color: #edf4f5;
+  box-shadow: 0 22px 45px rgba(0, 0, 0, 0.4);
+}
+
+.periodField :global(.period-popover button),
+.periodField :global(.period-popover select) {
+  border-color: rgba(164, 188, 199, 0.2);
+  background: rgba(3, 12, 20, 0.74);
+  color: #dce7e9;
+}
+
+.periodField :global(.period-popover button:hover),
+.periodField :global(.period-popover button.active) {
+  border-color: rgba(101, 217, 200, 0.42);
+  background: rgba(29, 158, 140, 0.17);
+  color: #69dfcd;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px 22px;
+  border-top: 1px solid rgba(164, 188, 199, 0.14);
+  background: rgba(2, 10, 17, 0.48);
+}
+
+.result {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.result strong {
+  color: #dfe8eb;
+  font-size: 0.77rem;
+}
+
+.result span,
+.result a {
+  overflow: hidden;
+  color: #8095a0;
+  font-size: 0.71rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #65d9c8;
+  text-decoration: none;
+}
+
+.actionButtons {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 10px;
+}
+
+.actionButtons button {
+  display: inline-flex;
+  width: auto;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0;
+  padding: 0 16px;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.actionButtons button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.secondaryAction {
+  border: 1px solid rgba(164, 188, 199, 0.22);
+  background: rgba(255, 255, 255, 0.035);
+  color: #dce7e9;
+  box-shadow: none;
+}
+
+.secondaryAction:hover:not(:disabled) {
+  border-color: rgba(101, 217, 200, 0.38);
+  background: rgba(101, 217, 200, 0.08);
+  color: #69dfcd;
+  transform: none;
+}
+
+.primaryAction {
+  border: 1px solid rgba(105, 235, 211, 0.2);
+  background: #168c7c;
+  color: #ffffff;
+  box-shadow: 0 10px 24px rgba(4, 117, 102, 0.24);
+}
+
+.primaryAction:hover:not(:disabled) {
+  background: #1ca38f;
+}
+
+@media (max-width: 880px) {
+  .formatBand {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .body {
+    grid-template-columns: 1fr;
+  }
+
+  .secondaryFields {
+    border-top: 1px solid rgba(164, 188, 199, 0.14);
+    border-left: 0;
+  }
+}
+
+@media (max-width: 620px) {
+  .workspace {
+    padding: 24px 16px 36px;
+  }
+
+  .intro {
+    gap: 12px;
+  }
+
+  .intro h1 {
+    font-size: 1.45rem;
+  }
+
+  .formatBand,
+  .primaryFields,
+  .secondaryFields,
+  .actions {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
+
+  .segmented {
+    grid-template-columns: 1fr;
+  }
+
+  .actions,
+  .actionButtons {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .actionButtons button {
+    width: 100%;
+  }
+
+  .periodField :global(.period-popover) {
+    width: min(320px, calc(100dvw - 72px));
+  }
+}

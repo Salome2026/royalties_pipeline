@@ -57,12 +57,64 @@ La normalizacion de alcance por artista vive en
 `web/app/shared/auth/permissions.ts` porque tambien la usan Comisiones y
 Movimientos Financieros.
 
+## Etapa 3: marco visual y navegacion
+
+La navegacion visible, el modulo de permisos y la presentacion de cada vista
+salen de un unico registro. Una tarjeta no puede definir por separado su nombre,
+su icono y su clave de permiso.
+
+Implementacion canonica:
+
+- `web/app/components/VpoAppFrame.tsx`
+- `web/app/components/VpoHome.tsx`
+- `web/app/components/vpo-app-frame.css`
+- `web/app/shared/navigation/views.ts`
+
+Los modulos pueden tener navegacion interna, pero no deben crear una segunda
+barra lateral global. Booking usa una barra de herramientas propia dentro del
+marco comun.
+
+## Etapa 4: Reporte por statement
+
+El Reporte por statement es responsable de sus opciones, estado de generacion,
+descarga y presentacion. La ruta productiva y el motor de negocio no se duplican.
+
+Implementacion canonica:
+
+- `web/app/features/statements/StatementReportModule.tsx`
+- `web/app/features/statements/StatementReportModule.module.css`
+- `web/app/features/statements/api.ts`
+
+## Etapa 5: Reporte de regalias
+
+La tarjeta Reporte de regalias conserva una sola entrada con tres salidas:
+Excel detallado, PDF ejecutivo y Google Sheet. El modulo es responsable de sus
+filtros, periodo, estado y descarga; los calculos y policies siguen viviendo en
+el backend productivo y en los documentos rectores de catalogo/reportes.
+
+Implementacion canonica:
+
+- `web/app/features/royalties/RoyaltyReportModule.tsx`
+- `web/app/features/royalties/RoyaltyReportModule.module.css`
+- `web/app/features/royalties/api.ts`
+
+Reglas de frontera:
+
+- usa `PeriodControl` con perfil `monthly_report`;
+- conserva `transaction_month` y `statement_period` como criterios distintos;
+- no interpreta marts, catalogo, taxonomia ni ajustes porcentuales en frontend;
+- Excel mantiene busqueda obligatoria;
+- PDF permite busqueda vacia y alcance por distribuidora/cuenta;
+- no queda una implementacion paralela en `page.tsx`.
+
 ## Orden de extraccion posterior
 
-1. Artistas y configuracion de comisiones.
-2. Booking y agenda.
-3. Finanzas y documentos financieros.
-4. Regalias, catalogo y distribuidoras.
+1. Reportes personalizados.
+2. Ingresos digitales y Participacion.
+3. Catalogo y distribuidoras.
+4. Artistas y configuracion de comisiones.
+5. Booking y agenda restantes.
+6. Finanzas y documentos financieros.
 
 Cada etapa debe cerrar con compilacion, validacion de permisos y comprobacion de
 que no existen dos implementaciones para la misma responsabilidad.

@@ -1,13 +1,13 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
-import { FileSpreadsheet, FileText } from "lucide-react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { PeriodControl } from "./components/PeriodControl";
 import { BookingDashboard, type BookingAgendaEvent } from "./components/BookingDashboard";
 import { VpoHome } from "./components/VpoHome";
 import { VpoAppFrame } from "./components/VpoAppFrame";
 import { EmployeesModule } from "./features/employees/EmployeesModule";
+import { RoyaltyReportModule } from "./features/royalties/RoyaltyReportModule";
 import { StatementReportModule } from "./features/statements/StatementReportModule";
 import {
   employeeCompensationLabels,
@@ -123,19 +123,6 @@ type CustomReportOptions = {
   templates: CustomReportTemplate[];
   sources: string[];
   source_accounts: CustomReportSourceAccount[];
-};
-
-type RoyaltyReportOutput = "excel" | "executive_pdf";
-
-type RoyaltyReportSourceAccount = {
-  source: string;
-  account: string;
-  display_name: string;
-};
-
-type RoyaltyReportOptions = {
-  sources: string[];
-  source_accounts: RoyaltyReportSourceAccount[];
 };
 
 type CustomReportSavedState = {
@@ -2254,16 +2241,6 @@ export default function Home() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
-  const [keywords, setKeywords] = useState("");
-  const [startMonth, setStartMonth] = useState("");
-  const [endMonth, setEndMonth] = useState("");
-  const [periodBasis, setPeriodBasis] = useState("transaction_month");
-  const [mode, setMode] = useState("any");
-  const [rawLimit, setRawLimit] = useState("5000");
-  const [royaltyReportOutput, setRoyaltyReportOutput] = useState<RoyaltyReportOutput>("excel");
-  const [royaltyReportOptions, setRoyaltyReportOptions] = useState<RoyaltyReportOptions | null>(null);
-  const [royaltyReportSource, setRoyaltyReportSource] = useState("");
-  const [royaltyReportAccount, setRoyaltyReportAccount] = useState("");
   const [customReportOptions, setCustomReportOptions] = useState<CustomReportOptions | null>(null);
   const [customReportTemplateKey, setCustomReportTemplateKey] = useState("los_anormales");
   const [customReportTitle, setCustomReportTitle] = useState("Regalias Los Anormales");
@@ -2275,11 +2252,9 @@ export default function Home() {
   const [customReportFlags, setCustomReportFlags] = useState<Record<string, boolean>>({});
   const [customReportLoading, setCustomReportLoading] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
   const [participationLoading, setParticipationLoading] = useState(false);
   const [message, setMessage] = useState<Message | null>(null);
   const [lastFile, setLastFile] = useState("");
-  const [lastSheetUrl, setLastSheetUrl] = useState("");
   const [participation, setParticipation] = useState<ParticipationData | null>(null);
   const [participationPreset, setParticipationPreset] = useState("last_year");
   const [participationStartMonth, setParticipationStartMonth] = useState("");
@@ -2496,12 +2471,6 @@ export default function Home() {
   }, [authenticated, view]);
 
   useEffect(() => {
-    if (authenticated && view === "royalties" && !royaltyReportOptions) {
-      loadRoyaltyReportOptions();
-    }
-  }, [authenticated, view, royaltyReportOptions]);
-
-  useEffect(() => {
     if (authenticated && view === "catalog") {
       loadCatalog();
     }
@@ -2665,11 +2634,6 @@ export default function Home() {
       };
     });
   }, [financeMovementForm.artist, financeMovementForm.businessArea, financeMovementForm.movementType, currentUser?.role, currentUserPermissions]);
-
-  const royaltyReportAccountOptions = useMemo(() => {
-    if (!royaltyReportOptions || !royaltyReportSource) return [];
-    return royaltyReportOptions.source_accounts.filter((item) => item.source === royaltyReportSource);
-  }, [royaltyReportOptions, royaltyReportSource]);
 
   const digitalIncomeAccountOptions = useMemo(() => {
     if (!digitalIncome) return [];
@@ -3629,7 +3593,6 @@ export default function Home() {
     setView("menu");
     setMessage(null);
     setLastFile("");
-    setLastSheetUrl("");
   }
 
   async function changeOwnPassword(event: FormEvent<HTMLFormElement>) {
@@ -3651,137 +3614,6 @@ export default function Home() {
     setNewPasswordConfirm("");
     setMessage({ type: "ok", text: "Contrasena actualizada correctamente." });
     setLoading(false);
-  }
-
-  function buildPayload(output: "excel" | "google_sheet" | "executive_pdf") {
-    const period = resolvePeriod(selectionFromMonths(startMonth, endMonth), "monthly_report");
-    return {
-      keywords: keywords.split(/[;,]/).map((item) => item.trim()).filter(Boolean),
-      start_month: period.startMonth,
-      end_month: period.endMonth,
-      period_basis: periodBasis,
-      mode,
-      raw_limit: Number(rawLimit) || 0,
-      source: royaltyReportSource || null,
-      account: royaltyReportAccount || null,
-      refresh_cache: false,
-      output,
-    };
-  }
-
-  async function loadRoyaltyReportOptions() {
-    const response = await fetch("/api/report-options", { cache: "no-store" });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({ error: "No se pudieron cargar las distribuidoras." }));
-      setMessage({ type: "error", text: data.error || "No se pudieron cargar las distribuidoras." });
-      return;
-    }
-    setRoyaltyReportOptions(await response.json());
-  }
-
-  function validatePeriod() {
-    const period = resolvePeriod(selectionFromMonths(startMonth, endMonth), "monthly_report");
-    if (isResolvedPeriodInvalid(period)) {
-      setMessage({ type: "error", text: "El periodo desde no puede ser mayor que hasta." });
-      return false;
-    }
-    return true;
-  }
-
-  async function generateExcel() {
-    setMessage(null);
-    setLastFile("");
-    setLastSheetUrl("");
-
-    if (!validatePeriod()) return;
-    setLoading(true);
-
-    const response = await fetch("/api/report-link", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildPayload("excel")),
-    });
-
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({ error: "No se pudo generar el reporte." }));
-      setMessage({ type: "error", text: data.error || "No se pudo generar el reporte." });
-      setLoading(false);
-      return;
-    }
-
-    const data = await response.json();
-    if (data.url) {
-      window.location.href = data.url;
-    }
-    setLastFile("Descarga directa iniciada");
-    setMessage({ type: "ok", text: "Reporte solicitado. La descarga se abre directo desde Cloud Run." });
-    setLoading(false);
-  }
-
-  async function generateExecutivePdf() {
-    setMessage(null);
-    setLastFile("");
-    setLastSheetUrl("");
-    if (!validatePeriod()) return;
-    setLoading(true);
-
-    const response = await fetch("/api/report", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildPayload("executive_pdf")),
-    });
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({ error: "No se pudo generar el PDF ejecutivo." }));
-      setMessage({ type: "error", text: data.error || "No se pudo generar el PDF ejecutivo." });
-      setLoading(false);
-      return;
-    }
-
-    const blob = await response.blob();
-    const disposition = response.headers.get("content-disposition") || "";
-    const filenameMatch = disposition.match(/filename="?([^";]+)"?/i);
-    const filename = filenameMatch?.[1] || "reporte_ejecutivo_regalias.pdf";
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-    setLastFile(filename);
-    setMessage({ type: "ok", text: "PDF ejecutivo generado correctamente." });
-    setLoading(false);
-  }
-
-  async function createGoogleSheet(event?: MouseEvent<HTMLButtonElement>) {
-    event?.preventDefault();
-    event?.stopPropagation();
-    setMessage(null);
-    setLastFile("");
-    setLastSheetUrl("");
-
-    if (!validatePeriod()) return;
-    setGoogleLoading(true);
-
-    const response = await fetch("/api/report", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(buildPayload("google_sheet")),
-    });
-
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({ error: "No se pudo crear el Google Sheet." }));
-      setMessage({ type: "error", text: data.error || "No se pudo crear el Google Sheet." });
-      setGoogleLoading(false);
-      return;
-    }
-
-    const data = await response.json();
-    setLastSheetUrl(data.url);
-    if (data.url) window.open(data.url, "_blank", "noopener,noreferrer");
-    setMessage({ type: "ok", text: "Google Sheet creado correctamente." });
-    setGoogleLoading(false);
   }
 
   async function loadCustomReportOptions() {
@@ -6817,20 +6649,10 @@ export default function Home() {
     setMessage({ type: "ok", text: `Show #${item.id} eliminado.` });
   }
 
-  function submitRoyalties(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (royaltyReportOutput === "executive_pdf") {
-      generateExecutivePdf();
-      return;
-    }
-    generateExcel();
-  }
-
   function openView(nextView: View) {
     setView(nextView);
     setMessage(null);
     setLastFile("");
-    setLastSheetUrl("");
   }
 
   function openBookingWorkspace() {
@@ -7794,135 +7616,7 @@ export default function Home() {
 
         {view === "statement" && <StatementReportModule onMessage={setMessage} />}
 
-        {view === "royalties" && (
-          <div className="grid">
-            <form className="panel" onSubmit={submitRoyalties}>
-              <h1>Reporte de regalias</h1>
-
-              <label>Formato</label>
-              <div className="report-format-switch" role="group" aria-label="Formato del reporte">
-                <button
-                  type="button"
-                  className={royaltyReportOutput === "excel" ? "active" : ""}
-                  onClick={() => setRoyaltyReportOutput("excel")}
-                >
-                  <FileSpreadsheet size={18} aria-hidden="true" />
-                  Excel detallado
-                </button>
-                <button
-                  type="button"
-                  className={royaltyReportOutput === "executive_pdf" ? "active" : ""}
-                  onClick={() => setRoyaltyReportOutput("executive_pdf")}
-                >
-                  <FileText size={18} aria-hidden="true" />
-                  PDF ejecutivo
-                </button>
-              </div>
-
-              <label htmlFor="keywords">Palabras clave</label>
-              <input
-                id="keywords"
-                value={keywords}
-                onChange={(event) => setKeywords(event.target.value)}
-                placeholder={royaltyReportOutput === "executive_pdf" ? "Opcional: artista, tema o ISRC" : "gusty dj, juli savioli"}
-                required={royaltyReportOutput === "excel"}
-              />
-
-              <PeriodControl
-                id="royalty_period"
-                label="Periodo"
-                profile="monthly_report"
-                selection={selectionFromMonths(startMonth, endMonth)}
-                onChange={(selection) => applyResolvedPeriod(selection, "monthly_report", setStartMonth, setEndMonth)}
-                helperText="Un mes solo incluye ese mes completo. Un rango incluye ambos meses completos."
-              />
-
-              <label htmlFor="period_basis">Criterio de periodo</label>
-              <select id="period_basis" value={periodBasis} onChange={(event) => setPeriodBasis(event.target.value)}>
-                <option value="transaction_month">Performance / mes de consumo</option>
-                <option value="statement_period">Liquidacion / mes de statement</option>
-              </select>
-
-              {royaltyReportOutput === "executive_pdf" && (
-                <div className="report-scope-grid">
-                  <div>
-                    <label htmlFor="royalty_report_source">Distribuidora</label>
-                    <select
-                      id="royalty_report_source"
-                      value={royaltyReportSource}
-                      onChange={(event) => {
-                        setRoyaltyReportSource(event.target.value);
-                        setRoyaltyReportAccount("");
-                      }}
-                    >
-                      <option value="">Todas</option>
-                      {(royaltyReportOptions?.sources || []).map((source) => (
-                        <option value={source} key={source}>{source.toUpperCase()}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label htmlFor="royalty_report_account">Cuenta</label>
-                    <select
-                      id="royalty_report_account"
-                      value={royaltyReportAccount}
-                      disabled={!royaltyReportSource}
-                      onChange={(event) => setRoyaltyReportAccount(event.target.value)}
-                    >
-                      <option value="">Todas</option>
-                      {royaltyReportAccountOptions.map((item) => (
-                        <option value={item.account} key={`${item.source}:${item.account}`}>{item.display_name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
-
-              {royaltyReportOutput === "excel" && (
-                <>
-                  <label htmlFor="mode">Coincidencia</label>
-                  <select id="mode" value={mode} onChange={(event) => setMode(event.target.value)}>
-                    <option value="any">Cualquier palabra</option>
-                    <option value="all">Todas las palabras</option>
-                  </select>
-
-                  <label htmlFor="raw_limit">Filas raw maximas</label>
-                  <input id="raw_limit" type="number" min="0" max="50000" value={rawLimit} onChange={(event) => setRawLimit(event.target.value)} />
-                </>
-              )}
-
-              <button type="submit" disabled={loading || googleLoading}>
-                {loading ? "Generando..." : royaltyReportOutput === "executive_pdf" ? "Descargar PDF" : "Descargar Excel"}
-              </button>
-            </form>
-
-            <div>
-              {royaltyReportOutput === "excel" && (
-                <section className="panel">
-                  <h2>Google Sheets</h2>
-                  <p>Crea el mismo reporte como spreadsheet editable en Google Drive.</p>
-                  <button type="button" disabled={loading || googleLoading} onClick={createGoogleSheet}>
-                    {googleLoading ? "Creando..." : "Crear Google Sheet"}
-                  </button>
-                </section>
-              )}
-
-              {lastFile && (
-                <section className="panel" style={{ marginTop: 24 }}>
-                  <h2>Ultimo reporte</h2>
-                  <p className="filename">{lastFile}</p>
-                </section>
-              )}
-
-              {lastSheetUrl && (
-                <section className="panel" style={{ marginTop: 24 }}>
-                  <h2>Google Sheet</h2>
-                  <p><a className="button" href={lastSheetUrl} target="_blank" rel="noreferrer">Abrir Google Sheet</a></p>
-                </section>
-              )}
-            </div>
-          </div>
-        )}
+        {view === "royalties" && <RoyaltyReportModule onMessage={setMessage} />}
 
         {view === "custom-reports" && (
           <section className="panel">
