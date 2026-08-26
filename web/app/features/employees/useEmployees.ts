@@ -137,8 +137,10 @@ export function useEmployees(onMessage: (message: EmployeeMessage | null) => voi
       ));
       resetForm();
       onMessage({ type: "ok", text: wasEditing ? "Empleado actualizado correctamente." : "Empleado creado correctamente." });
+      return true;
     } catch (error) {
       onMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo guardar el empleado." });
+      return false;
     } finally {
       setLoading(false);
     }

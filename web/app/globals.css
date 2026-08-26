@@ -3389,7 +3389,7 @@ main.home-main {
   box-shadow: 0 0 0 4px rgba(79, 192, 141, .1);
 }
 
-main.vpo-home-content {
+.vpo-home-content {
   width: min(1460px, calc(100vw - 304px));
   margin: 0 auto;
   padding: 22px clamp(18px, 3vw, 44px) 42px;
@@ -3772,7 +3772,7 @@ main.vpo-home-content {
     font-size: 0;
   }
 
-  main.vpo-home-content {
+  .vpo-home-content {
     width: 100%;
     margin: 0;
     padding: 20px 0 34px;

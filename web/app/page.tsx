@@ -6,6 +6,7 @@ import { FileSpreadsheet, FileText } from "lucide-react";
 import { PeriodControl } from "./components/PeriodControl";
 import { BookingDashboard, type BookingAgendaEvent } from "./components/BookingDashboard";
 import { VpoHome } from "./components/VpoHome";
+import { HOME_GROUPS, VpoAppFrame } from "./components/VpoAppFrame";
 import { EmployeesModule } from "./features/employees/EmployeesModule";
 import {
   employeeCompensationLabels,
@@ -7814,31 +7815,29 @@ export default function Home() {
     );
   }
 
-  return (
-    <div className={`shell ${view === "menu" ? "home-shell" : ""} ${view === "employees" ? "employee-shell" : ""}`}>
-      {view !== "menu" && <header className="topbar">
-        <div className="brand" aria-label="VPO Corp">
-          <Image className="topbar-logo" src="/vpo-logo.png" alt="VPO Corp" width={2539} height={1298} priority />
-        </div>
-        <div className="top-actions">
-          {currentUser && (
-            <span className="session-pill">{currentUser.username} · {currentUser.role}</span>
-          )}
-          <button type="button" onClick={() => openView("menu")}>Menu</button>
-          <button type="button" onClick={logout}>Salir</button>
-        </div>
-      </header>}
+  const navigationGroup = HOME_GROUPS.find((group) => group.modules.some((module) => module.view === view));
+  const navigationModule = navigationGroup?.modules.find((module) => module.view === view);
+  const frameEyebrow = view === "menu" ? "Centro operativo" : navigationGroup?.eyebrow || "VPO Corp";
+  const frameTitle = view === "menu" ? `Buenos días, ${currentUser?.username || "usuario"}` : navigationModule?.title || "VPO Corp";
 
+  return (
+    <VpoAppFrame
+      currentView={view}
+      username={currentUser?.username || "usuario"}
+      role={currentUser?.role || "viewer"}
+      eyebrow={frameEyebrow}
+      title={frameTitle}
+      canShow={(targetView) => canShowMenuView(targetView as View)}
+      onOpen={(targetView) => targetView === "booking" ? openBookingWorkspace() : openView(targetView as View)}
+      onLogout={logout}
+    >
       <main className={view === "menu" ? "home-main" : view === "booking" && bookingSurface === "dashboard" ? "booking-main" : view === "employees" ? "employee-main" : undefined}>
         {message && <div className={`message ${message.type === "error" ? "error" : ""}`}>{message.text}</div>}
 
         {view === "menu" && (
           <VpoHome
-            username={currentUser?.username || "usuario"}
-            role={currentUser?.role || "viewer"}
             canShow={(targetView) => canShowMenuView(targetView as View)}
             onOpen={(targetView) => targetView === "booking" ? openBookingWorkspace() : openView(targetView as View)}
-            onLogout={logout}
           />
         )}
 
@@ -15382,6 +15381,6 @@ export default function Home() {
           </div>
         )}
       </main>
-    </div>
+    </VpoAppFrame>
   );
 }

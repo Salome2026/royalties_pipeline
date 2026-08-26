@@ -1,6 +1,6 @@
 "use client";
 
-import type { FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { BadgeDollarSign, Contact, KeyRound, Save, ShieldCheck, UserRound, X } from "lucide-react";
 import { PermissionsEditor } from "./PermissionsEditor";
 import { DEFAULT_EMPLOYEE_FUNCTIONS, type PermissionLevel } from "./model";
@@ -37,6 +37,12 @@ export function EmployeeForm({
   onCancel,
   onSubmit,
 }: Props) {
+  const [section, setSection] = useState<"profile" | "compensation" | "access" | "permissions">("profile");
+
+  useEffect(() => {
+    setSection("profile");
+  }, [editingId]);
+
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void onSubmit();
@@ -55,8 +61,15 @@ export function EmployeeForm({
         {editingId && <button className="employees-icon-button" type="button" onClick={onCancel} title="Cancelar edicion" aria-label="Cancelar edicion"><X size={17} /></button>}
       </header>
 
+      <nav className="employee-editor-nav" aria-label="Secciones de la ficha">
+        <button type="button" aria-label="Ficha" title="Ficha" className={section === "profile" ? "is-active" : ""} onClick={() => setSection("profile")}><Contact size={16} /><span>Ficha</span></button>
+        <button type="button" aria-label="Función y salario" title="Función y salario" className={section === "compensation" ? "is-active" : ""} onClick={() => setSection("compensation")}><BadgeDollarSign size={16} /><span>Función y salario</span></button>
+        <button type="button" aria-label="Usuario" title="Usuario" className={section === "access" ? "is-active" : ""} onClick={() => setSection("access")}><KeyRound size={16} /><span>Usuario</span></button>
+        <button type="button" aria-label="Permisos" title="Permisos" className={section === "permissions" ? "is-active" : ""} onClick={() => setSection("permissions")}><ShieldCheck size={16} /><span>Permisos</span></button>
+      </nav>
+
       <div className="employee-editor-content">
-        <section className="employee-form-section">
+        {section === "profile" && <section className="employee-form-section employee-form-section-final">
           <div className="employee-form-section-title"><Contact size={17} /><div><h3>Datos personales</h3><span>Identificacion y contacto</span></div></div>
           <div className="employee-form-grid employee-form-grid-two">
             <div className="employee-field employee-field-wide">
@@ -79,10 +92,15 @@ export function EmployeeForm({
               <label htmlFor="employee_address">Domicilio</label>
               <input id="employee_address" value={form.address} onChange={(event) => onFieldChange("address", event.target.value)} />
             </div>
+            <div className="employee-field employee-field-wide">
+              <label htmlFor="employee_notes">Notas internas</label>
+              <textarea id="employee_notes" value={form.notes} onChange={(event) => onFieldChange("notes", event.target.value)} />
+            </div>
+            <label className="employee-toggle-field"><input type="checkbox" checked={form.active} onChange={(event) => onFieldChange("active", event.target.checked)} /><span>Empleado activo</span></label>
           </div>
-        </section>
+        </section>}
 
-        <section className="employee-form-section">
+        {section === "compensation" && <section className="employee-form-section employee-form-section-final">
           <div className="employee-form-section-title"><BadgeDollarSign size={17} /><div><h3>Funcion y compensacion</h3><span>Condicion pactada con VPO</span></div></div>
           <div className="employee-function-grid">
             {(functionOptions.length ? functionOptions : DEFAULT_EMPLOYEE_FUNCTIONS).map((functionName) => (
@@ -124,9 +142,9 @@ export function EmployeeForm({
             </div>
           )}
           <p className="employee-inline-note">Los pagos reales se registran en Movimientos Financieros.</p>
-        </section>
+        </section>}
 
-        <section className="employee-form-section">
+        {section === "access" && <section className="employee-form-section employee-form-section-final">
           <div className="employee-form-section-title"><KeyRound size={17} /><div><h3>Acceso al sistema</h3><span>Usuario y seguridad</span></div></div>
           <div className="employee-form-grid employee-form-grid-three">
             <div className="employee-field">
@@ -146,9 +164,9 @@ export function EmployeeForm({
             </div>
             <label className="employee-toggle-field"><input type="checkbox" checked={form.mustChangePassword} onChange={(event) => onFieldChange("mustChangePassword", event.target.checked)} /><span>Pedir cambio al ingresar</span></label>
           </div>
-        </section>
+        </section>}
 
-        <section className="employee-form-section employee-permissions-section">
+        {section === "permissions" && <section className="employee-form-section employee-permissions-section employee-form-section-final">
           <div className="employee-form-section-title"><ShieldCheck size={17} /><div><h3>Permisos por modulo</h3><span>Acceso y alcance por artista</span></div></div>
           <PermissionsEditor
             permissions={form.permissions}
@@ -158,17 +176,7 @@ export function EmployeeForm({
             onArtistModeChange={onPermissionArtistModeChange}
             onArtistToggle={onPermissionArtistToggle}
           />
-        </section>
-
-        <section className="employee-form-section employee-form-section-final">
-          <div className="employee-form-grid employee-form-grid-two">
-            <div className="employee-field employee-field-wide">
-              <label htmlFor="employee_notes">Notas internas</label>
-              <textarea id="employee_notes" value={form.notes} onChange={(event) => onFieldChange("notes", event.target.value)} />
-            </div>
-            <label className="employee-toggle-field"><input type="checkbox" checked={form.active} onChange={(event) => onFieldChange("active", event.target.checked)} /><span>Empleado activo</span></label>
-          </div>
-        </section>
+        </section>}
       </div>
 
       <footer className="employee-editor-footer">
