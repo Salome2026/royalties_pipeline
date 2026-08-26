@@ -1,0 +1,272 @@
+.workspace {
+  width: min(100%, 1080px);
+  margin: 0 auto;
+  padding: 38px 30px;
+  color: #f3f7f7;
+}
+
+.intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.intro > div:last-child {
+  min-width: 0;
+}
+
+.intro span {
+  color: #64d8c7;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.intro h1 {
+  margin: 5px 0 7px;
+  color: #ffffff;
+  font-size: 1.8rem;
+  line-height: 1.15;
+}
+
+.intro p {
+  max-width: 660px;
+  margin: 0;
+  color: #aebcc4;
+  line-height: 1.55;
+}
+
+.icon {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
+  place-items: center;
+  border: 1px solid rgba(100, 216, 199, 0.32);
+  border-radius: 8px;
+  background: rgba(19, 144, 128, 0.15);
+  color: #64d8c7;
+}
+
+.form {
+  overflow: hidden;
+  border: 1px solid rgba(164, 188, 199, 0.18);
+  border-radius: 8px;
+  background: rgba(12, 25, 37, 0.78);
+  box-shadow: 0 22px 55px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(18px);
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 22px;
+  border-bottom: 1px solid rgba(164, 188, 199, 0.14);
+  color: #64d8c7;
+}
+
+.sectionTitle div {
+  display: grid;
+  gap: 3px;
+}
+
+.sectionTitle strong {
+  color: #f3f7f7;
+  font-size: 0.96rem;
+}
+
+.sectionTitle span {
+  color: #91a4af;
+  font-size: 0.78rem;
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  padding: 22px;
+}
+
+.field {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.field label {
+  color: #dfe8eb;
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.field select,
+.field input {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid rgba(164, 188, 199, 0.24);
+  border-radius: 7px;
+  outline: none;
+  background: rgba(4, 13, 22, 0.72);
+  color: #f8fbfb;
+  font: inherit;
+}
+
+.field select {
+  padding: 0 12px;
+}
+
+.field input {
+  padding: 0 12px 0 56px;
+}
+
+.field select:focus,
+.field input:focus {
+  border-color: #4fc9b6;
+  box-shadow: 0 0 0 3px rgba(79, 201, 182, 0.13);
+}
+
+.field small,
+.toggleRow small {
+  color: #8196a2;
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.moneyInput {
+  position: relative;
+}
+
+.moneyInput > span {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  z-index: 1;
+  transform: translateY(-50%);
+  color: #64d8c7;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.toggleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 0 22px 22px;
+  padding: 15px 16px;
+  border: 1px solid rgba(164, 188, 199, 0.14);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.025);
+  cursor: pointer;
+}
+
+.toggleRow > span {
+  display: grid;
+  gap: 4px;
+}
+
+.toggleRow strong {
+  color: #e8eff1;
+  font-size: 0.82rem;
+}
+
+.toggleRow input {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  accent-color: #36b9a6;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 18px 22px;
+  border-top: 1px solid rgba(164, 188, 199, 0.14);
+  background: rgba(3, 12, 20, 0.5);
+}
+
+.actions > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.actions strong {
+  color: #dfe8eb;
+  font-size: 0.78rem;
+}
+
+.actions span {
+  overflow: hidden;
+  color: #8196a2;
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions button {
+  display: inline-flex;
+  min-height: 43px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 0 18px;
+  width: auto;
+  margin-top: 0;
+  border: 1px solid rgba(105, 235, 211, 0.2);
+  border-radius: 7px;
+  background: #168c7c;
+  color: #ffffff;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(4, 117, 102, 0.24);
+}
+
+.actions button:hover:not(:disabled) {
+  background: #1ca38f;
+}
+
+.actions button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+@media (max-width: 720px) {
+  .workspace {
+    padding: 24px 16px;
+  }
+
+  .intro {
+    gap: 12px;
+  }
+
+  .intro h1 {
+    font-size: 1.45rem;
+  }
+
+  .fields {
+    grid-template-columns: 1fr;
+    padding: 18px;
+  }
+
+  .toggleRow {
+    margin: 0 18px 18px;
+  }
+
+  .actions {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 18px;
+  }
+
+  .actions button {
+    width: 100%;
+  }
+}

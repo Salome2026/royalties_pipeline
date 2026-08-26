@@ -636,11 +636,7 @@ export function BookingDashboard({
 
   return (
     <div className="booking-dashboard-shell">
-      <aside className="booking-dashboard-sidebar">
-        <div className="booking-dashboard-brand">
-          <span>VPO</span>
-          <strong>BOOKING</strong>
-        </div>
+      <div className="booking-dashboard-toolbar">
         <nav aria-label="Navegación Booking">
           <button type="button" className={section === "overview" ? "active" : ""} onClick={() => setSection("overview")}><LayoutDashboard size={18} />Inicio</button>
           <button type="button" className={section === "agenda" ? "active" : ""} onClick={() => setSection("agenda")}><CalendarDays size={18} />Agenda</button>
@@ -649,11 +645,7 @@ export function BookingDashboard({
           {canOpenSummary && <button type="button" onClick={onOpenSummary}><CircleDollarSign size={18} />Resumen</button>}
           {canOpenDetail && <button type="button" onClick={onOpenDetail}><ListFilter size={18} />Detalle</button>}
         </nav>
-        <div className="booking-dashboard-side-note">
-          <span>Operación viva</span>
-          <strong>Cloud SQL</strong>
-        </div>
-      </aside>
+      </div>
 
       <div className="booking-dashboard-stage">
         <header className="booking-dashboard-header">

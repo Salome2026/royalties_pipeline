@@ -6,8 +6,9 @@ import { FileSpreadsheet, FileText } from "lucide-react";
 import { PeriodControl } from "./components/PeriodControl";
 import { BookingDashboard, type BookingAgendaEvent } from "./components/BookingDashboard";
 import { VpoHome } from "./components/VpoHome";
-import { HOME_GROUPS, VpoAppFrame } from "./components/VpoAppFrame";
+import { VpoAppFrame } from "./components/VpoAppFrame";
 import { EmployeesModule } from "./features/employees/EmployeesModule";
+import { StatementReportModule } from "./features/statements/StatementReportModule";
 import {
   employeeCompensationLabels,
   type EmployeeCompensationType,
@@ -23,6 +24,7 @@ import type { ModulePermission as EmployeePermission } from "./shared/auth/types
 import {
   canShowView,
   moduleForBookingMode,
+  navigationPresentationForView,
   type BookingWorkspaceMode,
   type View,
 } from "./shared/navigation/views";
@@ -34,6 +36,7 @@ import {
   type PeriodProfile,
   type PeriodSelection,
 } from "./lib/period";
+import { downloadBlob, filenameFromDisposition } from "./lib/download";
 
 type Message = {
   type: "ok" | "error";
@@ -1688,23 +1691,6 @@ const BOOKING_EXPENSE_CATEGORIES = [
   { value: "comision_externa", label: "Comision externa" },
   { value: "varios", label: "Varios" },
 ];
-function filenameFromDisposition(disposition: string | null, fallback: string) {
-  if (!disposition) return fallback;
-  const match = disposition.match(/filename="?([^"]+)"?/i);
-  return match?.[1] || fallback;
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
 function money(value: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
 }
@@ -2278,9 +2264,6 @@ export default function Home() {
   const [royaltyReportOptions, setRoyaltyReportOptions] = useState<RoyaltyReportOptions | null>(null);
   const [royaltyReportSource, setRoyaltyReportSource] = useState("");
   const [royaltyReportAccount, setRoyaltyReportAccount] = useState("");
-  const [statementMinTotal, setStatementMinTotal] = useState("0");
-  const [statementIncludeZeros, setStatementIncludeZeros] = useState(false);
-  const [statementReportVersion, setStatementReportVersion] = useState("legacy");
   const [customReportOptions, setCustomReportOptions] = useState<CustomReportOptions | null>(null);
   const [customReportTemplateKey, setCustomReportTemplateKey] = useState("los_anormales");
   const [customReportTitle, setCustomReportTitle] = useState("Regalias Los Anormales");
@@ -2293,7 +2276,6 @@ export default function Home() {
   const [customReportLoading, setCustomReportLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-  const [statementLoading, setStatementLoading] = useState(false);
   const [participationLoading, setParticipationLoading] = useState(false);
   const [message, setMessage] = useState<Message | null>(null);
   const [lastFile, setLastFile] = useState("");
@@ -3800,36 +3782,6 @@ export default function Home() {
     if (data.url) window.open(data.url, "_blank", "noopener,noreferrer");
     setMessage({ type: "ok", text: "Google Sheet creado correctamente." });
     setGoogleLoading(false);
-  }
-
-  async function generateStatementReport() {
-    setMessage(null);
-    setStatementLoading(true);
-
-    const response = await fetch("/api/statement", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        refresh_cache: false,
-        min_artist_total_usd: Number(statementMinTotal) || 0,
-        include_zero_total_artists: statementIncludeZeros,
-        report_version: statementReportVersion,
-      }),
-    });
-
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({ error: "No se pudo generar el reporte por statement." }));
-      setMessage({ type: "error", text: data.error || "No se pudo generar el reporte por statement." });
-      setStatementLoading(false);
-      return;
-    }
-
-    const blob = await response.blob();
-    const filename = filenameFromDisposition(response.headers.get("content-disposition"), "vpo_statement_report.xlsx");
-    downloadBlob(blob, filename);
-    setLastFile(filename);
-    setMessage({ type: "ok", text: "Reporte por statement generado correctamente." });
-    setStatementLoading(false);
   }
 
   async function loadCustomReportOptions() {
@@ -7815,10 +7767,9 @@ export default function Home() {
     );
   }
 
-  const navigationGroup = HOME_GROUPS.find((group) => group.modules.some((module) => module.view === view));
-  const navigationModule = navigationGroup?.modules.find((module) => module.view === view);
-  const frameEyebrow = view === "menu" ? "Centro operativo" : navigationGroup?.eyebrow || "VPO Corp";
-  const frameTitle = view === "menu" ? `Buenos días, ${currentUser?.username || "usuario"}` : navigationModule?.title || "VPO Corp";
+  const navigationPresentation = navigationPresentationForView(view);
+  const frameEyebrow = view === "menu" ? "Centro operativo" : navigationPresentation?.eyebrow || "VPO Corp";
+  const frameTitle = view === "menu" ? `Buenos días, ${currentUser?.username || "usuario"}` : navigationPresentation?.title || "VPO Corp";
 
   return (
     <VpoAppFrame
@@ -7841,49 +7792,7 @@ export default function Home() {
           />
         )}
 
-        {view === "statement" && (
-          <section className="panel">
-            <h1>Reporte por statement</h1>
-            <p>Genera el reporte historico por statement usando los marts nuevos publicados.</p>
-            <label htmlFor="statement_report_version">Tipo de reporte</label>
-            <select
-              id="statement_report_version"
-              value={statementReportVersion}
-              onChange={(event) => setStatementReportVersion(event.target.value)}
-            >
-              <option value="legacy">Reporte viejo</option>
-              <option value="new">Reporte nuevo</option>
-            </select>
-            <p className="field-help">
-              El nuevo excluye ONErpm MAWZ y usa las variantes post Motorcito / La Nueva Sangre.
-            </p>
-            <label htmlFor="statement_min_total">No mostrar artistas menores a USD</label>
-            <input
-              id="statement_min_total"
-              type="number"
-              min="0"
-              step="1"
-              value={statementMinTotal}
-              onChange={(event) => setStatementMinTotal(event.target.value)}
-            />
-            <p className="field-help">Se aplica por artista dentro de cada distribuidora/cuenta.</p>
-            <label className="checkbox-line">
-              <input
-                type="checkbox"
-                checked={statementIncludeZeros}
-                onChange={(event) => setStatementIncludeZeros(event.target.checked)}
-              />
-              Incluir artistas exactamente en cero
-            </label>
-            <p className="field-help">
-              Si esta desmarcado y el minimo es 0, muestra cualquier total mayor a cero, aunque sea 0.01.
-            </p>
-            <button type="button" disabled={statementLoading} onClick={generateStatementReport}>
-              {statementLoading ? "Generando..." : "Descargar reporte por statement"}
-            </button>
-            {lastFile && <p className="filename">{lastFile}</p>}
-          </section>
-        )}
+        {view === "statement" && <StatementReportModule onMessage={setMessage} />}
 
         {view === "royalties" && (
           <div className="grid">

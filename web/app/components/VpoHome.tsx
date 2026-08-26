@@ -8,7 +8,8 @@ import {
   ShieldCheck,
   UserRoundCog,
 } from "lucide-react";
-import { HOME_GROUPS } from "./VpoAppFrame";
+import { APP_NAVIGATION_GROUPS } from "../shared/navigation/views";
+import { NAVIGATION_ICONS } from "./VpoAppFrame";
 
 type VpoHomeProps = {
   canShow: (view: string) => boolean;
@@ -17,7 +18,7 @@ type VpoHomeProps = {
 
 export function VpoHome({ canShow, onOpen }: VpoHomeProps) {
   const visibleGroups = useMemo(
-    () => HOME_GROUPS
+    () => APP_NAVIGATION_GROUPS
       .map((group) => ({ ...group, modules: group.modules.filter((module) => canShow(module.view)) }))
       .filter((group) => group.modules.length > 0),
     [canShow],
@@ -46,7 +47,7 @@ export function VpoHome({ canShow, onOpen }: VpoHomeProps) {
               </div>
               <div className="vpo-home-grid">
                 {group.modules.map((module) => {
-                  const ModuleIcon = module.icon;
+                  const ModuleIcon = NAVIGATION_ICONS[module.icon];
                   return (
                     <button
                       type="button"
