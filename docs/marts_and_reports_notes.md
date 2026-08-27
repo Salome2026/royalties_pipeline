@@ -309,6 +309,9 @@ El reporte nuevo usa conversion FX; el viejo usaba `net_amount` directo.
 
 `Summary` no se carga al standardized principal. Solo se usa como control en `audit_soundon.py`.
 
+`Discovery Mode` tampoco se suma: detalla una deduccion ya incluida en
+`My Royalty`. `audit_soundon.py` exige que ambos importes coincidan por mes.
+
 ## Resumen operativo del dashboard de regalias
 
 `royalties_dashboard_summary.parquet` se construye desde

@@ -4,6 +4,7 @@ fastexcel
 google-api-python-client
 google-auth-oauthlib
 google-cloud-storage
+google-cloud-tasks
 httpx
 openpyxl
 pandas

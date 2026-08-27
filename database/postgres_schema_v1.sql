@@ -942,11 +942,30 @@ CREATE TABLE IF NOT EXISTS report_runs (
     requested_by text,
     params_json jsonb NOT NULL DEFAULT '{}'::jsonb,
     output_uri text,
-    status text NOT NULL DEFAULT 'created',
+    output_format text NOT NULL DEFAULT 'excel',
+    request_hash text,
+    progress_stage text NOT NULL DEFAULT 'queued',
+    result_filename text,
+    result_content_type text,
+    result_url text,
+    task_name text,
+    attempt_count integer NOT NULL DEFAULT 0,
+    status text NOT NULL DEFAULT 'queued',
     error_message text,
     created_at timestamptz NOT NULL DEFAULT now(),
-    finished_at timestamptz
+    started_at timestamptz,
+    finished_at timestamptz,
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL DEFAULT (now() + interval '30 days'),
+    CONSTRAINT report_runs_output_chk CHECK (output_format IN ('excel', 'executive_pdf', 'google_sheet')),
+    CONSTRAINT report_runs_status_chk CHECK (status IN ('queued', 'running', 'completed', 'failed'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_report_runs_requester_time
+    ON report_runs(requested_by, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_report_runs_active_hash
+    ON report_runs(requested_by, request_hash, status)
+    WHERE status IN ('queued', 'running');
 
 INSERT INTO schema_migrations(version, notes)
 VALUES ('cloud_operational_schema_v1_draft', 'Initial draft schema for VPO Corp cloud operational database')

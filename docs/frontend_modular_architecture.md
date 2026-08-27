@@ -107,11 +107,61 @@ Reglas de frontera:
 - PDF permite busqueda vacia y alcance por distribuidora/cuenta;
 - no queda una implementacion paralela en `page.tsx`.
 
+## Etapa 6: Catalogo general
+
+Catalogo general es responsable de consultar, filtrar y presentar la capa maestra
+de repertorio. Tambien administra el estado activo/inactivo y el override humano
+del label normalizado. Ninguna accion de la interfaz modifica statements crudos.
+
+Implementacion canonica:
+
+- `web/app/features/catalog/CatalogModule.tsx`
+- `web/app/features/catalog/CatalogModule.module.css`
+- `web/app/features/catalog/api.ts`
+- `web/app/features/catalog/types.ts`
+
+Reglas de frontera:
+
+- usa `PeriodControl` con perfil `activity_window`;
+- la ruta productiva sigue siendo `/api/catalog` y no se duplica el backend;
+- activo/inactivo gobierna `include_in_reports` sin borrar datos;
+- la edicion de label escribe solamente `label_normalized_override`;
+- el permiso de edicion llega desde la sesion vigente;
+- Configurador de distribuidoras puede abrir el modulo con source/account
+  preseleccionados mediante `CatalogInitialFilter`;
+- `page.tsx` no conserva estado, consultas ni JSX internos del catalogo.
+
+## Etapa 7: Control de distribuidoras
+
+Control de distribuidoras concentra la revision de carpetas, el procesamiento de
+archivos nuevos y la publicacion de datos analiticos. La interfaz es un panel
+operativo de ancho completo; no replica ni interpreta las reglas de ingest.
+
+Implementacion canonica:
+
+- `web/app/features/source-monitor/SourceMonitorModule.tsx`
+- `web/app/features/source-monitor/SourceMonitorModule.module.css`
+- `web/app/features/source-monitor/api.ts`
+- `web/app/features/source-monitor/types.ts`
+
+Reglas de frontera:
+
+- usa exclusivamente `/api/source-monitor` para consultar, procesar, actualizar
+  alertas y publicar;
+- el proceso iniciado en backend no depende del ciclo de vida visual de la
+  pantalla;
+- solo usuarios con permiso de edicion pueden procesar, cambiar monitoreo o
+  publicar;
+- la accion principal por cuenta es procesar pendientes reales;
+- revisar, abrir portal, silenciar alertas y cambiar monitoreo son acciones
+  secundarias;
+- `page.tsx` solo monta el modulo y entrega permiso y mensajes globales.
+
 ## Orden de extraccion posterior
 
 1. Reportes personalizados.
 2. Ingresos digitales y Participacion.
-3. Catalogo y distribuidoras.
+3. Configurador de distribuidoras.
 4. Artistas y configuracion de comisiones.
 5. Booking y agenda restantes.
 6. Finanzas y documentos financieros.

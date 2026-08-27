@@ -8,18 +8,30 @@ Incorporar SoundOn al pipeline viejo y al pipeline nuevo, usando `My Royalty` co
 
 - Carpeta: `C:\royalties_pipeline\input_raw\soundon`
 
-Cada mes trae cuatro archivos:
+Cada mes trae los archivos principales:
 
 - `My Royalty`
 - `Share in`
 - `Share out`
 - `Summary`
 
+El paquete tambien puede traer `Discovery Mode`. Es el detalle por tema de la
+deduccion que ya aparece en la columna `Discovery Mode Commission Amount` de
+`My Royalty`; no representa un segundo movimiento economico.
+
 ## Decision importante sobre Summary
 
 `Summary` es un resumen agregado por tienda. No se carga al standardized principal porque duplica el total de `My Royalty` y no trae granularidad de artista/tema/ISRC.
 
 Se usa solo en `audit_soundon.py`, leyendo los CSV originales desde `input_raw`, para validar que `My Royalty` cierre contra el resumen mensual.
+
+## Decision sobre Discovery Mode
+
+`Discovery Mode` no se carga al standardized ni se suma a ingresos. La auditoria
+compara `Deduction for this period` contra `Discovery Mode Commission Amount` de
+`My Royalty` para el mismo mes y falla si existe una diferencia. El monitor lo
+clasifica como `ignored_audit_detail`: queda visible y trazable, pero no bloquea
+la publicacion cuando la auditoria cierra.
 
 ## Scripts principales
 
@@ -63,6 +75,7 @@ Actualmente vienen vacios. El script esta preparado para leerlos si en el futuro
 ## Validacion esperada
 
 - `My Royalty` debe cerrar contra `Summary` por `Reporting Period`.
+- `Discovery Mode` debe cerrar contra la deduccion incluida en `My Royalty`.
 - `song_level_soundon.amount_usd` debe cerrar contra `standardized_raw_soundon.amount_usd`.
 
 ## Evidencia para DSP y monetizacion

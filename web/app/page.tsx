@@ -6,8 +6,11 @@ import { PeriodControl } from "./components/PeriodControl";
 import { BookingDashboard, type BookingAgendaEvent } from "./components/BookingDashboard";
 import { VpoHome } from "./components/VpoHome";
 import { VpoAppFrame } from "./components/VpoAppFrame";
+import { CatalogModule } from "./features/catalog/CatalogModule";
+import type { CatalogInitialFilter } from "./features/catalog/types";
 import { EmployeesModule } from "./features/employees/EmployeesModule";
 import { RoyaltyReportModule } from "./features/royalties/RoyaltyReportModule";
+import { SourceMonitorModule } from "./features/source-monitor/SourceMonitorModule";
 import { StatementReportModule } from "./features/statements/StatementReportModule";
 import {
   employeeCompensationLabels,
@@ -893,129 +896,6 @@ type FinanceMovementForm = {
   documentNotes: string;
 };
 
-type SourceMonitorItem = {
-  id: string;
-  source: string;
-  account: string;
-  display_name: string;
-  input_path: string;
-  expected_frequency: string;
-  max_age_months: number;
-  monitoring_active: boolean;
-  alert_silenced: boolean;
-  portal_url: string;
-  notes: string;
-  last_manual_review_at: string | null;
-  last_statement_period: string | null;
-  statement_age_months: number | null;
-  statement_files_in_mart: number;
-  rows_in_mart: number;
-  files_in_mart: number;
-  raw_files: number;
-  raw_inventory_summary?: Record<string, number>;
-  ignored_raw_count?: number;
-  ignored_raw_files?: { file_name: string; status: string; reason: string; rows?: number | null }[];
-  latest_raw_file: string | null;
-  latest_raw_modified: string | null;
-  unprocessed_raw_files: string[];
-  unprocessed_raw_count: number;
-  status: "ok" | "attention" | "alert" | "inactive";
-  alert: boolean;
-  reason: string;
-};
-
-type SourceMonitorData = {
-  generated_at: string;
-  items: SourceMonitorItem[];
-  summary: {
-    total: number;
-    alerts: number;
-    status_counts: Record<string, number>;
-  };
-};
-
-type SourceMonitorProcessResult = {
-  ok: boolean;
-  processed_at: string;
-  display_name: string;
-  source: string;
-  account: string;
-  pending_files_before: string[];
-  last_statement_before: string | null;
-  last_statement_after: string | null;
-  pending_files_after: string[];
-  summary: { statement_period: string; rows: number; amount_usd: number; files: number }[];
-  total_rows: number;
-  total_amount_usd: number;
-};
-
-type SourceMonitorPublishResult = {
-  ok: boolean;
-  published_at: string;
-  bucket: string;
-  prefix: string;
-  uploaded: { file_name: string; object_name: string; size_bytes: number; size_mb: number }[];
-};
-
-type SourceMonitorPublishJob = {
-  job_id: string;
-  status: "queued" | "running" | "completed" | "failed";
-  stage: string;
-  created_at: string;
-  started_at: string | null;
-  finished_at: string | null;
-  result: SourceMonitorPublishResult | null;
-  error: unknown;
-};
-
-type CatalogItem = {
-  catalog_key: string;
-  asset_isrc: string | null;
-  track_id: string | null;
-  track_title: string | null;
-  artist_statement: string | null;
-  first_transaction_month: string | null;
-  last_transaction_month: string | null;
-  amount_usd: number;
-  units: number;
-  sources: string | null;
-  accounts: string | null;
-  content_types: string | null;
-  source_sheets: string | null;
-  title_variants: string | null;
-  artist_variants: string | null;
-  external_release_date: string | null;
-  external_match_url: string | null;
-  external_label: string | null;
-  label_normalized_auto: string | null;
-  label_normalized_override: string | null;
-  label_normalized: string | null;
-  active: boolean;
-  include_in_reports: boolean;
-  catalog_business_status: string | null;
-  status_notes: string | null;
-  status_updated_at: string | null;
-};
-
-type CatalogData = {
-  items: CatalogItem[];
-  total: number;
-  limit: number;
-  offset: number;
-  totals: {
-    amount_usd: number;
-    units: number;
-  };
-  options: {
-    sources: string[];
-    accounts: string[];
-    artists: string[];
-    labels: string[];
-    first_month: string | null;
-    last_month: string | null;
-  };
-};
-
 type DigitalIncomeItem = {
   statement_period: string;
   source: string;
@@ -1739,22 +1619,6 @@ type StoredCommissionRule = {
   notes?: string | null;
 };
 
-const SOURCE_MONITOR_STATUS_LABELS: Record<string, string> = {
-  loaded_to_mart: "Cargados",
-  pending_real: "Pendientes",
-  ignored_empty: "Vacíos",
-  ignored_summary: "Summaries omitidos",
-  legacy_manual: "Legacy",
-};
-
-function sourceMonitorInventoryLabel(summary?: Record<string, number>) {
-  if (!summary) return "";
-  return Object.entries(summary)
-    .filter(([, count]) => count > 0)
-    .map(([status, count]) => `${SOURCE_MONITOR_STATUS_LABELS[status] || status}: ${count}`)
-    .join(" · ");
-}
-
 function flagLabel(value: boolean | string | null | undefined) {
   if (value === true) return "Si";
   if (value === false) return "No";
@@ -2259,27 +2123,7 @@ export default function Home() {
   const [participationPreset, setParticipationPreset] = useState("last_year");
   const [participationStartMonth, setParticipationStartMonth] = useState("");
   const [participationEndMonth, setParticipationEndMonth] = useState("");
-  const [sourceMonitor, setSourceMonitor] = useState<SourceMonitorData | null>(null);
-  const [sourceMonitorLoading, setSourceMonitorLoading] = useState(false);
-  const [sourceMonitorProcessingId, setSourceMonitorProcessingId] = useState("");
-  const [sourceMonitorLastProcess, setSourceMonitorLastProcess] = useState<SourceMonitorProcessResult | null>(null);
-  const [sourceMonitorPublishing, setSourceMonitorPublishing] = useState(false);
-  const [sourceMonitorLastPublish, setSourceMonitorLastPublish] = useState<SourceMonitorPublishResult | null>(null);
-  const [sourceMonitorPublishJob, setSourceMonitorPublishJob] = useState<SourceMonitorPublishJob | null>(null);
-  const [catalogData, setCatalogData] = useState<CatalogData | null>(null);
-  const [catalogLoading, setCatalogLoading] = useState(false);
-  const [catalogSource, setCatalogSource] = useState("");
-  const [catalogAccount, setCatalogAccount] = useState("");
-  const [catalogArtist, setCatalogArtist] = useState("");
-  const [catalogKeyword, setCatalogKeyword] = useState("");
-  const [catalogLabel, setCatalogLabel] = useState("");
-  const [catalogPeriod, setCatalogPeriod] = useState<PeriodSelection>({ mode: "all" });
-  const [catalogStatus, setCatalogStatus] = useState<"active" | "inactive" | "all">("active");
-  const [catalogOffset, setCatalogOffset] = useState(0);
-  const [catalogLabelEditKey, setCatalogLabelEditKey] = useState("");
-  const [catalogLabelDraft, setCatalogLabelDraft] = useState("");
-  const [catalogLabelSaving, setCatalogLabelSaving] = useState("");
-  const catalogLimit = 50;
+  const [catalogInitialFilter, setCatalogInitialFilter] = useState<CatalogInitialFilter | null>(null);
   const [digitalIncome, setDigitalIncome] = useState<DigitalIncomeData | null>(null);
   const [digitalIncomeLoading, setDigitalIncomeLoading] = useState(false);
   const [digitalIncomeArtistKeyword, setDigitalIncomeArtistKeyword] = useState("");
@@ -2465,18 +2309,6 @@ export default function Home() {
   }, [authenticated, view, bookingWorkspaceMode, bookingSurface]);
 
   useEffect(() => {
-    if (authenticated && view === "source-monitor") {
-      loadSourceMonitor();
-    }
-  }, [authenticated, view]);
-
-  useEffect(() => {
-    if (authenticated && view === "catalog") {
-      loadCatalog();
-    }
-  }, [authenticated, view, catalogSource, catalogAccount, catalogArtist, catalogStatus, catalogPeriod, catalogOffset]);
-
-  useEffect(() => {
     if (authenticated && view === "digital-income") {
       loadDigitalIncome();
     }
@@ -2493,10 +2325,6 @@ export default function Home() {
       loadDistributorConfig();
     }
   }, [authenticated, view, distributorConfig]);
-
-  useEffect(() => {
-    setCatalogOffset(0);
-  }, [catalogSource, catalogAccount, catalogArtist, catalogKeyword, catalogLabel, catalogStatus, catalogPeriod]);
 
   useEffect(() => {
     if (authenticated && view === "custom-reports" && !customReportOptions) {
@@ -4105,55 +3933,6 @@ export default function Home() {
     setBookingVisibleCount(5);
   }
 
-  async function loadSourceMonitor() {
-    setSourceMonitorLoading(true);
-    try {
-      const response = await fetch("/api/source-monitor", { cache: "no-store" });
-      if (response.ok) {
-        const data = await response.json();
-        setSourceMonitor(data);
-      } else {
-        setMessage({ type: "error", text: "No se pudo cargar el control de distribuidoras." });
-      }
-    } catch {
-      setMessage({ type: "error", text: "No se pudo cargar el control de distribuidoras." });
-    } finally {
-      setSourceMonitorLoading(false);
-    }
-  }
-
-  async function loadCatalog(nextOffset = catalogOffset) {
-    setCatalogLoading(true);
-    try {
-      const resolvedCatalogPeriod = resolvePeriod(catalogPeriod, "activity_window");
-      const params = new URLSearchParams();
-      if (catalogSource) params.set("source", catalogSource);
-      if (catalogAccount) params.set("account", catalogAccount);
-      if (catalogArtist) params.set("artist", catalogArtist);
-      if (catalogKeyword.trim()) params.set("keyword", catalogKeyword.trim());
-      if (catalogLabel.trim()) params.set("label", catalogLabel.trim());
-      if (resolvedCatalogPeriod.startMonth) params.set("start_month", resolvedCatalogPeriod.startMonth);
-      if (resolvedCatalogPeriod.endMonth) params.set("end_month", resolvedCatalogPeriod.endMonth);
-      params.set("status", catalogStatus);
-      params.set("limit", String(catalogLimit));
-      params.set("offset", String(nextOffset));
-
-      const response = await fetch(`/api/catalog?${params.toString()}`, { cache: "no-store" });
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({ error: "No se pudo cargar el catalogo." }));
-        setMessage({ type: "error", text: payload.error || "No se pudo cargar el catalogo." });
-        return;
-      }
-      const data = await response.json();
-      setCatalogData(data);
-      setCatalogOffset(nextOffset);
-    } catch {
-      setMessage({ type: "error", text: "No se pudo cargar el catalogo." });
-    } finally {
-      setCatalogLoading(false);
-    }
-  }
-
   async function loadDigitalIncome() {
     setDigitalIncomeLoading(true);
     try {
@@ -4287,171 +4066,6 @@ export default function Home() {
       setMessage({ type: "error", text });
     } finally {
       setDistributorPersonalizationSaving(false);
-    }
-  }
-
-  async function updateCatalogStatus(item: CatalogItem, active: boolean) {
-    const response = await fetch("/api/catalog", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        catalog_key: item.catalog_key,
-        active,
-        include_in_reports: active,
-        business_status: active ? "vpo_catalog" : "inactive",
-        notes: active ? "" : "Excluido manualmente desde Catalogo General.",
-      }),
-    });
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({ error: "No se pudo actualizar el catalogo." }));
-      setMessage({ type: "error", text: payload.error || "No se pudo actualizar el catalogo." });
-      return;
-    }
-    setMessage({ type: "ok", text: active ? "Tema marcado como activo." : "Tema marcado como inactivo." });
-    await loadCatalog(catalogOffset);
-  }
-
-  async function updateCatalogLabel(item: CatalogItem) {
-    if (!currentUser?.canEdit) return;
-    setCatalogLabelSaving(item.catalog_key);
-    const response = await fetch("/api/catalog", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        catalog_key: item.catalog_key,
-        active: item.active,
-        include_in_reports: item.include_in_reports,
-        business_status: item.catalog_business_status || (item.active ? "vpo_catalog" : "inactive"),
-        notes: item.status_notes || "",
-        label_normalized_override: catalogLabelDraft.trim() || null,
-      }),
-    });
-    setCatalogLabelSaving("");
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({ error: "No se pudo actualizar el label." }));
-      setMessage({ type: "error", text: payload.error || "No se pudo actualizar el label." });
-      return;
-    }
-    setCatalogLabelEditKey("");
-    setCatalogLabelDraft("");
-    setMessage({ type: "ok", text: "Label normalizado actualizado." });
-    await loadCatalog(catalogOffset);
-  }
-
-  async function updateSourceMonitorItem(id: string, body: Partial<SourceMonitorItem>) {
-    setSourceMonitorLoading(true);
-    try {
-      const response = await fetch(`/api/source-monitor?id=${encodeURIComponent(id)}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!response.ok) {
-        setMessage({ type: "error", text: "No se pudo actualizar el control de la distribuidora." });
-        return;
-      }
-      await loadSourceMonitor();
-    } catch {
-      setMessage({ type: "error", text: "No se pudo actualizar el control de la distribuidora." });
-    } finally {
-      setSourceMonitorLoading(false);
-    }
-  }
-
-  async function processSourceMonitorItem(id: string) {
-    setSourceMonitorProcessingId(id);
-    setMessage(null);
-    try {
-      const response = await fetch(`/api/source-monitor?id=${encodeURIComponent(id)}&action=process`, {
-        method: "POST",
-      });
-      if (!response.ok) {
-        let text = "No se pudo procesar la distribuidora.";
-        try {
-          const payload = await response.json();
-          text = payload.error || text;
-        } catch {
-          // keep generic message
-        }
-        setMessage({ type: "error", text });
-        return;
-      }
-      const data = await response.json();
-      setSourceMonitorLastProcess(data);
-      await loadSourceMonitor();
-      setMessage({ type: "ok", text: "Pipeline nuevo procesado localmente. Revisa el resumen antes de publicar a cloud." });
-    } catch {
-      setMessage({ type: "error", text: "No se pudo procesar la distribuidora." });
-    } finally {
-      setSourceMonitorProcessingId("");
-    }
-  }
-
-  async function publishSourceMonitorMarts() {
-    setSourceMonitorPublishing(true);
-    setSourceMonitorPublishJob(null);
-    setMessage(null);
-    try {
-      const response = await fetch("/api/source-monitor?action=publish", {
-        method: "POST",
-      });
-      if (!response.ok) {
-        let text = "No se pudieron publicar los marts a cloud.";
-        try {
-          const payload = await response.json();
-          text = payload.error || text;
-        } catch {
-          // keep generic message
-        }
-        setMessage({ type: "error", text });
-        return;
-      }
-      const data = await response.json();
-      setSourceMonitorPublishJob(data);
-      setMessage({ type: "ok", text: "Publicacion iniciada. Podes dejar la pantalla abierta mientras se actualiza el estado." });
-      pollSourceMonitorPublishJob(data.job_id);
-    } catch {
-      setMessage({ type: "error", text: "No se pudo iniciar la publicacion de datos analiticos." });
-      setSourceMonitorPublishing(false);
-    }
-  }
-
-  async function pollSourceMonitorPublishJob(jobId: string) {
-    try {
-      const response = await fetch(`/api/source-monitor?action=publish-status&job_id=${encodeURIComponent(jobId)}`, {
-        cache: "no-store",
-      });
-      if (!response.ok) {
-        let text = "No se pudo consultar el estado de publicacion.";
-        try {
-          const payload = await response.json();
-          text = payload.error || text;
-        } catch {
-          // keep generic message
-        }
-        setMessage({ type: "error", text });
-        setSourceMonitorPublishing(false);
-        return;
-      }
-      const job: SourceMonitorPublishJob = await response.json();
-      setSourceMonitorPublishJob(job);
-      if (job.status === "completed" && job.result) {
-        setSourceMonitorLastPublish(job.result);
-        setMessage({ type: "ok", text: "Datos analiticos publicados a cloud. La web online puede usar estos datos." });
-        setSourceMonitorPublishing(false);
-        await loadSourceMonitor();
-        return;
-      }
-      if (job.status === "failed") {
-        const errorText = typeof job.error === "string" ? job.error : JSON.stringify(job.error || "Error de publicacion");
-        setMessage({ type: "error", text: `Fallo la publicacion: ${errorText}` });
-        setSourceMonitorPublishing(false);
-        return;
-      }
-      window.setTimeout(() => pollSourceMonitorPublishJob(jobId), 4000);
-    } catch {
-      setMessage({ type: "error", text: "No se pudo consultar el estado de publicacion." });
-      setSourceMonitorPublishing(false);
     }
   }
 
@@ -6655,6 +6269,11 @@ export default function Home() {
     setLastFile("");
   }
 
+  function openCatalogForAccount(source: string, account: string) {
+    setCatalogInitialFilter({ source, account, status: "all", requestId: Date.now() });
+    openView("catalog");
+  }
+
   function openBookingWorkspace() {
     setBookingWorkspaceMode(canAccessBookingMode("individual") ? "individual" : "shared");
     setBookingSurface("dashboard");
@@ -6919,24 +6538,6 @@ export default function Home() {
     );
   }
 
-  const sourceMonitorPendingTotal = (sourceMonitor?.items || []).reduce((sum, item) => sum + item.unprocessed_raw_count, 0);
-  const sourceMonitorIgnoredTotal = (sourceMonitor?.items || []).reduce((sum, item) => sum + (item.ignored_raw_count || 0), 0);
-  const sourceMonitorRawTotal = (sourceMonitor?.items || []).reduce((sum, item) => sum + item.raw_files, 0);
-  const sourceMonitorLoadedTotal = (sourceMonitor?.items || []).reduce((sum, item) => sum + item.files_in_mart, 0);
-  const canPublishMarts = Boolean(currentUser?.canEdit)
-    && sourceMonitorPendingTotal === 0
-    && !sourceMonitorPublishing
-    && !sourceMonitorProcessingId
-    && !sourceMonitorLoading;
-  const publishDisabledReason = !currentUser?.canEdit
-    ? "Necesitas entrar con usuario editor/admin."
-    : sourceMonitorLoading
-      ? "Primero termina la revision de directorios."
-      : sourceMonitorProcessingId
-        ? "Hay un procesamiento en curso."
-        : sourceMonitorPendingTotal > 0
-          ? "Hay archivos pendientes reales. Procesalos y revisa los importes antes de publicar."
-          : "Publica los marts validados a Google Cloud Storage.";
   const distributorConfigSources = Object.keys(distributorConfig?.summary.sources || {}).sort((a, b) => a.localeCompare(b));
   const distributorConfigAccounts = (distributorConfig?.accounts || [])
     .filter((account) => !distributorConfigSource || account.source === distributorConfigSource);
@@ -7604,7 +7205,7 @@ export default function Home() {
       onOpen={(targetView) => targetView === "booking" ? openBookingWorkspace() : openView(targetView as View)}
       onLogout={logout}
     >
-      <main className={view === "menu" ? "home-main" : view === "booking" && bookingSurface === "dashboard" ? "booking-main" : view === "employees" ? "employee-main" : undefined}>
+      <main className={view === "menu" ? "home-main" : view === "booking" && bookingSurface === "dashboard" ? "booking-main" : view === "employees" ? "employee-main" : view === "catalog" ? "catalog-main" : undefined}>
         {message && <div className={`message ${message.type === "error" ? "error" : ""}`}>{message.text}</div>}
 
         {view === "menu" && (
@@ -8327,549 +7928,15 @@ export default function Home() {
         )}
 
         {view === "source-monitor" && (
-          <section className="panel wide-panel">
-            <div className="section-heading">
-              <div>
-                <h1>Control de distribuidoras</h1>
-                <p>Monitoreo operativo de descargas. Inactivo solo apaga alertas: no excluye datos historicos de reportes.</p>
-              </div>
-              <button type="button" onClick={loadSourceMonitor} disabled={sourceMonitorLoading}>
-                {sourceMonitorLoading ? "Revisando..." : "Revisar todos"}
-              </button>
-            </div>
-
-            {!currentUser?.canEdit && (
-              <p className="field-help danger-text">
-                Estas ingresado como viewer. Para procesar o cambiar alertas, entra con un usuario editor/admin.
-              </p>
-            )}
-
-            <div className="control-dashboard">
-              <div>
-                <span>Fuentes</span>
-                <strong>{sourceMonitor?.summary.total ?? 0}</strong>
-              </div>
-              <div>
-                <span>Raw detectados</span>
-                <strong>{sourceMonitorRawTotal}</strong>
-              </div>
-              <div>
-                <span>Cargados</span>
-                <strong>{sourceMonitorLoadedTotal}</strong>
-              </div>
-              <div className={sourceMonitorPendingTotal > 0 ? "warn" : ""}>
-                <span>Pendientes reales</span>
-                <strong>{sourceMonitorPendingTotal}</strong>
-              </div>
-              <div>
-                <span>Ignorados validos</span>
-                <strong>{sourceMonitorIgnoredTotal}</strong>
-              </div>
-              <div className={(sourceMonitor?.summary.alerts || 0) > 0 ? "danger" : ""}>
-                <span>Alertas</span>
-                <strong>{sourceMonitor?.summary.alerts ?? 0}</strong>
-              </div>
-              <div>
-                <span>OK</span>
-                <strong>{sourceMonitor?.summary.status_counts?.ok ?? 0}</strong>
-              </div>
-              <div>
-                <span>Inactivas</span>
-                <strong>{sourceMonitor?.summary.status_counts?.inactive ?? 0}</strong>
-              </div>
-            </div>
-
-            {sourceMonitorLastProcess && (
-              <div className="process-summary">
-                <div className="section-heading">
-                  <div>
-                    <h2>Resumen procesado</h2>
-                    <p>{sourceMonitorLastProcess.display_name} - {sourceMonitorLastProcess.processed_at}</p>
-                  </div>
-                  <div className="mini-total">
-                    <span>Total USD</span>
-                    <strong>{money(sourceMonitorLastProcess.total_amount_usd)}</strong>
-                  </div>
-                </div>
-                <div className="period-meta">
-                  <strong>Antes</strong>
-                  <span>{sourceMonitorLastProcess.last_statement_before || "-"}</span>
-                  <strong>Despues</strong>
-                  <span>{sourceMonitorLastProcess.last_statement_after || "-"}</span>
-                  <strong>Pendientes</strong>
-                  <span>{sourceMonitorLastProcess.pending_files_after.length}</span>
-                </div>
-                <div className="muted">
-                  Archivos: {sourceMonitorLastProcess.pending_files_before.length ? sourceMonitorLastProcess.pending_files_before.join(", ") : "sin archivos pendientes detectados"}
-                </div>
-                {sourceMonitorLastProcess.summary.length > 0 && (
-                  <table className="summary-table compact-table">
-                    <thead>
-                      <tr>
-                        <th>Statement</th>
-                        <th>Filas</th>
-                        <th>Archivos</th>
-                        <th>USD</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sourceMonitorLastProcess.summary.map((row) => (
-                        <tr key={row.statement_period}>
-                          <td>{row.statement_period}</td>
-                          <td>{row.rows.toLocaleString("es-AR")}</td>
-                          <td>{row.files}</td>
-                          <td>{money(row.amount_usd)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            )}
-
-            <div className="summary-table-wrap">
-              <table className="summary-table source-monitor-table">
-                <thead>
-                  <tr>
-                    <th>Distribuidora</th>
-                    <th>Estado carga</th>
-                    <th>Archivos</th>
-                    <th>Estado</th>
-                    <th>Acciones</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(sourceMonitor?.items || []).map((item) => (
-                    <tr key={item.id}>
-                      <td>
-                        <strong>{item.display_name}</strong>
-                        <div className="muted">{item.source} / {item.account}</div>
-                        <div className="muted">{item.input_path || "sin carpeta configurada"}</div>
-                      </td>
-                      <td>
-                        <div><strong>Statement:</strong> {item.last_statement_period || "-"}</div>
-                        <div className="muted">
-                          {item.statement_age_months === null ? "sin edad" : `${item.statement_age_months} mes(es) atras`} / tolerancia {item.max_age_months}
-                        </div>
-                        <div className="muted">Filas mart: {item.rows_in_mart.toLocaleString("es-AR")}</div>
-                      </td>
-                      <td>
-                        <div className="file-count-grid">
-                          <span><strong>Raw</strong>{item.raw_files}</span>
-                          <span><strong>Mart</strong>{item.files_in_mart}</span>
-                          <span className={item.unprocessed_raw_count > 0 ? "warn-text" : ""}><strong>Pend.</strong>{item.unprocessed_raw_count}</span>
-                          <span><strong>Ign.</strong>{item.ignored_raw_count || 0}</span>
-                        </div>
-                        {sourceMonitorInventoryLabel(item.raw_inventory_summary) && (
-                          <div className="muted truncate-text" title={sourceMonitorInventoryLabel(item.raw_inventory_summary)}>
-                            {sourceMonitorInventoryLabel(item.raw_inventory_summary)}
-                          </div>
-                        )}
-                        {(item.ignored_raw_count || 0) > 0 && (
-                          <div
-                            className="muted truncate-text"
-                            title={(item.ignored_raw_files || []).map((raw) => `${raw.file_name}: ${raw.reason}`).join("\n")}
-                          >
-                            Ignorados con regla: {item.ignored_raw_count}
-                          </div>
-                        )}
-                        <div className="muted truncate-text" title={item.latest_raw_file || ""}>Ultimo raw: {item.latest_raw_file || "sin archivos"}</div>
-                      </td>
-                      <td>
-                        <span className={`status-pill ${item.status}`}>{item.status}</span>
-                        <div className={item.alert ? "danger-text" : "muted"}>{item.reason}</div>
-                        {item.notes && <div className="muted">{item.notes}</div>}
-                      </td>
-                      <td>
-                        <div className="stack-actions">
-                          {item.portal_url && <a className="button secondary" href={item.portal_url} target="_blank" rel="noreferrer">Portal</a>}
-                          <button
-                            type="button"
-                            disabled={sourceMonitorLoading}
-                            title="Vuelve a comparar la carpeta input_raw contra lo procesado localmente."
-                            onClick={loadSourceMonitor}
-                          >
-                            {sourceMonitorLoading ? "Revisando..." : "Revisar directorio"}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={sourceMonitorLoading || !currentUser?.canEdit}
-                            title={!currentUser?.canEdit ? "Necesitas entrar con usuario editor/admin." : "Marca que ya revisaste esta distribuidora."}
-                            onClick={() => updateSourceMonitorItem(item.id, { last_manual_review_at: new Date().toISOString(), alert_silenced: false })}
-                          >
-                            Marcar revisada
-                          </button>
-                          <button
-                            type="button"
-                            disabled={sourceMonitorProcessingId !== "" || !currentUser?.canEdit || item.unprocessed_raw_count === 0}
-                            title={!currentUser?.canEdit ? "Necesitas entrar con usuario editor/admin." : sourceMonitorProcessingId !== "" ? "Hay un procesamiento en curso." : item.unprocessed_raw_count === 0 ? "No hay archivos nuevos pendientes para procesar." : "Ejecuta el ingest nuevo local para esta distribuidora."}
-                            onClick={() => processSourceMonitorItem(item.id)}
-                          >
-                            {sourceMonitorProcessingId === item.id ? "Procesando..." : item.unprocessed_raw_count === 0 ? "Sin pendientes" : "Procesar nuevos"}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={sourceMonitorLoading || !currentUser?.canEdit}
-                            title={!currentUser?.canEdit ? "Necesitas entrar con usuario editor/admin." : item.alert_silenced ? "Vuelve a activar la alerta para esta distribuidora." : "Oculta la alerta actual sin desactivar la data historica."}
-                            onClick={() => updateSourceMonitorItem(item.id, { alert_silenced: !item.alert_silenced })}
-                          >
-                            {item.alert_silenced ? "Reactivar alerta" : "Silenciar alerta"}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={sourceMonitorLoading || !currentUser?.canEdit}
-                            title={!currentUser?.canEdit ? "Necesitas entrar con usuario editor/admin." : item.monitoring_active ? "Deja de monitorear alertas nuevas, sin excluir lo ya cargado." : "Reactiva el monitoreo de alertas."}
-                            onClick={() => updateSourceMonitorItem(item.id, { monitoring_active: !item.monitoring_active, alert_silenced: item.monitoring_active ? true : false })}
-                          >
-                            {item.monitoring_active ? "No monitorear" : "Monitorear"}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="cloud-publish-box">
-              <div>
-                <h2>Publicacion cloud</h2>
-                <p>
-                  Este paso debe hacerse despues de revisar los resumenes locales. Publicar cloud actualiza la web online con los datos analiticos validados.
-                </p>
-              </div>
-              <button
-                type="button"
-                disabled={!canPublishMarts}
-                title={publishDisabledReason}
-                onClick={publishSourceMonitorMarts}
-              >
-                {sourceMonitorPublishing ? "Publicando..." : "Publicar datos analiticos"}
-              </button>
-              <p className="field-help">
-                Flujo correcto: revisar carpetas, procesar pendientes reales, validar importes y catalogo local, y recien ahi publicar.
-                {sourceMonitorPendingTotal > 0 ? ` Hay ${sourceMonitorPendingTotal} archivo(s) pendiente(s) real(es).` : " No hay pendientes reales detectados."}
-              </p>
-              {sourceMonitorPublishJob && sourceMonitorPublishJob.status !== "completed" && (
-                <div className="publish-result">
-                  <strong>Publicacion en curso</strong>
-                  <span>Estado: {sourceMonitorPublishJob.status} / {sourceMonitorPublishJob.stage}</span>
-                  <span>Job: {sourceMonitorPublishJob.job_id}</span>
-                </div>
-              )}
-              {sourceMonitorLastPublish && (
-                <div className="publish-result">
-                  <strong>Ultima publicacion: {sourceMonitorLastPublish.published_at}</strong>
-                  <span>{sourceMonitorLastPublish.bucket}/{sourceMonitorLastPublish.prefix}</span>
-                  <span>
-                    {sourceMonitorLastPublish.uploaded.map((file) => `${file.file_name} (${file.size_mb.toFixed(1)} MB)`).join(" · ")}
-                  </span>
-                </div>
-              )}
-            </div>
-          </section>
+          <SourceMonitorModule
+            canEdit={Boolean(currentUser?.canEdit)}
+            onMessage={setMessage}
+          />
         )}
 
         {view === "catalog" && (
-          <section className="panel wide-panel">
-            <div className="section-heading">
-              <div>
-                <h1>Catalogo General</h1>
-                <p>Base maestra deduplicada desde statements. Los cambios de activo/inactivo no modifican los crudos.</p>
-              </div>
-              <div className="button-row">
-                <button type="button" onClick={() => loadCatalog(0)} disabled={catalogLoading}>
-                  {catalogLoading ? "Cargando..." : "Actualizar"}
-                </button>
-              </div>
-            </div>
-
-            <div className="period-controls catalog-controls">
-              <div>
-                <label htmlFor="catalog_source">Distribuidora</label>
-                <select
-                  id="catalog_source"
-                  value={catalogSource}
-                  onChange={(event) => setCatalogSource(event.target.value)}
-                >
-                  <option value="">Todas</option>
-                  {catalogData?.options.sources.map((item) => (
-                    <option key={item} value={item}>{item}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label htmlFor="catalog_account">Cuenta</label>
-                <select
-                  id="catalog_account"
-                  value={catalogAccount}
-                  onChange={(event) => setCatalogAccount(event.target.value)}
-                >
-                  <option value="">Todas</option>
-                  {catalogData?.options.accounts.map((item) => (
-                    <option key={item} value={item}>{item}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label htmlFor="catalog_artist">Artista</label>
-                <select
-                  id="catalog_artist"
-                  value={catalogArtist}
-                  onChange={(event) => setCatalogArtist(event.target.value)}
-                >
-                  <option value="">Todos</option>
-                  {catalogData?.options.artists.map((item) => (
-                    <option key={item} value={item}>{item}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label htmlFor="catalog_keyword">Palabra clave</label>
-                <input
-                  id="catalog_keyword"
-                  value={catalogKeyword}
-                  onChange={(event) => setCatalogKeyword(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      loadCatalog(0);
-                    }
-                  }}
-                  placeholder="tema, artista o ISRC"
-                />
-              </div>
-              <div>
-                <label htmlFor="catalog_label">Label</label>
-                <select
-                  id="catalog_label"
-                  value={catalogLabel}
-                  onChange={(event) => setCatalogLabel(event.target.value)}
-                >
-                  <option value="">Todos</option>
-                  <option value="__missing__">No identificadas</option>
-                  {catalogData?.options.labels.map((item) => (
-                    <option key={item} value={item}>{item}</option>
-                  ))}
-                </select>
-              </div>
-              <PeriodControl
-                id="catalog_period"
-                label="Actividad"
-                profile="activity_window"
-                selection={catalogPeriod}
-                onChange={setCatalogPeriod}
-                minMonth={catalogData?.options.first_month || undefined}
-                maxMonth={catalogData?.options.last_month || undefined}
-                helperText="Filtra obras con actividad en el mes o rango elegido."
-              />
-              <div>
-                <label htmlFor="catalog_status">Estado</label>
-                <select
-                  id="catalog_status"
-                  value={catalogStatus}
-                  onChange={(event) => setCatalogStatus(event.target.value as "active" | "inactive" | "all")}
-                >
-                  <option value="active">Activos</option>
-                  <option value="inactive">Inactivos</option>
-                  <option value="all">Todos</option>
-                </select>
-              </div>
-              <button type="button" onClick={() => loadCatalog(0)} disabled={catalogLoading}>
-                Buscar
-              </button>
-            </div>
-
-            <div className="control-dashboard">
-              <div>
-                <span>Items</span>
-                <strong>{catalogData?.total.toLocaleString("es-AR") || 0}</strong>
-              </div>
-              <div>
-                <span>Total USD</span>
-                <strong>{money(catalogData?.totals.amount_usd || 0)}</strong>
-              </div>
-              <div>
-                <span>Unidades</span>
-                <strong>{Math.round(catalogData?.totals.units || 0).toLocaleString("es-AR")}</strong>
-              </div>
-              <div>
-                <span>Rango fuente</span>
-                <strong>{catalogData?.options.first_month || "-"} / {catalogData?.options.last_month || "-"}</strong>
-              </div>
-            </div>
-
-            <div className="catalog-pagination">
-              <span>
-                Mostrando {catalogData ? catalogData.offset + 1 : 0}
-                {" - "}
-                {catalogData ? Math.min(catalogData.offset + catalogData.items.length, catalogData.total) : 0}
-                {" de "}
-                {catalogData?.total || 0}
-              </span>
-              <div className="button-row">
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={catalogLoading || catalogOffset === 0}
-                  onClick={() => loadCatalog(Math.max(0, catalogOffset - catalogLimit))}
-                >
-                  Anterior
-                </button>
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={catalogLoading || !catalogData || catalogOffset + catalogLimit >= catalogData.total}
-                  onClick={() => loadCatalog(catalogOffset + catalogLimit)}
-                >
-                  Siguiente
-                </button>
-              </div>
-            </div>
-
-            <div className="summary-table-wrap catalog-table-wrap">
-              <table className="summary-table catalog-table">
-                <thead>
-                  <tr>
-                    <th>Estado</th>
-                    <th>Tema</th>
-                    <th>Artista</th>
-                    <th>ISRC / ID</th>
-                    <th>Distribuidoras</th>
-                    <th>Fechas</th>
-                    <th>USD</th>
-                    <th>Release</th>
-                    <th>Label</th>
-                    <th>Accion</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {catalogLoading && (
-                    <tr>
-                      <td colSpan={10}>Cargando catalogo...</td>
-                    </tr>
-                  )}
-                  {!catalogLoading && catalogData?.items.length === 0 && (
-                    <tr>
-                      <td colSpan={10}>Sin items para este filtro.</td>
-                    </tr>
-                  )}
-                  {catalogData?.items.map((item) => (
-                    <tr key={item.catalog_key} className={item.include_in_reports === false ? "inactive-row" : ""}>
-                      <td>
-                        <span className={`status-pill ${item.include_in_reports !== false ? "ok" : "inactive"}`}>
-                          {item.include_in_reports !== false ? "entra en reportes" : "fuera de reportes"}
-                        </span>
-                        {item.catalog_business_status && <span className="cell-note">{item.catalog_business_status}</span>}
-                        {item.status_notes && <span className="cell-note">{item.status_notes}</span>}
-                      </td>
-                      <td>
-                        <strong>{item.track_title || "Sin titulo"}</strong>
-                        {item.title_variants && item.title_variants !== item.track_title && (
-                          <span className="cell-note truncate-text" title={item.title_variants}>Variantes: {item.title_variants}</span>
-                        )}
-                      </td>
-                      <td>
-                        {item.artist_statement || "Sin artista"}
-                        {item.artist_variants && item.artist_variants !== item.artist_statement && (
-                          <span className="cell-note truncate-text" title={item.artist_variants}>Variantes: {item.artist_variants}</span>
-                        )}
-                      </td>
-                      <td>
-                        <strong>{item.asset_isrc || item.track_id || "-"}</strong>
-                        <span className="cell-note">{item.catalog_key}</span>
-                      </td>
-                      <td>
-                        <strong>{item.sources || "-"}</strong>
-                        <span className="cell-note">{item.accounts || "-"}</span>
-                        {item.content_types && <span className="cell-note">{item.content_types}</span>}
-                      </td>
-                      <td>
-                        <strong>{item.first_transaction_month || "-"} / {item.last_transaction_month || "-"}</strong>
-                      </td>
-                      <td>{money(item.amount_usd || 0)}</td>
-                      <td>
-                        {item.external_release_date || "-"}
-                        {item.external_match_url && (
-                          <a className="cell-note" href={item.external_match_url} target="_blank" rel="noreferrer">metadata</a>
-                        )}
-                      </td>
-                      <td>
-                        {catalogLabelEditKey === item.catalog_key ? (
-                          <div className="inline-edit">
-                            <input
-                              value={catalogLabelDraft}
-                              onChange={(event) => setCatalogLabelDraft(event.target.value)}
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter") {
-                                  event.preventDefault();
-                                  updateCatalogLabel(item);
-                                }
-                                if (event.key === "Escape") {
-                                  setCatalogLabelEditKey("");
-                                  setCatalogLabelDraft("");
-                                }
-                              }}
-                              autoFocus
-                            />
-                            <button
-                              type="button"
-                              className="secondary"
-                              disabled={catalogLabelSaving === item.catalog_key}
-                              onClick={() => updateCatalogLabel(item)}
-                            >
-                              Guardar
-                            </button>
-                            <button
-                              type="button"
-                              className="secondary"
-                              disabled={catalogLabelSaving === item.catalog_key}
-                              onClick={() => {
-                                setCatalogLabelEditKey("");
-                                setCatalogLabelDraft("");
-                              }}
-                            >
-                              Cancelar
-                            </button>
-                          </div>
-                        ) : currentUser?.canEdit ? (
-                          <button
-                            type="button"
-                            className="metadata-edit-chip"
-                            onClick={() => {
-                              setCatalogLabelEditKey(item.catalog_key);
-                              setCatalogLabelDraft(item.label_normalized || item.label_normalized_auto || item.external_label || "");
-                            }}
-                          >
-                            {item.label_normalized || "-"}
-                          </button>
-                        ) : (
-                          <strong>{item.label_normalized || "-"}</strong>
-                        )}
-                        {item.label_normalized_override && <span className="cell-note">manual</span>}
-                        {item.external_label && item.external_label !== item.label_normalized && (
-                          <span className="cell-note truncate-text" title={item.external_label}>Original: {item.external_label}</span>
-                        )}
-                      </td>
-                      <td>
-                        <button
-                          type="button"
-                          className="secondary"
-                          disabled={!currentUser?.canEdit}
-                          title={!currentUser?.canEdit ? "Necesitas usuario editor/admin." : item.active ? "Marcar este item como inactivo." : "Reactivar este item."}
-                          onClick={() => updateCatalogStatus(item, !item.active)}
-                        >
-                          {item.active ? "Inactivar" : "Activar"}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+          <CatalogModule canEdit={canEditModule("catalog")} initialFilter={catalogInitialFilter} onMessage={setMessage} />
         )}
-
         {view === "distributor-config" && (
           <section className="panel wide-panel">
             <div className="section-heading">
@@ -8942,10 +8009,7 @@ export default function Home() {
                 disabled={!selectedDistributorAccount}
                 onClick={() => {
                   if (!selectedDistributorAccount) return;
-                  setCatalogSource(selectedDistributorAccount.source);
-                  setCatalogAccount(selectedDistributorAccount.account);
-                  setCatalogStatus("all");
-                  setView("catalog");
+                  openCatalogForAccount(selectedDistributorAccount.source, selectedDistributorAccount.account);
                 }}
               >
                 Ver obras en catalogo
@@ -9324,10 +8388,7 @@ export default function Home() {
                       type="button"
                       className="secondary"
                       onClick={() => {
-                        setCatalogSource(selectedDistributorAccount.source);
-                        setCatalogAccount(selectedDistributorAccount.account);
-                        setCatalogStatus("all");
-                        setView("catalog");
+                        openCatalogForAccount(selectedDistributorAccount.source, selectedDistributorAccount.account);
                       }}
                     >
                       Abrir catalogo filtrado

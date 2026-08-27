@@ -10,6 +10,10 @@ Current production flow:
 
 ```text
 Browser -> Vercel API route -> Cloud Run API -> Cloud SQL / GCS marts
+
+Los reportes de regalias pesados no mantienen esa cadena abierta. Vercel crea
+un trabajo corto en Cloud Run, consulta su estado y descarga el resultado ya
+persistido. No aumentar `maxDuration` como solucion a reportes lentos.
 ```
 
 Vercel must not keep its own user list. Login is delegated to Cloud Run:

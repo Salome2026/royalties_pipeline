@@ -1,4 +1,5 @@
 import "./globals.css";
+import "./components/vpo-app-frame.css";
 
 export const metadata = {
   title: "VPO Corp",

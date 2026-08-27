@@ -110,10 +110,13 @@ Store/DSP, territorio, uso ni tipo de contenido, porque esas son dimensiones de
 analisis y no identidades distintas. Los identificadores originales se conservan
 como trazabilidad y el detalle mantiene las filas fuente.
 
-La busqueda por keyword es literal normalizada, no difusa: ignora mayusculas y
-separadores simples (espacios, guion y guion bajo). Asi, `superjunte` y
-`super junte` buscan la misma secuencia, sin autorizar uniones por titulo
-parecido.
+La busqueda por keyword es literal normalizada, no difusa: ignora mayusculas,
+tildes, la diferencia entre `n` y `ñ`, y separadores simples (espacios, guion y
+guion bajo). Asi, `boton` encuentra `Botón`, `ano` encuentra `año`, y
+`superjunte` encuentra `super junte`, sin autorizar uniones por titulo parecido.
+Esta regla se comparte con Dashboard de regalias, Ingresos digitales y Catalogo
+General. Solo normaliza la comparacion: nunca modifica el titulo, artista,
+identificador ni otro dato almacenado o presentado.
 
 Separacion conceptual:
 

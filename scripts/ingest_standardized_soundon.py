@@ -223,6 +223,10 @@ def main():
                 print("  Summary se omite del standardized principal; se usa solo en auditorias.")
                 continue
 
+            if statement_type == "discovery_mode":
+                print("  Discovery Mode se omite: detalla una deduccion ya incluida en My Royalty.")
+                continue
+
             df_std = standardize_detail_file(df, file_path, statement_type)
 
             part_path = TEMP_DIR / f"{file_path.stem}.parquet"

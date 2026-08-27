@@ -38,6 +38,9 @@ La pantalla no trata todos los archivos que no matchean contra el mart como erro
 - `pending_real`: archivo real que no aparece en el mart nuevo y requiere procesar.
 - `ignored_empty`: archivo reconocido pero sin filas utiles, por ejemplo statements vacios.
 - `ignored_summary`: resumen que se omite a proposito para evitar duplicar detalle granular, por ejemplo SoundOn summary.
+- `ignored_audit_detail`: detalle que no es un ingreso adicional y se controla
+  contra el archivo economico principal, por ejemplo SoundOn Discovery Mode
+  contra la deduccion ya incluida en My Royalty.
 - `legacy_manual`: carga historica excepcional documentada, por ejemplo Altafonte legacy dentro de Orchard/Altafonte.
 
 Solo `pending_real` bloquea la publicacion a cloud.

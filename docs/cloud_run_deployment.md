@@ -12,7 +12,7 @@
 - Region: `us-central1`
 - CPU: `1`
 - Memoria: `2Gi` para empezar. Si los reportes grandes siguen fallando, subir a `4Gi`.
-- Timeout: `600s`
+- Timeout: `1800s` para el worker persistente de reportes.
 - Concurrency: `1`
 - Min instances: `0`
 - Max instances: `1`
@@ -36,6 +36,12 @@ Usar los mismos valores que Render:
 - `VPO_OPERATIONAL_DB_NAME=vpo_corp`
 - `VPO_OPERATIONAL_DB_USER=postgres`
 - `VPO_OPERATIONAL_DB_PASSWORD` desde Secret Manager.
+- `VPO_REPORT_TASKS_PROJECT=vpo-corp-royalties`
+- `VPO_REPORT_TASKS_LOCATION=us-central1`
+- `VPO_REPORT_TASKS_QUEUE=vpo-report-jobs`
+- `VPO_REPORT_RESULTS_PREFIX=reports/jobs`
+- `VPO_REPORT_WORKER_BASE_URL=https://vpo-corp-api-259971998447.us-central1.run.app`
+- `VPO_REPORT_WORKER_TOKEN` desde Secret Manager.
 
 Para leer Google Cloud Storage en Cloud Run, preferimos usar el service account adjunto al servicio. Ese service account necesita permiso sobre el bucket, por ejemplo `Storage Object Viewer`.
 Para Cloud SQL, el servicio debe tener asociada la instancia con
@@ -50,13 +56,30 @@ gcloud run deploy vpo-corp-api `
   --allow-unauthenticated `
   --cpu 1 `
   --memory 2Gi `
-  --timeout 600 `
+  --timeout 1800 `
   --concurrency 1 `
   --min-instances 0 `
   --max-instances 1 `
   --add-cloudsql-instances vpo-corp-royalties:us-central1:vpo-corp-postgres `
   --set-env-vars GCS_BUCKET=vpo-corp-royalties-marts,GCS_PREFIX=marts,VPO_API_CACHE_DIR=/tmp/vpo-corp/gcs_marts,VPO_API_REPORTS_DIR=/tmp/vpo-corp/reports
 ```
+
+## Cola de reportes
+
+La pantalla `Reporte de regalias` no espera el archivo dentro de una peticion
+de Vercel. Registra el pedido en Cloud SQL y lo entrega a Cloud Tasks.
+
+- API: `cloudtasks.googleapis.com`.
+- Cola: `vpo-report-jobs`, region `us-central1`.
+- Maximo simultaneo: `1`.
+- Reintentos automaticos: `1`; un error queda visible y se solicita nuevamente
+  desde la pantalla, sin riesgo de duplicar un archivo.
+- Secreto interno: `vpo-report-worker-token`.
+- El service account de Cloud Run necesita `roles/cloudtasks.enqueuer` y acceso
+  al secreto interno.
+
+Los resultados quedan en `gs://vpo-corp-royalties-marts/reports/jobs/` y la
+tabla `report_runs` conserva el estado y el propietario.
 
 Despues cargar las variables secretas desde la consola de Cloud Run o con `gcloud run services update`.
 
@@ -66,6 +89,7 @@ Variables secretas a cargar:
 - `GOOGLE_OAUTH_TOKEN_JSON`
 - `GOOGLE_SHEETS_SHARE_EMAIL`
 - `GOOGLE_DRIVE_FOLDER_ID`
+- `VPO_REPORT_WORKER_TOKEN`
 
 ## Verificacion
 

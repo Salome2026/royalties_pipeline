@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import polars as pl
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 from google.cloud import storage
 from google.oauth2.credentials import Credentials as UserCredentials
@@ -39,6 +39,19 @@ from app.operational_db import (
     operational_db_healthcheck,
     operational_db_settings,
     operational_sqlite_compatible_connect,
+)
+from app.report_jobs import (
+    claim_report_job,
+    cloud_tasks_enabled,
+    complete_report_job,
+    create_or_reuse_report_job,
+    enqueue_report_job,
+    fail_report_job,
+    get_report_job,
+    get_report_job_artifact,
+    list_report_jobs,
+    set_report_job_stage,
+    set_report_job_task,
 )
 
 
@@ -57,6 +70,7 @@ from build_custom_title_royalty_report import (  # noqa: E402
     build_custom_title_report,
 )
 from lib.catalog_report_filter import apply_report_net_personalization, filter_reportable_generation  # noqa: E402
+from lib.text_search import contains_search_expr, normalize_search_text  # noqa: E402
 from lib.distributor_policy_store import (  # noqa: E402
     load_distributor_policy_document,
     update_report_personalization,
@@ -154,6 +168,8 @@ BOOKING_ARTIST_REGISTRY_PATH = BASE / "warehouse" / "booking" / "registry" / "bo
 SOURCE_MONITOR_CONFIG_PATH = BASE / "warehouse" / "registry" / "source_monitor_config.json"
 GOOGLE_SHEETS_SHARE_EMAIL = os.environ.get("GOOGLE_SHEETS_SHARE_EMAIL", "").strip()
 GOOGLE_DRIVE_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
+VPO_REPORT_RESULTS_PREFIX = os.environ.get("VPO_REPORT_RESULTS_PREFIX", "reports/jobs").strip("/")
+VPO_REPORT_WORKER_BASE_URL = os.environ.get("VPO_REPORT_WORKER_BASE_URL", "").strip().rstrip("/")
 
 SONG_FILE = "song_level_all_sources.parquet"
 STANDARDIZED_FILE = "standardized_raw_all_sources.parquet"
@@ -188,6 +204,7 @@ VPO_CATALOG_STATUS_SYNC_GCS = (
 )
 PUBLISH_JOBS: dict[str, dict] = {}
 PUBLISH_JOBS_LOCK = threading.Lock()
+LOCAL_REPORT_JOB_LOCK = threading.Lock()
 
 
 class KeywordReportRequest(BaseModel):
@@ -206,6 +223,19 @@ class ExecutiveRoyaltyReportRequest(BaseModel):
     end_month: str | None = None
     period_basis: Literal["transaction_month", "statement_period"] = "transaction_month"
     mode: Literal["any", "all"] = "any"
+    source: str | None = Field(default=None, max_length=80)
+    account: str | None = Field(default=None, max_length=120)
+    refresh_cache: bool = False
+
+
+class RoyaltyReportJobRequest(BaseModel):
+    output: Literal["excel", "executive_pdf", "google_sheet"] = "excel"
+    keywords: list[str] = Field(default_factory=list, max_length=100)
+    start_month: str | None = None
+    end_month: str | None = None
+    period_basis: Literal["transaction_month", "statement_period"] = "transaction_month"
+    mode: Literal["any", "all"] = "any"
+    raw_limit: int = Field(default=5000, ge=0, le=50000)
     source: str | None = Field(default=None, max_length=80)
     account: str | None = Field(default=None, max_length=120)
     refresh_cache: bool = False
@@ -1722,6 +1752,14 @@ def classify_raw_file(source: str, path: Path, mart_names: set[str]) -> dict:
         }
 
     if source == "soundon":
+        if "_discovery mode.csv" in lower_name:
+            return {
+                "file_name": name,
+                "status": "ignored_audit_detail",
+                "reason": "Detalle de deduccion Discovery Mode ya incluido en My Royalty; se valida por auditoria.",
+                "rows": count_csv_rows(path),
+            }
+
         if "_summary.csv" in lower_name:
             return {
                 "file_name": name,
@@ -7454,6 +7492,295 @@ def process_source_monitor(
     }
 
 
+def royalty_report_scope_label(source: str | None, account: str | None) -> str:
+    source = (source or "").strip().lower() or None
+    account = (account or "").strip().lower() or None
+    policy = load_distributor_policy_document()
+    matching_policy = next(
+        (
+            entry
+            for entry in policy.get("entries", [])
+            if str(entry.get("source") or "").strip().lower() == source
+            and str(entry.get("account") or "").strip().lower() == account
+        ),
+        None,
+    )
+    if source and account:
+        return str((matching_policy or {}).get("display_name") or "").strip() or (
+            f"{source.upper()} / {account.replace('_', ' ').title()}"
+        )
+    if source:
+        return source.upper()
+    return "Todas las distribuidoras"
+
+
+def upload_report_job_artifact(job_id: int, output_path: Path, content_type: str) -> str:
+    if not GCS_BUCKET:
+        raise RuntimeError("GCS_BUCKET no esta configurado para guardar el reporte.")
+    object_path = f"{VPO_REPORT_RESULTS_PREFIX}/{job_id}/{output_path.name}"
+    client = gcs_client()
+    blob = client.bucket(GCS_BUCKET).blob(object_path)
+    blob.upload_from_filename(str(output_path), content_type=content_type)
+    return f"gs://{GCS_BUCKET}/{object_path}"
+
+
+def materialize_report_job_artifact(job_id: int) -> tuple[Path, str, str]:
+    artifact = get_report_job_artifact(job_id)
+    if artifact is None or artifact.get("status") != "completed":
+        raise HTTPException(status_code=409, detail="El reporte todavia no esta listo.")
+    output_uri = str(artifact.get("output_uri") or "")
+    if not output_uri.startswith("gs://"):
+        raise HTTPException(status_code=500, detail="El reporte no tiene un archivo persistido valido.")
+    bucket_name, _, object_path = output_uri[5:].partition("/")
+    if not bucket_name or not object_path:
+        raise HTTPException(status_code=500, detail="La ubicacion del reporte es invalida.")
+    filename = Path(str(artifact.get("result_filename") or Path(object_path).name)).name
+    content_type = str(artifact.get("result_content_type") or "application/octet-stream")
+    local_dir = VPO_API_REPORTS_DIR / "completed" / str(job_id)
+    local_dir.mkdir(parents=True, exist_ok=True)
+    local_path = local_dir / filename
+    if not local_path.exists():
+        client = gcs_client()
+        blob = client.bucket(bucket_name).blob(object_path)
+        if not blob.exists(client):
+            raise HTTPException(status_code=410, detail="El archivo del reporte ya no esta disponible.")
+        blob.download_to_filename(str(local_path))
+    return local_path, filename, content_type
+
+
+def build_royalty_report_job(job: dict[str, Any]) -> tuple[str | None, str | None, str | None, str | None]:
+    job_id = int(job["id"])
+    output_format = str(job.get("output_format") or "excel")
+    params = dict(job.get("params") or {})
+    keywords = normalize_keywords(params.get("keywords") or [])
+    start_month = params.get("start_month") or None
+    end_month = params.get("end_month") or None
+    period_basis = params.get("period_basis") or "transaction_month"
+    mode = params.get("mode") or "any"
+    raw_limit = max(0, min(int(params.get("raw_limit") or 0), 50000))
+    refresh_cache = bool(params.get("refresh_cache"))
+    source = (params.get("source") or "").strip().lower() or None
+    account = (params.get("account") or "").strip().lower() or None
+
+    if start_month and end_month and start_month > end_month:
+        raise ValueError("El periodo desde no puede ser mayor que hasta.")
+    if output_format in {"excel", "google_sheet"} and not keywords:
+        raise ValueError("El reporte requiere al menos una palabra clave.")
+
+    set_report_job_stage(job_id, "reading_data")
+    marts = ensure_marts(
+        refresh_cache=refresh_cache,
+        filenames=[SONG_FILE, STANDARDIZED_FILE, CATALOG_MASTER_FILE],
+    )
+    configure_catalog_report_env(marts)
+    set_report_job_stage(job_id, "building")
+
+    if output_format == "excel":
+        output_path = build_report(
+            keywords=keywords,
+            mode=mode,
+            raw_limit=raw_limit,
+            start_month=start_month,
+            end_month=end_month,
+            period_basis=period_basis,
+            song_path=marts[SONG_FILE],
+            standardized_path=marts[STANDARDIZED_FILE],
+            output_dir=VPO_API_REPORTS_DIR,
+        )
+        content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    else:
+        tables = build_report_tables(
+            keywords=keywords,
+            mode=mode,
+            raw_limit=raw_limit if output_format == "google_sheet" else 0,
+            start_month=start_month,
+            end_month=end_month,
+            period_basis=period_basis,
+            song_path=marts[SONG_FILE],
+            standardized_path=marts[STANDARDIZED_FILE],
+            source=source if output_format == "executive_pdf" else None,
+            account=account if output_format == "executive_pdf" else None,
+        )
+        if output_format == "google_sheet":
+            spreadsheet_url = create_google_sheet(
+                tables=tables,
+                keywords=keywords,
+                start_month=start_month,
+                end_month=end_month,
+            )
+            return None, None, None, spreadsheet_url
+        output_path = build_executive_royalty_pdf(
+            tables=tables,
+            output_dir=VPO_API_REPORTS_DIR,
+            scope_label=royalty_report_scope_label(source, account),
+            keywords=keywords,
+            period_basis=period_basis,
+            start_month=start_month,
+            end_month=end_month,
+        )
+        content_type = "application/pdf"
+
+    set_report_job_stage(job_id, "uploading")
+    output_uri = upload_report_job_artifact(job_id, output_path, content_type)
+    filename = output_path.name
+    try:
+        output_path.unlink(missing_ok=True)
+    except OSError:
+        pass
+    return output_uri, filename, content_type, None
+
+
+def execute_royalty_report_job(job_id: int) -> dict[str, Any] | None:
+    job = claim_report_job(job_id)
+    if job is None:
+        return get_report_job(job_id)
+    try:
+        output_uri, filename, content_type, result_url = build_royalty_report_job(job)
+        complete_report_job(
+            job_id,
+            output_uri=output_uri,
+            filename=filename,
+            content_type=content_type,
+            result_url=result_url,
+        )
+    except Exception as exc:
+        fail_report_job(job_id, str(exc))
+    return get_report_job(job_id)
+
+
+def execute_local_royalty_report_job(job_id: int) -> None:
+    with LOCAL_REPORT_JOB_LOCK:
+        execute_royalty_report_job(job_id)
+
+
+def require_report_job_access(username: str, job: dict[str, Any], action: Literal["access", "create"] = "access") -> dict:
+    with operational_connect() as conn:
+        permission = require_module_permission(conn, username, "royalty_reports", action)
+    if not permission.get("is_admin") and str(job.get("requested_by") or "").casefold() != username.casefold():
+        raise HTTPException(status_code=403, detail="No tenes permiso para ver este reporte.")
+    return permission
+
+
+@app.post("/reports/jobs", status_code=202)
+def create_royalty_report_job(
+    request: RoyaltyReportJobRequest,
+    http_request: Request,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    username = clean_username(x_vpo_username or "")
+    if not username:
+        raise HTTPException(status_code=401, detail="Usuario requerido.")
+    with operational_connect() as conn:
+        require_module_permission(conn, username, "royalty_reports", "create")
+
+    params = request.model_dump(exclude={"output"})
+    params["keywords"] = normalize_keywords(params.get("keywords") or [])
+    if request.output in {"excel", "google_sheet"} and not params["keywords"]:
+        raise HTTPException(status_code=400, detail="Ingresa al menos una palabra clave.")
+    if request.start_month and request.end_month and request.start_month > request.end_month:
+        raise HTTPException(status_code=400, detail="El periodo desde no puede ser mayor que hasta.")
+
+    report_key = {
+        "excel": "royalty_keyword",
+        "executive_pdf": "royalty_executive",
+        "google_sheet": "royalty_google_sheet",
+    }[request.output]
+    job, created = create_or_reuse_report_job(
+        requested_by=username,
+        report_key=report_key,
+        output_format=request.output,
+        params=params,
+    )
+    if created:
+        try:
+            if cloud_tasks_enabled():
+                worker_base_url = VPO_REPORT_WORKER_BASE_URL or str(http_request.base_url).rstrip("/")
+                worker_url = f"{worker_base_url}/reports/jobs/{job['id']}/execute"
+                task_name = enqueue_report_job(int(job["id"]), worker_url)
+                set_report_job_task(int(job["id"]), task_name)
+            else:
+                thread = threading.Thread(
+                    target=execute_local_royalty_report_job,
+                    args=(int(job["id"]),),
+                    daemon=True,
+                    name=f"royalty-report-{job['id']}",
+                )
+                thread.start()
+                set_report_job_task(int(job["id"]), f"local:{thread.name}")
+        except Exception as exc:
+            fail_report_job(int(job["id"]), f"No se pudo encolar el reporte: {exc}")
+            raise HTTPException(status_code=500, detail="No se pudo iniciar el reporte.") from exc
+    return {"item": get_report_job(int(job["id"])), "reused": not created}
+
+
+@app.get("/reports/jobs")
+def recent_royalty_report_jobs(
+    limit: int = 10,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    username = clean_username(x_vpo_username or "")
+    if not username:
+        raise HTTPException(status_code=401, detail="Usuario requerido.")
+    with operational_connect() as conn:
+        permission = require_module_permission(conn, username, "royalty_reports", "access")
+    requested_by = None if permission.get("is_admin") else username
+    return {"items": list_report_jobs(requested_by, limit=limit)}
+
+
+@app.get("/reports/jobs/{job_id}")
+def royalty_report_job_status(
+    job_id: int,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    username = clean_username(x_vpo_username or "")
+    if not username:
+        raise HTTPException(status_code=401, detail="Usuario requerido.")
+    job = get_report_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Reporte no encontrado.")
+    require_report_job_access(username, job)
+    return {"item": job}
+
+
+@app.get("/reports/jobs/{job_id}/download")
+def royalty_report_job_download(
+    job_id: int,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> FileResponse:
+    require_api_key(x_vpo_api_key)
+    username = clean_username(x_vpo_username or "")
+    if not username:
+        raise HTTPException(status_code=401, detail="Usuario requerido.")
+    job = get_report_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Reporte no encontrado.")
+    require_report_job_access(username, job)
+    local_path, filename, content_type = materialize_report_job_artifact(job_id)
+    return FileResponse(path=local_path, media_type=content_type, filename=filename)
+
+
+@app.post("/reports/jobs/{job_id}/execute")
+def royalty_report_job_worker(
+    job_id: int,
+    x_vpo_worker_token: str | None = Header(default=None),
+) -> dict:
+    expected = os.environ.get("VPO_REPORT_WORKER_TOKEN", "").strip()
+    supplied = (x_vpo_worker_token or "").strip()
+    if not expected or not supplied or not secrets.compare_digest(expected, supplied):
+        raise HTTPException(status_code=403, detail="Worker no autorizado.")
+    item = execute_royalty_report_job(job_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Reporte no encontrado.")
+    return {"item": item}
+
+
 @app.post("/reports/keyword")
 def keyword_report(
     request: KeywordReportRequest,
@@ -8240,20 +8567,20 @@ def catalog_items(
     if account:
         filtered = filtered.filter(pl.col("accounts").fill_null("").str.contains(account, literal=True))
     if artist:
-        needle = artist.strip().casefold()
+        needle = normalize_search_text(artist)
         filtered = filtered.filter(
-            pl.col("artist_statement").fill_null("").str.to_lowercase().str.contains(needle, literal=True)
-            | pl.col("artist_variants").fill_null("").str.to_lowercase().str.contains(needle, literal=True)
+            contains_search_expr(pl.col("artist_statement"), needle)
+            | contains_search_expr(pl.col("artist_variants"), needle)
         )
     if keyword:
-        needle = keyword.strip().casefold()
+        needle = normalize_search_text(keyword)
         if needle:
             filtered = filtered.filter(
-                pl.col("track_title").fill_null("").str.to_lowercase().str.contains(needle, literal=True)
-                | pl.col("artist_statement").fill_null("").str.to_lowercase().str.contains(needle, literal=True)
-                | pl.col("asset_isrc").fill_null("").str.to_lowercase().str.contains(needle, literal=True)
-                | pl.col("title_variants").fill_null("").str.to_lowercase().str.contains(needle, literal=True)
-                | pl.col("artist_variants").fill_null("").str.to_lowercase().str.contains(needle, literal=True)
+                contains_search_expr(pl.col("track_title"), needle)
+                | contains_search_expr(pl.col("artist_statement"), needle)
+                | contains_search_expr(pl.col("asset_isrc"), needle)
+                | contains_search_expr(pl.col("title_variants"), needle)
+                | contains_search_expr(pl.col("artist_variants"), needle)
             )
     if label:
         clean_label = label.strip()
@@ -9001,10 +9328,10 @@ def digital_income(
     if account:
         filtered = filtered.filter(pl.col("account") == account.strip())
 
-    keyword = (artist_keyword or artist or "").strip().casefold()
+    keyword = normalize_search_text(artist_keyword or artist or "")
     if keyword:
         for token in [part for part in keyword.split() if part.strip()]:
-            filtered = filtered.filter(pl.col("search_text").str.contains(token, literal=True))
+            filtered = filtered.filter(contains_search_expr(pl.col("search_text"), token))
 
     month_scope = filtered
     if start_month:
@@ -9247,10 +9574,10 @@ def royalties_dashboard(
     if account:
         filtered = filtered.filter(pl.col("account") == account.strip())
 
-    search = (keyword or artist_keyword or "").strip().casefold()
+    search = normalize_search_text(keyword or artist_keyword or "")
     if search:
         for token in [part for part in search.split() if part.strip()]:
-            filtered = filtered.filter(pl.col("search_text").str.contains(token, literal=True))
+            filtered = filtered.filter(contains_search_expr(pl.col("search_text"), token))
 
     month_scope = filtered
     if start_month:

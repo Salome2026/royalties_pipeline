@@ -1,5 +1,4 @@
 @import "./features/employees/employees.css";
-@import "./components/vpo-app-frame.css";
 
 :root {
   --bg: #f5f2ec;
@@ -135,6 +134,11 @@ main {
 }
 
 main.booking-main {
+  width: 100%;
+  margin: 0;
+}
+
+main.catalog-main {
   width: 100%;
   margin: 0;
 }
@@ -423,49 +427,6 @@ label {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-.inline-edit {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto auto;
-  gap: 8px;
-  align-items: center;
-}
-
-.inline-edit input {
-  min-width: 180px;
-  padding: 8px 10px;
-  font-size: 13px;
-}
-
-.inline-edit button {
-  min-height: 34px;
-  padding: 7px 10px;
-  font-size: 12px;
-}
-
-.metadata-edit-chip {
-  width: auto;
-  min-height: 0;
-  margin: 0;
-  padding: 3px 7px;
-  border: 1px solid #d6dde8;
-  border-radius: 6px;
-  background: #f8fafc;
-  color: #101828;
-  box-shadow: none;
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1.35;
-  text-align: left;
-}
-
-.metadata-edit-chip:hover {
-  background: #eef4ff;
-  border-color: #b2c7f0;
-  color: #101828;
-  transform: none;
-  box-shadow: none;
 }
 
 input,
@@ -871,48 +832,6 @@ button:disabled:hover {
   font-size: 12px;
   color: var(--muted);
   margin-bottom: 5px;
-}
-
-.login {
-  min-height: 100vh;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background:
-    linear-gradient(140deg, rgba(16, 32, 51, .12) 0, rgba(15, 118, 110, .14) 48%, rgba(217, 139, 43, .18) 100%),
-    var(--bg);
-}
-
-.login .panel {
-  width: min(460px, 100%);
-  padding: 34px;
-  border-radius: 18px;
-  border-color: rgba(255, 255, 255, .72);
-  box-shadow: var(--shadow);
-}
-
-.login-brand {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  margin-bottom: 18px;
-  user-select: none;
-}
-
-.login-brand .brand-vpo {
-  font-size: 58px;
-  padding: 7px 10px 9px;
-  border-radius: 12px;
-}
-
-.login-brand .brand-corp {
-  font-size: 42px;
-}
-
-.login-copy {
-  max-width: 330px;
-  font-weight: 650;
-  margin-bottom: 22px;
 }
 
 .filename {
@@ -2289,25 +2208,6 @@ button:disabled:hover {
   position: static;
 }
 
-.catalog-table {
-  min-width: 1380px;
-}
-
-.catalog-table th,
-.catalog-table td {
-  white-space: normal;
-}
-
-.catalog-table td:first-child,
-.catalog-table th:first-child {
-  position: static;
-}
-
-.inactive-row {
-  color: #667085;
-  background: #f8fafc;
-}
-
 .process-summary {
   border: 1px solid #abefc6;
   background: #f6fef9;
@@ -3158,14 +3058,6 @@ button:disabled:hover {
 
   .menu-card {
     min-height: 158px;
-  }
-
-  .login-brand .brand-vpo {
-    font-size: 44px;
-  }
-
-  .login-brand .brand-corp {
-    font-size: 34px;
   }
 
   .section-heading {

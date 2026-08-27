@@ -2,7 +2,9 @@
 
 This API is the production-oriented backend for VPO Corp royalties reports.
 
-It reads generated marts from Google Cloud Storage, caches them locally, and returns formatted XLSX reports.
+It reads generated marts from Google Cloud Storage, caches them locally, and
+creates persistent report jobs. Cloud requests return immediately; the result
+is stored in GCS and can be downloaded after the job completes.
 
 ## Entrypoint
 
@@ -38,7 +40,23 @@ uvicorn app.vpo_corp_api:app --host 127.0.0.1 --port 8010
 Invoke-WebRequest http://127.0.0.1:8010/health -UseBasicParsing
 ```
 
-## Generate Keyword Report
+## Generate Royalty Report
+
+The operational web flow uses:
+
+```text
+POST /reports/jobs
+GET  /reports/jobs/{id}
+GET  /reports/jobs/{id}/download
+```
+
+The authenticated username is required in `X-VPO-Username`. See
+`docs/royalty_report_jobs.md` for states, permissions and cloud execution.
+
+The synchronous examples below are low-level diagnostic endpoints and are not
+the browser workflow.
+
+## Diagnostic Keyword Report
 
 ```powershell
 $headers = @{ "X-VPO-API-Key" = "your-api-key" }

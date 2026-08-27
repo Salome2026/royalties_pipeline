@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 import polars as pl
 
@@ -13,6 +14,58 @@ INPUT_DIR = BASE / "input_raw" / "soundon"
 def print_df(df: pl.DataFrame):
     pl.Config.set_tbl_formatting("ASCII_FULL")
     print(df)
+
+
+def decimal_sum(df: pl.DataFrame, column: str) -> float:
+    if column not in df.columns:
+        raise RuntimeError(f"Falta la columna requerida: {column}")
+    return float(
+        df.select(
+            pl.col(column)
+            .cast(pl.Utf8)
+            .str.replace_all(",", ".")
+            .str.strip_chars()
+            .replace("", None)
+            .cast(pl.Float64, strict=False)
+            .sum()
+        ).item()
+        or 0.0
+    )
+
+
+def audit_discovery_mode() -> None:
+    comparisons = []
+    for detail_path in sorted(INPUT_DIR.glob("*_Discovery Mode.csv")):
+        match = re.search(r"_(\d{4})_(\d{2})_Discovery Mode\.csv$", detail_path.name, flags=re.IGNORECASE)
+        if not match:
+            raise RuntimeError(f"Nombre Discovery Mode no reconocido: {detail_path.name}")
+
+        statement_period = f"{match.group(1)}-{match.group(2)}"
+        royalty_path = detail_path.with_name(detail_path.name.replace("_Discovery Mode.csv", "_My Royalty.csv"))
+        if not royalty_path.exists():
+            raise RuntimeError(f"Falta My Royalty para validar {detail_path.name}")
+
+        detail = pl.read_csv(detail_path, infer_schema_length=1000, ignore_errors=True, encoding="utf8-lossy")
+        royalty = pl.read_csv(royalty_path, infer_schema_length=10000, ignore_errors=True, encoding="utf8-lossy")
+        detail_amount = decimal_sum(detail, "Deduction for this period")
+        embedded_amount = decimal_sum(royalty, "Discovery Mode Commission Amount")
+        comparisons.append({
+            "statement_period": statement_period,
+            "discovery_detail_usd": detail_amount,
+            "my_royalty_embedded_usd": embedded_amount,
+            "diff": embedded_amount - detail_amount,
+        })
+
+    print("\n=== DISCOVERY MODE VS MY ROYALTY ===")
+    if not comparisons:
+        print("Sin archivos Discovery Mode separados.")
+        return
+
+    comparison = pl.DataFrame(comparisons).sort("statement_period")
+    print_df(comparison)
+    mismatches = comparison.filter(pl.col("diff").abs() > 0.000001)
+    if mismatches.height:
+        raise RuntimeError("Discovery Mode no coincide con la deduccion incluida en My Royalty.")
 
 
 def main():
@@ -78,6 +131,8 @@ def main():
         .with_columns((pl.col("my_royalty_usd") - pl.col("summary_usd")).alias("diff"))
         .sort("statement_period")
     )
+
+    audit_discovery_mode()
 
     print("\n=== SONG VS STANDARDIZED CATALOG ===")
     catalog_total = std.filter(pl.col("include_in_catalog_view") == True)["amount_usd"].sum()

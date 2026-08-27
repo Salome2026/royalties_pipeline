@@ -438,3 +438,30 @@ Arranque seguro:
 - usar `scripts/start_catalog_metadata_worker.ps1`;
 - ese arranque trabaja por tandas finitas y prioriza montos `100,50,10`;
 - dejar `min_amount=0` solo para corridas manuales, finitas y supervisadas.
+
+## Interfaz operativa
+
+La busqueda libre de tema, artista o identificador usa la regla comun de
+keywords: no distingue mayusculas, tildes ni `n`/`ñ`. La equivalencia existe
+solo durante la comparacion y no modifica la identidad ni la metadata mostrada.
+
+La unica interfaz operativa de Catalogo general vive en:
+
+- `web/app/features/catalog/CatalogModule.tsx`;
+- `web/app/features/catalog/api.ts`;
+- `web/app/features/catalog/types.ts`.
+
+La pantalla principal `web/app/page.tsx` solo monta el modulo y le entrega el
+permiso vigente. No conserva una segunda implementacion ni interpreta catalogo.
+
+Comportamiento rector:
+
+- el rango usa perfil `activity_window` y filtra actividad por mes completo;
+- source, account, artista, label normalizado y estado son filtros de la misma
+  consulta canonica;
+- Configurador de distribuidoras puede abrir el catalogo prefiltrado por cuenta;
+- activar/inactivar actualiza estado e inclusion en reportes, no elimina la obra;
+- editar label modifica solamente `label_normalized_override`;
+- `external_label` permanece visible como dato original y nunca se pisa;
+- usuarios sin permiso de edicion pueden consultar, pero no alterar estado ni
+  normalizacion.

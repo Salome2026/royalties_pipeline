@@ -82,6 +82,7 @@ alimentar la web.
 ### Cloud, web y operacion
 
 - [Cloud Run deployment](cloud_run_deployment.md)
+- [Trabajos de reportes de regalias](royalty_report_jobs.md)
 - [Production API notes](production_api_notes.md)
 - [Google Cloud Storage publish](google_cloud_storage_publish.md)
 - [Vercel frontend notes](vercel_frontend_notes.md)

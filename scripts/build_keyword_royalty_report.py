@@ -12,9 +12,11 @@ from openpyxl.utils import get_column_letter
 try:
     from lib.catalog_report_filter import apply_report_net_personalization, filter_reportable_generation
     from lib.store_taxonomy import build_normalized_store_summary
+    from lib.text_search import contains_search_expr, normalize_search_text
 except ModuleNotFoundError:
     from scripts.lib.catalog_report_filter import apply_report_net_personalization, filter_reportable_generation
     from scripts.lib.store_taxonomy import build_normalized_store_summary
+    from scripts.lib.text_search import contains_search_expr, normalize_search_text
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -329,25 +331,10 @@ def exclude_isrc_expr(columns: set[str], excluded_isrcs: list[str]) -> pl.Expr:
 
 def contains_expr(columns: set[str], search_columns: list[str], keyword: str) -> pl.Expr:
     exprs = []
-    normalized_keyword = re.sub(r"\s+", " ", keyword.strip().lower())
-    compact_keyword = re.sub(r"[\s_-]+", "", normalized_keyword)
-
+    normalized_keyword = normalize_search_text(keyword)
     for col in search_columns:
         if col in columns:
-            normalized_value = (
-                pl.col(col)
-                .cast(pl.Utf8)
-                .str.to_lowercase()
-                .str.replace_all(r"\s+", " ")
-                .str.strip_chars()
-            )
-            match = normalized_value.str.contains(normalized_keyword, literal=True)
-            if compact_keyword:
-                match = match | (
-                    normalized_value
-                    .str.replace_all(r"[\s_-]+", "")
-                    .str.contains(compact_keyword, literal=True)
-                )
+            match = contains_search_expr(pl.col(col), normalized_keyword)
             exprs.append(match.fill_null(False))
 
     if not exprs:
