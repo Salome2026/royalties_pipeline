@@ -1,0 +1,60 @@
+steps:
+  - id: Build
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - --no-cache
+      - -t
+      - ${_IMAGE_REPOSITORY}/vpo-corp-platform:${COMMIT_SHA}
+      - .
+      - -f
+      - Dockerfile
+
+  - id: Push
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_IMAGE_REPOSITORY}/vpo-corp-platform:${COMMIT_SHA}
+
+  - id: Deploy API
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - services
+      - update
+      - ${_API_SERVICE}
+      - --platform=managed
+      - --image=${_IMAGE_REPOSITORY}/vpo-corp-platform:${COMMIT_SHA}
+      - --labels=managed-by=cloud-build,commit-sha=${COMMIT_SHA}
+      - --region=${_REGION}
+      - --quiet
+
+  - id: Deploy report Job
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - jobs
+      - update
+      - ${_REPORT_JOB}
+      - --image=${_IMAGE_REPOSITORY}/vpo-corp-platform:${COMMIT_SHA}
+      - --region=${_REGION}
+      - --quiet
+
+images:
+  - ${_IMAGE_REPOSITORY}/vpo-corp-platform:${COMMIT_SHA}
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  substitutionOption: MUST_MATCH
+
+substitutions:
+  _API_SERVICE: vpo-corp-api
+  _IMAGE_REPOSITORY: us-central1-docker.pkg.dev/vpo-corp-royalties/cloud-run-source-deploy/royalties_pipeline
+  _REGION: us-central1
+  _REPORT_JOB: vpo-royalty-report-job
+
+tags:
+  - vpo-corp-platform
+  - production

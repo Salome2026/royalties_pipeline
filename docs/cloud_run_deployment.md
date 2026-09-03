@@ -94,6 +94,12 @@ Job se actualizan al mismo digest y luego se verifican:
 - descarga directa por URL firmada;
 - coincidencia de tamano y SHA-256 entre PostgreSQL, GCS y el archivo recibido.
 
+El despliegue automatico rector se define en `cloudbuild.yaml`. El trigger de
+produccion observa `main` en `Salome2026/royalties_pipeline`, construye una sola
+imagen por commit y actualiza con ella tanto `vpo-corp-api` como
+`vpo-royalty-report-job`. No se mantienen configuraciones inline ni triggers
+contra propietarios anteriores del repositorio.
+
 El frontend conserva:
 
 - `VPO_API_URL=https://vpo-corp-api-259971998447.us-central1.run.app`
