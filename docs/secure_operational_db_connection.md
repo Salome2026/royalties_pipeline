@@ -35,7 +35,7 @@ VPO_POSTGRES_CONNECT_MODE=cloudsql_socket|local_proxy|direct_tcp
 VPO_OPERATIONAL_DB_NAME=vpo_corp
 VPO_OPERATIONAL_DB_USER=postgres
 VPO_OPERATIONAL_DB_PASSWORD=...
-VPO_CLOUDSQL_CONNECTION_NAME=vpo-corp-royalties:us-central1:vpo-corp-postgres
+VPO_CLOUDSQL_CONNECTION_NAME=vpo-corp-royalties:us-central1:vpo-corp-postgres-ssd
 VPO_POSTGRES_LOCAL_PROXY_HOST=127.0.0.1
 VPO_POSTGRES_LOCAL_PROXY_PORT=5432
 VPO_ALLOW_DIRECT_POSTGRES_TCP=
@@ -53,7 +53,7 @@ recuperacion historica controlada.
 Usar Cloud SQL Auth Proxy:
 
 ```powershell
-cloud-sql-proxy vpo-corp-royalties:us-central1:vpo-corp-postgres --port 5432
+cloud-sql-proxy vpo-corp-royalties:us-central1:vpo-corp-postgres-ssd --port 5432
 ```
 
 Luego:
@@ -73,7 +73,7 @@ VPO_POSTGRES_LOCAL_PROXY_PORT=5432
 Configurar Cloud Run con la instancia Cloud SQL asociada:
 
 ```text
-vpo-corp-royalties:us-central1:vpo-corp-postgres
+vpo-corp-royalties:us-central1:vpo-corp-postgres-ssd
 ```
 
 Variables:
@@ -81,7 +81,7 @@ Variables:
 ```text
 VPO_OPERATIONAL_DB_DRIVER=postgres
 VPO_POSTGRES_CONNECT_MODE=cloudsql_socket
-VPO_CLOUDSQL_CONNECTION_NAME=vpo-corp-royalties:us-central1:vpo-corp-postgres
+VPO_CLOUDSQL_CONNECTION_NAME=vpo-corp-royalties:us-central1:vpo-corp-postgres-ssd
 VPO_OPERATIONAL_DB_NAME=vpo_corp
 VPO_OPERATIONAL_DB_USER=postgres
 VPO_OPERATIONAL_DB_PASSWORD=<secret>
@@ -135,7 +135,7 @@ Mantener el servicio cloud real con:
 ```text
 VPO_OPERATIONAL_DB_DRIVER=postgres
 VPO_POSTGRES_CONNECT_MODE=cloudsql_socket
-VPO_CLOUDSQL_CONNECTION_NAME=vpo-corp-royalties:us-central1:vpo-corp-postgres
+VPO_CLOUDSQL_CONNECTION_NAME=vpo-corp-royalties:us-central1:vpo-corp-postgres-ssd
 VPO_OPERATIONAL_DB_NAME=vpo_corp
 VPO_OPERATIONAL_DB_USER=postgres
 VPO_OPERATIONAL_DB_PASSWORD=<secret>

@@ -63,13 +63,13 @@ Variables operativas:
 
 - `VPO_OPERATIONAL_DB_DRIVER=postgres`
 - `VPO_POSTGRES_CONNECT_MODE=cloudsql_socket`
-- `VPO_CLOUDSQL_CONNECTION_NAME=vpo-corp-royalties:us-central1:vpo-corp-postgres`
+- `VPO_CLOUDSQL_CONNECTION_NAME=vpo-corp-royalties:us-central1:vpo-corp-postgres-ssd`
 - `VPO_OPERATIONAL_DB_NAME=vpo_corp`
 - `VPO_OPERATIONAL_DB_USER=postgres`
 - `VPO_OPERATIONAL_DB_PASSWORD` desde Secret Manager.
 - Pool API: minimo `1`, maximo `4`, espera `10` segundos.
 
-Query Insights esta activo en `vpo-corp-postgres`; registra etiquetas de
+Query Insights esta activo en `vpo-corp-postgres-ssd`; registra etiquetas de
 aplicacion y no registra direcciones de cliente.
 
 Con esta configuracion, Cloud Run usa Cloud SQL como base viva. No debe leer

@@ -84,7 +84,7 @@ Despliegue validado el `2026-09-03`:
   `vpo-royalty-report-job@vpo-corp-royalties.iam.gserviceaccount.com`;
 - recursos: `2 CPU`, `4 GiB`, timeout `3600 s`;
 - una tarea, paralelismo `1`, sin reintento automatico;
-- Cloud SQL por socket a `vpo-corp-postgres`;
+- Cloud SQL por socket a `vpo-corp-postgres-ssd`;
 - entrada desde `marts/` y salida en `reports/jobs/` del bucket operativo;
 - secretos permitidos: password de PostgreSQL y token OAuth necesario para
   el formato Google Sheets.

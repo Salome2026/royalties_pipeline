@@ -38,6 +38,13 @@ Los Jobs de reportes parten de 0 y usan un maximo de 2 conexiones por ejecucion 
 trabajo de datos ocurre sobre Parquet/GCS y PostgreSQL conserva solo estado y
 auditoria.
 
+La instancia operativa es `vpo-corp-postgres-ssd`, Enterprise zonal en
+`us-central1`, con `db-g1-small`, 1.7 GB de memoria y SSD de 10 GB. El corte del
+`2026-09-03` reemplazo la instancia `db-f1-micro` con HDD porque su memoria se
+mantuvo al 100% durante los siete dias medidos. La base ocupaba 17 MB y la
+replica se valido con 53 tablas, conteos identicos y cero bytes de atraso antes
+de promoverla.
+
 ## Configuracion
 
 - `VPO_POSTGRES_APPLICATION_NAME`

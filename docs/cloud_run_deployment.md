@@ -24,7 +24,7 @@ Configuracion validada el `2026-09-03`:
 - `1 CPU`, `2 GiB`, concurrencia `4`;
 - minimo `0`, maximo `1`, facturacion por request;
 - timeout `1800 s` para endpoints operativos existentes;
-- Cloud SQL por socket a `vpo-corp-postgres`;
+- Cloud SQL por socket a `vpo-corp-postgres-ssd`;
 - trafico al `100%` sobre la ultima revision.
 
 Variables del circuito de reportes:
@@ -62,7 +62,7 @@ Configuracion vigente:
 - `GCS_PREFIX=marts`
 - `VPO_OPERATIONAL_DB_DRIVER=postgres`
 - `VPO_POSTGRES_CONNECT_MODE=cloudsql_socket`
-- `VPO_CLOUDSQL_CONNECTION_NAME=vpo-corp-royalties:us-central1:vpo-corp-postgres`
+- `VPO_CLOUDSQL_CONNECTION_NAME=vpo-corp-royalties:us-central1:vpo-corp-postgres-ssd`
 - `VPO_OPERATIONAL_DB_NAME=vpo_corp`
 - `VPO_OPERATIONAL_DB_USER=postgres`
 - `VPO_OPERATIONAL_DB_PASSWORD` desde Secret Manager.
