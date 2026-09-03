@@ -19,7 +19,7 @@ PostgreSQL desde la API y los Cloud Run Jobs de VPO Corp.
 
 ## Capacidad
 
-Cloud SQL dispone actualmente de 25 conexiones. La configuracion inicial de la
+Cloud SQL dispone actualmente de 50 conexiones. La configuracion inicial de la
 API es:
 
 - minimo por instancia: 1;
@@ -30,7 +30,7 @@ API es:
 - inactividad maxima de una conexion excedente: 5 minutos.
 
 Con un maximo futuro de cuatro instancias de API, el techo de la API es 16
-conexiones. Las restantes quedan disponibles para Jobs, administracion y margen
+conexiones. Las 34 restantes quedan disponibles para Jobs, administracion y margen
 operativo. Aumentar el pool exige revisar primero `max_connections`, cantidad de
 instancias y concurrencia real.
 
@@ -43,7 +43,8 @@ La instancia operativa es `vpo-corp-postgres-ssd`, Enterprise zonal en
 `2026-09-03` reemplazo la instancia `db-f1-micro` con HDD porque su memoria se
 mantuvo al 100% durante los siete dias medidos. La base ocupaba 17 MB y la
 replica se valido con 53 tablas, conteos identicos y cero bytes de atraso antes
-de promoverla.
+de promoverla. La instancia tiene proteccion contra borrado, siete backups
+diarios y recuperacion a un punto exacto con siete dias de logs.
 
 ## Configuracion
 
