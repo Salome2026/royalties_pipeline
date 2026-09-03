@@ -1,10 +1,8 @@
 # VPO Corp Production API
 
-This API is the production-oriented backend for VPO Corp royalties reports.
-
-It reads generated marts from Google Cloud Storage, caches them locally, and
-creates persistent report jobs. Cloud requests return immediately; the result
-is stored in GCS and can be downloaded after the job completes.
+La API FastAPI atiende la operacion viva sobre Cloud SQL y solicita trabajos
+pesados al Cloud Run Job de reportes. No genera reportes de regalias dentro de
+la peticion HTTP.
 
 ## Entrypoint
 
@@ -12,122 +10,67 @@ is stored in GCS and can be downloaded after the job completes.
 app/vpo_corp_api.py
 ```
 
-## Environment
+## Entorno local
 
-Set these values in `.env` locally or in the hosting provider:
+El inicio normal se realiza con `scripts/start_vpo_local.ps1`. La API local usa
+Cloud SQL mediante el proxy y solicita el mismo Job cloud que produccion.
+
+Variables relevantes:
 
 ```text
 GCS_BUCKET=vpo-corp-royalties-marts
 GCS_PREFIX=marts
 GOOGLE_APPLICATION_CREDENTIALS=C:\royalties_pipeline\.secrets\gcs_service_account.json
 VPO_API_KEY=change-me
-VPO_API_CACHE_DIR=C:\royalties_pipeline\cache\gcs_marts
-VPO_API_REPORTS_DIR=C:\royalties_pipeline\reports\api
+VPO_REPORT_JOB_PROJECT=vpo-corp-royalties
+VPO_REPORT_JOB_LOCATION=us-central1
+VPO_REPORT_JOB_NAME=vpo-royalty-report-job
+VPO_REPORT_DOWNLOAD_TTL_MINUTES=10
+VPO_REPORT_SIGNER_SERVICE_ACCOUNT=vpo-marts-publisher@vpo-corp-royalties.iam.gserviceaccount.com
 ```
 
-For production hosting, do not commit or upload the service account JSON to Git.
-Store it as a secret/environment file according to the host's recommended method.
+El JSON de la cuenta de servicio y las claves nunca se suben a Git.
 
-## Local Run
-
-```powershell
-uvicorn app.vpo_corp_api:app --host 127.0.0.1 --port 8010
-```
-
-## Health Check
+## Health
 
 ```powershell
 Invoke-WebRequest http://127.0.0.1:8010/health -UseBasicParsing
 ```
 
-## Generate Royalty Report
+## Reportes de regalias
 
-The operational web flow uses:
+El unico contrato HTTP vigente es:
 
 ```text
 POST /reports/jobs
+GET  /reports/jobs
 GET  /reports/jobs/{id}
 GET  /reports/jobs/{id}/download
 ```
 
-The authenticated username is required in `X-VPO-Username`. See
-`docs/royalty_report_jobs.md` for states, permissions and cloud execution.
+Los pedidos requieren `X-VPO-API-Key` y `X-VPO-Username`. La creacion valida
+`royalty_reports.create`; consulta y descarga validan acceso y propiedad. El
+endpoint de descarga devuelve una URL GCS firmada de corta duracion.
 
-The synchronous examples below are low-level diagnostic endpoints and are not
-the browser workflow.
+Formatos registrados:
 
-## Diagnostic Keyword Report
+- `excel`: reporte completo;
+- `executive_pdf`: informe ejecutivo;
+- `google_sheet`: documento compartido.
 
-```powershell
-$headers = @{ "X-VPO-API-Key" = "your-api-key" }
-$body = @{
-  keywords = @("juli savioli")
-  start_month = "2025-01"
-  end_month = "2026-02"
-  mode = "any"
-  raw_limit = 5000
-  refresh_cache = $false
-} | ConvertTo-Json
+No existen endpoints sincronicos de diagnostico, `refresh_cache`, ejecucion
+local ni endpoint HTTP de worker. El contrato completo vive en
+`docs/royalty_report_jobs.md`.
 
-Invoke-WebRequest `
-  -Uri http://127.0.0.1:8010/reports/keyword `
-  -Method POST `
-  -Headers $headers `
-  -ContentType "application/json" `
-  -Body $body `
-  -OutFile C:\royalties_pipeline\reports\api_test.xlsx
-```
+## Google Sheets
 
-The first request may take longer because it downloads marts from GCS into the local cache.
-
-## Generate Google Sheet
-
-Enable these APIs in Google Cloud first:
-
-- Google Sheets API
-- Google Drive API
-
-Set this environment variable so the created spreadsheet is shared with your Google account:
+El Job necesita Google Sheets API, Google Drive API y el token OAuth guardado en
+Secret Manager. La carpeta y el correo de destino se configuran con:
 
 ```text
-GOOGLE_SHEETS_SHARE_EMAIL=your-google-email@example.com
+GOOGLE_SHEETS_SHARE_EMAIL=<correo-autorizado>
+GOOGLE_DRIVE_FOLDER_ID=<id-carpeta>
 ```
 
-Recommended: create a Google Drive folder for reports, share it as Editor with the service account, and set:
-
-```text
-GOOGLE_DRIVE_FOLDER_ID=<folder-id-from-drive-url>
-```
-
-Service account email:
-
-```text
-vpo-marts-publisher@vpo-corp-royalties.iam.gserviceaccount.com
-```
-
-Then call:
-
-```powershell
-$headers = @{ "X-VPO-API-Key" = "YOUR_API_KEY" }
-$body = @{
-  keywords = @("juli savioli")
-  start_month = "2025-01"
-  end_month = "2026-02"
-  mode = "any"
-  raw_limit = 5000
-  refresh_cache = $false
-} | ConvertTo-Json
-
-Invoke-WebRequest `
-  -Uri http://127.0.0.1:8010/reports/google-sheet `
-  -Method POST `
-  -Headers $headers `
-  -ContentType "application/json" `
-  -Body $body
-```
-
-The API returns:
-
-```json
-{"url":"https://docs.google.com/spreadsheets/d/..."}
-```
+El resultado externo queda registrado en `report_runs` igual que los demas
+formatos.

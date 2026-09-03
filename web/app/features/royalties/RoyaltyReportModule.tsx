@@ -138,7 +138,6 @@ export function RoyaltyReportModule({ onMessage }: Props) {
       raw_limit: Number(rawLimit) || 0,
       source: source || null,
       account: account || null,
-      refresh_cache: false,
     };
   }
 

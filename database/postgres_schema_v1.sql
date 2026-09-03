@@ -938,9 +938,13 @@ CREATE TABLE IF NOT EXISTS custom_report_configs (
 
 CREATE TABLE IF NOT EXISTS report_runs (
     id bigserial PRIMARY KEY,
-    report_key text,
-    requested_by text,
+    report_key text NOT NULL,
+    requested_by text NOT NULL,
     params_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+    input_manifest_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+    policy_snapshot_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+    policy_version bigint,
+    engine_version text,
     output_uri text,
     output_format text NOT NULL DEFAULT 'excel',
     request_hash text,
@@ -948,24 +952,71 @@ CREATE TABLE IF NOT EXISTS report_runs (
     result_filename text,
     result_content_type text,
     result_url text,
-    task_name text,
+    result_size_bytes bigint,
+    result_sha256 text,
+    execution_name text,
     attempt_count integer NOT NULL DEFAULT 0,
     status text NOT NULL DEFAULT 'queued',
     error_message text,
+    error_log_ref text,
     created_at timestamptz NOT NULL DEFAULT now(),
     started_at timestamptz,
     finished_at timestamptz,
     updated_at timestamptz NOT NULL DEFAULT now(),
     expires_at timestamptz NOT NULL DEFAULT (now() + interval '30 days'),
+    lease_expires_at timestamptz,
     CONSTRAINT report_runs_output_chk CHECK (output_format IN ('excel', 'executive_pdf', 'google_sheet')),
-    CONSTRAINT report_runs_status_chk CHECK (status IN ('queued', 'running', 'completed', 'failed'))
+    CONSTRAINT report_runs_status_chk CHECK (status IN ('queued', 'running', 'completed', 'failed')),
+    CONSTRAINT report_runs_stage_chk CHECK (progress_stage IN (
+        'queued', 'preparing', 'reading_data', 'building', 'uploading',
+        'completed', 'failed'
+    )),
+    CONSTRAINT report_runs_report_key_chk CHECK (report_key IN (
+        'royalty_keyword', 'royalty_executive', 'royalty_google_sheet'
+    )),
+    CONSTRAINT report_runs_requested_by_chk CHECK (btrim(requested_by) <> ''),
+    CONSTRAINT report_runs_params_json_chk CHECK (jsonb_typeof(params_json) = 'object'),
+    CONSTRAINT report_runs_input_manifest_chk CHECK (jsonb_typeof(input_manifest_json) = 'object'),
+    CONSTRAINT report_runs_policy_snapshot_chk CHECK (jsonb_typeof(policy_snapshot_json) = 'object'),
+    CONSTRAINT report_runs_policy_version_chk CHECK (policy_version IS NULL OR policy_version > 0),
+    CONSTRAINT report_runs_active_context_chk CHECK (
+        status NOT IN ('queued', 'running')
+        OR (
+            policy_version IS NOT NULL
+            AND input_manifest_json ? 'objects'
+            AND jsonb_typeof(input_manifest_json -> 'objects') = 'object'
+            AND input_manifest_json -> 'objects' <> '{}'::jsonb
+            AND policy_snapshot_json ? 'entries'
+            AND jsonb_typeof(policy_snapshot_json -> 'entries') = 'array'
+            AND jsonb_array_length(policy_snapshot_json -> 'entries') > 0
+        )
+    ),
+    CONSTRAINT report_runs_attempt_count_chk CHECK (attempt_count >= 0),
+    CONSTRAINT report_runs_result_size_chk CHECK (result_size_bytes IS NULL OR result_size_bytes >= 0),
+    CONSTRAINT report_runs_result_sha256_chk CHECK (
+        result_sha256 IS NULL OR result_sha256 ~ '^[0-9a-f]{64}$'
+    ),
+    CONSTRAINT report_runs_request_hash_chk CHECK (
+        request_hash IS NULL OR request_hash ~ '^[0-9a-f]{64}$'
+    ),
+    CONSTRAINT report_runs_running_started_chk CHECK (
+        status <> 'running' OR started_at IS NOT NULL
+    ),
+    CONSTRAINT report_runs_terminal_finished_chk CHECK (
+        status NOT IN ('completed', 'failed') OR finished_at IS NOT NULL
+    ),
+    CONSTRAINT report_runs_completed_result_chk CHECK (
+        status <> 'completed' OR output_uri IS NOT NULL OR result_url IS NOT NULL
+    )
 );
 
 CREATE INDEX IF NOT EXISTS idx_report_runs_requester_time
     ON report_runs(requested_by, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_report_runs_active_hash
-    ON report_runs(requested_by, request_hash, status)
-    WHERE status IN ('queued', 'running');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_report_runs_active_hash
+    ON report_runs(lower(requested_by), request_hash)
+    WHERE status IN ('queued', 'running') AND request_hash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_report_runs_status_updated
+    ON report_runs(status, updated_at);
 
 INSERT INTO schema_migrations(version, notes)
 VALUES ('cloud_operational_schema_v1_draft', 'Initial draft schema for VPO Corp cloud operational database')

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+from copy import deepcopy
 from pathlib import Path
 import sys
 from typing import Any
@@ -13,6 +16,10 @@ from app.operational_db import operational_connect, operational_db_settings
 
 
 POLICY_SCHEMA_VERSION = 1
+_POLICY_SNAPSHOT: ContextVar[dict[str, Any] | None] = ContextVar(
+    "distributor_policy_snapshot",
+    default=None,
+)
 
 
 def _require_postgres() -> None:
@@ -59,6 +66,9 @@ def _document_from_rows(settings_row: dict[str, Any], rows: list[dict[str, Any]]
 
 
 def load_distributor_policy_document() -> dict[str, Any]:
+    snapshot = _POLICY_SNAPSHOT.get()
+    if snapshot is not None:
+        return deepcopy(snapshot)
     _require_postgres()
     with operational_connect() as conn:
         settings_row = conn.execute(
@@ -79,6 +89,21 @@ def load_distributor_policy_document() -> dict[str, Any]:
     if not rows:
         raise RuntimeError("Distributor account policies are not initialized in Cloud SQL.")
     return _document_from_rows(settings_row, rows)
+
+
+@contextmanager
+def use_distributor_policy_snapshot(document: dict[str, Any]):
+    if int(document.get("schema_version") or 0) != POLICY_SCHEMA_VERSION:
+        raise RuntimeError("El snapshot de policies del reporte no es valido.")
+    if int(document.get("policy_version") or 0) <= 0:
+        raise RuntimeError("El snapshot de policies no tiene una version valida.")
+    if not isinstance(document.get("entries"), list) or not document["entries"]:
+        raise RuntimeError("El snapshot de policies no contiene distribuidoras.")
+    token = _POLICY_SNAPSHOT.set(deepcopy(document))
+    try:
+        yield
+    finally:
+        _POLICY_SNAPSHOT.reset(token)
 
 
 def replace_distributor_policy_document(payload: dict[str, Any], updated_by: str) -> dict[str, Any]:

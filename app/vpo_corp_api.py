@@ -17,18 +17,13 @@ from calendar import monthrange
 from datetime import date
 from datetime import datetime
 from io import BytesIO
-from time import time
 from pathlib import Path
 from typing import Any, Literal
 
 import polars as pl
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, Response
 from google.cloud import storage
-from google.oauth2.credentials import Credentials as UserCredentials
-from google.oauth2 import service_account
-from googleapiclient.discovery import build as google_build
-from googleapiclient.errors import HttpError
 from pydantic import BaseModel, Field
 
 from app.operational_db import (
@@ -41,18 +36,16 @@ from app.operational_db import (
     operational_sqlite_compatible_connect,
 )
 from app.report_jobs import (
-    claim_report_job,
-    cloud_tasks_enabled,
-    complete_report_job,
     create_or_reuse_report_job,
-    enqueue_report_job,
     fail_report_job,
     get_report_job,
     get_report_job_artifact,
     list_report_jobs,
-    set_report_job_stage,
-    set_report_job_task,
+    set_report_job_execution,
 )
+from app.royalty_reports.delivery import create_signed_download_url
+from app.royalty_reports.launcher import CloudRunReportJobLauncher
+from app.royalty_reports.manifests import build_gcs_input_manifest
 
 
 BASE = Path(__file__).resolve().parents[1]
@@ -62,8 +55,7 @@ ENV_PATH = BASE / ".env"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from build_keyword_royalty_report import build_report, build_report_tables, normalize_keywords  # noqa: E402
-from build_executive_royalty_pdf import build_executive_royalty_pdf  # noqa: E402
+from build_keyword_royalty_report import normalize_keywords  # noqa: E402
 from build_statement_report_from_mart import build_statement_report_from_mart  # noqa: E402
 from build_custom_title_royalty_report import (  # noqa: E402
     DEFAULT_LOS_ANORMALES_TERMS,
@@ -168,8 +160,12 @@ BOOKING_ARTIST_REGISTRY_PATH = BASE / "warehouse" / "booking" / "registry" / "bo
 SOURCE_MONITOR_CONFIG_PATH = BASE / "warehouse" / "registry" / "source_monitor_config.json"
 GOOGLE_SHEETS_SHARE_EMAIL = os.environ.get("GOOGLE_SHEETS_SHARE_EMAIL", "").strip()
 GOOGLE_DRIVE_FOLDER_ID = os.environ.get("GOOGLE_DRIVE_FOLDER_ID", "").strip()
-VPO_REPORT_RESULTS_PREFIX = os.environ.get("VPO_REPORT_RESULTS_PREFIX", "reports/jobs").strip("/")
-VPO_REPORT_WORKER_BASE_URL = os.environ.get("VPO_REPORT_WORKER_BASE_URL", "").strip().rstrip("/")
+VPO_REPORT_DOWNLOAD_TTL_MINUTES = int(
+    os.environ.get("VPO_REPORT_DOWNLOAD_TTL_MINUTES", "10") or 10
+)
+VPO_REPORT_SIGNER_SERVICE_ACCOUNT = os.environ.get(
+    "VPO_REPORT_SIGNER_SERVICE_ACCOUNT", ""
+).strip()
 
 SONG_FILE = "song_level_all_sources.parquet"
 STANDARDIZED_FILE = "standardized_raw_all_sources.parquet"
@@ -204,28 +200,6 @@ VPO_CATALOG_STATUS_SYNC_GCS = (
 )
 PUBLISH_JOBS: dict[str, dict] = {}
 PUBLISH_JOBS_LOCK = threading.Lock()
-LOCAL_REPORT_JOB_LOCK = threading.Lock()
-
-
-class KeywordReportRequest(BaseModel):
-    keywords: list[str] = Field(..., min_length=1)
-    start_month: str | None = None
-    end_month: str | None = None
-    period_basis: Literal["transaction_month", "statement_period"] = "transaction_month"
-    mode: Literal["any", "all"] = "any"
-    raw_limit: int = Field(default=5000, ge=0, le=50000)
-    refresh_cache: bool = False
-
-
-class ExecutiveRoyaltyReportRequest(BaseModel):
-    keywords: list[str] = Field(default_factory=list, max_length=100)
-    start_month: str | None = None
-    end_month: str | None = None
-    period_basis: Literal["transaction_month", "statement_period"] = "transaction_month"
-    mode: Literal["any", "all"] = "any"
-    source: str | None = Field(default=None, max_length=80)
-    account: str | None = Field(default=None, max_length=120)
-    refresh_cache: bool = False
 
 
 class RoyaltyReportJobRequest(BaseModel):
@@ -238,7 +212,6 @@ class RoyaltyReportJobRequest(BaseModel):
     raw_limit: int = Field(default=5000, ge=0, le=50000)
     source: str | None = Field(default=None, max_length=80)
     account: str | None = Field(default=None, max_length=120)
-    refresh_cache: bool = False
 
 
 class RefreshRequest(BaseModel):
@@ -739,12 +712,6 @@ ParticipationPreset = Literal["last_month", "last_3_months", "last_year", "all_h
 
 app = FastAPI(title="VPO Corp Royalties API", version="0.1.0")
 
-GOOGLE_API_SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive.file",
-]
-
-
 def require_api_key(x_vpo_api_key: str | None) -> None:
     if not VPO_API_KEY or VPO_API_KEY == "change-me":
         raise HTTPException(
@@ -1242,68 +1209,6 @@ def account_rule_preview_by_account(cutoff_entries: list[dict], refresh_cache: b
     return result
 
 
-def report_signature_payload(
-    keywords: str,
-    start_month: str,
-    end_month: str,
-    period_basis: str,
-    mode: str,
-    raw_limit: int,
-    refresh_cache: bool,
-    expires: int,
-) -> str:
-    return "\n".join([
-        keywords,
-        start_month,
-        end_month,
-        period_basis,
-        mode,
-        str(raw_limit),
-        "1" if refresh_cache else "0",
-        str(expires),
-    ])
-
-
-def sign_report_payload(payload: str) -> str:
-    if not VPO_API_KEY or VPO_API_KEY == "change-me":
-        raise HTTPException(status_code=500, detail="VPO_API_KEY is not configured.")
-
-    return hmac.new(
-        VPO_API_KEY.encode("utf-8"),
-        payload.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
-
-
-def require_valid_report_signature(
-    keywords: str,
-    start_month: str,
-    end_month: str,
-    period_basis: str,
-    mode: str,
-    raw_limit: int,
-    refresh_cache: bool,
-    expires: int,
-    sig: str,
-) -> None:
-    if expires < int(time()):
-        raise HTTPException(status_code=401, detail="Download link expired.")
-
-    expected = sign_report_payload(report_signature_payload(
-        keywords=keywords,
-        start_month=start_month,
-        end_month=end_month,
-        period_basis=period_basis,
-        mode=mode,
-        raw_limit=raw_limit,
-        refresh_cache=refresh_cache,
-        expires=expires,
-    ))
-
-    if not hmac.compare_digest(expected, sig):
-        raise HTTPException(status_code=401, detail="Invalid download signature.")
-
-
 def gcs_client() -> storage.Client:
     if GCS_SERVICE_ACCOUNT_JSON:
         try:
@@ -1321,42 +1226,6 @@ def gcs_client() -> storage.Client:
         return storage.Client.from_service_account_json(str(credentials_path))
 
     return storage.Client()
-
-
-def google_credentials(scopes: list[str]):
-    if GOOGLE_OAUTH_TOKEN_JSON:
-        try:
-            token_info = json.loads(GOOGLE_OAUTH_TOKEN_JSON)
-        except json.JSONDecodeError as exc:
-            raise HTTPException(status_code=500, detail=f"GOOGLE_OAUTH_TOKEN_JSON is invalid JSON: {exc}") from exc
-
-        return UserCredentials.from_authorized_user_info(token_info, scopes=scopes)
-
-    if GCS_SERVICE_ACCOUNT_JSON:
-        try:
-            service_account_info = json.loads(GCS_SERVICE_ACCOUNT_JSON)
-        except json.JSONDecodeError as exc:
-            raise HTTPException(status_code=500, detail=f"GCS_SERVICE_ACCOUNT_JSON is invalid JSON: {exc}") from exc
-
-        return service_account.Credentials.from_service_account_info(
-            service_account_info,
-            scopes=scopes,
-        )
-
-    if GOOGLE_APPLICATION_CREDENTIALS:
-        credentials_path = Path(GOOGLE_APPLICATION_CREDENTIALS)
-        if not credentials_path.exists():
-            raise HTTPException(status_code=500, detail=f"Credentials file not found: {credentials_path}")
-
-        return service_account.Credentials.from_service_account_file(
-            str(credentials_path),
-            scopes=scopes,
-        )
-
-    raise HTTPException(
-        status_code=500,
-        detail="Configure GCS_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS.",
-    )
 
 
 def object_name(filename: str) -> str:
@@ -6915,340 +6784,6 @@ def require_known_booking_artist(artist: str) -> str:
     return canonical
 
 
-def dataframe_values(dataframe) -> list[list[object]]:
-    clean = dataframe.where(dataframe.notna(), "")
-    values = [list(clean.columns)]
-
-    for row in clean.astype(object).itertuples(index=False, name=None):
-        values.append([value.item() if hasattr(value, "item") else value for value in row])
-
-    return values
-
-
-def sheet_title(keywords: list[str], start_month: str | None, end_month: str | None) -> str:
-    keyword_part = " ".join(keywords)[:60] or "keyword"
-    period_part = ""
-    if start_month or end_month:
-        period_part = f" {start_month or 'start'} to {end_month or 'end'}"
-    return f"VPO Royalties - {keyword_part}{period_part}"
-
-
-def column_width(column_name: str, dataframe) -> int:
-    lower_name = column_name.lower()
-
-    sample_values = [str(column_name)]
-    if column_name in dataframe.columns:
-        sample_values.extend(
-            str(value)
-            for value in dataframe[column_name].head(80).fillna("").tolist()
-        )
-
-    max_len = max((len(value) for value in sample_values), default=10)
-    calculated = max_len * 7 + 24
-
-    min_width = 90
-    max_width = 220
-
-    if "texto coincidente" in lower_name:
-        max_width = 360
-        min_width = 180
-    elif "tema" in lower_name or "title" in lower_name or "artista" in lower_name or "artist" in lower_name:
-        max_width = 260
-        min_width = 140
-    elif "archivo" in lower_name:
-        max_width = 280
-        min_width = 160
-    elif "generado" in lower_name:
-        max_width = 180
-        min_width = 130
-    elif lower_name in {"ingresos usd", "importe neto"}:
-        max_width = 130
-        min_width = 115
-    elif lower_name in {"unidades", "filas", "filas song level", "filas raw"}:
-        max_width = 120
-        min_width = 95
-    elif lower_name in {"desde", "hasta", "mes", "fuente", "cuenta", "tipo de contenido", "isrc"}:
-        max_width = 150
-        min_width = 100
-
-    return int(min(max(calculated, min_width), max_width))
-
-
-def create_google_sheet(
-    tables,
-    keywords: list[str],
-    start_month: str | None,
-    end_month: str | None,
-) -> str:
-    credentials = google_credentials(GOOGLE_API_SCOPES)
-    sheets_service = google_build("sheets", "v4", credentials=credentials, cache_discovery=False)
-    drive_service = google_build("drive", "v3", credentials=credentials, cache_discovery=False)
-
-    sheet_names = list(tables.keys())
-    title = sheet_title(keywords, start_month, end_month)
-
-    if GOOGLE_DRIVE_FOLDER_ID:
-        try:
-            drive_file = drive_service.files().create(
-                body={
-                    "name": title,
-                    "mimeType": "application/vnd.google-apps.spreadsheet",
-                    "parents": [GOOGLE_DRIVE_FOLDER_ID],
-                },
-                fields="id,webViewLink",
-                supportsAllDrives=True,
-            ).execute()
-        except HttpError as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Google Drive file create failed in folder {GOOGLE_DRIVE_FOLDER_ID}: {exc.reason}",
-            ) from exc
-
-        spreadsheet_id = drive_file["id"]
-        spreadsheet_url = drive_file.get("webViewLink") or f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
-
-        try:
-            metadata = sheets_service.spreadsheets().get(
-                spreadsheetId=spreadsheet_id,
-                fields="sheets.properties(sheetId,title)",
-            ).execute()
-            first_sheet_id = metadata["sheets"][0]["properties"]["sheetId"]
-            setup_requests = [
-                {
-                    "updateSheetProperties": {
-                        "properties": {
-                            "sheetId": first_sheet_id,
-                            "title": sheet_names[0],
-                        },
-                        "fields": "title",
-                    }
-                }
-            ]
-            setup_requests.extend(
-                {"addSheet": {"properties": {"title": name}}}
-                for name in sheet_names[1:]
-            )
-            sheets_service.spreadsheets().batchUpdate(
-                spreadsheetId=spreadsheet_id,
-                body={"requests": setup_requests},
-            ).execute()
-        except HttpError as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Google Sheets setup failed: {exc.reason}",
-            ) from exc
-    else:
-        try:
-            spreadsheet = sheets_service.spreadsheets().create(
-                body={
-                    "properties": {"title": title},
-                    "sheets": [{"properties": {"title": name}} for name in sheet_names],
-                },
-                fields="spreadsheetId,spreadsheetUrl,sheets.properties",
-            ).execute()
-        except HttpError as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Google Sheets create failed: {exc.reason}",
-            ) from exc
-
-        spreadsheet_id = spreadsheet["spreadsheetId"]
-        spreadsheet_url = spreadsheet["spreadsheetUrl"]
-
-    for sheet_name, dataframe in tables.items():
-        values = dataframe_values(dataframe)
-        if not values:
-            continue
-
-        try:
-            sheets_service.spreadsheets().values().update(
-                spreadsheetId=spreadsheet_id,
-                range=f"'{sheet_name}'!A1",
-                valueInputOption="USER_ENTERED",
-                body={"values": values},
-            ).execute()
-        except HttpError as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Google Sheets write failed on {sheet_name}: {exc.reason}",
-            ) from exc
-
-    metadata = sheets_service.spreadsheets().get(
-        spreadsheetId=spreadsheet_id,
-        fields="sheets.properties(sheetId,title)",
-    ).execute()
-    sheet_id_by_title = {
-        sheet["properties"]["title"]: sheet["properties"]["sheetId"]
-        for sheet in metadata["sheets"]
-    }
-
-    amount_headers = {
-        "amount_usd",
-        "song_level_amount_usd",
-        "net_amount",
-        "Ingresos USD",
-        "Importe neto",
-    }
-    integer_headers = {
-        "units",
-        "rows",
-        "song_level_rows",
-        "raw_sample_rows",
-        "Unidades",
-        "Filas",
-        "Filas song level",
-        "Filas raw",
-    }
-
-    requests = []
-    for sheet_name, dataframe in tables.items():
-        sheet_id = sheet_id_by_title[sheet_name]
-        column_count = max(1, len(dataframe.columns))
-        row_count = max(1, len(dataframe.index) + 1)
-        requests.extend([
-            {
-                "repeatCell": {
-                    "range": {
-                        "sheetId": sheet_id,
-                        "startRowIndex": 0,
-                        "endRowIndex": 1,
-                    },
-                    "cell": {
-                        "userEnteredFormat": {
-                            "backgroundColor": {"red": 0.12, "green": 0.31, "blue": 0.47},
-                            "textFormat": {"foregroundColor": {"red": 1, "green": 1, "blue": 1}, "bold": True},
-                            "horizontalAlignment": "CENTER",
-                        }
-                    },
-                    "fields": "userEnteredFormat(backgroundColor,textFormat,horizontalAlignment)",
-                }
-            },
-            {
-                "updateSheetProperties": {
-                    "properties": {
-                        "sheetId": sheet_id,
-                        "gridProperties": {"frozenRowCount": 1},
-                    },
-                    "fields": "gridProperties.frozenRowCount",
-                }
-            },
-            {
-                "autoResizeDimensions": {
-                    "dimensions": {
-                        "sheetId": sheet_id,
-                        "dimension": "COLUMNS",
-                        "startIndex": 0,
-                        "endIndex": column_count,
-                    }
-                }
-            },
-        ])
-
-        requests.append({
-            "setBasicFilter": {
-                "filter": {
-                    "range": {
-                        "sheetId": sheet_id,
-                        "startRowIndex": 0,
-                        "endRowIndex": row_count,
-                        "startColumnIndex": 0,
-                        "endColumnIndex": column_count,
-                    }
-                }
-            }
-        })
-
-        for idx, column_name in enumerate(dataframe.columns):
-            requests.append({
-                "updateDimensionProperties": {
-                    "range": {
-                        "sheetId": sheet_id,
-                        "dimension": "COLUMNS",
-                        "startIndex": idx,
-                        "endIndex": idx + 1,
-                    },
-                    "properties": {
-                        "pixelSize": column_width(str(column_name), dataframe),
-                    },
-                    "fields": "pixelSize",
-                }
-            })
-
-            if column_name in amount_headers:
-                requests.append({
-                    "repeatCell": {
-                        "range": {
-                            "sheetId": sheet_id,
-                            "startRowIndex": 1,
-                            "endRowIndex": row_count,
-                            "startColumnIndex": idx,
-                            "endColumnIndex": idx + 1,
-                        },
-                        "cell": {
-                            "userEnteredFormat": {
-                                "numberFormat": {
-                                    "type": "CURRENCY",
-                                    "pattern": "$#,##0.00",
-                                }
-                            }
-                        },
-                        "fields": "userEnteredFormat.numberFormat",
-                    }
-                })
-            elif column_name in integer_headers:
-                requests.append({
-                    "repeatCell": {
-                        "range": {
-                            "sheetId": sheet_id,
-                            "startRowIndex": 1,
-                            "endRowIndex": row_count,
-                            "startColumnIndex": idx,
-                            "endColumnIndex": idx + 1,
-                        },
-                        "cell": {
-                            "userEnteredFormat": {
-                                "numberFormat": {
-                                    "type": "NUMBER",
-                                    "pattern": "#,##0",
-                                }
-                            }
-                        },
-                        "fields": "userEnteredFormat.numberFormat",
-                    }
-                })
-
-    if requests:
-        try:
-            sheets_service.spreadsheets().batchUpdate(
-                spreadsheetId=spreadsheet_id,
-                body={"requests": requests},
-            ).execute()
-        except HttpError as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Google Sheets format failed: {exc.reason}",
-            ) from exc
-
-    if GOOGLE_SHEETS_SHARE_EMAIL:
-        try:
-            drive_service.permissions().create(
-                fileId=spreadsheet_id,
-                body={
-                    "type": "user",
-                    "role": "writer",
-                    "emailAddress": GOOGLE_SHEETS_SHARE_EMAIL,
-                },
-                sendNotificationEmail=False,
-            ).execute()
-        except HttpError as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Google Drive share failed for {GOOGLE_SHEETS_SHARE_EMAIL}: {exc.reason}",
-            ) from exc
-
-    return spreadsheet_url
-
-
 @app.get("/health")
 def health() -> dict:
     sheets_auth_mode = "oauth_user" if GOOGLE_OAUTH_TOKEN_JSON else "service_account"
@@ -7492,165 +7027,40 @@ def process_source_monitor(
     }
 
 
-def royalty_report_scope_label(source: str | None, account: str | None) -> str:
-    source = (source or "").strip().lower() or None
-    account = (account or "").strip().lower() or None
-    policy = load_distributor_policy_document()
-    matching_policy = next(
-        (
-            entry
-            for entry in policy.get("entries", [])
-            if str(entry.get("source") or "").strip().lower() == source
-            and str(entry.get("account") or "").strip().lower() == account
-        ),
-        None,
-    )
-    if source and account:
-        return str((matching_policy or {}).get("display_name") or "").strip() or (
-            f"{source.upper()} / {account.replace('_', ' ').title()}"
-        )
-    if source:
-        return source.upper()
-    return "Todas las distribuidoras"
+def canonical_royalty_report_params(
+    request: RoyaltyReportJobRequest,
+    policy_snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    params = request.model_dump(exclude={"output"})
+    params["keywords"] = normalize_keywords(params.get("keywords") or [])
+    if request.output in {"excel", "google_sheet"} and not params["keywords"]:
+        raise HTTPException(status_code=400, detail="Ingresa al menos una palabra clave.")
+    if request.start_month and request.end_month and request.start_month > request.end_month:
+        raise HTTPException(status_code=400, detail="El periodo desde no puede ser mayor que hasta.")
 
+    source = str(params.get("source") or "").strip().lower() or None
+    account = str(params.get("account") or "").strip().lower() or None
+    if request.output != "executive_pdf":
+        source = None
+        account = None
+    elif account and not source:
+        raise HTTPException(status_code=400, detail="La cuenta requiere una distribuidora.")
 
-def upload_report_job_artifact(job_id: int, output_path: Path, content_type: str) -> str:
-    if not GCS_BUCKET:
-        raise RuntimeError("GCS_BUCKET no esta configurado para guardar el reporte.")
-    object_path = f"{VPO_REPORT_RESULTS_PREFIX}/{job_id}/{output_path.name}"
-    client = gcs_client()
-    blob = client.bucket(GCS_BUCKET).blob(object_path)
-    blob.upload_from_filename(str(output_path), content_type=content_type)
-    return f"gs://{GCS_BUCKET}/{object_path}"
+    entries = policy_snapshot.get("entries") or []
+    if source and not any(str(item.get("source") or "").lower() == source for item in entries):
+        raise HTTPException(status_code=400, detail="La distribuidora seleccionada no esta activa.")
+    if account and not any(
+        str(item.get("source") or "").lower() == source
+        and str(item.get("account") or "").lower() == account
+        for item in entries
+    ):
+        raise HTTPException(status_code=400, detail="La cuenta seleccionada no esta activa.")
 
-
-def materialize_report_job_artifact(job_id: int) -> tuple[Path, str, str]:
-    artifact = get_report_job_artifact(job_id)
-    if artifact is None or artifact.get("status") != "completed":
-        raise HTTPException(status_code=409, detail="El reporte todavia no esta listo.")
-    output_uri = str(artifact.get("output_uri") or "")
-    if not output_uri.startswith("gs://"):
-        raise HTTPException(status_code=500, detail="El reporte no tiene un archivo persistido valido.")
-    bucket_name, _, object_path = output_uri[5:].partition("/")
-    if not bucket_name or not object_path:
-        raise HTTPException(status_code=500, detail="La ubicacion del reporte es invalida.")
-    filename = Path(str(artifact.get("result_filename") or Path(object_path).name)).name
-    content_type = str(artifact.get("result_content_type") or "application/octet-stream")
-    local_dir = VPO_API_REPORTS_DIR / "completed" / str(job_id)
-    local_dir.mkdir(parents=True, exist_ok=True)
-    local_path = local_dir / filename
-    if not local_path.exists():
-        client = gcs_client()
-        blob = client.bucket(bucket_name).blob(object_path)
-        if not blob.exists(client):
-            raise HTTPException(status_code=410, detail="El archivo del reporte ya no esta disponible.")
-        blob.download_to_filename(str(local_path))
-    return local_path, filename, content_type
-
-
-def build_royalty_report_job(job: dict[str, Any]) -> tuple[str | None, str | None, str | None, str | None]:
-    job_id = int(job["id"])
-    output_format = str(job.get("output_format") or "excel")
-    params = dict(job.get("params") or {})
-    keywords = normalize_keywords(params.get("keywords") or [])
-    start_month = params.get("start_month") or None
-    end_month = params.get("end_month") or None
-    period_basis = params.get("period_basis") or "transaction_month"
-    mode = params.get("mode") or "any"
-    raw_limit = max(0, min(int(params.get("raw_limit") or 0), 50000))
-    refresh_cache = bool(params.get("refresh_cache"))
-    source = (params.get("source") or "").strip().lower() or None
-    account = (params.get("account") or "").strip().lower() or None
-
-    if start_month and end_month and start_month > end_month:
-        raise ValueError("El periodo desde no puede ser mayor que hasta.")
-    if output_format in {"excel", "google_sheet"} and not keywords:
-        raise ValueError("El reporte requiere al menos una palabra clave.")
-
-    set_report_job_stage(job_id, "reading_data")
-    marts = ensure_marts(
-        refresh_cache=refresh_cache,
-        filenames=[SONG_FILE, STANDARDIZED_FILE, CATALOG_MASTER_FILE],
-    )
-    configure_catalog_report_env(marts)
-    set_report_job_stage(job_id, "building")
-
-    if output_format == "excel":
-        output_path = build_report(
-            keywords=keywords,
-            mode=mode,
-            raw_limit=raw_limit,
-            start_month=start_month,
-            end_month=end_month,
-            period_basis=period_basis,
-            song_path=marts[SONG_FILE],
-            standardized_path=marts[STANDARDIZED_FILE],
-            output_dir=VPO_API_REPORTS_DIR,
-        )
-        content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    else:
-        tables = build_report_tables(
-            keywords=keywords,
-            mode=mode,
-            raw_limit=raw_limit if output_format == "google_sheet" else 0,
-            start_month=start_month,
-            end_month=end_month,
-            period_basis=period_basis,
-            song_path=marts[SONG_FILE],
-            standardized_path=marts[STANDARDIZED_FILE],
-            source=source if output_format == "executive_pdf" else None,
-            account=account if output_format == "executive_pdf" else None,
-        )
-        if output_format == "google_sheet":
-            spreadsheet_url = create_google_sheet(
-                tables=tables,
-                keywords=keywords,
-                start_month=start_month,
-                end_month=end_month,
-            )
-            return None, None, None, spreadsheet_url
-        output_path = build_executive_royalty_pdf(
-            tables=tables,
-            output_dir=VPO_API_REPORTS_DIR,
-            scope_label=royalty_report_scope_label(source, account),
-            keywords=keywords,
-            period_basis=period_basis,
-            start_month=start_month,
-            end_month=end_month,
-        )
-        content_type = "application/pdf"
-
-    set_report_job_stage(job_id, "uploading")
-    output_uri = upload_report_job_artifact(job_id, output_path, content_type)
-    filename = output_path.name
-    try:
-        output_path.unlink(missing_ok=True)
-    except OSError:
-        pass
-    return output_uri, filename, content_type, None
-
-
-def execute_royalty_report_job(job_id: int) -> dict[str, Any] | None:
-    job = claim_report_job(job_id)
-    if job is None:
-        return get_report_job(job_id)
-    try:
-        output_uri, filename, content_type, result_url = build_royalty_report_job(job)
-        complete_report_job(
-            job_id,
-            output_uri=output_uri,
-            filename=filename,
-            content_type=content_type,
-            result_url=result_url,
-        )
-    except Exception as exc:
-        fail_report_job(job_id, str(exc))
-    return get_report_job(job_id)
-
-
-def execute_local_royalty_report_job(job_id: int) -> None:
-    with LOCAL_REPORT_JOB_LOCK:
-        execute_royalty_report_job(job_id)
+    params["source"] = source
+    params["account"] = account
+    if request.output == "executive_pdf":
+        params["raw_limit"] = 0
+    return params
 
 
 def require_report_job_access(username: str, job: dict[str, Any], action: Literal["access", "create"] = "access") -> dict:
@@ -7664,7 +7074,6 @@ def require_report_job_access(username: str, job: dict[str, Any], action: Litera
 @app.post("/reports/jobs", status_code=202)
 def create_royalty_report_job(
     request: RoyaltyReportJobRequest,
-    http_request: Request,
     x_vpo_api_key: str | None = Header(default=None),
     x_vpo_username: str | None = Header(default=None),
 ) -> dict:
@@ -7675,12 +7084,19 @@ def create_royalty_report_job(
     with operational_connect() as conn:
         require_module_permission(conn, username, "royalty_reports", "create")
 
-    params = request.model_dump(exclude={"output"})
-    params["keywords"] = normalize_keywords(params.get("keywords") or [])
-    if request.output in {"excel", "google_sheet"} and not params["keywords"]:
-        raise HTTPException(status_code=400, detail="Ingresa al menos una palabra clave.")
-    if request.start_month and request.end_month and request.start_month > request.end_month:
-        raise HTTPException(status_code=400, detail="El periodo desde no puede ser mayor que hasta.")
+    policy_snapshot = load_distributor_policy_document()
+    policy_version = int(policy_snapshot.get("policy_version") or 0)
+    if policy_version <= 0:
+        raise HTTPException(status_code=500, detail="Las policies de distribuidoras no tienen version.")
+    params = canonical_royalty_report_params(request, policy_snapshot)
+    try:
+        input_manifest = build_gcs_input_manifest(
+            client=gcs_client(),
+            bucket_name=GCS_BUCKET,
+            prefix=GCS_PREFIX,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Los datos publicados no estan disponibles.") from exc
 
     report_key = {
         "excel": "royalty_keyword",
@@ -7692,25 +7108,16 @@ def create_royalty_report_job(
         report_key=report_key,
         output_format=request.output,
         params=params,
+        input_manifest=input_manifest,
+        policy_snapshot=policy_snapshot,
+        policy_version=policy_version,
     )
     if created:
         try:
-            if cloud_tasks_enabled():
-                worker_base_url = VPO_REPORT_WORKER_BASE_URL or str(http_request.base_url).rstrip("/")
-                worker_url = f"{worker_base_url}/reports/jobs/{job['id']}/execute"
-                task_name = enqueue_report_job(int(job["id"]), worker_url)
-                set_report_job_task(int(job["id"]), task_name)
-            else:
-                thread = threading.Thread(
-                    target=execute_local_royalty_report_job,
-                    args=(int(job["id"]),),
-                    daemon=True,
-                    name=f"royalty-report-{job['id']}",
-                )
-                thread.start()
-                set_report_job_task(int(job["id"]), f"local:{thread.name}")
+            operation_name = CloudRunReportJobLauncher.from_environment().run(int(job["id"]))
+            set_report_job_execution(int(job["id"]), operation_name)
         except Exception as exc:
-            fail_report_job(int(job["id"]), f"No se pudo encolar el reporte: {exc}")
+            fail_report_job(int(job["id"]), f"No se pudo iniciar Cloud Run Job: {exc}")
             raise HTTPException(status_code=500, detail="No se pudo iniciar el reporte.") from exc
     return {"item": get_report_job(int(job["id"])), "reused": not created}
 
@@ -7753,7 +7160,7 @@ def royalty_report_job_download(
     job_id: int,
     x_vpo_api_key: str | None = Header(default=None),
     x_vpo_username: str | None = Header(default=None),
-) -> FileResponse:
+) -> dict[str, Any]:
     require_api_key(x_vpo_api_key)
     username = clean_username(x_vpo_username or "")
     if not username:
@@ -7762,59 +7169,24 @@ def royalty_report_job_download(
     if job is None:
         raise HTTPException(status_code=404, detail="Reporte no encontrado.")
     require_report_job_access(username, job)
-    local_path, filename, content_type = materialize_report_job_artifact(job_id)
-    return FileResponse(path=local_path, media_type=content_type, filename=filename)
-
-
-@app.post("/reports/jobs/{job_id}/execute")
-def royalty_report_job_worker(
-    job_id: int,
-    x_vpo_worker_token: str | None = Header(default=None),
-) -> dict:
-    expected = os.environ.get("VPO_REPORT_WORKER_TOKEN", "").strip()
-    supplied = (x_vpo_worker_token or "").strip()
-    if not expected or not supplied or not secrets.compare_digest(expected, supplied):
-        raise HTTPException(status_code=403, detail="Worker no autorizado.")
-    item = execute_royalty_report_job(job_id)
-    if item is None:
-        raise HTTPException(status_code=404, detail="Reporte no encontrado.")
-    return {"item": item}
-
-
-@app.post("/reports/keyword")
-def keyword_report(
-    request: KeywordReportRequest,
-    x_vpo_api_key: str | None = Header(default=None),
-) -> FileResponse:
-    require_api_key(x_vpo_api_key)
-
-    if request.start_month and request.end_month and request.start_month > request.end_month:
-        raise HTTPException(status_code=400, detail="start_month cannot be greater than end_month.")
-
-    keywords = normalize_keywords(request.keywords)
-    if not keywords:
-        raise HTTPException(status_code=400, detail="At least one keyword is required.")
-
-    marts = ensure_marts(refresh_cache=request.refresh_cache, filenames=[SONG_FILE, STANDARDIZED_FILE, CATALOG_MASTER_FILE])
-    configure_catalog_report_env(marts)
-
-    output_path = build_report(
-        keywords=keywords,
-        mode=request.mode,
-        raw_limit=request.raw_limit,
-        start_month=request.start_month,
-        end_month=request.end_month,
-        period_basis=request.period_basis,
-        song_path=marts[SONG_FILE],
-        standardized_path=marts[STANDARDIZED_FILE],
-        output_dir=VPO_API_REPORTS_DIR,
-    )
-
-    return FileResponse(
-        path=output_path,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename=output_path.name,
-    )
+    artifact = get_report_job_artifact(job_id)
+    if artifact is None or artifact.get("status") != "completed":
+        raise HTTPException(status_code=409, detail="El reporte todavia no esta listo.")
+    output_uri = str(artifact.get("output_uri") or "")
+    filename = Path(str(artifact.get("result_filename") or "reporte")).name
+    try:
+        url = create_signed_download_url(
+            client=gcs_client(),
+            output_uri=output_uri,
+            filename=filename,
+            expiration_minutes=VPO_REPORT_DOWNLOAD_TTL_MINUTES,
+            signer_service_account=VPO_REPORT_SIGNER_SERVICE_ACCOUNT,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=410, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {"url": url, "expires_in_seconds": VPO_REPORT_DOWNLOAD_TTL_MINUTES * 60}
 
 
 @app.get("/reports/royalty/options")
@@ -7861,128 +7233,6 @@ def royalty_report_options(
         "sources": sorted({item["source"] for item in source_accounts}),
         "source_accounts": source_accounts,
     }
-
-
-@app.post("/reports/executive")
-def executive_royalty_report(
-    request: ExecutiveRoyaltyReportRequest,
-    x_vpo_api_key: str | None = Header(default=None),
-) -> FileResponse:
-    require_api_key(x_vpo_api_key)
-    if request.start_month and request.end_month and request.start_month > request.end_month:
-        raise HTTPException(status_code=400, detail="start_month cannot be greater than end_month.")
-
-    keywords = normalize_keywords(request.keywords)
-    marts = ensure_marts(
-        refresh_cache=request.refresh_cache,
-        filenames=[SONG_FILE, STANDARDIZED_FILE, CATALOG_MASTER_FILE],
-    )
-    configure_catalog_report_env(marts)
-
-    policy = load_distributor_policy_document()
-    source = (request.source or "").strip().lower() or None
-    account = (request.account or "").strip().lower() or None
-    matching_policy = next(
-        (
-            entry
-            for entry in policy.get("entries", [])
-            if str(entry.get("source") or "").strip().lower() == source
-            and str(entry.get("account") or "").strip().lower() == account
-        ),
-        None,
-    )
-    if source and account:
-        scope_label = str((matching_policy or {}).get("display_name") or "").strip()
-        if not scope_label:
-            scope_label = f"{source.upper()} / {account.replace('_', ' ').title()}"
-    elif source:
-        scope_label = source.upper()
-    else:
-        scope_label = "Todas las distribuidoras"
-
-    tables = build_report_tables(
-        keywords=keywords,
-        mode=request.mode,
-        raw_limit=0,
-        start_month=request.start_month,
-        end_month=request.end_month,
-        period_basis=request.period_basis,
-        song_path=marts[SONG_FILE],
-        standardized_path=marts[STANDARDIZED_FILE],
-        source=source,
-        account=account,
-    )
-    try:
-        output_path = build_executive_royalty_pdf(
-            tables=tables,
-            output_dir=VPO_API_REPORTS_DIR,
-            scope_label=scope_label,
-            keywords=keywords,
-            period_basis=request.period_basis,
-            start_month=request.start_month,
-            end_month=request.end_month,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    return FileResponse(
-        path=output_path,
-        media_type="application/pdf",
-        filename=output_path.name,
-    )
-
-
-@app.get("/reports/keyword-download")
-def keyword_report_download(
-    keywords: str,
-    expires: int,
-    sig: str,
-    start_month: str = "",
-    end_month: str = "",
-    period_basis: Literal["transaction_month", "statement_period"] = "transaction_month",
-    mode: Literal["any", "all"] = "any",
-    raw_limit: int = 5000,
-    refresh_cache: bool = False,
-) -> FileResponse:
-    require_valid_report_signature(
-        keywords=keywords,
-        start_month=start_month,
-        end_month=end_month,
-        period_basis=period_basis,
-        mode=mode,
-        raw_limit=raw_limit,
-        refresh_cache=refresh_cache,
-        expires=expires,
-        sig=sig,
-    )
-
-    if start_month and end_month and start_month > end_month:
-        raise HTTPException(status_code=400, detail="start_month cannot be greater than end_month.")
-
-    normalized_keywords = normalize_keywords([keywords])
-    if not normalized_keywords:
-        raise HTTPException(status_code=400, detail="At least one keyword is required.")
-
-    marts = ensure_marts(refresh_cache=refresh_cache, filenames=[SONG_FILE, STANDARDIZED_FILE, CATALOG_MASTER_FILE])
-    configure_catalog_report_env(marts)
-
-    output_path = build_report(
-        keywords=normalized_keywords,
-        mode=mode,
-        raw_limit=raw_limit,
-        start_month=start_month or None,
-        end_month=end_month or None,
-        period_basis=period_basis,
-        song_path=marts[SONG_FILE],
-        standardized_path=marts[STANDARDIZED_FILE],
-        output_dir=VPO_API_REPORTS_DIR,
-    )
-
-    return FileResponse(
-        path=output_path,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        filename=output_path.name,
-    )
 
 
 @app.post("/reports/statement")
@@ -8142,49 +7392,6 @@ def custom_title_report(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         filename=output_path.name,
     )
-
-
-@app.post("/reports/google-sheet")
-def keyword_google_sheet(
-    request: KeywordReportRequest,
-    x_vpo_api_key: str | None = Header(default=None),
-) -> dict[str, str]:
-    require_api_key(x_vpo_api_key)
-
-    if request.start_month and request.end_month and request.start_month > request.end_month:
-        raise HTTPException(status_code=400, detail="start_month cannot be greater than end_month.")
-
-    keywords = normalize_keywords(request.keywords)
-    if not keywords:
-        raise HTTPException(status_code=400, detail="At least one keyword is required.")
-
-    marts = ensure_marts(refresh_cache=request.refresh_cache, filenames=[SONG_FILE, STANDARDIZED_FILE, CATALOG_MASTER_FILE])
-    configure_catalog_report_env(marts)
-
-    tables = build_report_tables(
-        keywords=keywords,
-        mode=request.mode,
-        raw_limit=request.raw_limit,
-        start_month=request.start_month,
-        end_month=request.end_month,
-        period_basis=request.period_basis,
-        song_path=marts[SONG_FILE],
-        standardized_path=marts[STANDARDIZED_FILE],
-    )
-
-    try:
-        spreadsheet_url = create_google_sheet(
-            tables=tables,
-            keywords=keywords,
-            start_month=request.start_month,
-            end_month=request.end_month,
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Google Sheet generation failed: {exc}") from exc
-
-    return {"url": spreadsheet_url}
 
 
 @app.get("/participation/distributors")

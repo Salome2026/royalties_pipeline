@@ -6,8 +6,11 @@ snapshots historicos y operacion viva.
 ## Idea central
 
 - Cloud SQL Postgres es la unica base operativa viva.
-- Local sigue siendo el taller pesado: ingesta de excels, marts, parquets,
-  catalogo, reportes y herramientas administrativas.
+- El destino rector del trabajo pesado es cloud: Cloud Run Jobs procesa
+  reportes e ingestas sobre objetos versionados en GCS.
+- Mientras cada flujo no haya completado su corte, las herramientas locales
+  vigentes pueden seguir operando, pero no se extienden ni se convierten en un
+  segundo camino productivo. Cada corte retira por completo el flujo reemplazado.
 - Cuando local lee o escribe datos operativos, tambien debe hacerlo contra
   Cloud SQL.
 - SQLite local queda como foto historica o backup de corte, no como segunda
@@ -79,6 +82,30 @@ Objetos principales:
 - `booking/live/booking_live.sqlite`: snapshot historico/legacy de booking. No usar para operacion viva.
 
 Regla: subir solo artefactos elegidos. No subir carpetas crudas, backups locales ni archivos de prueba.
+
+## Trabajo pesado cloud
+
+Los reportes pesados siguen el contrato de `royalty_report_jobs.md`:
+
+- la API registra y autoriza;
+- Cloud Run Jobs procesa;
+- Cloud SQL conserva estado y auditoria;
+- GCS entrega datos publicados y guarda resultados;
+- Vercel no procesa ni retransmite archivos pesados;
+- localhost y cloud solicitan el mismo Job.
+
+La ingesta cloud futura debe conservar el mismo limite de responsabilidades:
+crudo inmutable y Parquet canonico en GCS, estado operativo en Cloud SQL y
+computo aislado en Cloud Run Jobs.
+
+Estado validado `2026-09-03`:
+
+- API y localhost solicitan el mismo `vpo-royalty-report-job`;
+- cada pedido congela generaciones de marts y policy activa en PostgreSQL;
+- los resultados se descargan directamente desde GCS con URL firmada;
+- Cloud Tasks, el token de worker y las rutas sincronas reemplazadas fueron
+  retirados;
+- API y Job ejecutan el mismo digest de imagen.
 
 ## Booking operativo
 
@@ -161,8 +188,10 @@ Checklist antes de push:
 
 - Cloud Run debe quedar con `min instances = 0`.
 - No dejar jobs o servidores locales replicando datos a cloud en loop.
-- No subir reportes grandes temporales a GCS.
-- Mantener `max instances = 1` mientras el uso sea interno y acotado.
+- Guardar en GCS solamente resultados administrados bajo
+  `reports/jobs/<id>/`, con lifecycle y metadata en Cloud SQL.
+- Definir limites explicitos de instancias y concurrencia por servicio o Job.
+  La API y los trabajos pesados no comparten capacidad.
 - Para vistas compartidas puntuales, publicar snapshots chicos y estables.
 
 ## Estado produccion

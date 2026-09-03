@@ -1,110 +1,108 @@
-# VPO Corp API - Google Cloud Run
+# VPO Corp en Google Cloud Run
 
-## Arquitectura
+## Arquitectura vigente
 
-- Vercel: frontend Next.js.
-- Google Cloud Storage: marts publicados.
-- Google Cloud Run: API FastAPI.
-- Cloud SQL Postgres: base operativa viva unica.
+- Vercel aloja el frontend Next.js.
+- `vpo-corp-api` expone la API FastAPI y atiende operacion liviana.
+- `vpo-royalty-report-job` genera los reportes pesados en ejecuciones aisladas.
+- Cloud SQL PostgreSQL es la unica base operativa viva.
+- Google Cloud Storage contiene marts publicados y resultados temporales.
 
-## Configuracion recomendada
+La API y el Job usan la misma imagen inmutable, pero tienen comandos, recursos
+e identidades diferentes. No existe worker HTTP, Cloud Tasks, thread local ni
+ruta sincrona alternativa para reportes de regalias.
 
-- Region: `us-central1`
-- CPU: `1`
-- Memoria: `2Gi` para empezar. Si los reportes grandes siguen fallando, subir a `4Gi`.
-- Timeout: `1800s` para el worker persistente de reportes.
-- Concurrency: `1`
-- Min instances: `0`
-- Max instances: `1`
-- Billing: request-based.
+## API `vpo-corp-api`
 
-## Variables necesarias
+Configuracion validada el `2026-09-03`:
 
-Usar los mismos valores que Render:
+- region: `us-central1`;
+- imagen:
+  `sha256:b30b9a60a63745efca6b5f44527c18c45152511d254a72815af2c87200180d2c`;
+- service account:
+  `vpo-marts-publisher@vpo-corp-royalties.iam.gserviceaccount.com`;
+- `1 CPU`, `2 GiB`, concurrencia `4`;
+- minimo `0`, maximo `1`, facturacion por request;
+- timeout `1800 s` para endpoints operativos existentes;
+- Cloud SQL por socket a `vpo-corp-postgres`;
+- trafico al `100%` sobre la ultima revision.
+
+Variables del circuito de reportes:
+
+- `VPO_REPORT_JOB_PROJECT=vpo-corp-royalties`
+- `VPO_REPORT_JOB_LOCATION=us-central1`
+- `VPO_REPORT_JOB_NAME=vpo-royalty-report-job`
+- `VPO_REPORT_DOWNLOAD_TTL_MINUTES=10`
+- `VPO_REPORT_SIGNER_SERVICE_ACCOUNT=vpo-marts-publisher@vpo-corp-royalties.iam.gserviceaccount.com`
+
+La identidad de la API tiene permiso para ejecutar el Job con override de
+`VPO_REPORT_RUN_ID` y para firmar las descargas como ella misma. No posee token
+compartido de worker.
+
+## Job `vpo-royalty-report-job`
+
+Configuracion vigente:
+
+- region: `us-central1`;
+- misma imagen inmutable que la API;
+- comando: `python -m app.royalty_reports.job_main`;
+- entrada por ejecucion: solamente `VPO_REPORT_RUN_ID`;
+- service account:
+  `vpo-royalty-report-job@vpo-corp-royalties.iam.gserviceaccount.com`;
+- `2 CPU`, `4 GiB`, timeout `3600 s`;
+- una tarea, paralelismo `1`, `maxRetries=0`;
+- Cloud SQL por socket;
+- lectura de las generaciones congeladas bajo `marts/`;
+- escritura bajo `reports/jobs/<report_run_id>/`;
+- secretos: password de PostgreSQL y token OAuth para Google Sheets.
+
+## Variables operativas comunes
 
 - `GCS_BUCKET=vpo-corp-royalties-marts`
 - `GCS_PREFIX=marts`
-- `VPO_API_CACHE_DIR=/tmp/vpo-corp/gcs_marts`
-- `VPO_API_REPORTS_DIR=/tmp/vpo-corp/reports`
-- `VPO_API_KEY`
-- `GOOGLE_SHEETS_SHARE_EMAIL`
-- `GOOGLE_DRIVE_FOLDER_ID`
-- `GOOGLE_OAUTH_TOKEN_JSON`
 - `VPO_OPERATIONAL_DB_DRIVER=postgres`
 - `VPO_POSTGRES_CONNECT_MODE=cloudsql_socket`
 - `VPO_CLOUDSQL_CONNECTION_NAME=vpo-corp-royalties:us-central1:vpo-corp-postgres`
 - `VPO_OPERATIONAL_DB_NAME=vpo_corp`
 - `VPO_OPERATIONAL_DB_USER=postgres`
 - `VPO_OPERATIONAL_DB_PASSWORD` desde Secret Manager.
-- `VPO_REPORT_TASKS_PROJECT=vpo-corp-royalties`
-- `VPO_REPORT_TASKS_LOCATION=us-central1`
-- `VPO_REPORT_TASKS_QUEUE=vpo-report-jobs`
-- `VPO_REPORT_RESULTS_PREFIX=reports/jobs`
-- `VPO_REPORT_WORKER_BASE_URL=https://vpo-corp-api-259971998447.us-central1.run.app`
-- `VPO_REPORT_WORKER_TOKEN` desde Secret Manager.
 
-Para leer Google Cloud Storage en Cloud Run, preferimos usar el service account adjunto al servicio. Ese service account necesita permiso sobre el bucket, por ejemplo `Storage Object Viewer`.
-Para Cloud SQL, el servicio debe tener asociada la instancia con
-`--add-cloudsql-instances`.
+La API tambien recibe `VPO_API_KEY`. El Job no la necesita. Los secretos no se
+escriben en archivos de despliegue ni en Git.
 
-## Deploy inicial desde la raiz del repo
+## Flujo de un reporte
 
-```powershell
-gcloud run deploy vpo-corp-api `
-  --source C:\royalties_pipeline `
-  --region us-central1 `
-  --allow-unauthenticated `
-  --cpu 1 `
-  --memory 2Gi `
-  --timeout 1800 `
-  --concurrency 1 `
-  --min-instances 0 `
-  --max-instances 1 `
-  --add-cloudsql-instances vpo-corp-royalties:us-central1:vpo-corp-postgres `
-  --set-env-vars GCS_BUCKET=vpo-corp-royalties-marts,GCS_PREFIX=marts,VPO_API_CACHE_DIR=/tmp/vpo-corp/gcs_marts,VPO_API_REPORTS_DIR=/tmp/vpo-corp/reports
-```
+1. La API valida usuario, permiso y parametros.
+2. Congela las generaciones de marts y la policy activa.
+3. Registra el pedido en `report_runs`.
+4. Ejecuta el Job con el identificador del pedido.
+5. El Job construye y publica el resultado en GCS.
+6. La API autoriza al usuario y genera una URL V4 de corta duracion.
+7. El navegador descarga directamente desde GCS.
 
-## Cola de reportes
+Vercel no recibe el archivo y la API no lo copia a `/tmp` para entregarlo.
 
-La pantalla `Reporte de regalias` no espera el archivo dentro de una peticion
-de Vercel. Registra el pedido en Cloud SQL y lo entrega a Cloud Tasks.
+## Despliegue y verificacion
 
-- API: `cloudtasks.googleapis.com`.
-- Cola: `vpo-report-jobs`, region `us-central1`.
-- Maximo simultaneo: `1`.
-- Reintentos automaticos: `1`; un error queda visible y se solicita nuevamente
-  desde la pantalla, sin riesgo de duplicar un archivo.
-- Secreto interno: `vpo-report-worker-token`.
-- El service account de Cloud Run necesita `roles/cloudtasks.enqueuer` y acceso
-  al secreto interno.
+Cada despliegue debe usar un digest, no depender de una etiqueta mutable. API y
+Job se actualizan al mismo digest y luego se verifican:
 
-Los resultados quedan en `gs://vpo-corp-royalties-marts/reports/jobs/` y la
-tabla `report_runs` conserva el estado y el propietario.
+- `/health` de la API;
+- ausencia de rutas sincronas y `/reports/jobs/<id>/execute` en OpenAPI;
+- creacion de un trabajo desde localhost y desde cloud;
+- finalizacion del Job y metadata completa en PostgreSQL;
+- descarga directa por URL firmada;
+- coincidencia de tamano y SHA-256 entre PostgreSQL, GCS y el archivo recibido.
 
-Despues cargar las variables secretas desde la consola de Cloud Run o con `gcloud run services update`.
+El frontend conserva:
 
-Variables secretas a cargar:
-
+- `VPO_API_URL=https://vpo-corp-api-259971998447.us-central1.run.app`
 - `VPO_API_KEY`
-- `GOOGLE_OAUTH_TOKEN_JSON`
-- `GOOGLE_SHEETS_SHARE_EMAIL`
-- `GOOGLE_DRIVE_FOLDER_ID`
-- `VPO_REPORT_WORKER_TOKEN`
+- `VPO_SESSION_SECRET`
 
-## Verificacion
+## Costos
 
-```powershell
-curl https://TU-CLOUD-RUN-URL/health
-```
-
-Luego cambiar en Vercel:
-
-- `VPO_API_URL=https://TU-CLOUD-RUN-URL`
-
-Mantener:
-
-- `VPO_API_KEY` igual que en Cloud Run.
-
-## Nota de costos
-
-Con `min instances = 0`, Cloud Run no queda prendido todo el mes. Para uso interno y reportes eventuales, deberia ser mucho mas economico que un servidor fijo.
+La API mantiene `min instances=0`. Los reportes consumen recursos solamente
+durante una ejecucion del Job. La concurrencia inicial del Job es uno y solo se
+aumenta con mediciones. Los artefactos bajo `reports/jobs/` tienen retencion
+limitada y la auditoria permanece en PostgreSQL.

@@ -60,12 +60,15 @@ export async function GET(request: NextRequest) {
 
   if (!download) return NextResponse.json(await response.json());
 
-  const buffer = await response.arrayBuffer();
-  return new NextResponse(buffer, {
-    status: 200,
-    headers: {
-      "Content-Type": response.headers.get("content-type") || "application/octet-stream",
-      "Content-Disposition": response.headers.get("content-disposition") || "attachment",
-    },
-  });
+  const payload = await response.json();
+  let target: URL;
+  try {
+    target = new URL(String(payload.url || ""));
+  } catch {
+    return NextResponse.json({ error: "La descarga segura no es válida." }, { status: 502 });
+  }
+  if (target.protocol !== "https:" || target.hostname !== "storage.googleapis.com") {
+    return NextResponse.json({ error: "La descarga segura no es válida." }, { status: 502 });
+  }
+  return NextResponse.redirect(target, 307);
 }

@@ -24,7 +24,6 @@ export type RoyaltyReportPayload = {
   raw_limit: number;
   source: string | null;
   account: string | null;
-  refresh_cache: false;
 };
 
 export type RoyaltyReportJob = {
