@@ -126,6 +126,10 @@ Acciones:
 
 ### Fase 3: pool de conexiones Postgres
 
+Estado: completada el 2026-09-03. El contrato vigente vive en
+`postgres_runtime_access.md`. La API y los Jobs comparten el adapter con pool,
+ciclo de vida explicito y limites por servicio. Query Insights quedo activo.
+
 Objetivo:
 
 - La API debe reutilizar conexiones.
@@ -210,4 +214,3 @@ Antes de tocar codigo, validar con Ruben:
 - si se empieza por sacar DDL de runtime;
 - si se prioriza empleados o booking;
 - si se hace backup y commit previo.
-

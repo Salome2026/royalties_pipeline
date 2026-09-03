@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 
+from app.operational_db import close_operational_db_pool
 from app.report_jobs import set_report_job_execution
 from app.royalty_reports.cloud_runtime import build_cloud_report_runtime
 from app.royalty_reports.execution import execute_report_job
@@ -43,3 +44,5 @@ if __name__ == "__main__":
     except Exception as exc:
         print(str(exc), file=sys.stderr, flush=True)
         raise
+    finally:
+        close_operational_db_pool()

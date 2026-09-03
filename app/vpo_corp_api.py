@@ -14,6 +14,7 @@ import threading
 import unicodedata
 import uuid
 from calendar import monthrange
+from contextlib import asynccontextmanager
 from datetime import date
 from datetime import datetime
 from io import BytesIO
@@ -27,6 +28,7 @@ from google.cloud import storage
 from pydantic import BaseModel, Field
 
 from app.operational_db import (
+    close_operational_db_pool,
     db_bool,
     db_sql,
     is_postgres_connection,
@@ -34,6 +36,7 @@ from app.operational_db import (
     operational_db_healthcheck,
     operational_db_settings,
     operational_sqlite_compatible_connect,
+    open_operational_db_pool,
 )
 from app.report_jobs import (
     create_or_reuse_report_job,
@@ -710,7 +713,16 @@ class BookingAgendaEventRequest(BaseModel):
 ParticipationPreset = Literal["last_month", "last_3_months", "last_year", "all_history", "custom"]
 
 
-app = FastAPI(title="VPO Corp Royalties API", version="0.1.0")
+@asynccontextmanager
+async def api_lifespan(_: FastAPI):
+    open_operational_db_pool(wait=True)
+    try:
+        yield
+    finally:
+        close_operational_db_pool()
+
+
+app = FastAPI(title="VPO Corp Royalties API", version="0.1.0", lifespan=api_lifespan)
 
 def require_api_key(x_vpo_api_key: str | None) -> None:
     if not VPO_API_KEY or VPO_API_KEY == "change-me":
@@ -6745,19 +6757,22 @@ def build_artist_finance_ledger(
     }
 
 
-def booking_artist_options() -> list[str]:
+def booking_artist_options(conn: Any | None = None) -> list[str]:
     artists: dict[str, str] = {}
     init_booking_db()
-    with booking_connect() as conn:
-        artist_rows = conn.execute(
-            """
-            SELECT stage_name
-            FROM booking_artists
-            WHERE active = 1
-            ORDER BY stage_name
-            """
-        ).fetchall()
-        show_rows = conn.execute("SELECT DISTINCT artist FROM booking_shows").fetchall()
+    if conn is None:
+        with booking_connect() as owned_conn:
+            return booking_artist_options(owned_conn)
+
+    artist_rows = conn.execute(
+        """
+        SELECT stage_name
+        FROM booking_artists
+        WHERE active = 1
+        ORDER BY stage_name
+        """
+    ).fetchall()
+    show_rows = conn.execute("SELECT DISTINCT artist FROM booking_shows").fetchall()
 
     for row in artist_rows:
         cleaned = clean_booking_artist(row["stage_name"])
@@ -10278,7 +10293,7 @@ def finance_movements(
             item["document_detail"] = document_map.get(int(row["id"]))
             movement_items.append(item)
         artists = sorted(set([
-            *filter_artists_by_scope(booking_artist_options(), conn, x_vpo_username, "finance_movements"),
+            *filter_artists_by_scope(booking_artist_options(conn), conn, x_vpo_username, "finance_movements"),
             *[row["artist"] for row in distinct_artist_rows if row["artist"]],
         ]), key=lambda value: value.casefold())
 

@@ -12,6 +12,7 @@ vigente.
 - [Production guardrails](production_guardrails.md)
 - [Cloud environment policy](cloud_environment_policy.md)
 - [Secure operational DB connection](secure_operational_db_connection.md)
+- [Acceso operativo a PostgreSQL](postgres_runtime_access.md)
 - [UI period control policy](ui_period_control_policy.md)
 
 Regla vigente: Cloud SQL Postgres es la unica base operativa viva. SQLite queda

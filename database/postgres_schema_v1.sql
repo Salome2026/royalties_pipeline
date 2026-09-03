@@ -305,6 +305,8 @@ CREATE TABLE IF NOT EXISTS booking_event_source_links (
 
 CREATE INDEX IF NOT EXISTS idx_booking_event_source_reference
     ON booking_event_source_links(source_system, source_reference);
+CREATE INDEX IF NOT EXISTS idx_booking_event_source_event
+    ON booking_event_source_links(event_id, id DESC);
 
 CREATE TABLE IF NOT EXISTS booking_shows (
     id bigserial PRIMARY KEY,
@@ -394,6 +396,9 @@ CREATE TABLE IF NOT EXISTS booking_show_expenses (
     legacy_sqlite_id bigint UNIQUE
 );
 
+CREATE INDEX IF NOT EXISTS idx_booking_show_expenses_show
+    ON booking_show_expenses(show_id, id);
+
 CREATE TABLE IF NOT EXISTS booking_movements (
     id bigserial PRIMARY KEY,
     show_id bigint NOT NULL REFERENCES booking_shows(id) ON DELETE CASCADE,
@@ -406,6 +411,9 @@ CREATE TABLE IF NOT EXISTS booking_movements (
     created_at timestamptz NOT NULL DEFAULT now(),
     legacy_sqlite_id bigint UNIQUE
 );
+
+CREATE INDEX IF NOT EXISTS idx_booking_movements_show
+    ON booking_movements(show_id, id);
 
 CREATE TABLE IF NOT EXISTS booking_pre_split_adjustments (
     id bigserial PRIMARY KEY,

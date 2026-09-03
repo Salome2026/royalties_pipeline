@@ -66,6 +66,7 @@ Configuracion vigente:
 - `VPO_OPERATIONAL_DB_NAME=vpo_corp`
 - `VPO_OPERATIONAL_DB_USER=postgres`
 - `VPO_OPERATIONAL_DB_PASSWORD` desde Secret Manager.
+- limites de pool segun `postgres_runtime_access.md`.
 
 La API tambien recibe `VPO_API_KEY`. El Job no la necesita. Los secretos no se
 escriben en archivos de despliegue ni en Git.
@@ -99,6 +100,9 @@ produccion observa `main` en `Salome2026/royalties_pipeline`, construye una sola
 imagen por commit y actualiza con ella tanto `vpo-corp-api` como
 `vpo-royalty-report-job`. No se mantienen configuraciones inline ni triggers
 contra propietarios anteriores del repositorio.
+
+El mismo despliegue fija `application_name` y los limites del pool: 1 a 4 para
+la API y 0 a 2 para cada ejecucion del Job.
 
 El frontend conserva:
 

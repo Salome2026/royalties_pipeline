@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 import json
@@ -30,6 +31,13 @@ class OperationalDbSettings:
     local_proxy_host: str
     local_proxy_port: int
     allow_direct_tcp: bool
+    application_name: str
+    pool_min_size: int
+    pool_max_size: int
+    pool_timeout_seconds: float
+    pool_max_waiting: int
+    pool_max_lifetime_seconds: float
+    pool_max_idle_seconds: float
 
     @property
     def safe_summary(self) -> dict[str, str]:
@@ -43,6 +51,10 @@ class OperationalDbSettings:
             "cloudsql_connection_name": self.cloudsql_connection_name if self.driver == "postgres" else "",
             "local_proxy": f"{self.local_proxy_host}:{self.local_proxy_port}" if self.driver == "postgres" else "",
             "direct_tcp_allowed": "yes" if self.allow_direct_tcp else "no",
+            "application_name": self.application_name if self.driver == "postgres" else "",
+            "pool_min_size": str(self.pool_min_size) if self.driver == "postgres" else "",
+            "pool_max_size": str(self.pool_max_size) if self.driver == "postgres" else "",
+            "pool_timeout_seconds": str(self.pool_timeout_seconds) if self.driver == "postgres" else "",
         }
 
 
@@ -80,6 +92,23 @@ def operational_db_settings() -> OperationalDbSettings:
         "yes",
         "on",
     }
+    application_name = os.environ.get("VPO_POSTGRES_APPLICATION_NAME", "vpo-corp").strip() or "vpo-corp"
+    pool_min_size = int(os.environ.get("VPO_POSTGRES_POOL_MIN_SIZE", "1"))
+    pool_max_size = int(os.environ.get("VPO_POSTGRES_POOL_MAX_SIZE", "4"))
+    pool_timeout_seconds = float(os.environ.get("VPO_POSTGRES_POOL_TIMEOUT_SECONDS", "10"))
+    pool_max_waiting = int(os.environ.get("VPO_POSTGRES_POOL_MAX_WAITING", "16"))
+    pool_max_lifetime_seconds = float(os.environ.get("VPO_POSTGRES_POOL_MAX_LIFETIME_SECONDS", "1800"))
+    pool_max_idle_seconds = float(os.environ.get("VPO_POSTGRES_POOL_MAX_IDLE_SECONDS", "300"))
+
+    if pool_min_size < 0 or pool_max_size < 1 or pool_min_size > pool_max_size:
+        raise OperationalDbConfigError(
+            "Postgres pool sizes must satisfy 0 <= VPO_POSTGRES_POOL_MIN_SIZE "
+            "<= VPO_POSTGRES_POOL_MAX_SIZE and max size must be positive."
+        )
+    if pool_timeout_seconds <= 0 or pool_max_waiting < 1:
+        raise OperationalDbConfigError("Postgres pool timeout and max waiting must be positive.")
+    if pool_max_lifetime_seconds <= 0 or pool_max_idle_seconds <= 0:
+        raise OperationalDbConfigError("Postgres pool lifetime and idle limits must be positive.")
 
     return OperationalDbSettings(
         driver=driver,
@@ -92,6 +121,13 @@ def operational_db_settings() -> OperationalDbSettings:
         local_proxy_host=proxy_host,
         local_proxy_port=proxy_port,
         allow_direct_tcp=allow_direct_tcp,
+        application_name=application_name,
+        pool_min_size=pool_min_size,
+        pool_max_size=pool_max_size,
+        pool_timeout_seconds=pool_timeout_seconds,
+        pool_max_waiting=pool_max_waiting,
+        pool_max_lifetime_seconds=pool_max_lifetime_seconds,
+        pool_max_idle_seconds=pool_max_idle_seconds,
     )
 
 
@@ -105,6 +141,7 @@ def _postgres_connect_params(settings: OperationalDbSettings) -> dict[str, Any]:
         "user": settings.user,
         "password": password,
         "connect_timeout": int(os.environ.get("VPO_POSTGRES_CONNECT_TIMEOUT", "10")),
+        "application_name": settings.application_name,
     }
 
     if settings.postgres_mode == "cloudsql_socket":
@@ -318,6 +355,100 @@ class PostgresSqliteCompatConnection:
         return int(row["id"]) if row and row["id"] is not None else None
 
 
+_POSTGRES_POOL: Any | None = None
+_POSTGRES_POOL_SIGNATURE: tuple[Any, ...] | None = None
+_POSTGRES_POOL_LOCK = threading.Lock()
+
+
+def _postgres_pool_signature(settings: OperationalDbSettings) -> tuple[Any, ...]:
+    return (
+        settings.postgres_mode,
+        settings.database_name,
+        settings.user,
+        settings.cloudsql_connection_name,
+        settings.local_proxy_host,
+        settings.local_proxy_port,
+        settings.application_name,
+        settings.pool_min_size,
+        settings.pool_max_size,
+        settings.pool_timeout_seconds,
+        settings.pool_max_waiting,
+        settings.pool_max_lifetime_seconds,
+        settings.pool_max_idle_seconds,
+    )
+
+
+def open_operational_db_pool(*, wait: bool = True) -> Any:
+    settings = operational_db_settings()
+    if settings.driver != "postgres":
+        return None
+
+    global _POSTGRES_POOL, _POSTGRES_POOL_SIGNATURE
+    signature = _postgres_pool_signature(settings)
+    with _POSTGRES_POOL_LOCK:
+        if _POSTGRES_POOL is not None and _POSTGRES_POOL_SIGNATURE == signature:
+            return _POSTGRES_POOL
+        if _POSTGRES_POOL is not None:
+            _POSTGRES_POOL.close(timeout=5.0)
+
+        try:
+            from psycopg.rows import dict_row
+            from psycopg_pool import ConnectionPool
+        except ImportError as exc:
+            raise OperationalDbConfigError(
+                "psycopg[binary,pool] is required for postgres operational DB."
+            ) from exc
+
+        pool = ConnectionPool(
+            kwargs={**_postgres_connect_params(settings), "row_factory": dict_row},
+            min_size=settings.pool_min_size,
+            max_size=settings.pool_max_size,
+            open=False,
+            check=ConnectionPool.check_connection,
+            name="vpo-operational-db",
+            timeout=settings.pool_timeout_seconds,
+            max_waiting=settings.pool_max_waiting,
+            max_lifetime=settings.pool_max_lifetime_seconds,
+            max_idle=settings.pool_max_idle_seconds,
+        )
+        pool.open(wait=wait, timeout=settings.pool_timeout_seconds)
+        _POSTGRES_POOL = pool
+        _POSTGRES_POOL_SIGNATURE = signature
+        return pool
+
+
+def close_operational_db_pool() -> None:
+    global _POSTGRES_POOL, _POSTGRES_POOL_SIGNATURE
+    with _POSTGRES_POOL_LOCK:
+        pool = _POSTGRES_POOL
+        _POSTGRES_POOL = None
+        _POSTGRES_POOL_SIGNATURE = None
+    if pool is not None:
+        pool.close(timeout=5.0)
+
+
+def operational_db_pool_stats() -> dict[str, int | str]:
+    settings = operational_db_settings()
+    if settings.driver != "postgres":
+        return {"status": "not_applicable"}
+    pool = _POSTGRES_POOL
+    if pool is None:
+        return {
+            "status": "closed",
+            "pool_min": settings.pool_min_size,
+            "pool_max": settings.pool_max_size,
+        }
+    stats = pool.get_stats()
+    return {
+        "status": "open",
+        "pool_min": settings.pool_min_size,
+        "pool_max": settings.pool_max_size,
+        "pool_size": int(stats.get("pool_size", 0)),
+        "pool_available": int(stats.get("pool_available", 0)),
+        "requests_waiting": int(stats.get("requests_waiting", 0)),
+    }
+
+
 @contextmanager
 def operational_connect() -> Iterator[Any]:
     settings = operational_db_settings()
@@ -336,22 +467,14 @@ def operational_connect() -> Iterator[Any]:
             conn.close()
         return
 
-    try:
-        import psycopg
-        from psycopg.rows import dict_row
-    except ImportError as exc:
-        raise OperationalDbConfigError("psycopg[binary] is required for postgres operational DB.") from exc
-
-    params = _postgres_connect_params(settings)
-    conn = psycopg.connect(**params, row_factory=dict_row)
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    pool = open_operational_db_pool()
+    with pool.connection(timeout=settings.pool_timeout_seconds) as conn:
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
 
 
 @contextmanager
@@ -363,7 +486,7 @@ def operational_sqlite_compatible_connect() -> Iterator[Any]:
             yield conn
 
 
-def operational_db_healthcheck() -> dict[str, str]:
+def operational_db_healthcheck() -> dict[str, Any]:
     try:
         settings = operational_db_settings()
         payload = settings.safe_summary
@@ -372,6 +495,7 @@ def operational_db_healthcheck() -> dict[str, str]:
             row = cursor.fetchone()
             ok_value = row["ok"] if isinstance(row, dict) else row[0]
             payload["status"] = "ok" if int(ok_value) == 1 else "unexpected"
+        payload["pool"] = operational_db_pool_stats()
     except Exception as exc:
         payload = {
             "driver": os.environ.get("VPO_OPERATIONAL_DB_DRIVER", "postgres").strip().lower(),

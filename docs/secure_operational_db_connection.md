@@ -4,6 +4,9 @@
 
 Cloud SQL Postgres es la unica base viva operativa.
 
+La conexion de aplicacion y sus limites de pool se rigen por
+`postgres_runtime_access.md`.
+
 SQLite local queda congelada como foto historica/respaldo del corte y no debe
 recibir nuevas escrituras operativas.
 
