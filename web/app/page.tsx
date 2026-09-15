@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { ArrowLeft, ArrowRight, Check, RefreshCw, RotateCcw, Search, Table2, Rows3 } from "lucide-react";
 import { PeriodControl } from "./components/PeriodControl";
 import { BookingDashboard, type BookingAgendaEvent } from "./components/BookingDashboard";
 import { VpoHome } from "./components/VpoHome";
@@ -12,6 +13,7 @@ import { EmployeesModule } from "./features/employees/EmployeesModule";
 import { RoyaltyReportModule } from "./features/royalties/RoyaltyReportModule";
 import { SourceMonitorModule } from "./features/source-monitor/SourceMonitorModule";
 import { StatementReportModule } from "./features/statements/StatementReportModule";
+import digitalStyles from "./features/digital-income/DigitalIncome.module.css";
 import {
   employeeCompensationLabels,
   type EmployeeCompensationType,
@@ -963,6 +965,13 @@ type DigitalIncomeData = {
     first_month: string | null;
     last_month: string | null;
   };
+};
+
+type DigitalIncomeFilters = {
+  artistKeyword: string;
+  source: string;
+  account: string;
+  period: PeriodSelection;
 };
 
 type RoyaltiesDashboardRank = {
@@ -2130,6 +2139,8 @@ export default function Home() {
   const [digitalIncomeSource, setDigitalIncomeSource] = useState("");
   const [digitalIncomeAccount, setDigitalIncomeAccount] = useState("");
   const [digitalIncomePeriod, setDigitalIncomePeriod] = useState<PeriodSelection>({ mode: "last_6_months" });
+  const [digitalIncomeTab, setDigitalIncomeTab] = useState<"accounts" | "detail">("accounts");
+  const [digitalIncomeDetailPage, setDigitalIncomeDetailPage] = useState(0);
   const digitalIncomeLimit = 500;
   const [royaltiesDashboard, setRoyaltiesDashboard] = useState<RoyaltiesDashboardData | null>(null);
   const [royaltiesDashboardLoading, setRoyaltiesDashboardLoading] = useState(false);
@@ -3933,14 +3944,17 @@ export default function Home() {
     setBookingVisibleCount(5);
   }
 
-  async function loadDigitalIncome() {
+  async function loadDigitalIncome(filters?: DigitalIncomeFilters) {
     setDigitalIncomeLoading(true);
     try {
-      const digitalPeriod = resolvePeriod(digitalIncomePeriod, "dashboard_period");
+      const artistKeyword = filters?.artistKeyword ?? digitalIncomeArtistKeyword;
+      const source = filters?.source ?? digitalIncomeSource;
+      const account = filters?.account ?? digitalIncomeAccount;
+      const digitalPeriod = resolvePeriod(filters?.period ?? digitalIncomePeriod, "dashboard_period");
       const params = new URLSearchParams();
-      if (digitalIncomeArtistKeyword.trim()) params.set("artist_keyword", digitalIncomeArtistKeyword.trim());
-      if (digitalIncomeSource) params.set("source", digitalIncomeSource);
-      if (digitalIncomeAccount) params.set("account", digitalIncomeAccount);
+      if (artistKeyword.trim()) params.set("artist_keyword", artistKeyword.trim());
+      if (source) params.set("source", source);
+      if (account) params.set("account", account);
       if (digitalPeriod.startMonth) params.set("start_month", digitalPeriod.startMonth);
       if (digitalPeriod.endMonth) params.set("end_month", digitalPeriod.endMonth);
       params.set("period_mode", digitalPeriod.mode);
@@ -3954,6 +3968,7 @@ export default function Home() {
       }
       const data = await response.json();
       setDigitalIncome(data);
+      setDigitalIncomeDetailPage(0);
     } catch {
       setMessage({ type: "error", text: "No se pudo cargar ingresos digitales." });
     } finally {
@@ -6269,6 +6284,15 @@ export default function Home() {
     setLastFile("");
   }
 
+  function resetDigitalIncomeFilters() {
+    const period: PeriodSelection = { mode: "last_6_months" };
+    setDigitalIncomeArtistKeyword("");
+    setDigitalIncomeSource("");
+    setDigitalIncomeAccount("");
+    setDigitalIncomePeriod(period);
+    void loadDigitalIncome({ artistKeyword: "", source: "", account: "", period });
+  }
+
   function openCatalogForAccount(source: string, account: string) {
     setCatalogInitialFilter({ source, account, status: "all", requestId: Date.now() });
     openView("catalog");
@@ -7193,6 +7217,13 @@ export default function Home() {
   const navigationPresentation = navigationPresentationForView(view);
   const frameEyebrow = view === "menu" ? "Centro operativo" : navigationPresentation?.eyebrow || "VPO Corp";
   const frameTitle = view === "menu" ? `Buenos días, ${currentUser?.username || "usuario"}` : navigationPresentation?.title || "VPO Corp";
+  const digitalIncomePageSize = 50;
+  const digitalIncomeVisibleItems = digitalIncome?.items.slice(
+    digitalIncomeDetailPage * digitalIncomePageSize,
+    (digitalIncomeDetailPage + 1) * digitalIncomePageSize,
+  ) || [];
+  const digitalIncomePageCount = Math.max(1, Math.ceil((digitalIncome?.items.length || 0) / digitalIncomePageSize));
+  const digitalIncomeTrendMax = Math.max(1, ...(digitalIncome?.monthly || []).map((item) => Math.abs(item.total_usd)));
 
   return (
     <VpoAppFrame
@@ -7205,7 +7236,7 @@ export default function Home() {
       onOpen={(targetView) => targetView === "booking" ? openBookingWorkspace() : openView(targetView as View)}
       onLogout={logout}
     >
-      <main className={view === "menu" ? "home-main" : view === "booking" && bookingSurface === "dashboard" ? "booking-main" : view === "employees" ? "employee-main" : view === "catalog" ? "catalog-main" : undefined}>
+      <main className={view === "menu" ? "home-main" : view === "booking" && bookingSurface === "dashboard" ? "booking-main" : view === "employees" ? "employee-main" : view === "catalog" ? "catalog-main" : view === "digital-income" ? "digital-income-main" : undefined}>
         {message && <div className={`message ${message.type === "error" ? "error" : ""}`}>{message.text}</div>}
 
         {view === "menu" && (
@@ -7713,217 +7744,164 @@ export default function Home() {
         )}
 
         {view === "digital-income" && (
-          <section className="panel wide-panel">
-            <div className="section-heading">
-              <div>
-                <h1>Ingresos Digitales</h1>
-                <p>Lectura directa de los statements: ingresos reales informados por las distribuidoras, sin aplicar reglas de negocio, splits, comisiones, contratos ni estado del catalogo.</p>
+          <section className={digitalStyles.workspace}>
+            <header className={digitalStyles.header}>
+              <div className={digitalStyles.titleGroup}>
+                <span className={digitalStyles.eyebrow}>Statements</span>
+                <h1>Ingresos digitales</h1>
+                <p>Importes informados por distribuidoras, sin ajustes internos.</p>
               </div>
-              <button type="button" onClick={loadDigitalIncome} disabled={digitalIncomeLoading}>
-                {digitalIncomeLoading ? "Cargando..." : "Actualizar"}
-              </button>
-            </div>
+              <div className={digitalStyles.headerActions}>
+                <div className={digitalStyles.sourceRange}>
+                  <span>Fuente disponible</span>
+                  <strong>{digitalIncome?.options.first_month || "-"} a {digitalIncome?.options.last_month || "-"}</strong>
+                </div>
+                <button type="button" className={digitalStyles.iconButton} onClick={() => void loadDigitalIncome()} disabled={digitalIncomeLoading} aria-label="Actualizar ingresos" title="Actualizar ingresos">
+                  <RefreshCw size={17} aria-hidden="true" className={digitalIncomeLoading ? digitalStyles.spin : undefined} />
+                </button>
+              </div>
+            </header>
 
-            <div className="period-controls catalog-controls">
-              <div>
-                <label htmlFor="digital_income_artist">Artista / keyword</label>
-                <input
-                  id="digital_income_artist"
-                  value={digitalIncomeArtistKeyword}
-                  onChange={(event) => setDigitalIncomeArtistKeyword(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      loadDigitalIncome();
-                    }
-                  }}
-                  placeholder="Ej: Gusty, Aneley, Candu"
-                />
+            <form className={digitalStyles.filters} onSubmit={(event) => { event.preventDefault(); void loadDigitalIncome(); }}>
+              <div className={`${digitalStyles.field} ${digitalStyles.searchField}`}>
+                <label htmlFor="digital_income_artist">Artista o tema</label>
+                <div className={digitalStyles.inputShell}>
+                  <Search size={16} aria-hidden="true" />
+                  <input id="digital_income_artist" value={digitalIncomeArtistKeyword} onChange={(event) => setDigitalIncomeArtistKeyword(event.target.value)} placeholder="Buscar en statements" />
+                </div>
               </div>
-              <div>
+              <div className={digitalStyles.field}>
                 <label htmlFor="digital_income_source">Distribuidora</label>
-                <select
-                  id="digital_income_source"
-                  value={digitalIncomeSource}
-                  onChange={(event) => {
-                    setDigitalIncomeSource(event.target.value);
-                    setDigitalIncomeAccount("");
-                  }}
-                >
+                <select id="digital_income_source" value={digitalIncomeSource} onChange={(event) => { setDigitalIncomeSource(event.target.value); setDigitalIncomeAccount(""); }}>
                   <option value="">Todas</option>
-                  {digitalIncome?.options.sources.map((item) => (
-                    <option key={item} value={item}>{item}</option>
-                  ))}
+                  {digitalIncome?.options.sources.map((item) => <option key={item} value={item}>{item}</option>)}
                 </select>
               </div>
-              <div>
-                <label htmlFor="digital_income_account">Subcompañía</label>
-                <select
-                  id="digital_income_account"
-                  value={digitalIncomeAccount}
-                  onChange={(event) => setDigitalIncomeAccount(event.target.value)}
-                >
+              <div className={digitalStyles.field}>
+                <label htmlFor="digital_income_account">Cuenta</label>
+                <select id="digital_income_account" value={digitalIncomeAccount} onChange={(event) => setDigitalIncomeAccount(event.target.value)}>
                   <option value="">Todas</option>
-                  {digitalIncomeAccountOptions.map((item) => (
-                    <option key={item} value={item}>{item}</option>
-                  ))}
+                  {digitalIncomeAccountOptions.map((item) => <option key={item} value={item}>{item}</option>)}
                 </select>
               </div>
-              <PeriodControl
-                id="digital_income_period"
-                label="Periodo"
-                profile="dashboard_period"
-                selection={digitalIncomePeriod}
-                presets={["last_6_months", "last_12_months", "all"]}
-                onChange={setDigitalIncomePeriod}
-                helperText="Por defecto muestra ultimos 6 meses. Todo carga el historico disponible."
-              />
-              <button type="button" onClick={loadDigitalIncome} disabled={digitalIncomeLoading}>
-                Buscar
+              <div className={digitalStyles.periodField}>
+                <PeriodControl id="digital_income_period" label="Periodo" profile="dashboard_period" selection={digitalIncomePeriod} presets={["last_6_months", "last_12_months", "all"]} minMonth={digitalIncome?.options.first_month} maxMonth={digitalIncome?.options.last_month} onChange={setDigitalIncomePeriod} />
+              </div>
+              <div className={digitalStyles.filterActions}>
+                <button type="button" className={digitalStyles.iconButton} onClick={resetDigitalIncomeFilters} disabled={digitalIncomeLoading} aria-label="Limpiar filtros" title="Limpiar filtros">
+                  <RotateCcw size={17} aria-hidden="true" />
+                </button>
+                <button type="submit" className={digitalStyles.applyButton} disabled={digitalIncomeLoading}>
+                  <Search size={16} aria-hidden="true" />
+                  {digitalIncomeLoading ? "Cargando" : "Aplicar"}
+                </button>
+              </div>
+            </form>
+
+            <div className={digitalStyles.metricBand} aria-live="polite">
+              <div className={digitalStyles.primaryMetric}><span>Ingreso USD</span><strong>{moneyCents(digitalIncome?.totals.total_usd || 0)}</strong></div>
+              <div><span>Ingreso EUR</span><strong>{eurCents(digitalIncome?.totals.total_eur || 0)}</strong></div>
+              <div><span>Grupos</span><strong>{(digitalIncome?.total || 0).toLocaleString("es-AR")}</strong></div>
+              <div><span>Meses</span><strong>{digitalIncome?.totals.months || 0}</strong></div>
+              <div><span>Distribuidoras</span><strong>{digitalIncome?.totals.sources || 0}</strong></div>
+              <div><span>Cuentas</span><strong>{digitalIncome?.totals.accounts || 0}</strong></div>
+            </div>
+
+            <div className={digitalStyles.scopeLine}>
+              <span>Rango consultado: <strong>{digitalIncome?.totals.first_month || "-"} a {digitalIncome?.totals.last_month || "-"}</strong></span>
+              <span>Base: <strong>statement sin splits ni comisiones</strong></span>
+            </div>
+
+            <div className={digitalStyles.tabs} role="tablist" aria-label="Vista de ingresos">
+              <button id="digital_income_accounts_tab" type="button" role="tab" aria-controls="digital_income_accounts_panel" aria-selected={digitalIncomeTab === "accounts"} className={digitalIncomeTab === "accounts" ? digitalStyles.activeTab : undefined} onClick={() => setDigitalIncomeTab("accounts")}>
+                <Table2 size={16} aria-hidden="true" /> Por cuenta
+              </button>
+              <button id="digital_income_detail_tab" type="button" role="tab" aria-controls="digital_income_detail_panel" aria-selected={digitalIncomeTab === "detail"} className={digitalIncomeTab === "detail" ? digitalStyles.activeTab : undefined} onClick={() => setDigitalIncomeTab("detail")}>
+                <Rows3 size={16} aria-hidden="true" /> Detalle
               </button>
             </div>
 
-            <div className="control-dashboard">
-              <div>
-                <span>Total USD</span>
-                <strong>{moneyCents(digitalIncome?.totals.total_usd || 0)}</strong>
-              </div>
-              <div>
-                <span>Filas</span>
-                <strong>{(digitalIncome?.total || 0).toLocaleString("es-AR")}</strong>
-              </div>
-              <div>
-                <span>Meses</span>
-                <strong>{digitalIncome?.totals.months || 0}</strong>
-              </div>
-              <div>
-                <span>Distribuidoras</span>
-                <strong>{digitalIncome?.totals.sources || 0}</strong>
-              </div>
-              <div>
-                <span>Subcompañías</span>
-                <strong>{digitalIncome?.totals.accounts || 0}</strong>
-              </div>
-              <div>
-                <span>Rango</span>
-                <strong>{digitalIncome?.totals.first_month || "-"} / {digitalIncome?.totals.last_month || "-"}</strong>
-              </div>
-            </div>
-
-            <div className="period-meta">
-              <strong>Vista</strong>
-              <span>Ingresos reales agrupados por distribuidora/cuenta</span>
-              <strong>Fuente</strong>
-              <span>{digitalIncome?.options.first_month || "-"} a {digitalIncome?.options.last_month || "-"}</span>
-              <strong>Reglas</strong>
-              <span>Sin comisiones internas ni capa de negocio</span>
-            </div>
-
-            <div className="section-heading compact-heading">
-              <div>
-                <h2>Últimos meses por distribuidora</h2>
-                <p>
-                  Cada fila es una distribuidora/subcompañía. Las columnas muestran los meses del rango aplicado
-                  {digitalIncomeArtistKeyword.trim() ? ` para la búsqueda "${digitalIncomeArtistKeyword.trim()}".` : "."}
-                </p>
-              </div>
-            </div>
-
-            <div className="summary-table-wrap">
-              <table className="summary-table digital-income-matrix">
-                <thead>
-                  <tr>
-                    <th>Distribuidora / cuenta</th>
-                    {(digitalIncome?.matrix_months || []).map((month) => (
-                      <th key={month}>{month}</th>
+            {digitalIncomeTab === "accounts" && (
+              <div id="digital_income_accounts_panel" role="tabpanel" aria-labelledby="digital_income_accounts_tab">
+                <section className={digitalStyles.trendSection}>
+                  <div className={digitalStyles.sectionTitle}><h2>Evolución mensual</h2><span>USD por mes de statement</span></div>
+                  <div className={digitalStyles.trendRows}>
+                    {digitalIncomeLoading && <div className={digitalStyles.emptyState}>Cargando ingresos...</div>}
+                    {!digitalIncomeLoading && !digitalIncome?.monthly.length && <div className={digitalStyles.emptyState}>Sin meses para este filtro.</div>}
+                    {!digitalIncomeLoading && digitalIncome?.monthly.map((item) => (
+                      <div className={digitalStyles.trendRow} key={item.statement_period}>
+                        <span>{item.statement_period}</span>
+                        <div className={digitalStyles.trendTrack} aria-hidden="true">
+                          <div className={item.total_usd < 0 ? digitalStyles.negativeBar : digitalStyles.trendBar} style={{ width: `${item.total_usd ? Math.max(3, Math.round(Math.abs(item.total_usd) / digitalIncomeTrendMax * 100)) : 0}%` }} />
+                        </div>
+                        <strong className={item.total_usd < 0 ? digitalStyles.negativeAmount : undefined}>{moneyCents(item.total_usd || 0)}</strong>
+                      </div>
                     ))}
-                    <th>Total</th>
-                    <th>Artistas</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {digitalIncomeLoading && (
-                    <tr>
-                      <td colSpan={(digitalIncome?.matrix_months.length || 0) + 3}>Cargando ingresos...</td>
-                    </tr>
-                  )}
-                  {!digitalIncomeLoading && digitalIncome?.matrix.length === 0 && (
-                    <tr>
-                      <td colSpan={(digitalIncome?.matrix_months.length || 0) + 3}>Sin datos para este filtro.</td>
-                    </tr>
-                  )}
-                  {digitalIncome?.matrix.map((item) => (
-                    <tr key={`${item.source}-${item.account}`}>
-                      <td>
-                        <strong>{item.source}</strong>
-                        <span className="cell-note">{item.account}</span>
-                        {item.has_share_in_out && <span className="cell-note">Incluye Share In/Out</span>}
-                      </td>
-                      {digitalIncome.matrix_months.map((month) => (
-                        <td key={month}>{moneyCents(item.months[month] || 0)}</td>
-                      ))}
-                      <td><strong>{moneyCents(item.total_usd || 0)}</strong></td>
-                      <td>{item.artists.toLocaleString("es-AR")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </div>
+                </section>
 
-            <div className="section-heading compact-heading">
-              <div>
-                <h2>Detalle de respaldo</h2>
-                <p>
-                  Mostrando {digitalIncome?.items.length || 0} de {(digitalIncome?.total || 0).toLocaleString("es-AR")} grupos artista/mes.
-                  {(digitalIncome?.total || 0) > (digitalIncome?.items.length || 0) ? " Ajusta los filtros para ver un recorte mas chico." : ""}
-                </p>
+                <section className={digitalStyles.tableSection}>
+                  <div className={digitalStyles.sectionTitle}><h2>Distribuidoras y cuentas</h2><span>{digitalIncome?.matrix.length || 0} cuentas en el rango</span></div>
+                  <div className={digitalStyles.tableScroll}>
+                    <table className={`${digitalStyles.table} ${digitalStyles.matrixTable}`}>
+                      <thead><tr>
+                        <th>Distribuidora / cuenta</th>
+                        {(digitalIncome?.matrix_months || []).map((month) => <th key={month}>{month}</th>)}
+                        <th>Total USD</th><th>Artistas</th>
+                      </tr></thead>
+                      <tbody>
+                        {digitalIncomeLoading && <tr><td colSpan={(digitalIncome?.matrix_months.length || 0) + 3} className={digitalStyles.emptyCell}>Cargando ingresos...</td></tr>}
+                        {!digitalIncomeLoading && !digitalIncome?.matrix.length && <tr><td colSpan={(digitalIncome?.matrix_months.length || 0) + 3} className={digitalStyles.emptyCell}>Sin datos para este filtro.</td></tr>}
+                        {!digitalIncomeLoading && digitalIncome?.matrix.map((item) => (
+                          <tr key={`${item.source}-${item.account}`}>
+                            <td className={digitalStyles.accountCell}><strong>{item.source}</strong><span>{item.account}</span>{item.has_share_in_out && <small>Share In/Out</small>}</td>
+                            {digitalIncome.matrix_months.map((month) => <td key={month} className={item.months[month] < 0 ? digitalStyles.negativeAmount : undefined}>{moneyCents(item.months[month] || 0)}</td>)}
+                            <td className={item.total_usd < 0 ? digitalStyles.negativeAmount : digitalStyles.totalCell}>{moneyCents(item.total_usd || 0)}</td>
+                            <td>{item.artists.toLocaleString("es-AR")}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      {!digitalIncomeLoading && Boolean(digitalIncome?.matrix.length) && <tfoot><tr>
+                        <th>Total</th>
+                        {digitalIncome?.matrix_months.map((month) => <td key={month}>{moneyCents(digitalIncome.matrix.reduce((sum, item) => sum + (item.months[month] || 0), 0))}</td>)}
+                        <td>{moneyCents(digitalIncome?.totals.total_usd || 0)}</td><td>-</td>
+                      </tr></tfoot>}
+                    </table>
+                  </div>
+                </section>
               </div>
-            </div>
+            )}
 
-            <div className="summary-table-wrap">
-              <table className="summary-table">
-                <thead>
-                  <tr>
-                    <th>Mes statement</th>
-                    <th>Distribuidora</th>
-                    <th>Subcompañía</th>
-                    <th>Artista statement</th>
-                    <th>Tema / referencia</th>
-                    <th>Ingreso USD</th>
-                    <th>Ingreso EUR</th>
-                    <th>Share In/Out</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {digitalIncomeLoading && (
-                    <tr>
-                      <td colSpan={8}>Cargando ingresos...</td>
-                    </tr>
-                  )}
-                  {!digitalIncomeLoading && digitalIncome?.items.length === 0 && (
-                    <tr>
-                      <td colSpan={8}>Sin filas para este filtro.</td>
-                    </tr>
-                  )}
-                  {digitalIncome?.items.map((item, idx) => (
-                    <tr key={`${item.statement_period}-${item.source}-${item.account}-${item.artist}-${idx}`}>
-                      <td>{item.statement_period}</td>
-                      <td>{item.source}</td>
-                      <td>{item.account}</td>
-                      <td>{item.artist || "-"}</td>
-                      <td>{item.title || "-"}</td>
-                      <td>{moneyCents(item.total_usd || 0)}</td>
-                      <td>{item.total_eur ? eurCents(item.total_eur) : "-"}</td>
-                      <td>
-                        <span className={`status-pill ${item.has_share_in_out ? "warning" : "inactive"}`}>
-                          {item.has_share_in_out ? "Si" : "No"}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {digitalIncomeTab === "detail" && (
+              <section id="digital_income_detail_panel" role="tabpanel" aria-labelledby="digital_income_detail_tab" className={digitalStyles.tableSection}>
+                <div className={digitalStyles.detailHeader}>
+                  <div className={digitalStyles.sectionTitle}><h2>Detalle de respaldo</h2><span>{digitalIncome?.total.toLocaleString("es-AR") || "0"} grupos artista / mes</span></div>
+                  <div className={digitalStyles.pageControls}>
+                    <span>{digitalIncomeVisibleItems.length ? digitalIncomeDetailPage * digitalIncomePageSize + 1 : 0}-{digitalIncomeDetailPage * digitalIncomePageSize + digitalIncomeVisibleItems.length} de {digitalIncome?.items.length || 0} cargados</span>
+                    <button type="button" className={digitalStyles.iconButton} onClick={() => setDigitalIncomeDetailPage((page) => Math.max(0, page - 1))} disabled={digitalIncomeLoading || digitalIncomeDetailPage === 0} aria-label="Página anterior" title="Página anterior"><ArrowLeft size={16} aria-hidden="true" /></button>
+                    <button type="button" className={digitalStyles.iconButton} onClick={() => setDigitalIncomeDetailPage((page) => Math.min(digitalIncomePageCount - 1, page + 1))} disabled={digitalIncomeLoading || digitalIncomeDetailPage >= digitalIncomePageCount - 1} aria-label="Página siguiente" title="Página siguiente"><ArrowRight size={16} aria-hidden="true" /></button>
+                  </div>
+                </div>
+                {(digitalIncome?.total || 0) > (digitalIncome?.items.length || 0) && <p className={digitalStyles.resultNote}>Detalle disponible: primeros {digitalIncome?.items.length || 0} de {(digitalIncome?.total || 0).toLocaleString("es-AR")} grupos.</p>}
+                <div className={digitalStyles.tableScroll}>
+                  <table className={`${digitalStyles.table} ${digitalStyles.detailTable}`}>
+                    <thead><tr><th>Mes</th><th>Distribuidora</th><th>Cuenta</th><th>Artista statement</th><th>Tema / referencia</th><th>Ingreso USD</th><th>Ingreso EUR</th><th>Share In/Out</th></tr></thead>
+                    <tbody>
+                      {digitalIncomeLoading && <tr><td colSpan={8} className={digitalStyles.emptyCell}>Cargando ingresos...</td></tr>}
+                      {!digitalIncomeLoading && !digitalIncomeVisibleItems.length && <tr><td colSpan={8} className={digitalStyles.emptyCell}>Sin filas para este filtro.</td></tr>}
+                      {!digitalIncomeLoading && digitalIncomeVisibleItems.map((item, idx) => (
+                        <tr key={`${item.statement_period}-${item.source}-${item.account}-${item.artist}-${digitalIncomeDetailPage}-${idx}`}>
+                          <td>{item.statement_period}</td><td>{item.source}</td><td>{item.account}</td><td title={item.artist || undefined}>{item.artist || "-"}</td><td title={item.title || undefined}>{item.title || "-"}</td>
+                          <td className={item.total_usd < 0 ? digitalStyles.negativeAmount : undefined}>{moneyCents(item.total_usd || 0)}</td>
+                          <td>{item.total_eur ? eurCents(item.total_eur) : "-"}</td>
+                          <td><span className={item.has_share_in_out ? digitalStyles.shareYes : digitalStyles.shareNo}>{item.has_share_in_out && <Check size={13} aria-hidden="true" />}{item.has_share_in_out ? "Sí" : "No"}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            )}
           </section>
         )}
 
