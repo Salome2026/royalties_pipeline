@@ -90,6 +90,7 @@ async function setupPage(browser, viewport) {
   await page.getByRole("main").getByRole("heading", { name: "Ingresos digitales" }).waitFor();
   const formattedTotal = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(totalUsd);
   await page.getByText(formattedTotal, { exact: true }).first().waitFor();
+  assert.equal(await page.getByRole("main").getByText("Ingreso EUR", { exact: true }).count(), 0);
   return { page, queries };
 }
 
@@ -102,6 +103,7 @@ async function main() {
     await desktop.page.screenshot({ path: path.join(outDir, "digital-income-desktop.png"), fullPage: true });
     assert.equal(await desktop.page.getByRole("tab", { name: /Por cuenta/i }).getAttribute("aria-selected"), "true");
     await desktop.page.getByRole("tab", { name: /Detalle/i }).click();
+    assert.equal(await desktop.page.getByRole("columnheader", { name: "Ingreso EUR" }).count(), 0);
     assert.equal(await desktop.page.locator("tbody tr").count(), 50);
     await desktop.page.getByRole("button", { name: "Página siguiente" }).click();
     assert.equal(await desktop.page.locator("tbody tr").count(), 50);
@@ -129,6 +131,7 @@ async function main() {
     await mobile.page.getByRole("button", { name: "Aplicar" }).click();
     assert(mobile.queries.at(-1).includes("period_mode=last_12_months"));
     await mobile.page.getByRole("tab", { name: /Detalle/i }).click();
+    assert.equal(await mobile.page.getByRole("columnheader", { name: "Ingreso EUR" }).count(), 0);
     assert.equal(await mobile.page.locator("main.digital-income-main tbody tr").count(), 50);
     await mobile.page.screenshot({ path: path.join(outDir, "digital-income-mobile-detail.png"), fullPage: true });
     console.log("OK: desktop/mobile layout, tabs, detail paging, apply and reset filters");

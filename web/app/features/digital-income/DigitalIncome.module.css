@@ -259,7 +259,7 @@
 
 .metricBand {
   display: grid;
-  grid-template-columns: minmax(190px, 1.55fr) minmax(170px, 1.35fr) repeat(4, minmax(90px, .7fr));
+  grid-template-columns: minmax(210px, 1.8fr) repeat(4, minmax(95px, .8fr));
   margin-top: 18px;
   padding: 14px 0;
   border-top: 1px solid var(--line);
@@ -442,7 +442,7 @@
 }
 
 .detailTable {
-  min-width: 1120px;
+  min-width: 990px;
 }
 
 .table th,
@@ -555,9 +555,7 @@
 }
 
 .detailTable td:nth-child(6),
-.detailTable td:nth-child(7),
-.detailTable th:nth-child(6),
-.detailTable th:nth-child(7) {
+.detailTable th:nth-child(6) {
   text-align: right;
 }
 
@@ -688,13 +686,18 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .metricBand > div:nth-child(2),
-  .metricBand > div:nth-child(4) {
+  .metricBand > div.primaryMetric {
+    grid-column: span 2;
     border-right: 0;
   }
 
   .metricBand > div:nth-child(3),
   .metricBand > div:nth-child(5) {
+    border-right: 0;
+  }
+
+  .metricBand > div:nth-child(2),
+  .metricBand > div:nth-child(4) {
     padding-left: 0;
     border-right: 1px solid var(--line);
   }

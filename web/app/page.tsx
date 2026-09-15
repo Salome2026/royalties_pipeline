@@ -7800,7 +7800,6 @@ export default function Home() {
 
             <div className={digitalStyles.metricBand} aria-live="polite">
               <div className={digitalStyles.primaryMetric}><span>Ingreso USD</span><strong>{moneyCents(digitalIncome?.totals.total_usd || 0)}</strong></div>
-              <div><span>Ingreso EUR</span><strong>{eurCents(digitalIncome?.totals.total_eur || 0)}</strong></div>
               <div><span>Grupos</span><strong>{(digitalIncome?.total || 0).toLocaleString("es-AR")}</strong></div>
               <div><span>Meses</span><strong>{digitalIncome?.totals.months || 0}</strong></div>
               <div><span>Distribuidoras</span><strong>{digitalIncome?.totals.sources || 0}</strong></div>
@@ -7885,15 +7884,14 @@ export default function Home() {
                 {(digitalIncome?.total || 0) > (digitalIncome?.items.length || 0) && <p className={digitalStyles.resultNote}>Detalle disponible: primeros {digitalIncome?.items.length || 0} de {(digitalIncome?.total || 0).toLocaleString("es-AR")} grupos.</p>}
                 <div className={digitalStyles.tableScroll}>
                   <table className={`${digitalStyles.table} ${digitalStyles.detailTable}`}>
-                    <thead><tr><th>Mes</th><th>Distribuidora</th><th>Cuenta</th><th>Artista statement</th><th>Tema / referencia</th><th>Ingreso USD</th><th>Ingreso EUR</th><th>Share In/Out</th></tr></thead>
+                    <thead><tr><th>Mes</th><th>Distribuidora</th><th>Cuenta</th><th>Artista statement</th><th>Tema / referencia</th><th>Ingreso USD</th><th>Share In/Out</th></tr></thead>
                     <tbody>
-                      {digitalIncomeLoading && <tr><td colSpan={8} className={digitalStyles.emptyCell}>Cargando ingresos...</td></tr>}
-                      {!digitalIncomeLoading && !digitalIncomeVisibleItems.length && <tr><td colSpan={8} className={digitalStyles.emptyCell}>Sin filas para este filtro.</td></tr>}
+                      {digitalIncomeLoading && <tr><td colSpan={7} className={digitalStyles.emptyCell}>Cargando ingresos...</td></tr>}
+                      {!digitalIncomeLoading && !digitalIncomeVisibleItems.length && <tr><td colSpan={7} className={digitalStyles.emptyCell}>Sin filas para este filtro.</td></tr>}
                       {!digitalIncomeLoading && digitalIncomeVisibleItems.map((item, idx) => (
                         <tr key={`${item.statement_period}-${item.source}-${item.account}-${item.artist}-${digitalIncomeDetailPage}-${idx}`}>
                           <td>{item.statement_period}</td><td>{item.source}</td><td>{item.account}</td><td title={item.artist || undefined}>{item.artist || "-"}</td><td title={item.title || undefined}>{item.title || "-"}</td>
                           <td className={item.total_usd < 0 ? digitalStyles.negativeAmount : undefined}>{moneyCents(item.total_usd || 0)}</td>
-                          <td>{item.total_eur ? eurCents(item.total_eur) : "-"}</td>
                           <td><span className={item.has_share_in_out ? digitalStyles.shareYes : digitalStyles.shareNo}>{item.has_share_in_out && <Check size={13} aria-hidden="true" />}{item.has_share_in_out ? "Sí" : "No"}</span></td>
                         </tr>
                       ))}
