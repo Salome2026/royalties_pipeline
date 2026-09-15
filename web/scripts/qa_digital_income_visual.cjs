@@ -107,28 +107,32 @@ function fixtureForMonths(selectedMonths) {
   };
 }
 
-function fixtureForManyAccounts(count = 31) {
+function fixtureForManyAccounts(count = 31, selectedMonths = months) {
   const manyMatrix = Array.from({ length: count }, (_, index) => {
-    const amounts = months.map((_, monthIndex) => 1000 + index * 137 + monthIndex * 83);
+    const amounts = selectedMonths.map((_, monthIndex) => 1000 + index * 137 + monthIndex * 83);
     return {
       source: index % 2 ? "fuga" : "ada",
       account: `Cuenta de catalogo numero ${String(index + 1).padStart(2, "0")}`,
-      months: Object.fromEntries(months.map((month, monthIndex) => [month, amounts[monthIndex]])),
+      months: Object.fromEntries(selectedMonths.map((month, monthIndex) => [month, amounts[monthIndex]])),
       total_usd: amounts.reduce((sum, amount) => sum + amount, 0),
       artists: 10 + index,
       has_share_in_out: index % 4 === 0,
     };
   });
-  const manyMonthly = months.map((month) => ({ statement_period: month, total_usd: manyMatrix.reduce((sum, row) => sum + row.months[month], 0) }));
+  const manyMonthly = selectedMonths.map((month) => ({ statement_period: month, total_usd: manyMatrix.reduce((sum, row) => sum + row.months[month], 0) }));
   return {
     ...fixture,
     monthly: manyMonthly,
     matrix: manyMatrix,
+    matrix_months: selectedMonths,
     totals: {
       ...fixture.totals,
       total_usd: manyMonthly.reduce((sum, row) => sum + row.total_usd, 0),
+      months: selectedMonths.length,
       sources: 2,
       accounts: manyMatrix.length,
+      first_month: selectedMonths[0],
+      last_month: selectedMonths[selectedMonths.length - 1],
     },
   };
 }
@@ -152,7 +156,7 @@ async function setupPage(browser, viewport) {
     const search = new URL(route.request().url()).searchParams;
     const period = search.get("period_mode");
     const keyword = search.get("artist_keyword");
-    const data = keyword === "__qa_many_accounts__" ? fixtureForManyAccounts() : keyword === "__qa_eight_accounts__" ? fixtureForManyAccounts(8) : period === "all" ? fixtureForMonths(allMonths) : period === "last_12_months" ? fixtureForMonths(allMonths.slice(-12)) : fixture;
+    const data = keyword === "__qa_many_accounts__" ? fixtureForManyAccounts() : keyword === "__qa_eight_accounts__" ? fixtureForManyAccounts(8) : keyword === "__qa_eight_12m__" ? fixtureForManyAccounts(8, allMonths.slice(-12)) : period === "all" ? fixtureForMonths(allMonths) : period === "last_12_months" ? fixtureForMonths(allMonths.slice(-12)) : fixture;
     return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(data) });
   });
   await page.goto("http://localhost:3000", { waitUntil: "domcontentloaded" });
@@ -246,6 +250,12 @@ async function main() {
     assert(mobile.queries.at(-1).includes("period_mode=last_12_months"));
     const mediumPages = await downloadPdf(mobile.page, path.join(outDir, "digital-income-12m.pdf"));
     assert(mediumPages > shortPages && mediumPages < longPages, `twelve-month PDF pages should be intermediate: ${mediumPages}`);
+    await mobile.page.locator("#digital_income_artist").fill("__qa_eight_12m__");
+    const eightMonthResponse = mobile.page.waitForResponse((response) => response.url().includes("artist_keyword=__qa_eight_12m__") && response.status() === 200);
+    await mobile.page.getByRole("button", { name: "Aplicar" }).click();
+    await eightMonthResponse;
+    const eightMonthPages = await downloadPdf(mobile.page, path.join(outDir, "digital-income-eight-12m.pdf"));
+    assert.equal(eightMonthPages, 3, `twelve months with eight accounts should use three PDF pages: ${eightMonthPages}`);
     await mobile.page.getByRole("tab", { name: /Detalle/i }).click();
     assert.equal(await mobile.page.getByRole("columnheader", { name: "Ingreso EUR" }).count(), 0);
     assert.equal(await mobile.page.locator("main.digital-income-main tbody tr").count(), 50);
@@ -257,7 +267,7 @@ async function main() {
     const narrowWorkspaceWidth = await narrow.page.locator("main.digital-income-main > section").first().evaluate((element) => element.getBoundingClientRect().width);
     assert(narrowWorkspaceWidth <= 320, `narrow mobile workspace overflow: ${narrowWorkspaceWidth}`);
     await narrow.page.screenshot({ path: path.join(outDir, "digital-income-mobile-narrow.png"), fullPage: true });
-    console.log(`OK: desktop/mobile layout, filters, detail paging, dynamic PDFs (${shortPages}/${mediumPages}/${longPages} pages; range ${rangePages}, eight accounts ${eightPages}, 31 accounts ${manyPages})`);
+    console.log(`OK: desktop/mobile layout, filters, detail paging, dynamic PDFs (${shortPages}/${mediumPages}/${longPages} pages; range ${rangePages}, eight accounts ${eightPages}, eight x twelve ${eightMonthPages}, 31 accounts ${manyPages})`);
   } finally {
     await browser.close();
   }

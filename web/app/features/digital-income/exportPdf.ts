@@ -135,19 +135,21 @@ function matrixPageHeader(doc: PDFDocument, bold: PDFFont) {
 
 function matrixBlock(page: PDFPage, months: string[], rows: DigitalIncomeReportData["matrix"], scope: { block: number; blocks: number; start: number; totalRows: number }, top: number, regular: PDFFont, bold: PDFFont) {
   const accountWidth = 212;
-  const monthWidth = 86;
-  const totalWidth = 120;
+  const showTotal = scope.block === scope.blocks;
+  const showSubtotal = scope.blocks === 1;
+  const monthWidth = showTotal ? (months.length === 6 ? 75 : 86) : Math.min(110, Math.floor((landscape[0] - 80 - accountWidth) / months.length));
+  const totalWidth = showTotal ? (months.length === 6 ? 100 : 120) : 0;
   const tableWidth = accountWidth + monthWidth * months.length + totalWidth;
   const right = 40 + tableWidth;
   drawText(page, months.length === 1 ? months[0] : `${months[0]} a ${months[months.length - 1]}`, 40, top, bold, 13);
   drawText(page, `Bloque ${scope.block} de ${scope.blocks}  |  Cuentas ${scope.start + 1}-${scope.start + rows.length} de ${scope.totalRows}`, 40, top - 17, regular, 8, muted);
-  drawRight(page, "Total USD: periodo completo", right, top - 17, regular, 8, muted);
+  if (showTotal) drawRight(page, "Total USD: periodo completo", right, top - 17, regular, 8, muted);
 
   const headerBottom = top - 49;
   page.drawRectangle({ x: 40, y: headerBottom, width: tableWidth, height: 24, color: pale });
   drawText(page, "DISTRIBUIDORA / CUENTA", 46, headerBottom + 9, bold, 8, muted);
   months.forEach((month, index) => drawRight(page, month, 40 + accountWidth + (index + 1) * monthWidth - 7, headerBottom + 9, bold, 8, muted));
-  drawRight(page, "TOTAL USD", right - 7, headerBottom + 9, bold, 8, muted);
+  if (showTotal) drawRight(page, "TOTAL USD", right - 7, headerBottom + 9, bold, 8, muted);
 
   rows.forEach((row, index) => {
     const bottom = headerBottom - (index + 1) * 24;
@@ -158,13 +160,15 @@ function matrixBlock(page: PDFPage, months: string[], rows: DigitalIncomeReportD
       const amount = row.months[month] || 0;
       drawMoneyRight(page, amount, 40 + accountWidth + (monthIndex + 1) * monthWidth - 7, bottom + 8, regular, 8, amount < 0 ? coral : ink, monthWidth - 10);
     });
-    drawMoneyRight(page, row.total_usd, right - 7, bottom + 8, bold, 8, row.total_usd < 0 ? coral : green, totalWidth - 10);
+    if (showTotal) drawMoneyRight(page, row.total_usd, right - 7, bottom + 8, bold, 8, row.total_usd < 0 ? coral : green, totalWidth - 10);
     rule(page, 40, bottom, tableWidth);
   });
 
+  if (!showSubtotal) return headerBottom - rows.length * 24 - 20;
+
   const subtotalY = headerBottom - rows.length * 24 - 27;
   page.drawRectangle({ x: 40, y: subtotalY - 5, width: tableWidth, height: 24, color: rgb(0.88, 0.92, 0.89) });
-  drawText(page, "Subtotal de estas cuentas", 46, subtotalY + 4, bold, 9);
+  drawText(page, "Total de estas cuentas", 46, subtotalY + 4, bold, 9);
   months.forEach((month, index) => drawMoneyRight(page, rows.reduce((sum, row) => sum + (row.months[month] || 0), 0), 40 + accountWidth + (index + 1) * monthWidth - 7, subtotalY + 4, bold, 8, ink, monthWidth - 10));
   drawMoneyRight(page, rows.reduce((sum, row) => sum + row.total_usd, 0), right - 7, subtotalY + 4, bold, 8, green, totalWidth - 10);
   return subtotalY - 24;
@@ -313,14 +317,15 @@ export async function buildDigitalIncomeExecutivePdf(data: DigitalIncomeReportDa
 
   if (matrix.length && rowY > 236) topAccounts(doc.getPages().at(-1)!, matrix, rowY - 12, regular, bold);
 
-  const monthBlocks = Array.from({ length: Math.ceil(data.matrix_months.length / 5) }, (_, index) => data.matrix_months.slice(index * 5, index * 5 + 5));
+  const monthBlocks = Array.from({ length: Math.ceil(data.matrix_months.length / 6) }, (_, index) => data.matrix_months.slice(index * 6, index * 6 + 6));
   let currentMatrixPage: PDFPage | null = null;
   let nextMatrixTop = 510;
   let blocksOnPage = 0;
   for (let block = 0; block < monthBlocks.length; block += 1) {
     for (let start = 0; start < matrix.length; start += 15) {
       const rows = matrix.slice(start, start + 15);
-      const requiredHeight = 49 + rows.length * 24 + 27 + 24;
+      const showSubtotal = monthBlocks.length === 1;
+      const requiredHeight = 49 + rows.length * 24 + (showSubtotal ? 27 + 24 : 20);
       if (!currentMatrixPage || blocksOnPage >= 2 || nextMatrixTop - requiredHeight < 62) {
         currentMatrixPage = matrixPageHeader(doc, bold);
         nextMatrixTop = 510;
