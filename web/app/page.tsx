@@ -7772,10 +7772,6 @@ export default function Home() {
                 <p>Importes informados por distribuidoras, sin ajustes internos.</p>
               </div>
               <div className={digitalStyles.headerActions}>
-                <div className={digitalStyles.sourceRange}>
-                  <span>Fuente disponible</span>
-                  <strong>{digitalIncome?.options.first_month || "-"} a {digitalIncome?.options.last_month || "-"}</strong>
-                </div>
                 <button type="button" className={digitalStyles.pdfButton} onClick={() => void exportDigitalIncomePdf()} disabled={!digitalIncome || !digitalIncomeAppliedScope || digitalIncomeLoading || digitalIncomePdfLoading} title="Descargar PDF ejecutivo del filtro aplicado">
                   <FileDown size={16} aria-hidden="true" /> {digitalIncomePdfLoading ? "Generando" : "PDF ejecutivo"}
                 </button>
@@ -7831,6 +7827,7 @@ export default function Home() {
 
             <div className={digitalStyles.scopeLine}>
               <span>Rango consultado: <strong>{digitalIncome?.totals.first_month || "-"} a {digitalIncome?.totals.last_month || "-"}</strong></span>
+              <span>Fuente disponible: <strong>{digitalIncome?.options.first_month || "-"} a {digitalIncome?.options.last_month || "-"}</strong></span>
               <span>Base: <strong>statement sin splits ni comisiones</strong></span>
             </div>
 

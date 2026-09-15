@@ -59,27 +59,15 @@
 .headerActions {
   display: flex;
   align-items: center;
-  gap: 15px;
+  gap: 8px;
   flex: 0 0 auto;
 }
 
-.sourceRange {
-  display: grid;
-  gap: 3px;
-  text-align: right;
-}
-
-.sourceRange span,
 .metricBand span {
   color: var(--muted);
   font-size: 10px;
   font-weight: 800;
   text-transform: uppercase;
-}
-
-.sourceRange strong {
-  color: var(--text);
-  font-size: 12px;
 }
 
 .workspace button.iconButton {
@@ -690,11 +678,6 @@
     grid-template-columns: minmax(0, 1fr) 38px;
     width: 100%;
     gap: 8px;
-  }
-
-  .sourceRange {
-    grid-column: 1 / -1;
-    text-align: left;
   }
 
   .workspace button.pdfButton {
