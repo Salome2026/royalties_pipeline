@@ -74,6 +74,20 @@ function drawRight(page: PDFPage, value: unknown, right: number, y: number, font
   page.drawText(content, { x: right - font.widthOfTextAtSize(content, size), y, size, font, color });
 }
 
+function drawMoneyRight(page: PDFPage, amount: number, right: number, y: number, font: PDFFont, size: number, color = ink, maxWidth?: number) {
+  const content = safeText(usd.format(amount), font);
+  const textWidth = font.widthOfTextAtSize(content, size);
+  const finalSize = maxWidth && textWidth > maxWidth ? size * maxWidth / textWidth : size;
+  page.drawText(content, { x: right - font.widthOfTextAtSize(content, finalSize), y, size: finalSize, font, color });
+}
+
+function drawMoneyLeft(page: PDFPage, amount: number, x: number, y: number, font: PDFFont, size: number, color: ReturnType<typeof rgb>, maxWidth: number) {
+  const content = safeText(usd.format(amount), font);
+  const textWidth = font.widthOfTextAtSize(content, size);
+  const finalSize = textWidth > maxWidth ? size * maxWidth / textWidth : size;
+  page.drawText(content, { x, y, size: finalSize, font, color });
+}
+
 function rule(page: PDFPage, x: number, y: number, width: number) {
   page.drawRectangle({ x, y, width, height: 0.6, color: line });
 }
@@ -95,7 +109,7 @@ function monthlyRow(page: PDFPage, month: DigitalIncomeReportData["monthly"][num
   drawText(page, month.statement_period, 48, y, regular, 9);
   page.drawRectangle({ x: 130, y: y + 2, width: 250, height: 5, color: line });
   if (month.total_usd) page.drawRectangle({ x: 130, y: y + 2, width: Math.max(2, 250 * Math.abs(month.total_usd) / max), height: 5, color: month.total_usd < 0 ? coral : green });
-  drawRight(page, usd.format(month.total_usd), portrait[0] - 48, y, bold, 9, month.total_usd < 0 ? coral : ink);
+  drawMoneyRight(page, month.total_usd, portrait[0] - 48, y, bold, 9, month.total_usd < 0 ? coral : ink);
   rule(page, 40, y - 7, portrait[0] - 80);
 }
 
@@ -105,7 +119,7 @@ function topAccounts(page: PDFPage, rows: DigitalIncomeReportData["matrix"], y: 
   let rowY = y - 54;
   for (const row of rows.slice(0, 5)) {
     drawText(page, `${row.source} / ${row.account}`, 48, rowY, regular, 9, ink, 345);
-    drawRight(page, usd.format(row.total_usd), portrait[0] - 48, rowY, bold, 9, row.total_usd < 0 ? coral : ink);
+    drawMoneyRight(page, row.total_usd, portrait[0] - 48, rowY, bold, 9, row.total_usd < 0 ? coral : ink);
     rule(page, 40, rowY - 8, portrait[0] - 80);
     rowY -= 23;
   }
@@ -142,29 +156,118 @@ function matrixBlock(page: PDFPage, months: string[], rows: DigitalIncomeReportD
     drawText(page, `${row.account}  |  ${row.artists} artistas${row.has_share_in_out ? "  |  Share In/Out" : ""}`, 46, bottom + 3, regular, 7, muted, accountWidth - 12);
     months.forEach((month, monthIndex) => {
       const amount = row.months[month] || 0;
-      drawRight(page, usd.format(amount), 40 + accountWidth + (monthIndex + 1) * monthWidth - 7, bottom + 8, regular, 8, amount < 0 ? coral : ink, monthWidth - 10);
+      drawMoneyRight(page, amount, 40 + accountWidth + (monthIndex + 1) * monthWidth - 7, bottom + 8, regular, 8, amount < 0 ? coral : ink, monthWidth - 10);
     });
-    drawRight(page, usd.format(row.total_usd), right - 7, bottom + 8, bold, 8, row.total_usd < 0 ? coral : green, totalWidth - 10);
+    drawMoneyRight(page, row.total_usd, right - 7, bottom + 8, bold, 8, row.total_usd < 0 ? coral : green, totalWidth - 10);
     rule(page, 40, bottom, tableWidth);
   });
 
   const subtotalY = headerBottom - rows.length * 24 - 27;
   page.drawRectangle({ x: 40, y: subtotalY - 5, width: tableWidth, height: 24, color: rgb(0.88, 0.92, 0.89) });
   drawText(page, "Subtotal de estas cuentas", 46, subtotalY + 4, bold, 9);
-  months.forEach((month, index) => drawRight(page, usd.format(rows.reduce((sum, row) => sum + (row.months[month] || 0), 0)), 40 + accountWidth + (index + 1) * monthWidth - 7, subtotalY + 4, bold, 8, ink, monthWidth - 10));
-  drawRight(page, usd.format(rows.reduce((sum, row) => sum + row.total_usd, 0)), right - 7, subtotalY + 4, bold, 8, green, totalWidth - 10);
+  months.forEach((month, index) => drawMoneyRight(page, rows.reduce((sum, row) => sum + (row.months[month] || 0), 0), 40 + accountWidth + (index + 1) * monthWidth - 7, subtotalY + 4, bold, 8, ink, monthWidth - 10));
+  drawMoneyRight(page, rows.reduce((sum, row) => sum + row.total_usd, 0), right - 7, subtotalY + 4, bold, 8, green, totalWidth - 10);
   return subtotalY - 24;
+}
+
+function compactPage(doc: PDFDocument, data: DigitalIncomeReportData, scope: DigitalIncomeReportScope, months: DigitalIncomeReportData["monthly"], matrix: DigitalIncomeReportData["matrix"], created: string, regular: PDFFont, bold: PDFFont) {
+  const page = doc.addPage(landscape);
+  const width = landscape[0];
+  const max = Math.max(1, ...months.map((month) => Math.abs(month.total_usd)));
+
+  page.drawRectangle({ x: 40, y: 565, width: 34, height: 3, color: green });
+  drawText(page, "VPO CORP / DIGITAL", 82, 562, bold, 9, green);
+  drawRight(page, `Emitido: ${created}`, width - 40, 562, regular, 9, muted);
+  drawText(page, "Ingresos digitales", 40, 534, bold, 24);
+  drawText(page, "Informe ejecutivo - ingresos informados por distribuidoras", 40, 515, regular, 9, muted);
+  rule(page, 40, 504, width - 80);
+
+  drawText(page, `Periodo aplicado: ${scope.periodLabel}`, 40, 486, bold, 10, ink, 380);
+  drawRight(page, `Meses con datos: ${data.totals.first_month || "-"} a ${data.totals.last_month || "-"}`, width - 40, 486, regular, 9, muted, 330);
+  drawText(page, `Busqueda: ${scope.artistKeyword || "Sin filtro"}`, 40, 470, regular, 9, muted, 365);
+  drawRight(page, `Distribuidora / cuenta: ${scope.source || "Todas"} / ${scope.account || "Todas"}`, width - 40, 470, regular, 9, muted, 365);
+
+  drawText(page, "INGRESO USD", 40, 448, bold, 8, muted);
+  drawMoneyLeft(page, data.totals.total_usd, 40, 425, bold, 20, green, 260);
+  drawText(page, "GRUPOS", 320, 448, bold, 8, muted);
+  drawText(page, data.total.toLocaleString("es-AR"), 320, 429, bold, 12);
+  drawText(page, "ALCANCE", 495, 448, bold, 8, muted);
+  drawText(page, `${data.totals.months} meses  |  ${data.totals.sources} distribuidoras  |  ${data.totals.accounts} cuentas`, 495, 429, regular, 9, ink, 300);
+  drawText(page, "Base: statements sin splits, comisiones ni ajustes internos.", 40, 413, regular, 8, muted);
+  rule(page, 40, 404, width - 80);
+
+  drawText(page, "Evolucion mensual", 40, 386, bold, 13);
+  drawRight(page, "USD por mes de statement", width - 40, 386, regular, 8, muted);
+  let trendY = 370;
+  months.forEach((month, index) => {
+    if (index % 2 === 1) page.drawRectangle({ x: 40, y: trendY - 5, width: width - 80, height: 16, color: pale });
+    drawText(page, month.statement_period, 48, trendY, regular, 9);
+    page.drawRectangle({ x: 150, y: trendY + 2, width: 470, height: 5, color: line });
+    if (month.total_usd) page.drawRectangle({ x: 150, y: trendY + 2, width: Math.max(2, 470 * Math.abs(month.total_usd) / max), height: 5, color: month.total_usd < 0 ? coral : green });
+    drawMoneyRight(page, month.total_usd, width - 48, trendY, bold, 9, month.total_usd < 0 ? coral : ink, 160);
+    rule(page, 40, trendY - 5, width - 80);
+    trendY -= 16;
+  });
+
+  const matrixTitleY = trendY - 19;
+  drawText(page, "Distribuidoras y cuentas", 40, matrixTitleY, bold, 13);
+  drawRight(page, `${matrix.length} cuentas en el rango`, width - 40, matrixTitleY, regular, 8, muted);
+  const accountWidth = 212;
+  const monthWidth = data.matrix_months.length === 6 ? 75 : 90;
+  const totalWidth = 100;
+  const tableWidth = accountWidth + monthWidth * data.matrix_months.length + totalWidth;
+  const right = 40 + tableWidth;
+  const headerBottom = matrixTitleY - 29;
+  page.drawRectangle({ x: 40, y: headerBottom, width: tableWidth, height: 20, color: pale });
+  drawText(page, "DISTRIBUIDORA / CUENTA", 46, headerBottom + 6, bold, 8, muted);
+  data.matrix_months.forEach((month, index) => drawRight(page, month, 40 + accountWidth + (index + 1) * monthWidth - 6, headerBottom + 6, bold, 8, muted));
+  drawRight(page, "TOTAL USD", right - 6, headerBottom + 6, bold, 8, muted);
+
+  matrix.forEach((row, index) => {
+    const bottom = headerBottom - (index + 1) * 18;
+    if (index % 2 === 1) page.drawRectangle({ x: 40, y: bottom, width: tableWidth, height: 18, color: pale });
+    drawText(page, row.source, 46, bottom + 9, bold, 8, ink, accountWidth - 12);
+    drawText(page, `${row.account}  |  ${row.artists} artistas${row.has_share_in_out ? "  |  Share In/Out" : ""}`, 46, bottom + 1, regular, 7, muted, accountWidth - 12);
+    data.matrix_months.forEach((month, monthIndex) => {
+      const amount = row.months[month] || 0;
+      drawMoneyRight(page, amount, 40 + accountWidth + (monthIndex + 1) * monthWidth - 6, bottom + 5, regular, 8, amount < 0 ? coral : ink, monthWidth - 8);
+    });
+    drawMoneyRight(page, row.total_usd, right - 6, bottom + 5, bold, 8, row.total_usd < 0 ? coral : green, totalWidth - 8);
+    rule(page, 40, bottom, tableWidth);
+  });
+
+  const totalY = headerBottom - matrix.length * 18 - 22;
+  page.drawRectangle({ x: 40, y: totalY - 4, width: tableWidth, height: 20, color: rgb(0.88, 0.92, 0.89) });
+  drawText(page, "Total", 46, totalY + 3, bold, 9);
+  data.matrix_months.forEach((month, index) => drawMoneyRight(page, matrix.reduce((sum, row) => sum + (row.months[month] || 0), 0), 40 + accountWidth + (index + 1) * monthWidth - 6, totalY + 3, bold, 8, ink, monthWidth - 8));
+  drawMoneyRight(page, data.totals.total_usd, right - 6, totalY + 3, bold, 8, green, totalWidth - 8);
+}
+
+function addFooters(doc: PDFDocument, regular: PDFFont) {
+  const pages = doc.getPages();
+  pages.forEach((current, index) => {
+    const pageWidth = current.getWidth();
+    rule(current, 40, 49, pageWidth - 80);
+    drawText(current, "VPO CORP  |  Ingresos digitales  |  Fuente: statements", 40, 31, regular, 8, muted);
+    drawRight(current, `Pagina ${index + 1} de ${pages.length}`, pageWidth - 40, 31, regular, 8, muted);
+  });
 }
 
 export async function buildDigitalIncomeExecutivePdf(data: DigitalIncomeReportData, scope: DigitalIncomeReportScope) {
   const doc = await PDFDocument.create();
   const regular = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const page = doc.addPage(portrait);
-  const width = portrait[0];
   const created = new Intl.DateTimeFormat("es-AR", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date());
   const months = [...data.monthly].sort((a, b) => a.statement_period.localeCompare(b.statement_period));
   const matrix = [...data.matrix].sort((a, b) => b.total_usd - a.total_usd);
+  if (months.length > 0 && months.length <= 6 && data.matrix_months.length > 0 && data.matrix_months.length <= 6 && matrix.length > 0 && matrix.length <= 8) {
+    compactPage(doc, data, scope, months, matrix, created, regular, bold);
+    addFooters(doc, regular);
+    return doc.save();
+  }
+
+  const page = doc.addPage(portrait);
+  const width = portrait[0];
   const max = Math.max(1, ...months.map((month) => Math.abs(month.total_usd)));
 
   page.drawRectangle({ x: 40, y: 796, width: 34, height: 3, color: green });
@@ -185,7 +288,7 @@ export async function buildDigitalIncomeExecutivePdf(data: DigitalIncomeReportDa
   rule(page, 40, 618, width - 80);
 
   drawText(page, "INGRESO USD", 40, 594, bold, 8, muted);
-  drawText(page, usd.format(data.totals.total_usd), 40, 568, bold, 21, green, 300);
+  drawMoneyLeft(page, data.totals.total_usd, 40, 568, bold, 21, green, 300);
   drawText(page, "GRUPOS", 368, 594, bold, 8, muted);
   drawText(page, data.total.toLocaleString("es-AR"), 368, 574, bold, 12);
   drawText(page, `${data.totals.months} meses  |  ${data.totals.sources} distribuidoras  |  ${data.totals.accounts} cuentas`, 40, 543, regular, 9, muted);
@@ -228,13 +331,6 @@ export async function buildDigitalIncomeExecutivePdf(data: DigitalIncomeReportDa
     }
   }
 
-  const pages = doc.getPages();
-  pages.forEach((current, index) => {
-    const pageWidth = current.getWidth();
-    rule(current, 40, 49, pageWidth - 80);
-    drawText(current, "VPO CORP  |  Ingresos digitales  |  Fuente: statements", 40, 31, regular, 8, muted);
-    drawRight(current, `Pagina ${index + 1} de ${pages.length}`, pageWidth - 40, 31, regular, 8, muted);
-  });
-
+  addFooters(doc, regular);
   return doc.save();
 }

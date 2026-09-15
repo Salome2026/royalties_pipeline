@@ -107,8 +107,8 @@ function fixtureForMonths(selectedMonths) {
   };
 }
 
-function fixtureForManyAccounts() {
-  const manyMatrix = Array.from({ length: 31 }, (_, index) => {
+function fixtureForManyAccounts(count = 31) {
+  const manyMatrix = Array.from({ length: count }, (_, index) => {
     const amounts = months.map((_, monthIndex) => 1000 + index * 137 + monthIndex * 83);
     return {
       source: index % 2 ? "fuga" : "ada",
@@ -151,7 +151,8 @@ async function setupPage(browser, viewport) {
     queries.push(route.request().url());
     const search = new URL(route.request().url()).searchParams;
     const period = search.get("period_mode");
-    const data = search.get("artist_keyword") === "__qa_many_accounts__" ? fixtureForManyAccounts() : period === "all" ? fixtureForMonths(allMonths) : period === "last_12_months" ? fixtureForMonths(allMonths.slice(-12)) : fixture;
+    const keyword = search.get("artist_keyword");
+    const data = keyword === "__qa_many_accounts__" ? fixtureForManyAccounts() : keyword === "__qa_eight_accounts__" ? fixtureForManyAccounts(8) : period === "all" ? fixtureForMonths(allMonths) : period === "last_12_months" ? fixtureForMonths(allMonths.slice(-12)) : fixture;
     return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(data) });
   });
   await page.goto("http://localhost:3000", { waitUntil: "domcontentloaded" });
@@ -181,7 +182,18 @@ async function main() {
     const queriesBeforePdf = desktop.queries.length;
     const shortPages = await downloadPdf(desktop.page, path.join(outDir, "digital-income-6m.pdf"));
     assert.equal(desktop.queries.length, queriesBeforePdf, "PDF generation should not refetch digital income");
-    assert.equal(shortPages, 2, `unexpected six-month PDF pages: ${shortPages}`);
+    assert.equal(shortPages, 1, `unexpected six-month PDF pages: ${shortPages}`);
+    await desktop.page.locator("#digital_income_period_trigger").click();
+    const rangeDialog = desktop.page.getByRole("dialog", { name: "Periodo" });
+    await rangeDialog.getByRole("button", { name: "Rango" }).click();
+    await rangeDialog.getByRole("combobox", { name: "Año" }).selectOption("2026");
+    await rangeDialog.getByRole("button", { name: "Mar", exact: true }).click();
+    await rangeDialog.getByRole("button", { name: "Ago", exact: true }).click();
+    const rangeResponse = desktop.page.waitForResponse((response) => response.url().includes("period_mode=closed_range") && response.url().includes("start_month=2026-03") && response.url().includes("end_month=2026-08") && response.status() === 200);
+    await desktop.page.getByRole("button", { name: "Aplicar" }).click();
+    await rangeResponse;
+    const rangePages = await downloadPdf(desktop.page, path.join(outDir, "digital-income-range.pdf"));
+    assert.equal(rangePages, 1, `closed range should fit one PDF page: ${rangePages}`);
     assert.equal(await desktop.page.getByRole("tab", { name: /Por cuenta/i }).getAttribute("aria-selected"), "true");
     await desktop.page.getByRole("tab", { name: /Detalle/i }).click();
     assert.equal(await desktop.page.getByRole("columnheader", { name: "Ingreso EUR" }).count(), 0);
@@ -203,6 +215,12 @@ async function main() {
     const longPages = await downloadPdf(desktop.page, path.join(outDir, "digital-income-all.pdf"));
     assert(longPages > shortPages, `all-period PDF should grow: ${longPages} <= ${shortPages}`);
     await desktop.page.getByRole("button", { name: "Limpiar filtros" }).click();
+    await desktop.page.locator("#digital_income_artist").fill("__qa_eight_accounts__");
+    const eightResponse = desktop.page.waitForResponse((response) => response.url().includes("artist_keyword=__qa_eight_accounts__") && response.status() === 200);
+    await desktop.page.getByRole("button", { name: "Aplicar" }).click();
+    await eightResponse;
+    const eightPages = await downloadPdf(desktop.page, path.join(outDir, "digital-income-eight-accounts.pdf"));
+    assert.equal(eightPages, 1, `six months with eight accounts should fit one PDF page: ${eightPages}`);
     await desktop.page.locator("#digital_income_artist").fill("__qa_many_accounts__");
     const manyResponse = desktop.page.waitForResponse((response) => response.url().includes("artist_keyword=__qa_many_accounts__") && response.status() === 200);
     await desktop.page.getByRole("button", { name: "Aplicar" }).click();
@@ -239,7 +257,7 @@ async function main() {
     const narrowWorkspaceWidth = await narrow.page.locator("main.digital-income-main > section").first().evaluate((element) => element.getBoundingClientRect().width);
     assert(narrowWorkspaceWidth <= 320, `narrow mobile workspace overflow: ${narrowWorkspaceWidth}`);
     await narrow.page.screenshot({ path: path.join(outDir, "digital-income-mobile-narrow.png"), fullPage: true });
-    console.log(`OK: desktop/mobile layout, filters, detail paging, dynamic PDFs (${shortPages}/${mediumPages}/${longPages} pages; ${manyPages} with 31 accounts)`);
+    console.log(`OK: desktop/mobile layout, filters, detail paging, dynamic PDFs (${shortPages}/${mediumPages}/${longPages} pages; range ${rangePages}, eight accounts ${eightPages}, 31 accounts ${manyPages})`);
   } finally {
     await browser.close();
   }
