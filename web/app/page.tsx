@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, RefreshCw, RotateCcw, Search, Table2, Rows3 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, FileDown, RefreshCw, RotateCcw, Search, Table2, Rows3 } from "lucide-react";
 import { PeriodControl } from "./components/PeriodControl";
 import { BookingDashboard, type BookingAgendaEvent } from "./components/BookingDashboard";
 import { VpoHome } from "./components/VpoHome";
@@ -14,6 +14,7 @@ import { RoyaltyReportModule } from "./features/royalties/RoyaltyReportModule";
 import { SourceMonitorModule } from "./features/source-monitor/SourceMonitorModule";
 import { StatementReportModule } from "./features/statements/StatementReportModule";
 import digitalStyles from "./features/digital-income/DigitalIncome.module.css";
+import type { DigitalIncomeReportScope } from "./features/digital-income/exportPdf";
 import {
   employeeCompensationLabels,
   type EmployeeCompensationType,
@@ -2141,6 +2142,8 @@ export default function Home() {
   const [digitalIncomePeriod, setDigitalIncomePeriod] = useState<PeriodSelection>({ mode: "last_6_months" });
   const [digitalIncomeTab, setDigitalIncomeTab] = useState<"accounts" | "detail">("accounts");
   const [digitalIncomeDetailPage, setDigitalIncomeDetailPage] = useState(0);
+  const [digitalIncomeAppliedScope, setDigitalIncomeAppliedScope] = useState<DigitalIncomeReportScope | null>(null);
+  const [digitalIncomePdfLoading, setDigitalIncomePdfLoading] = useState(false);
   const digitalIncomeLimit = 500;
   const [royaltiesDashboard, setRoyaltiesDashboard] = useState<RoyaltiesDashboardData | null>(null);
   const [royaltiesDashboardLoading, setRoyaltiesDashboardLoading] = useState(false);
@@ -3968,6 +3971,7 @@ export default function Home() {
       }
       const data = await response.json();
       setDigitalIncome(data);
+      setDigitalIncomeAppliedScope({ artistKeyword: artistKeyword.trim(), source, account, periodLabel: digitalPeriod.label });
       setDigitalIncomeDetailPage(0);
     } catch {
       setMessage({ type: "error", text: "No se pudo cargar ingresos digitales." });
@@ -6293,6 +6297,22 @@ export default function Home() {
     void loadDigitalIncome({ artistKeyword: "", source: "", account: "", period });
   }
 
+  async function exportDigitalIncomePdf() {
+    if (!digitalIncome || !digitalIncomeAppliedScope || digitalIncomeLoading || digitalIncomePdfLoading) return;
+    setDigitalIncomePdfLoading(true);
+    try {
+      const { buildDigitalIncomeExecutivePdf } = await import("./features/digital-income/exportPdf");
+      const bytes = await buildDigitalIncomeExecutivePdf(digitalIncome, digitalIncomeAppliedScope);
+      const first = digitalIncome.totals.first_month || "sin_datos";
+      const last = digitalIncome.totals.last_month || "sin_datos";
+      downloadBlob(new Blob([new Uint8Array(bytes)], { type: "application/pdf" }), `ingresos_digitales_${first}_${last}.pdf`);
+    } catch {
+      setMessage({ type: "error", text: "No se pudo generar el PDF de ingresos digitales." });
+    } finally {
+      setDigitalIncomePdfLoading(false);
+    }
+  }
+
   function openCatalogForAccount(source: string, account: string) {
     setCatalogInitialFilter({ source, account, status: "all", requestId: Date.now() });
     openView("catalog");
@@ -7756,6 +7776,9 @@ export default function Home() {
                   <span>Fuente disponible</span>
                   <strong>{digitalIncome?.options.first_month || "-"} a {digitalIncome?.options.last_month || "-"}</strong>
                 </div>
+                <button type="button" className={digitalStyles.pdfButton} onClick={() => void exportDigitalIncomePdf()} disabled={!digitalIncome || !digitalIncomeAppliedScope || digitalIncomeLoading || digitalIncomePdfLoading} title="Descargar PDF ejecutivo del filtro aplicado">
+                  <FileDown size={16} aria-hidden="true" /> {digitalIncomePdfLoading ? "Generando" : "PDF ejecutivo"}
+                </button>
                 <button type="button" className={digitalStyles.iconButton} onClick={() => void loadDigitalIncome()} disabled={digitalIncomeLoading} aria-label="Actualizar ingresos" title="Actualizar ingresos">
                   <RefreshCw size={17} aria-hidden="true" className={digitalIncomeLoading ? digitalStyles.spin : undefined} />
                 </button>

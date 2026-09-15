@@ -105,6 +105,31 @@
   transform: none;
 }
 
+.workspace button.pdfButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 38px;
+  margin: 0;
+  padding: 0 13px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: none;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.workspace button.pdfButton:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--surface-raised);
+  color: var(--accent);
+  transform: none;
+}
+
 .spin {
   animation: spin 1s linear infinite;
 }
@@ -661,12 +686,19 @@
   }
 
   .headerActions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 38px;
     width: 100%;
-    justify-content: space-between;
+    gap: 8px;
   }
 
   .sourceRange {
+    grid-column: 1 / -1;
     text-align: left;
+  }
+
+  .workspace button.pdfButton {
+    width: 100%;
   }
 
   .filters {
