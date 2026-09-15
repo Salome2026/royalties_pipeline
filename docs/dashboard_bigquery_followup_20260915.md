@@ -9,8 +9,8 @@ cambiar la lectura productiva hasta conciliar y comparar.
 
 | Codigo | Estado | Responsable | Evidencia | Metrica anterior | Metrica nueva | Commit | Despliegue |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| PERF-001 Linea base y casos testigo | En curso; datos y codigo alineados, medicion productiva pendiente | Codex | Casos locales, colision y registros Cloud Run abajo; seis marts GCS verificados; prueba funcional productiva de un mes HTTP 200 | Local: 6m 37.2 s, 1m 10.3 s, FUGA 6m 25.1 s; historico cloud hasta 147.2 s y dos 503 | Pendiente; prueba funcional 2026-06 en Cloud Run 24.1 s, no linea base | `d4de3cf`; tracker en commit posterior | GCS 18:33; API revision `00161-rkc` al 100%; Job y Vercel publicadas |
-| PERF-002 Dashboard con una sola lectura | Pendiente | Por asignar | 7 llamadas `.collect()` fuera de rankings y 2 por cada uno de 13 rankings en `royalties_dashboard` | PERF-001 | Pendiente | - | - |
+| PERF-001 Linea base y casos testigo | Completo: tres casos productivos y respuestas testigo; percentiles pendientes de OPS-001 | Codex | Tabla de mediciones y hashes abajo; seis marts GCS verificados; politica v10 | Local previo: 6m 37.2 s, 1m 10.3 s, FUGA 6m 25.1 s; historico cloud hasta 147.2 s y dos 503 | Produccion: A 87.1 s, B 6.9 s, C 32.1 s; una muestra por caso | `7528dc7` | API `00162-brg`, GCS 18:33 |
+| PERF-002 Dashboard con una sola lectura | En uso: agregados principales unificados; opciones/meses aun aparte | Codex | Seis respuestas JSON equivalentes, hashes A/B/C iguales en canaria y publica; 17 planes en un `pl.collect_all`; pico local 1324 MB con una CPU | Produccion A 87.1 s, B 6.9 s, C 32.1 s | Cloud Run A 11.5 s, B 1.2 s, C 4.1 s; A publico 8.2 s | `8bf54ca` | API `00163-bmw` al 100%; Job y Vercel mismo commit |
 | PERF-003 Cache por generacion de datos | Pendiente | Por asignar | El cache GCS usa existencia local; el resumen local se regenera por mtime durante GET | Primer GET >180 s; un GET concurrente dio 500 | Pendiente | - | - |
 | BQ-001 Dataset, esquemas y permisos | Pendiente | Por asignar | - | - | Pendiente | - | - |
 | BQ-002 Carga versionada desde GCS | Pendiente | Por asignar | - | - | Pendiente | - | - |
@@ -96,10 +96,11 @@ enfocada `qa_digital_income_selection`, el chequeo TypeScript `--noEmit` y
 2026-09-15. Esta en el commit `d4de3cf`, publicado en Vercel, Cloud Run API
 y Cloud Run Job. La prueba productiva de Ingresos digitales devolvio HTTP 200.
 
-La seleccion compartida en Cloud SQL sigue en version 25 y limita la vista a
-`ada / indyana_records`; no se modifico durante la alineacion. Todos los
-usuarios con acceso ven ese filtro hasta que alguno elija `Todas` u otra
-seleccion. La respuesta productiva confirma la version 25. El build completo
+La seleccion compartida en Cloud SQL estaba en version 25 y limitaba la vista
+a `ada / indyana_records` durante la primera alineacion; Codex no la modifico.
+Durante PERF-002 cambio a version 28: incluye todas las distribuidoras y
+excluye solo `ada / mawz`. Ese estado compartido se conservo sin escribirlo.
+El build completo
 de Next y el estado de despliegue Vercel del commit terminaron con exito. No
 se hizo una prueba visual autenticada del PDF ejecutivo en produccion; su
 generacion sigue siendo del frontend y no se altero en este commit.
@@ -137,19 +138,68 @@ no un percentil estable de todo el trafico:
 | `00159-zec` | 10 | 2 | 0.12 s | 6.49 s | 34.24 s |
 | `00160-fen` | 6 | 0 | 0.10 s | 1.48 s | 43.59 s |
 
-La muestra historica se tomo antes de alinear el trafico. Ahora el 100% esta
-en `vpo-corp-api-00161-rkc` (imagen `d4de3cf`). Una prueba funcional de
+La muestra historica se tomo antes de alinear el trafico. En ese momento el
+100% estaba en `vpo-corp-api-00161-rkc` (imagen `d4de3cf`). Una prueba funcional de
 `royalties-dashboard` para 2026-06 devolvio HTTP 200 en 24.1 s; no se usa
-como percentil ni como linea base representativa. Se necesitan casos testigo
-y telemetria de esta revision antes de marcar PERF-001 como completo.
+como percentil ni como linea base representativa. Los casos testigo se
+midieron luego en `00162-brg` y cerraron PERF-001.
+
+## PERF-001: linea base productiva alineada
+
+Medicion secuencial en la API publica el 2026-09-15, revision
+`vpo-corp-api-00162-brg`, commit `7528dc7`, politica de distribuidoras v10,
+con el paquete GCS publicado a las 18:33. Cada caso tiene una sola muestra;
+sirve para equivalencia y comparacion inicial, no para percentiles ni SLA.
+
+| Caso | Filtros | HTTP | Tiempo | USD | Filas origen | Huella SHA-256 de respuesta |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| A | Ultimos 6 meses, statement period | 200 | 87.1 s | 217,532.25 | 3,306,103 | `5FCFAD5823E788449A1AB0A54A9AC0D3DC3D92B2A85C067FC66BD58DBC7B3D9B` |
+| B | 2026-09, statement period | 200 | 6.9 s | 16,778.37 | 504,469 | `219BC4FC3F9EB9F853213C9569DB0E1F9168C1350E65E6360EA573FE8370E31A` |
+| C | FUGA, ultimos 6 meses | 200 | 32.1 s | 118,863.91 | 2,914,425 | `F45273DF240576AC7C3A18A5E8D5F4D0B049EBFD306E1204E0913796B32CEA03` |
+
+La version candidata `8bf54ca` dio objetos JSON identicos a la version
+publica para A, B, C y tambien rango vacio, transaction month 2026-07 y
+ADA junio. El caso A candidato tardo 15.0 s local con varios nucleos y
+46.3 s con una CPU; el pico de memoria con una CPU y politica real fue
+1324 MB. No extrapolar esas cifras directamente a Cloud Run (2 GiB, 1 CPU).
+El trafico publico se fijo temporalmente a `00162-brg` para evaluar la
+revision nueva sin exponerla hasta completar la prueba canaria. La revision
+`00163-bmw` se activo mediante tag con 0% de trafico publico; la API publica
+recupero despues el 100% a `LATEST` y el tag `dashboard-fastpath` tambien
+apunta a esa revision.
+
+## PERF-002: prueba canaria y despliegue
+
+Cloud Build `3bb1f29a-39c9-4e00-a277-4efeb4107a9c` termino SUCCESS para
+`8bf54ca`. API `vpo-corp-api-00163-bmw` y Job de reportes usan la misma
+imagen; Vercel termino su despliegue. La candidata dio HTTP 200 y la misma
+huella SHA-256 exacta que la linea base para A/B/C. Logs de Cloud Run:
+3 requests, 0 errores, latencias 11.35 / 1.14 / 3.94 s. La prueba en cliente
+incluye el traslado HTTP y fue 11.5 / 1.2 / 4.1 s.
+
+| Caso | Antes `00162-brg` | Candidata `00163-bmw` | Despues, ruta publica | Equivalencia |
+| --- | ---: | ---: | ---: | --- |
+| A, ultimos 6 meses | 87.1 s | 11.5 s | 8.2 s | SHA-256 exacto |
+| B, 2026-09 | 6.9 s | 1.2 s | Pendiente de muestra publica | SHA-256 exacto |
+| C, FUGA 6 meses | 32.1 s | 4.1 s | Pendiente de muestra publica | SHA-256 exacto |
+
+Tres repeticiones adicionales de A en la candidata: 9.4, 8.4 y 8.4 s,
+HTTP 200 y USD 217,532.25. `/health`, Ingresos digitales, opciones de
+reportes y web publica respondieron despues del cambio de trafico. Se
+consultaron opciones de reportes, no se genero un reporte pesado. El pico
+local de 1324 MB con una CPU exige vigilar memoria y 5xx productivos en
+OPS-001; Cloud Monitoring a resolucion de un minuto no certifica el pico
+de cada request. PERF-002 reduce la lectura costosa de los agregados, pero
+todavia obtiene opciones y meses en pasos anteriores; la cache por generacion
+de PERF-003 y los agregados materializados de BigQuery siguen pendientes.
 
 ## Proxima decision E1
 
-`PERF-002` debe reducir lecturas sin materializar las 3.15 millones de filas
-completas en la API. La configuracion publicada, verificada con Cloud Run el
+`PERF-002` ya unifico los agregados principales sin devolver las 3.15
+millones de filas completas a Python. La configuracion publicada, verificada con Cloud Run el
 2026-09-15, es 2 GiB, 1 CPU y concurrencia 1; el documento de despliegue de
 septiembre ya no refleja esa concurrencia. `PERF-003` debe separar
 preparacion/publicacion del
 GET y enlazar el cache a la generacion publicada, evitando que dos requests
-escriban las mismas carpetas. Antes de cambiar el dashboard, conservar totales,
-meses, rankings y opciones de A/B/C como casos de equivalencia.
+escriban las mismas carpetas. A/B/C y los bordes quedan como casos de
+equivalencia para las siguientes etapas.
