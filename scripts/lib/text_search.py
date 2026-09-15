@@ -53,3 +53,12 @@ def contains_search_expr(expr: pl.Expr, value: object) -> pl.Expr:
         .str.replace_all(r"[\s_-]+", "")
         .str.contains(search_regex_pattern(compact))
     )
+
+
+def contains_prepared_search_expr(expr: pl.Expr, value: object) -> pl.Expr:
+    """Search already-lowercase text without normalizing every stored row."""
+    compact = re.sub(r"[\s_-]+", "", normalize_search_text(value))
+    if not compact:
+        return pl.lit(True)
+    pattern = r"[\s_-]*".join(search_regex_pattern(char) for char in compact)
+    return expr.fill_null("").str.contains(pattern)

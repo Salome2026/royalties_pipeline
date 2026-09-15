@@ -482,11 +482,12 @@ def apply_report_net_personalization(
     lf: pl.LazyFrame,
     schema: set[str] | None = None,
     amount_col: str = "amount_usd",
+    policy_document: dict | None = None,
 ) -> pl.LazyFrame:
     schema = schema or set(lf.collect_schema().names())
     if amount_col not in schema:
         return lf
-    policy = load_distributor_policy_document()
+    policy = policy_document if policy_document is not None else load_distributor_policy_document()
     personalization = policy.get("report_personalization") or {}
     if not bool(personalization.get("enabled", False)):
         return lf

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from collections import OrderedDict
 import hashlib
 import hmac
 import json
@@ -24,6 +25,7 @@ from typing import Any, Literal
 import polars as pl
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, Response
+from google.api_core.exceptions import NotFound
 from google.cloud import storage
 from pydantic import BaseModel, Field
 
@@ -65,7 +67,7 @@ from build_custom_title_royalty_report import (  # noqa: E402
     build_custom_title_report,
 )
 from lib.catalog_report_filter import apply_report_net_personalization, filter_reportable_generation  # noqa: E402
-from lib.text_search import contains_search_expr, normalize_search_text  # noqa: E402
+from lib.text_search import contains_prepared_search_expr, contains_search_expr, normalize_search_text  # noqa: E402
 from lib.distributor_policy_store import (  # noqa: E402
     load_distributor_policy_document,
     update_report_personalization,
@@ -203,6 +205,10 @@ VPO_CATALOG_STATUS_SYNC_GCS = (
 )
 PUBLISH_JOBS: dict[str, dict] = {}
 PUBLISH_JOBS_LOCK = threading.Lock()
+MART_CACHE_LOCK = threading.Lock()
+DASHBOARD_CACHE_LOCK = threading.Lock()
+DASHBOARD_CACHE: OrderedDict[tuple, dict] = OrderedDict()
+DASHBOARD_CACHE_LIMIT = 32
 
 
 class RoyaltyReportJobRequest(BaseModel):
@@ -1248,7 +1254,11 @@ def catalog_status_object_name() -> str:
     return VPO_CATALOG_STATUS_GCS_OBJECT or object_name("catalog_status.parquet")
 
 
-def ensure_marts(refresh_cache: bool = False, filenames: list[str] | None = None) -> dict[str, Path]:
+def ensure_marts(
+    refresh_cache: bool = False,
+    filenames: list[str] | None = None,
+    verify_generation: bool = False,
+) -> dict[str, Path]:
     requested_files = filenames or REQUIRED_MART_FILES
 
     if VPO_LOCAL_MARTS_DIR is not None and VPO_LOCAL_MARTS_DIR.exists():
@@ -1274,16 +1284,51 @@ def ensure_marts(refresh_cache: bool = False, filenames: list[str] | None = None
         local_path = VPO_API_CACHE_DIR / filename
         paths[filename] = local_path
 
-        if local_path.exists() and not refresh_cache:
-            continue
+        with MART_CACHE_LOCK:
+            if local_path.exists() and not refresh_cache and not verify_generation:
+                continue
 
-        blob = bucket.blob(object_name(filename))
-        if not blob.exists(client):
-            raise HTTPException(status_code=500, detail=f"GCS object not found: gs://{GCS_BUCKET}/{blob.name}")
+            blob = bucket.blob(object_name(filename))
+            try:
+                blob.reload(client=client)
+            except NotFound as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"GCS object not found: gs://{GCS_BUCKET}/{blob.name}",
+                ) from exc
 
-        blob.download_to_filename(str(local_path))
+            generation = str(blob.generation)
+            generation_path = local_path.with_name(f"{filename}.generation")
+            if (
+                local_path.exists()
+                and not refresh_cache
+                and verify_generation
+                and generation_path.exists()
+                and generation_path.read_text(encoding="ascii").strip() == generation
+            ):
+                continue
+
+            temporary_path = local_path.with_name(f"{filename}.{uuid.uuid4().hex}.download")
+            try:
+                blob.download_to_filename(
+                    str(temporary_path),
+                    client=client,
+                    if_generation_match=blob.generation,
+                )
+                os.replace(temporary_path, local_path)
+                generation_path.write_text(generation, encoding="ascii")
+            finally:
+                temporary_path.unlink(missing_ok=True)
 
     return paths
+
+
+def cache_dashboard_response(key: tuple, value: dict) -> None:
+    with DASHBOARD_CACHE_LOCK:
+        DASHBOARD_CACHE[key] = value
+        DASHBOARD_CACHE.move_to_end(key)
+        while len(DASHBOARD_CACHE) > DASHBOARD_CACHE_LIMIT:
+            DASHBOARD_CACHE.popitem(last=False)
 
 
 def load_catalog_status() -> pl.DataFrame:
@@ -8735,6 +8780,7 @@ def royalties_dashboard(
     require_api_key(x_vpo_api_key)
     safe_limit = max(3, min(int(limit or 10), 50))
     period_col = "transaction_month" if period_basis == "transaction_month" else "statement_period"
+    search = normalize_search_text(keyword or artist_keyword or "")
 
     if VPO_LOCAL_MARTS_DIR is not None and VPO_LOCAL_MARTS_DIR.exists():
         marts = ensure_marts(refresh_cache=refresh_cache, filenames=[STANDARDIZED_FILE])
@@ -8744,7 +8790,11 @@ def royalties_dashboard(
         summary_path = build_royalties_dashboard_summary_mart(standardized_path, refresh_cache=refresh_cache)
     else:
         try:
-            summary_marts = ensure_marts(refresh_cache=refresh_cache, filenames=[ROYALTIES_DASHBOARD_SUMMARY_FILE])
+            summary_marts = ensure_marts(
+                refresh_cache=refresh_cache,
+                filenames=[ROYALTIES_DASHBOARD_SUMMARY_FILE],
+                verify_generation=True,
+            )
             summary_path = summary_marts[ROYALTIES_DASHBOARD_SUMMARY_FILE]
         except HTTPException:
             marts = ensure_marts(refresh_cache=refresh_cache, filenames=[STANDARDIZED_FILE])
@@ -8752,12 +8802,29 @@ def royalties_dashboard(
             if not standardized_path.exists():
                 raise HTTPException(status_code=500, detail=f"No existe standardized mart: {standardized_path}")
             summary_path = build_royalties_dashboard_summary_mart(standardized_path, refresh_cache=refresh_cache)
-    base = pl.scan_parquet(summary_path)
     policy_document = load_distributor_policy_document()
+    file_state = summary_path.stat()
+    policy_digest = hashlib.sha256(
+        json.dumps(policy_document, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+    cache_key = (
+        str(summary_path), file_state.st_mtime_ns, file_state.st_size,
+        policy_digest, period_col, period_mode, source.strip() if source else None,
+        account.strip() if account else None, search, start_month, end_month, safe_limit,
+    )
+    if not refresh_cache:
+        with DASHBOARD_CACHE_LOCK:
+            cached_response = DASHBOARD_CACHE.get(cache_key)
+            if cached_response is not None:
+                DASHBOARD_CACHE.move_to_end(cache_key)
+                return cached_response
+
+    base = pl.scan_parquet(summary_path)
     base = apply_report_net_personalization(
         base,
         set(base.collect_schema().names()),
         amount_col="amount_usd",
+        policy_document=policy_document,
     )
     personalization_state = {
         **policy_document["report_personalization"],
@@ -8796,10 +8863,9 @@ def royalties_dashboard(
     if account:
         filtered = filtered.filter(pl.col("account") == account.strip())
 
-    search = normalize_search_text(keyword or artist_keyword or "")
     if search:
         for token in [part for part in search.split() if part.strip()]:
-            filtered = filtered.filter(contains_search_expr(pl.col("search_text"), token))
+            filtered = filtered.filter(contains_prepared_search_expr(pl.col("search_text"), token))
 
     month_scope = filtered
     if start_month:
@@ -8829,7 +8895,7 @@ def royalties_dashboard(
             "first_month": None,
             "last_month": None,
         }
-        return {
+        empty_response = {
             "report_personalization": personalization_state,
             "period_basis": period_basis,
             "period_column": period_col,
@@ -8858,6 +8924,8 @@ def royalties_dashboard(
             },
             "options": options,
         }
+        cache_dashboard_response(cache_key, empty_response)
+        return empty_response
 
     if start_month or end_month or period_mode in {"single_month", "closed_range", "all"}:
         months = available_months
@@ -8866,7 +8934,16 @@ def royalties_dashboard(
     else:
         months = available_months[-6:]
 
-    scoped = month_scope.filter(pl.col(period_col).is_in(months))
+    scoped = (
+        month_scope
+        .filter(pl.col(period_col).is_in(months))
+        .select([
+            "source", "account", period_col, "amount_usd", "units", "raw_rows",
+            "artist", "title", "dsp", "monetization_normalized",
+            "content_origin_normalized", "territory", "sale_type", "label",
+        ])
+        .collect()
+    )
 
     totals = (
         scoped
@@ -8882,20 +8959,17 @@ def royalties_dashboard(
             pl.min(period_col).alias("first_month"),
             pl.max(period_col).alias("last_month"),
         ])
-        .collect()
         .to_dicts()[0]
     )
     total_amount = float(totals.get("amount_usd") or 0.0)
 
-    def rank_by(field: str, name_key: str = "name", frame: pl.LazyFrame | None = None) -> list[dict]:
+    def rank_by(
+        field: str,
+        name_key: str = "name",
+        frame: pl.DataFrame | None = None,
+        denominator: float = total_amount,
+    ) -> list[dict]:
         source_frame = frame if frame is not None else scoped
-        frame_total = (
-            source_frame
-            .select(pl.sum("amount_usd").round(2).alias("amount_usd"))
-            .collect()
-            .to_dicts()[0]
-            .get("amount_usd")
-        )
         df = (
             source_frame
             .filter(pl.col(field).is_not_null() & (pl.col(field) != ""))
@@ -8907,9 +8981,7 @@ def royalties_dashboard(
             ])
             .sort("amount_usd", descending=True)
             .limit(safe_limit)
-            .collect()
         )
-        denominator = float(frame_total or 0.0)
         rows: list[dict] = []
         for row in df.to_dicts():
             amount = float(row.get("amount_usd") or 0.0)
@@ -8931,7 +9003,6 @@ def royalties_dashboard(
             pl.sum("raw_rows").alias("rows"),
         ])
         .sort(period_col)
-        .collect()
         .rename({period_col: "month"})
         .to_dicts()
     )
@@ -8959,7 +9030,6 @@ def royalties_dashboard(
             pl.col("title").n_unique().alias("titles"),
         ])
         .sort("amount_usd", descending=True)
-        .collect()
     )
     matrix = []
     for row in matrix_df.to_dicts():
@@ -8984,11 +9054,11 @@ def royalties_dashboard(
             pl.col("title").n_unique().alias("titles"),
             pl.col("artist").n_unique().alias("artists"),
         ])
-        .collect()
         .to_dicts()[0]
     )
+    youtube_amount = float(youtube_totals.get("amount_usd") or 0.0)
 
-    return {
+    dashboard_response = {
         "report_personalization": personalization_state,
         "period_basis": period_basis,
         "period_column": period_col,
@@ -9010,13 +9080,15 @@ def royalties_dashboard(
         },
         "youtube": {
             "totals": youtube_totals,
-            "monetization": rank_by("monetization_normalized", frame=youtube_scope),
-            "content_origin": rank_by("content_origin_normalized", frame=youtube_scope),
-            "title": rank_by("title", frame=youtube_scope),
-            "territory": rank_by("territory", frame=youtube_scope),
+            "monetization": rank_by("monetization_normalized", frame=youtube_scope, denominator=youtube_amount),
+            "content_origin": rank_by("content_origin_normalized", frame=youtube_scope, denominator=youtube_amount),
+            "title": rank_by("title", frame=youtube_scope, denominator=youtube_amount),
+            "territory": rank_by("territory", frame=youtube_scope, denominator=youtube_amount),
         },
         "options": options,
     }
+    cache_dashboard_response(cache_key, dashboard_response)
+    return dashboard_response
 
 
 @app.get("/booking/shows")
