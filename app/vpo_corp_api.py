@@ -8881,23 +8881,11 @@ def royalties_dashboard(
         "updated_at": policy_document["updated_at"],
     }
 
-    source_account_options = (
-        base
-        .select(["source", "account"])
-        .unique()
-        .sort(["source", "account"])
-        .collect()
-    )
-    all_months = (
-        base
-        .filter(pl.col(period_col) != "")
-        .select(period_col)
-        .unique()
-        .sort(period_col)
-        .collect()
-        .get_column(period_col)
-        .to_list()
-    )
+    source_account_options, all_months_df = pl.collect_all([
+        base.select(["source", "account"]).unique().sort(["source", "account"]),
+        base.filter(pl.col(period_col) != "").select(period_col).unique().sort(period_col),
+    ], engine="streaming")
+    all_months = all_months_df.get_column(period_col).to_list()
     options = {
         "sources": source_account_options.get_column("source").unique().sort().to_list(),
         "accounts": source_account_options.get_column("account").unique().sort().to_list(),
@@ -8924,13 +8912,8 @@ def royalties_dashboard(
         month_scope = month_scope.filter(pl.col(period_col) <= end_month)
 
     available_months = (
-        month_scope
-        .select(period_col)
-        .unique()
-        .sort(period_col)
-        .collect()
-        .get_column(period_col)
-        .to_list()
+        month_scope.select(period_col).unique().sort(period_col).collect(engine="streaming")
+        .get_column(period_col).to_list()
     )
     if not available_months:
         empty_totals = {
@@ -8982,38 +8965,39 @@ def royalties_dashboard(
     else:
         months = available_months[-6:]
 
-    scoped = month_scope.filter(pl.col(period_col).is_in(months))
+    scoped = month_scope.filter(pl.col(period_col).is_in(months)).select([
+        period_col,
+        "amount_usd",
+        "units",
+        "raw_rows",
+        "source",
+        "account",
+        "title",
+        "artist",
+        "dsp",
+        "monetization_normalized",
+        "content_origin_normalized",
+        "territory",
+        "sale_type",
+        "label",
+    ])
 
-    totals = (
-        scoped
-        .select([
-            pl.sum("amount_usd").round(2).alias("amount_usd"),
-            pl.sum("units").round(0).alias("units"),
-            pl.sum("raw_rows").alias("rows"),
-            pl.col(period_col).n_unique().alias("months"),
-            pl.col("source").n_unique().alias("sources"),
-            pl.col("account").n_unique().alias("accounts"),
-            pl.col("title").n_unique().alias("titles"),
-            pl.col("artist").n_unique().alias("artists"),
-            pl.min(period_col).alias("first_month"),
-            pl.max(period_col).alias("last_month"),
-        ])
-        .collect()
-        .to_dicts()[0]
-    )
-    total_amount = float(totals.get("amount_usd") or 0.0)
+    totals_plan = scoped.select([
+        pl.sum("amount_usd").round(2).alias("amount_usd"),
+        pl.sum("units").round(0).alias("units"),
+        pl.sum("raw_rows").alias("rows"),
+        pl.col(period_col).n_unique().alias("months"),
+        pl.col("source").n_unique().alias("sources"),
+        pl.col("account").n_unique().alias("accounts"),
+        pl.col("title").n_unique().alias("titles"),
+        pl.col("artist").n_unique().alias("artists"),
+        pl.min(period_col).alias("first_month"),
+        pl.max(period_col).alias("last_month"),
+    ])
 
-    def rank_by(field: str, name_key: str = "name", frame: pl.LazyFrame | None = None) -> list[dict]:
-        source_frame = frame if frame is not None else scoped
-        frame_total = (
-            source_frame
-            .select(pl.sum("amount_usd").round(2).alias("amount_usd"))
-            .collect()
-            .to_dicts()[0]
-            .get("amount_usd")
-        )
-        df = (
-            source_frame
+    def rank_plan(field: str, frame: pl.LazyFrame) -> pl.LazyFrame:
+        return (
+            frame
             .filter(pl.col(field).is_not_null() & (pl.col(field) != ""))
             .group_by(field)
             .agg([
@@ -9023,14 +9007,14 @@ def royalties_dashboard(
             ])
             .sort("amount_usd", descending=True)
             .limit(safe_limit)
-            .collect()
         )
-        denominator = float(frame_total or 0.0)
+
+    def format_rank(field: str, df: pl.DataFrame, denominator: float) -> list[dict]:
         rows: list[dict] = []
         for row in df.to_dicts():
             amount = float(row.get("amount_usd") or 0.0)
             rows.append({
-                name_key: row.get(field) or "-",
+                "name": row.get(field) or "-",
                 "amount_usd": amount,
                 "units": float(row.get("units") or 0.0),
                 "rows": int(row.get("rows") or 0),
@@ -9038,7 +9022,7 @@ def royalties_dashboard(
             })
         return rows
 
-    monthly = (
+    monthly_plan = (
         scoped
         .group_by(period_col)
         .agg([
@@ -9047,9 +9031,6 @@ def royalties_dashboard(
             pl.sum("raw_rows").alias("rows"),
         ])
         .sort(period_col)
-        .collect()
-        .rename({period_col: "month"})
-        .to_dicts()
     )
 
     month_aggs = [
@@ -9063,7 +9044,7 @@ def royalties_dashboard(
         )
         for month in months
     ]
-    matrix_df = (
+    matrix_plan = (
         scoped
         .group_by(["source", "account"])
         .agg([
@@ -9075,10 +9056,49 @@ def royalties_dashboard(
             pl.col("title").n_unique().alias("titles"),
         ])
         .sort("amount_usd", descending=True)
-        .collect()
     )
+
+    youtube_scope = scoped.filter(pl.col("dsp") == "YouTube")
+    youtube_totals_plan = (
+        youtube_scope
+        .select([
+            pl.sum("amount_usd").round(2).alias("amount_usd"),
+            pl.sum("units").round(0).alias("units"),
+            pl.sum("raw_rows").alias("rows"),
+            pl.col("title").n_unique().alias("titles"),
+            pl.col("artist").n_unique().alias("artists"),
+        ])
+    )
+
+    ranking_fields = [
+        ("sources", "source"),
+        ("dsp", "dsp"),
+        ("monetization", "monetization_normalized"),
+        ("content_origin", "content_origin_normalized"),
+        ("territory", "territory"),
+        ("sale_type", "sale_type"),
+        ("artist", "artist"),
+        ("title", "title"),
+        ("label", "label"),
+    ]
+    youtube_ranking_fields = [
+        ("monetization", "monetization_normalized"),
+        ("content_origin", "content_origin_normalized"),
+        ("title", "title"),
+        ("territory", "territory"),
+    ]
+    results = pl.collect_all([
+        totals_plan,
+        monthly_plan,
+        matrix_plan,
+        youtube_totals_plan,
+        *(rank_plan(field, scoped) for _, field in ranking_fields),
+        *(rank_plan(field, youtube_scope) for _, field in youtube_ranking_fields),
+    ], engine="streaming")
+    totals = results[0].to_dicts()[0]
+    monthly = results[1].rename({period_col: "month"}).to_dicts()
     matrix = []
-    for row in matrix_df.to_dicts():
+    for row in results[2].to_dicts():
         matrix.append({
             "source": row["source"],
             "account": row["account"],
@@ -9089,20 +9109,17 @@ def royalties_dashboard(
             "artists": int(row.get("artists") or 0),
             "titles": int(row.get("titles") or 0),
         })
-
-    youtube_scope = scoped.filter(pl.col("dsp") == "YouTube")
-    youtube_totals = (
-        youtube_scope
-        .select([
-            pl.sum("amount_usd").round(2).alias("amount_usd"),
-            pl.sum("units").round(0).alias("units"),
-            pl.sum("raw_rows").alias("rows"),
-            pl.col("title").n_unique().alias("titles"),
-            pl.col("artist").n_unique().alias("artists"),
-        ])
-        .collect()
-        .to_dicts()[0]
-    )
+    youtube_totals = results[3].to_dicts()[0]
+    total_amount = float(totals.get("amount_usd") or 0.0)
+    youtube_amount = float(youtube_totals.get("amount_usd") or 0.0)
+    rankings = {
+        name: format_rank(field, results[4 + index], total_amount)
+        for index, (name, field) in enumerate(ranking_fields)
+    }
+    youtube_rankings = {
+        name: format_rank(field, results[4 + len(ranking_fields) + index], youtube_amount)
+        for index, (name, field) in enumerate(youtube_ranking_fields)
+    }
 
     return {
         "report_personalization": personalization_state,
@@ -9113,23 +9130,10 @@ def royalties_dashboard(
         "totals": totals,
         "monthly": monthly,
         "matrix": matrix,
-        "rankings": {
-            "sources": rank_by("source"),
-            "dsp": rank_by("dsp"),
-            "monetization": rank_by("monetization_normalized"),
-            "content_origin": rank_by("content_origin_normalized"),
-            "territory": rank_by("territory"),
-            "sale_type": rank_by("sale_type"),
-            "artist": rank_by("artist"),
-            "title": rank_by("title"),
-            "label": rank_by("label"),
-        },
+        "rankings": rankings,
         "youtube": {
             "totals": youtube_totals,
-            "monetization": rank_by("monetization_normalized", frame=youtube_scope),
-            "content_origin": rank_by("content_origin_normalized", frame=youtube_scope),
-            "title": rank_by("title", frame=youtube_scope),
-            "territory": rank_by("territory", frame=youtube_scope),
+            **youtube_rankings,
         },
         "options": options,
     }
