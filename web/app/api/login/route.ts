@@ -9,7 +9,11 @@ export async function POST(request: NextRequest) {
 
   const apiUrl = process.env.VPO_API_URL?.replace(/\/$/, "");
   const apiKey = process.env.VPO_API_KEY;
-  if (apiUrl && apiKey) {
+  if (!apiUrl || !apiKey) {
+    return NextResponse.json({ error: "El servicio de acceso no esta configurado." }, { status: 503 });
+  }
+
+  try {
     const response = await fetch(`${apiUrl}/auth/login`, {
       method: "POST",
       headers: {
@@ -18,16 +22,24 @@ export async function POST(request: NextRequest) {
       },
       body: JSON.stringify({ username: normalizedUsername, password: password || "" }),
       cache: "no-store",
-    }).catch(() => null);
+      signal: AbortSignal.timeout(10000),
+    });
 
-    if (response?.ok) {
-      const data = await response.json();
-      user = data.user || null;
+    if (response.status === 401) {
+      return NextResponse.json({ error: "Usuario o contrasena incorrectos." }, { status: 401 });
     }
+    if (!response.ok) {
+      return NextResponse.json({ error: "El servicio de acceso no esta disponible. Intenta nuevamente." }, { status: 503 });
+    }
+
+    const data = await response.json();
+    user = data.user || null;
+  } catch {
+    return NextResponse.json({ error: "El servicio de acceso no esta disponible. Intenta nuevamente." }, { status: 503 });
   }
 
   if (!user) {
-    return NextResponse.json({ error: "Usuario o contrasena incorrectos." }, { status: 401 });
+    return NextResponse.json({ error: "El servicio de acceso respondio sin un usuario valido." }, { status: 502 });
   }
 
   const cookieStore = await cookies();
