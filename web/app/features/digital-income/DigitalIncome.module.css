@@ -140,6 +140,84 @@
   min-width: 0;
 }
 
+.selectionField { position: relative; min-width: 0; }
+.selectionLabel { display: block; margin: 0 0 7px; color: #cad4cb; font-size: 11px; font-weight: 750; }
+.workspace button.selectionTrigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 42px;
+  min-height: 42px;
+  margin: 0;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: none;
+  font-size: 13px;
+  font-weight: 650;
+  text-align: left;
+  transform: none;
+}
+.selectionTrigger span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace button.selectionTrigger:hover:not(:disabled), .workspace button.selectionTrigger:focus-visible { border-color: var(--accent); background: var(--surface-raised); }
+.selectionPopover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  width: max(100%, 216px);
+  max-width: min(280px, calc(100vw - 36px));
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #202a25;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .36);
+}
+.selectionList { max-height: 226px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #536b5b transparent; }
+.selectionList::-webkit-scrollbar { width: 6px; }
+.selectionList::-webkit-scrollbar-track { background: transparent; }
+.selectionList::-webkit-scrollbar-thumb { border-radius: 3px; background: #536b5b; }
+.selectionRow { display: flex; align-items: center; min-height: 32px; }
+.selectionAllRow { padding-bottom: 3px; margin-bottom: 3px; border-bottom: 1px solid var(--line); }
+.workspace .selectionPopover button.selectionName,
+.workspace .selectionPopover button.selectionCheck {
+  min-height: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+.workspace .selectionPopover button.selectionName {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: flex-start;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+.workspace .selectionPopover button.selectionCheck {
+  display: grid;
+  flex: 0 0 30px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  place-items: center;
+  color: var(--accent);
+}
+.workspace .selectionPopover button.selectionName:hover:not(:disabled),
+.workspace .selectionPopover button.selectionCheck:hover:not(:disabled) { background: #314139; }
+
 .field label,
 .periodField :global(.period-control > label) {
   display: block;

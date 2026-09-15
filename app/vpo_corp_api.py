@@ -260,6 +260,14 @@ class DistributorPersonalizationRequest(BaseModel):
     accounts: list[DistributorPersonalizationAccountRequest] = Field(default_factory=list, max_length=200)
 
 
+class DigitalIncomeViewSelectionRequest(BaseModel):
+    sources: list[str] | None = Field(default=None, max_length=200)
+    excluded_sources: list[str] = Field(default_factory=list, max_length=200)
+    source_accounts: list[dict[str, str]] | None = Field(default=None, max_length=500)
+    excluded_source_accounts: list[dict[str, str]] = Field(default_factory=list, max_length=500)
+    version: int = Field(ge=0)
+
+
 class SourceMonitorUpdateRequest(BaseModel):
     monitoring_active: bool | None = None
     alert_silenced: bool | None = None
@@ -717,6 +725,9 @@ ParticipationPreset = Literal["last_month", "last_3_months", "last_year", "all_h
 async def api_lifespan(_: FastAPI):
     open_operational_db_pool(wait=True)
     try:
+        if operational_db_settings().driver == "postgres":
+            with operational_connect() as conn:
+                ensure_digital_income_view_selection_table(conn)
         yield
     finally:
         close_operational_db_pool()
@@ -8492,6 +8503,93 @@ def build_digital_income_summary_mart(standardized_path: Path, refresh_cache: bo
     return DIGITAL_INCOME_SUMMARY_PATH
 
 
+def ensure_digital_income_view_selection_table(conn: Any) -> None:
+    if not is_postgres_connection(conn):
+        raise HTTPException(status_code=503, detail="La seleccion global de ingresos digitales usa Cloud SQL Postgres.")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS digital_income_view_selection (
+            singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+            selection_json TEXT NOT NULL DEFAULT '{"sources":null,"source_accounts":null}',
+            version INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO digital_income_view_selection (singleton_id)
+        VALUES (1) ON CONFLICT (singleton_id) DO NOTHING
+        """
+    )
+
+
+def read_digital_income_view_selection(conn: Any) -> dict:
+    if not is_postgres_connection(conn):
+        raise HTTPException(status_code=503, detail="La seleccion global de ingresos digitales usa Cloud SQL Postgres.")
+    row = conn.execute(
+        "SELECT selection_json, version FROM digital_income_view_selection WHERE singleton_id = 1"
+    ).fetchone()
+    saved = json.loads(row["selection_json"])
+    return {
+        "sources": saved.get("sources"),
+        "excluded_sources": saved.get("excluded_sources", []),
+        "source_accounts": saved.get("source_accounts"),
+        "excluded_source_accounts": saved.get("excluded_source_accounts", []),
+        "version": int(row["version"]),
+    }
+
+
+@app.put("/digital-income/selection")
+def update_digital_income_view_selection(
+    request: DigitalIncomeViewSelectionRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    if not x_vpo_username:
+        raise HTTPException(status_code=401, detail="No autorizado.")
+    if request.sources is not None and request.excluded_sources:
+        raise HTTPException(status_code=400, detail="Seleccion de distribuidoras invalida.")
+    if request.source_accounts is not None and request.excluded_source_accounts:
+        raise HTTPException(status_code=400, detail="Seleccion de cuentas invalida.")
+    with booking_connect() as permission_conn:
+        require_module_permission(permission_conn, x_vpo_username, "digital_income", "access")
+    with operational_connect() as conn:
+        current = read_digital_income_view_selection(conn)
+        if current["version"] != request.version:
+            raise HTTPException(status_code=409, detail="La seleccion cambio. Actualiza e intenta de nuevo.")
+        sources = None if request.sources is None else sorted({value.strip() for value in request.sources if value.strip()})
+        excluded_sources = sorted({value.strip() for value in request.excluded_sources if value.strip()})
+
+        def clean_account_pairs(items: list[dict[str, str]]) -> list[dict[str, str]]:
+            pairs = sorted({
+                (item.get("source", "").strip(), item.get("account", "").strip())
+                for item in items
+                if item.get("source", "").strip() and item.get("account", "").strip()
+            })
+            return [{"source": source, "account": account} for source, account in pairs]
+
+        source_accounts = None if request.source_accounts is None else clean_account_pairs(request.source_accounts)
+        excluded_source_accounts = clean_account_pairs(request.excluded_source_accounts)
+        selection = {
+            "sources": sources,
+            "excluded_sources": excluded_sources,
+            "source_accounts": source_accounts,
+            "excluded_source_accounts": excluded_source_accounts,
+        }
+        result = conn.execute(
+            db_sql(conn, """
+            UPDATE digital_income_view_selection
+            SET selection_json = ?, version = version + 1
+            WHERE singleton_id = 1 AND version = ?
+            """),
+            (json.dumps(selection, ensure_ascii=False), request.version),
+        )
+        if result.rowcount != 1:
+            raise HTTPException(status_code=409, detail="La seleccion cambio. Actualiza e intenta de nuevo.")
+        return {**selection, "version": request.version + 1}
+
+
 @app.get("/digital-income")
 def digital_income(
     source: str | None = None,
@@ -8505,8 +8603,14 @@ def digital_income(
     offset: int = 0,
     refresh_cache: bool = False,
     x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
 ):
     require_api_key(x_vpo_api_key)
+    if x_vpo_username:
+        with booking_connect() as permission_conn:
+            require_module_permission(permission_conn, x_vpo_username, "digital_income", "access")
+    with operational_connect() as conn:
+        view_selection = read_digital_income_view_selection(conn)
     limit = max(1, min(int(limit or 500), 5000))
     offset = max(0, int(offset or 0))
 
@@ -8545,6 +8649,16 @@ def digital_income(
     }
 
     filtered = base
+    if view_selection["sources"] is not None:
+        filtered = filtered.filter(pl.col("source").is_in(view_selection["sources"]))
+    elif view_selection["excluded_sources"]:
+        filtered = filtered.filter(~pl.col("source").is_in(view_selection["excluded_sources"]))
+    if view_selection["source_accounts"] is not None:
+        account_keys = [f'{item["source"]}\0{item["account"]}' for item in view_selection["source_accounts"]]
+        filtered = filtered.filter(pl.concat_str(["source", "account"], separator="\0").is_in(account_keys))
+    elif view_selection["excluded_source_accounts"]:
+        account_keys = [f'{item["source"]}\0{item["account"]}' for item in view_selection["excluded_source_accounts"]]
+        filtered = filtered.filter(~pl.concat_str(["source", "account"], separator="\0").is_in(account_keys))
     if source:
         filtered = filtered.filter(pl.col("source") == source.strip())
     if account:
@@ -8592,6 +8706,7 @@ def digital_income(
                 "last_month": None,
             },
             "options": options,
+            "view_selection": view_selection,
         }
 
     if start_month or end_month or period_mode in {"single_month", "closed_range", "all"}:
@@ -8715,6 +8830,7 @@ def digital_income(
         "keyword": keyword,
         "totals": totals,
         "options": options,
+        "view_selection": view_selection,
     }
 
 

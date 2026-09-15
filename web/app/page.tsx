@@ -14,6 +14,7 @@ import { RoyaltyReportModule } from "./features/royalties/RoyaltyReportModule";
 import { SourceMonitorModule } from "./features/source-monitor/SourceMonitorModule";
 import { StatementReportModule } from "./features/statements/StatementReportModule";
 import digitalStyles from "./features/digital-income/DigitalIncome.module.css";
+import SelectionMenu, { type SelectionIntent } from "./features/digital-income/SelectionMenu";
 import type { DigitalIncomeReportScope } from "./features/digital-income/exportPdf";
 import {
   employeeCompensationLabels,
@@ -966,14 +967,32 @@ type DigitalIncomeData = {
     first_month: string | null;
     last_month: string | null;
   };
+  view_selection: DigitalIncomeViewSelection;
+};
+
+type DigitalIncomeViewSelection = {
+  sources: string[] | null;
+  excluded_sources: string[];
+  source_accounts: { source: string; account: string }[] | null;
+  excluded_source_accounts: { source: string; account: string }[];
+  version: number;
 };
 
 type DigitalIncomeFilters = {
   artistKeyword: string;
-  source: string;
-  account: string;
   period: PeriodSelection;
 };
+
+function digitalIncomeAccountKey(item: { source: string; account: string }) {
+  return JSON.stringify([item.source, item.account]);
+}
+
+function digitalIncomeAccountPairs(keys: string[]) {
+  return keys.map((key) => {
+    const [source, account] = JSON.parse(key) as [string, string];
+    return { source, account };
+  });
+}
 
 type RoyaltiesDashboardRank = {
   name: string;
@@ -2137,8 +2156,8 @@ export default function Home() {
   const [digitalIncome, setDigitalIncome] = useState<DigitalIncomeData | null>(null);
   const [digitalIncomeLoading, setDigitalIncomeLoading] = useState(false);
   const [digitalIncomeArtistKeyword, setDigitalIncomeArtistKeyword] = useState("");
-  const [digitalIncomeSource, setDigitalIncomeSource] = useState("");
-  const [digitalIncomeAccount, setDigitalIncomeAccount] = useState("");
+  const [digitalIncomeViewSelection, setDigitalIncomeViewSelection] = useState<DigitalIncomeViewSelection | null>(null);
+  const [digitalIncomeSelectionSaving, setDigitalIncomeSelectionSaving] = useState(false);
   const [digitalIncomePeriod, setDigitalIncomePeriod] = useState<PeriodSelection>({ mode: "last_6_months" });
   const [digitalIncomeTab, setDigitalIncomeTab] = useState<"accounts" | "detail">("accounts");
   const [digitalIncomeDetailPage, setDigitalIncomeDetailPage] = useState(0);
@@ -2477,13 +2496,27 @@ export default function Home() {
     });
   }, [financeMovementForm.artist, financeMovementForm.businessArea, financeMovementForm.movementType, currentUser?.role, currentUserPermissions]);
 
+  const digitalIncomeSelectedSources = useMemo(() => {
+    if (!digitalIncome || !digitalIncomeViewSelection) return null;
+    if (digitalIncomeViewSelection.sources !== null) return digitalIncomeViewSelection.sources;
+    if (!digitalIncomeViewSelection.excluded_sources.length) return null;
+    return digitalIncome.options.sources.filter((source) => !digitalIncomeViewSelection.excluded_sources.includes(source));
+  }, [digitalIncome, digitalIncomeViewSelection]);
+
+  const digitalIncomeSelectedAccounts = useMemo(() => {
+    if (!digitalIncome || !digitalIncomeViewSelection) return null;
+    if (digitalIncomeViewSelection.source_accounts !== null) return digitalIncomeViewSelection.source_accounts.map(digitalIncomeAccountKey);
+    if (!digitalIncomeViewSelection.excluded_source_accounts.length) return null;
+    const excluded = new Set(digitalIncomeViewSelection.excluded_source_accounts.map(digitalIncomeAccountKey));
+    return digitalIncome.options.source_accounts.map(digitalIncomeAccountKey).filter((key) => !excluded.has(key));
+  }, [digitalIncome, digitalIncomeViewSelection]);
+
   const digitalIncomeAccountOptions = useMemo(() => {
     if (!digitalIncome) return [];
-    if (!digitalIncomeSource) return digitalIncome.options.accounts;
-    return digitalIncome.options.source_accounts
-      .filter((item) => item.source === digitalIncomeSource)
-      .map((item) => item.account);
-  }, [digitalIncome, digitalIncomeSource]);
+    return digitalIncome.options.source_accounts.filter((item) =>
+      digitalIncomeSelectedSources === null || digitalIncomeSelectedSources.includes(item.source)
+    );
+  }, [digitalIncome, digitalIncomeSelectedSources]);
 
   const royaltiesDashboardAccountOptions = useMemo(() => {
     if (!royaltiesDashboard) return [];
@@ -3951,13 +3984,9 @@ export default function Home() {
     setDigitalIncomeLoading(true);
     try {
       const artistKeyword = filters?.artistKeyword ?? digitalIncomeArtistKeyword;
-      const source = filters?.source ?? digitalIncomeSource;
-      const account = filters?.account ?? digitalIncomeAccount;
       const digitalPeriod = resolvePeriod(filters?.period ?? digitalIncomePeriod, "dashboard_period");
       const params = new URLSearchParams();
       if (artistKeyword.trim()) params.set("artist_keyword", artistKeyword.trim());
-      if (source) params.set("source", source);
-      if (account) params.set("account", account);
       if (digitalPeriod.startMonth) params.set("start_month", digitalPeriod.startMonth);
       if (digitalPeriod.endMonth) params.set("end_month", digitalPeriod.endMonth);
       params.set("period_mode", digitalPeriod.mode);
@@ -3969,9 +3998,22 @@ export default function Home() {
         setMessage({ type: "error", text: payload.error || "No se pudo cargar ingresos digitales." });
         return;
       }
-      const data = await response.json();
+      const data = await response.json() as DigitalIncomeData;
       setDigitalIncome(data);
-      setDigitalIncomeAppliedScope({ artistKeyword: artistKeyword.trim(), source, account, periodLabel: digitalPeriod.label });
+      setDigitalIncomeViewSelection(data.view_selection);
+      const sources = data.view_selection.sources ?? (data.view_selection.excluded_sources.length
+        ? data.options.sources.filter((item) => !data.view_selection.excluded_sources.includes(item)) : null);
+      const excludedKeys = new Set(data.view_selection.excluded_source_accounts.map(digitalIncomeAccountKey));
+      const accounts = data.view_selection.source_accounts ?? (excludedKeys.size
+        ? data.options.source_accounts.filter((item) => !excludedKeys.has(digitalIncomeAccountKey(item))) : null);
+      const excludedSources = sources === null ? [] : data.options.sources.filter((item) => !sources.includes(item));
+      const excludedAccounts = accounts === null ? [] : data.options.source_accounts.filter((item) => !accounts.some((selected) => digitalIncomeAccountKey(selected) === digitalIncomeAccountKey(item)));
+      setDigitalIncomeAppliedScope({
+        artistKeyword: artistKeyword.trim(),
+        source: sources === null ? "" : sources.length === 0 ? "Ninguna" : excludedSources.length === 1 ? `Todas excepto ${excludedSources[0]}` : sources.length === 1 ? sources[0] : `${sources.length} distribuidoras`,
+        account: accounts === null ? "" : accounts.length === 0 ? "Ninguna" : excludedAccounts.length === 1 ? `Todas excepto ${excludedAccounts[0].account} (${excludedAccounts[0].source})` : accounts.length === 1 ? `${accounts[0].account} (${accounts[0].source})` : `${accounts.length} cuentas`,
+        periodLabel: digitalPeriod.label,
+      });
       setDigitalIncomeDetailPage(0);
     } catch {
       setMessage({ type: "error", text: "No se pudo cargar ingresos digitales." });
@@ -6291,10 +6333,57 @@ export default function Home() {
   function resetDigitalIncomeFilters() {
     const period: PeriodSelection = { mode: "last_6_months" };
     setDigitalIncomeArtistKeyword("");
-    setDigitalIncomeSource("");
-    setDigitalIncomeAccount("");
     setDigitalIncomePeriod(period);
-    void loadDigitalIncome({ artistKeyword: "", source: "", account: "", period });
+    void loadDigitalIncome({ artistKeyword: "", period });
+  }
+
+  async function saveDigitalIncomeSelection(next: Omit<DigitalIncomeViewSelection, "version">) {
+    if (!digitalIncomeViewSelection || digitalIncomeSelectionSaving) return;
+    setDigitalIncomeSelectionSaving(true);
+    try {
+      const response = await fetch("/api/digital-income", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...next, version: digitalIncomeViewSelection.version }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        setMessage({ type: "error", text: payload.error || "No se pudo guardar la seleccion." });
+        await loadDigitalIncome();
+        return;
+      }
+      setDigitalIncomeViewSelection(await response.json() as DigitalIncomeViewSelection);
+      await loadDigitalIncome();
+    } catch {
+      setMessage({ type: "error", text: "No se pudo guardar la seleccion." });
+      await loadDigitalIncome();
+    } finally {
+      setDigitalIncomeSelectionSaving(false);
+    }
+  }
+
+  function updateDigitalIncomeSources(keys: string[] | null, intent: SelectionIntent) {
+    if (!digitalIncomeViewSelection || !digitalIncome) return;
+    const allKeys = digitalIncome.options.sources;
+    const useAll = intent === "all" || keys === null;
+    const useExclusions = intent === "toggle" && digitalIncomeViewSelection.sources === null && !useAll;
+    void saveDigitalIncomeSelection({
+      ...digitalIncomeViewSelection,
+      sources: useAll || useExclusions ? null : keys,
+      excluded_sources: useExclusions ? allKeys.filter((key) => !keys?.includes(key)) : [],
+    });
+  }
+
+  function updateDigitalIncomeAccounts(keys: string[] | null, intent: SelectionIntent) {
+    if (!digitalIncomeViewSelection || !digitalIncome) return;
+    const allKeys = digitalIncome.options.source_accounts.map(digitalIncomeAccountKey);
+    const useAll = intent === "all" || keys === null;
+    const useExclusions = intent === "toggle" && digitalIncomeViewSelection.source_accounts === null && !useAll;
+    void saveDigitalIncomeSelection({
+      ...digitalIncomeViewSelection,
+      source_accounts: useAll || useExclusions ? null : digitalIncomeAccountPairs(keys || []),
+      excluded_source_accounts: useExclusions ? digitalIncomeAccountPairs(allKeys.filter((key) => !keys?.includes(key))) : [],
+    });
   }
 
   async function exportDigitalIncomePdf() {
@@ -7789,20 +7878,8 @@ export default function Home() {
                   <input id="digital_income_artist" value={digitalIncomeArtistKeyword} onChange={(event) => setDigitalIncomeArtistKeyword(event.target.value)} placeholder="Buscar en statements" />
                 </div>
               </div>
-              <div className={digitalStyles.field}>
-                <label htmlFor="digital_income_source">Distribuidora</label>
-                <select id="digital_income_source" value={digitalIncomeSource} onChange={(event) => { setDigitalIncomeSource(event.target.value); setDigitalIncomeAccount(""); }}>
-                  <option value="">Todas</option>
-                  {digitalIncome?.options.sources.map((item) => <option key={item} value={item}>{item}</option>)}
-                </select>
-              </div>
-              <div className={digitalStyles.field}>
-                <label htmlFor="digital_income_account">Cuenta</label>
-                <select id="digital_income_account" value={digitalIncomeAccount} onChange={(event) => setDigitalIncomeAccount(event.target.value)}>
-                  <option value="">Todas</option>
-                  {digitalIncomeAccountOptions.map((item) => <option key={item} value={item}>{item}</option>)}
-                </select>
-              </div>
+              <SelectionMenu label="Distribuidora" options={(digitalIncome?.options.sources || []).map((item) => ({ key: item, label: item }))} allKeys={digitalIncome?.options.sources || []} selected={digitalIncomeSelectedSources} disabled={!digitalIncomeViewSelection || digitalIncomeSelectionSaving || digitalIncomeLoading} onChange={updateDigitalIncomeSources} />
+              <SelectionMenu label="Cuenta" options={digitalIncomeAccountOptions.map((item) => ({ key: digitalIncomeAccountKey(item), label: digitalIncomeSelectedSources?.length === 1 ? item.account : `${item.account} / ${item.source}` }))} allKeys={(digitalIncome?.options.source_accounts || []).map(digitalIncomeAccountKey)} selected={digitalIncomeSelectedAccounts} disabled={!digitalIncomeViewSelection || digitalIncomeSelectionSaving || digitalIncomeLoading} onChange={updateDigitalIncomeAccounts} />
               <div className={digitalStyles.periodField}>
                 <PeriodControl id="digital_income_period" label="Periodo" profile="dashboard_period" selection={digitalIncomePeriod} presets={["last_6_months", "last_12_months", "all"]} minMonth={digitalIncome?.options.first_month} maxMonth={digitalIncome?.options.last_month} onChange={setDigitalIncomePeriod} />
               </div>

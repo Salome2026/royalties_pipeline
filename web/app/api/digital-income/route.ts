@@ -33,10 +33,28 @@ export async function GET(request: NextRequest) {
 
   const params = request.nextUrl.searchParams.toString();
   const response = await fetch(`${config.apiUrl}/digital-income${params ? `?${params}` : ""}`, {
-    headers: { "X-VPO-API-Key": config.apiKey },
+    headers: { "X-VPO-API-Key": config.apiKey, "X-VPO-Username": config.user.username },
     cache: "no-store",
   });
 
+  if (!response.ok) return apiError(response);
+  return NextResponse.json(await response.json());
+}
+
+export async function PUT(request: NextRequest) {
+  const config = await apiConfig();
+  if ("error" in config) return config.error;
+
+  const response = await fetch(`${config.apiUrl}/digital-income/selection`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "X-VPO-API-Key": config.apiKey,
+      "X-VPO-Username": config.user.username,
+    },
+    body: JSON.stringify(await request.json()),
+    cache: "no-store",
+  });
   if (!response.ok) return apiError(response);
   return NextResponse.json(await response.json());
 }

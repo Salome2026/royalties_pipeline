@@ -1018,6 +1018,12 @@ CREATE TABLE IF NOT EXISTS report_runs (
     )
 );
 
+CREATE TABLE IF NOT EXISTS digital_income_view_selection (
+    singleton_id integer PRIMARY KEY CHECK (singleton_id = 1),
+    selection_json text NOT NULL DEFAULT '{"sources":null,"source_accounts":null}',
+    version integer NOT NULL DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_report_runs_requester_time
     ON report_runs(requested_by, created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_report_runs_active_hash
