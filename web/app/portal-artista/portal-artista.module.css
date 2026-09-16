@@ -17,8 +17,25 @@
 }
 
 .portal {
-  background: #141a17;
+  --surface: rgba(26, 33, 30, .76);
+  --surface-raised: rgba(32, 42, 37, .88);
+  --line: rgba(93, 112, 101, .48);
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: rgba(20, 26, 23, .94);
   color: var(--text);
+}
+
+.portal::before {
+  content: "";
+  position: fixed;
+  inset: 70px 0 0;
+  z-index: -1;
+  pointer-events: none;
+  background: url("/vpo-logo.png") center 46% / min(42vw, 520px) auto no-repeat;
+  opacity: .075;
+  filter: grayscale(1) brightness(1.5);
 }
 
 .topbar {
@@ -31,7 +48,7 @@
   min-height: 70px;
   padding: 0 34px;
   border-bottom: 1px solid var(--line);
-  background: rgba(20, 26, 23, .94);
+  background: rgba(20, 26, 23, .82);
   backdrop-filter: blur(16px);
 }
 
@@ -73,7 +90,7 @@
 .userBlock button:hover,
 .iconButton:hover:not(:disabled) { border-color: var(--accent); background: var(--surface-raised); color: var(--accent); }
 
-.workspace { width: min(100%, 1360px); margin: 0 auto; padding: 28px 34px 52px; }
+.workspace { position: relative; z-index: 1; width: min(100%, 1360px); margin: 0 auto; padding: 28px 34px 52px; }
 .pageHeader { align-items: flex-end; justify-content: space-between; gap: 24px; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
 .eyebrow { color: var(--accent); font-size: 11px; font-weight: 800; text-transform: uppercase; }
 .pageHeader h1 { margin: 5px 0 7px; font-size: 28px; line-height: 1.15; }
@@ -127,22 +144,22 @@
 .trendRow { display: grid; grid-template-columns: 88px minmax(0, 1fr) minmax(125px, auto); align-items: center; gap: 13px; min-height: 43px; border-bottom: 1px solid rgba(55, 69, 61, .7); }
 .trendRow > span { color: var(--muted); font-size: 11px; font-weight: 700; }
 .trendRow > strong { color: var(--text); font-size: 12px; text-align: right; }
-.trendTrack { height: 9px; overflow: hidden; background: #27322c; }
+.trendTrack { height: 9px; overflow: hidden; background: rgba(39, 50, 44, .72); }
 .trendBar,
 .negativeBar { height: 100%; background: var(--accent); }
 .negativeBar { background: var(--negative); }
 .negativeAmount { color: var(--negative) !important; }
 
-.tableScroll { width: 100%; max-height: 620px; overflow: auto; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: #151b18; }
+.tableScroll { width: 100%; max-height: 620px; overflow: auto; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: rgba(21, 27, 24, .72); }
 .table { width: 100%; min-width: max(900px, 100%); border-collapse: separate; border-spacing: 0; color: var(--text); font-size: 12px; }
 .table th,
 .table td { padding: 11px 12px; border-bottom: 1px solid #303b33; text-align: right; white-space: nowrap; }
-.table thead th { position: sticky; top: 0; z-index: 2; background: #27352c; color: #d9e5dc; font-size: 10px; font-weight: 800; text-transform: uppercase; }
+.table thead th { position: sticky; top: 0; z-index: 2; background: rgba(39, 53, 44, .94); color: #d9e5dc; font-size: 10px; font-weight: 800; text-transform: uppercase; }
 .table th:first-child,
-.table td:first-child { position: sticky; left: 0; z-index: 1; min-width: 170px; background: #1a211e; text-align: left; }
-.table thead th:first-child { z-index: 3; background: #27352c; }
+.table td:first-child { position: sticky; left: 0; z-index: 1; min-width: 170px; background: rgba(26, 33, 30, .94); text-align: left; }
+.table thead th:first-child { z-index: 3; background: rgba(39, 53, 44, .97); }
 .table tbody tr:nth-child(even),
-.table tbody tr:nth-child(even) td:first-child { background: #1b241f; }
+.table tbody tr:nth-child(even) td:first-child { background: rgba(27, 36, 31, .94); }
 .table td:first-child strong,
 .table td:first-child span { display: block; }
 .table td:first-child span { margin-top: 2px; color: var(--muted); font-size: 11px; }
@@ -165,7 +182,7 @@
 .rankValue { text-align: right; }
 .rankValue strong { color: var(--text); font-size: 12px; }
 .rankValue span { margin-top: 3px; color: var(--accent); font-size: 10px; font-weight: 750; }
-.rankBar { grid-column: 2 / 4; height: 3px; overflow: hidden; background: #27322c; }
+.rankBar { grid-column: 2 / 4; height: 3px; overflow: hidden; background: rgba(39, 50, 44, .72); }
 .rankBar span { display: block; height: 100%; background: var(--accent); }
 .empty { padding: 18px 0; color: var(--muted); font-size: 12px; }
 .alert { margin: 15px 0 0; padding: 10px 12px; border-left: 2px solid var(--negative); background: rgba(236, 170, 160, .09); color: #f3c0b8; font-size: 12px; }
