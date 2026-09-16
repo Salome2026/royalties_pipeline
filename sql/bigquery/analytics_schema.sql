@@ -182,6 +182,51 @@ PARTITION BY statement_month
 CLUSTER BY release_id, source, account, artist
 OPTIONS(description = 'Resumen de ingresos digitales sin ajustes internos');
 
+CREATE TABLE IF NOT EXISTS `{project}.{dataset}.analytics_reconciliation_runs` (
+  run_id STRING NOT NULL,
+  release_id STRING NOT NULL,
+  started_at TIMESTAMP NOT NULL,
+  completed_at TIMESTAMP NOT NULL,
+  status STRING NOT NULL,
+  amount_tolerance_usd FLOAT64 NOT NULL,
+  units_tolerance FLOAT64 NOT NULL,
+  group_count INT64 NOT NULL,
+  mismatch_count INT64 NOT NULL,
+  report_uri STRING,
+  results_uri STRING,
+  notes STRING
+)
+CLUSTER BY release_id, status, run_id
+OPTIONS(description = 'Ejecuciones de conciliacion Parquet contra BigQuery');
+
+CREATE TABLE IF NOT EXISTS `{project}.{dataset}.analytics_reconciliation_results` (
+  run_id STRING NOT NULL,
+  release_id STRING NOT NULL,
+  period_basis STRING NOT NULL,
+  source STRING,
+  account STRING,
+  period_month DATE,
+  parquet_rows INT64 NOT NULL,
+  bigquery_rows INT64 NOT NULL,
+  parquet_amount_usd FLOAT64 NOT NULL,
+  bigquery_amount_usd FLOAT64 NOT NULL,
+  amount_difference_usd FLOAT64 NOT NULL,
+  parquet_units FLOAT64 NOT NULL,
+  bigquery_units FLOAT64 NOT NULL,
+  units_difference FLOAT64 NOT NULL,
+  parquet_isrcs INT64 NOT NULL,
+  bigquery_isrcs INT64 NOT NULL,
+  parquet_missing_isrc_rows INT64 NOT NULL,
+  bigquery_missing_isrc_rows INT64 NOT NULL,
+  parquet_multi_isrc_title_groups INT64 NOT NULL,
+  bigquery_multi_isrc_title_groups INT64 NOT NULL,
+  status STRING NOT NULL,
+  mismatch_reasons STRING
+)
+PARTITION BY period_month
+CLUSTER BY release_id, period_basis, source, account
+OPTIONS(description = 'Resultado de conciliacion por fuente, cuenta y mes');
+
 CREATE OR REPLACE VIEW `{project}.{dataset}.current_release` AS
 SELECT *
 FROM `{project}.{dataset}.analytics_releases`

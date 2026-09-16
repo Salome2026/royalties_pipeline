@@ -8,6 +8,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -569,14 +570,14 @@ SELECT
   '{sql_string(manifest_generation)}',
   TIMESTAMP('{sql_string(published_at)}'),
   CURRENT_TIMESTAMP(),
-  'ready',
+  'loaded',
   '{sql_string(manifest_uri)}',
   {source_files},
   (SELECT COUNT(*) FROM {qualified(stages['detail'])}),
   (SELECT COALESCE(SUM(amount_usd), 0) FROM {qualified(stages['detail'])}),
   (SELECT COUNT(*) FROM {qualified(stages['dashboard'])}),
   (SELECT COALESCE(SUM(amount_usd), 0) FROM {qualified(stages['dashboard'])}),
-  'shadow load from immutable GCS release';
+  'shadow load pending BQ-003 reconciliation';
 """.strip(),
             "COMMIT TRANSACTION;",
         ]
@@ -593,6 +594,7 @@ def bq_query_json(bq: str, project: str, location: str, sql: str) -> list[dict[s
             f"--location={location}",
             "--use_legacy_sql=false",
             "--format=json",
+            "--max_rows=1000000",
         ],
         capture=True,
         input_text=sql,
@@ -608,6 +610,7 @@ def main() -> None:
     parser.add_argument("--location", default="US")
     parser.add_argument("--bucket", default=os.environ.get("GCS_BUCKET", "vpo-corp-royalties-marts"))
     parser.add_argument("--prefix", default=os.environ.get("GCS_PREFIX", "marts"))
+    parser.add_argument("--skip-reconciliation", action="store_true")
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
 
@@ -699,15 +702,15 @@ def main() -> None:
 
     validation_sql = f"""
 SELECT
-  (SELECT release_id FROM `{args.project}.{args.dataset}.current_release`) AS current_release_id,
+  (SELECT status FROM `{args.project}.{args.dataset}.analytics_releases` WHERE release_id = '{sql_string(release_id)}') AS release_status,
   (SELECT COUNT(*) FROM `{args.project}.{args.dataset}.royalty_statement_fact` WHERE release_id = '{sql_string(release_id)}') AS detail_rows,
   (SELECT COALESCE(SUM(amount_usd), 0) FROM `{args.project}.{args.dataset}.royalty_statement_fact` WHERE release_id = '{sql_string(release_id)}') AS detail_amount,
   (SELECT COUNT(*) FROM `{args.project}.{args.dataset}.royalty_dashboard_rankings` WHERE release_id = '{sql_string(release_id)}') AS dashboard_rows,
   (SELECT COALESCE(SUM(amount_usd), 0) FROM `{args.project}.{args.dataset}.royalty_dashboard_rankings` WHERE release_id = '{sql_string(release_id)}') AS dashboard_amount
 """.strip()
     validation = bq_query_json(bq, args.project, args.location, validation_sql)[0]
-    if validation["current_release_id"] != release_id:
-        raise RuntimeError(f"current_release no apunta al release cargado: {validation}")
+    if validation["release_status"] != "loaded":
+        raise RuntimeError(f"El release no quedo listo para conciliar: {validation}")
     if int(validation["detail_rows"]) != local_detail["rows"]:
         raise RuntimeError(f"Filas de detalle no coinciden: {validation}")
     if int(validation["dashboard_rows"]) != local_dashboard["rows"]:
@@ -720,6 +723,20 @@ SELECT
     for table in stages.values():
         run([bq, f"--project_id={args.project}", "rm", "-f", "-t", f"{args.project}:{args.dataset}.{table}"])
     print(json.dumps({"ok": True, "release_id": release_id, "validation": validation}, indent=2))
+    if not args.skip_reconciliation:
+        run(
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "reconcile_bigquery_release.py"),
+                f"--project={args.project}",
+                f"--dataset={args.dataset}",
+                f"--location={args.location}",
+                f"--bucket={args.bucket}",
+                f"--prefix={args.prefix}",
+                f"--release-id={release_id}",
+                "--apply",
+            ]
+        )
 
 
 if __name__ == "__main__":
