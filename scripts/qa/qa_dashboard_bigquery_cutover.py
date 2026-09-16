@@ -22,9 +22,11 @@ class EmptyQueryJob:
 class RecordingBigQueryClient:
     def __init__(self) -> None:
         self.job_config = None
+        self.sql = None
 
-    def query(self, _sql: str, *, job_config, location: str):
+    def query(self, sql: str, *, job_config, location: str):
         assert location == "US"
+        self.sql = sql
         self.job_config = job_config
         return EmptyQueryJob()
 
@@ -40,6 +42,7 @@ def assert_bigquery_cost_guard() -> None:
         start_month=None,
         end_month=None,
         search_tokens=[],
+        artist_scope_tokens=["candu"],
         use_all_months=False,
         month_limit=6,
         ranking_limit=10,
@@ -49,6 +52,8 @@ def assert_bigquery_cost_guard() -> None:
     assert rows == []
     assert client.job_config is not None
     assert client.job_config.maximum_bytes_billed == 2_500_000_000
+    parameters = {parameter.name: parameter for parameter in client.job_config.query_parameters}
+    assert parameters["artist_scope_tokens"].values == ["candu"]
 
 
 def assert_dashboard_switch() -> None:

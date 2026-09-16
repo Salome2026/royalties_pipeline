@@ -8918,6 +8918,7 @@ def query_royalties_dashboard_from_bigquery(
     period_basis: str,
     period_mode: str,
     limit: int,
+    artist_scope: set[str] | None = None,
 ) -> dict[str, Any]:
     return query_royalties_dashboard_bigquery(
         policy_document=load_distributor_policy_document(),
@@ -8930,6 +8931,7 @@ def query_royalties_dashboard_from_bigquery(
         period_basis=period_basis,
         period_mode=period_mode,
         limit=limit,
+        artist_scope=artist_scope,
         project=VPO_BIGQUERY_PROJECT,
         dataset=VPO_BIGQUERY_DATASET,
         location=VPO_BIGQUERY_LOCATION,
@@ -8955,8 +8957,20 @@ def royalties_dashboard(
     limit: int = 10,
     refresh_cache: bool = False,
     x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
 ):
     require_api_key(x_vpo_api_key)
+    artist_scope = None
+    dashboard_username = x_vpo_username if isinstance(x_vpo_username, str) else None
+    if clean_username(dashboard_username or ""):
+        with operational_connect() as conn:
+            dashboard_permission = require_module_permission(
+                conn,
+                dashboard_username,
+                "royalties_dashboard",
+                "access",
+            )
+        artist_scope = dashboard_permission.get("scope")
     response.headers["X-VPO-Dashboard-Backend"] = "parquet"
     if VPO_ROYALTIES_DASHBOARD_BACKEND == "bigquery":
         started = time.perf_counter()
@@ -8971,6 +8985,7 @@ def royalties_dashboard(
                 period_basis=period_basis,
                 period_mode=period_mode,
                 limit=limit,
+                artist_scope=artist_scope,
             )
         except Exception as exc:
             elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
@@ -9010,6 +9025,11 @@ def royalties_dashboard(
         set(base.collect_schema().names()),
         amount_col="amount_usd",
     )
+    if artist_scope is not None:
+        artist_filters = [contains_search_expr(pl.col("artist"), artist) for artist in artist_scope]
+        if not artist_filters:
+            raise HTTPException(status_code=403, detail="No tenes artistas habilitados para este dashboard.")
+        base = base.filter(pl.any_horizontal(*artist_filters))
     personalization_state = {
         **policy_document["report_personalization"],
         "policy_version": policy_document["policy_version"],
@@ -9287,8 +9307,20 @@ def royalties_dashboard_bigquery_shadow(
     limit: int = 10,
     refresh_cache: bool = False,
     x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
 ):
     require_api_key(x_vpo_api_key)
+    artist_scope = None
+    dashboard_username = x_vpo_username if isinstance(x_vpo_username, str) else None
+    if clean_username(dashboard_username or ""):
+        with operational_connect() as conn:
+            dashboard_permission = require_module_permission(
+                conn,
+                dashboard_username,
+                "royalties_dashboard",
+                "access",
+            )
+        artist_scope = dashboard_permission.get("scope")
     del refresh_cache
     try:
         return query_royalties_dashboard_from_bigquery(
@@ -9301,6 +9333,7 @@ def royalties_dashboard_bigquery_shadow(
             period_basis=period_basis,
             period_mode=period_mode,
             limit=limit,
+            artist_scope=artist_scope,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

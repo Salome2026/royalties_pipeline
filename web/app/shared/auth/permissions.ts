@@ -7,6 +7,7 @@ const ARTIST_SCOPED_MODULES = new Set([
   "booking_commissions",
   "artist_finance",
   "finance_movements",
+  "royalties_dashboard",
 ]);
 
 export function artistScopeKey(value: string) {

@@ -105,6 +105,19 @@ def dashboard_sql(
 WITH option_base AS (
   SELECT source, account, {period_column} AS period_month
   FROM {table}
+  WHERE ARRAY_LENGTH(@artist_scope_tokens) = 0
+    OR EXISTS (
+      SELECT 1
+      FROM UNNEST(@artist_scope_tokens) AS token
+      WHERE STRPOS(
+        REGEXP_REPLACE(NORMALIZE_AND_CASEFOLD(COALESCE(artist, ''), NFD), r'\pM', ''),
+        token
+      ) > 0
+        OR STRPOS(
+          REGEXP_REPLACE(REGEXP_REPLACE(NORMALIZE_AND_CASEFOLD(COALESCE(artist, ''), NFD), r'\pM', ''), r'[\s_-]+', ''),
+          REGEXP_REPLACE(token, r'[\s_-]+', '')
+        ) > 0
+    )
 ),
 base AS (
   SELECT
@@ -125,6 +138,21 @@ base AS (
     REGEXP_REPLACE(NORMALIZE_AND_CASEFOLD(COALESCE(search_text, ''), NFD), r'\pM', '') AS normalized_search
   FROM {table}
   WHERE {period_column} IS NOT NULL
+    AND (
+      ARRAY_LENGTH(@artist_scope_tokens) = 0
+      OR EXISTS (
+        SELECT 1
+        FROM UNNEST(@artist_scope_tokens) AS token
+        WHERE STRPOS(
+          REGEXP_REPLACE(NORMALIZE_AND_CASEFOLD(COALESCE(artist, ''), NFD), r'\pM', ''),
+          token
+        ) > 0
+          OR STRPOS(
+            REGEXP_REPLACE(REGEXP_REPLACE(NORMALIZE_AND_CASEFOLD(COALESCE(artist, ''), NFD), r'\pM', ''), r'[\s_-]+', ''),
+            REGEXP_REPLACE(token, r'[\s_-]+', '')
+          ) > 0
+      )
+    )
 ),
 filtered AS (
   SELECT *
@@ -298,6 +326,7 @@ def query_rows(
     start_month: str | None,
     end_month: str | None,
     search_tokens: list[str],
+    artist_scope_tokens: list[str],
     use_all_months: bool,
     month_limit: int,
     ranking_limit: int,
@@ -313,6 +342,7 @@ def query_rows(
             bigquery.ScalarQueryParameter("start_month", "DATE", month_date(start_month)),
             bigquery.ScalarQueryParameter("end_month", "DATE", month_date(end_month)),
             bigquery.ArrayQueryParameter("search_tokens", "STRING", search_tokens),
+            bigquery.ArrayQueryParameter("artist_scope_tokens", "STRING", artist_scope_tokens),
             bigquery.ScalarQueryParameter("use_all_months", "BOOL", use_all_months),
             bigquery.ScalarQueryParameter("month_limit", "INT64", month_limit),
             bigquery.ScalarQueryParameter("ranking_limit", "INT64", ranking_limit),
@@ -486,6 +516,7 @@ def royalties_dashboard_bigquery(
     account: str | None = None,
     keyword: str | None = None,
     artist_keyword: str | None = None,
+    artist_scope: Iterable[str] | None = None,
     start_month: str | None = None,
     end_month: str | None = None,
     period_basis: str = "statement_period",
@@ -500,6 +531,12 @@ def royalties_dashboard_bigquery(
     safe_limit = max(3, min(int(limit or 10), 50))
     search = normalize_search_text(keyword or artist_keyword or "")
     search_tokens = [part for part in search.split() if part]
+    artist_scope_tokens = sorted({
+        normalized
+        for value in (artist_scope or [])
+        for normalized in [normalize_search_text(value)]
+        if normalized
+    })
     use_all_months = bool(start_month or end_month or period_mode in {"single_month", "closed_range", "all"})
     month_limit = 12 if period_mode == "last_12_months" else 6
     sql = dashboard_sql(
@@ -517,6 +554,7 @@ def royalties_dashboard_bigquery(
         start_month=start_month,
         end_month=end_month,
         search_tokens=search_tokens,
+        artist_scope_tokens=artist_scope_tokens,
         use_all_months=use_all_months,
         month_limit=month_limit,
         ranking_limit=safe_limit,

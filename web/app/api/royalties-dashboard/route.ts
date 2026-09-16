@@ -33,7 +33,10 @@ export async function GET(request: NextRequest) {
 
   const params = request.nextUrl.searchParams.toString();
   const response = await fetch(`${config.apiUrl}/royalties-dashboard${params ? `?${params}` : ""}`, {
-    headers: { "X-VPO-API-Key": config.apiKey },
+    headers: {
+      "X-VPO-API-Key": config.apiKey,
+      "X-VPO-Username": config.user.username,
+    },
     cache: "no-store",
   });
 

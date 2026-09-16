@@ -2128,6 +2128,28 @@ export default function Home() {
     canEditModule,
     canApproveModule,
   } = useSession();
+
+  useEffect(() => {
+    if (!authenticated || currentUser?.role === "admin" || currentUserModuleAccess === null) return;
+    const royaltyPermission = currentUserPermissions?.find(
+      (permission) => permission.module_key === "royalties_dashboard" && permission.can_access,
+    );
+    const hasArtistScope = royaltyPermission?.scope?.some(
+      (item) => item.scope_type === "artist" && item.scope_ref,
+    );
+    const hasGlobalScope = royaltyPermission?.scope?.some(
+      (item) => item.scope_type === "all" && item.scope_ref === "*",
+    );
+    if (
+      currentUserModuleAccess.length === 1
+      && currentUserModuleAccess[0] === "royalties_dashboard"
+      && hasArtistScope
+      && !hasGlobalScope
+    ) {
+      window.location.replace("/portal-artista");
+    }
+  }, [authenticated, currentUser?.role, currentUserModuleAccess, currentUserPermissions]);
+
   const [view, setView] = useState<View>("menu");
   const [bookingWorkspaceMode, setBookingWorkspaceMode] = useState<BookingWorkspaceMode>("individual");
   const [username, setUsername] = useState("");
