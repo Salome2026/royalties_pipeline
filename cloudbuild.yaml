@@ -46,6 +46,28 @@ steps:
       - --region=${_REGION}
       - --quiet
 
+  - id: Verify production alignment
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        EXPECTED_IMAGE="${_IMAGE_REPOSITORY}/vpo-corp-platform:${COMMIT_SHA}"
+        API_IMAGE="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --format='value(spec.template.spec.containers[0].image)')"
+        JOB_IMAGE="$(gcloud run jobs describe "${_REPORT_JOB}" --region="${_REGION}" --format='value(spec.template.spec.template.spec.containers[0].image)')"
+        TRAFFIC="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --format='value(status.traffic[0].percent)')"
+        SERVICE_URL="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --format='value(status.url)')"
+
+        test "$API_IMAGE" = "$EXPECTED_IMAGE"
+        test "$JOB_IMAGE" = "$EXPECTED_IMAGE"
+        test "$TRAFFIC" = "100"
+
+        HEALTH_JSON="$(curl --fail --silent --show-error --retry 4 --retry-all-errors --retry-delay 10 --max-time 120 "${SERVICE_URL}/health/ready")"
+        printf '%s' "$HEALTH_JSON" | grep -q '"status":"ok"'
+        printf '%s' "$HEALTH_JSON" | grep -q '"active_release_id":"'
+        printf '%s' "$HEALTH_JSON" | grep -q '"using_stale_fallback":false'
+        printf '%s' "$HEALTH_JSON" | grep -q '"last_error":null'
+
 images:
   - ${_IMAGE_REPOSITORY}/vpo-corp-platform:${COMMIT_SHA}
 

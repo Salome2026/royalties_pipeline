@@ -6827,22 +6827,58 @@ def require_known_booking_artist(artist: str) -> str:
     return canonical
 
 
-@app.get("/health")
-def health() -> dict:
+def build_health_payload(*, ensure_release: bool = False) -> dict:
     sheets_auth_mode = "oauth_user" if GOOGLE_OAUTH_TOKEN_JSON else "service_account"
     local_marts = VPO_LOCAL_MARTS_DIR is not None and VPO_LOCAL_MARTS_DIR.exists()
+    release_error = None
+    if ensure_release and not local_marts:
+        try:
+            ensure_marts(refresh_cache=False, filenames=[STATEMENT_SUMMARY_FILE])
+        except Exception as exc:
+            release_error = f"{type(exc).__name__}: {exc}"
+
+    cache_status = None if local_marts else mart_release_cache().status()
+    database_status = operational_db_healthcheck()
+    issues = []
+    if database_status.get("status") != "ok":
+        issues.append("operational_db")
+    if release_error:
+        issues.append("mart_release")
+    if cache_status:
+        if cache_status.get("using_stale_fallback"):
+            issues.append("mart_cache_fallback")
+        if cache_status.get("last_error"):
+            issues.append("mart_cache_error")
+        if ensure_release and not cache_status.get("active_release_id"):
+            issues.append("mart_release_missing")
+
     return {
-        "status": "ok",
+        "status": "degraded" if issues else "ok",
+        "issues": issues,
         "bucket": GCS_BUCKET,
         "prefix": GCS_PREFIX,
         "marts_mode": "local" if local_marts else "gcs",
         "local_marts_dir": str(VPO_LOCAL_MARTS_DIR) if VPO_LOCAL_MARTS_DIR is not None else "",
-        "mart_cache": None if local_marts else mart_release_cache().status(),
+        "mart_cache": cache_status,
+        "release_check_error": release_error,
         "sheets_auth_mode": sheets_auth_mode,
         "drive_folder_configured": "yes" if GOOGLE_DRIVE_FOLDER_ID else "no",
         "share_email_configured": "yes" if GOOGLE_SHEETS_SHARE_EMAIL else "no",
-        "operational_db": operational_db_healthcheck(),
+        "operational_db": database_status,
     }
+
+
+@app.get("/health")
+def health() -> dict:
+    return build_health_payload()
+
+
+@app.get("/health/ready")
+def readiness(response: Response) -> dict:
+    payload = build_health_payload(ensure_release=True)
+    if payload["status"] != "ok":
+        response.status_code = 503
+    return payload
 
 
 @app.get("/source-monitor")

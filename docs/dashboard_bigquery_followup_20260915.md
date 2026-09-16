@@ -22,7 +22,7 @@ cambiar la lectura productiva hasta conciliar y comparar.
 | QUEUE-001 Heartbeat y deteccion de procesos trabados | Pendiente | Por asignar | - | - | Pendiente | - | - |
 | QUEUE-002 Concurrencia global y reintentos | Pendiente | Por asignar | - | - | Pendiente | - | - |
 | ING-001 Ingesta durable y publicacion atomica | En curso: publicacion atomica completa; job durable y reintentos pendientes | Codex / por asignar | Manifiesto escrito despues de los objetos inmutables; canonicales de compatibilidad; release activo abajo | Seis sobrescrituras secuenciales sin puntero comun | API y nuevos Jobs leen una sola version; persistencia del job de ingesta pendiente | `2e5dc14`, `224c50d` | Release inicial activo en GCS; API/Job alineados |
-| OPS-001 Metricas, alertas y despliegue | Pendiente | Por asignar | - | - | Pendiente | - | - |
+| OPS-001 Metricas, alertas y despliegue | Completo: readiness, cinco alertas y bloqueo de despliegue | Codex | `/health/ready`; uptime cada minuto; politicas 5xx, p95, memoria y Job; Cloud Build verifica imagen, trafico, release y fallback | 0 politicas, 0 canales; p95 horario maximo 231.9 s, memoria p95 maxima 42.8%, 7 respuestas 5xx en 24 h | 5 politicas con correo operativo, readiness externo y gate reproducible | Entrega OPS-001 | Cloud Monitoring + siguiente revision API/Job |
 
 No se debe completar una tarea sin actualizar las ocho columnas. Las cifras
 locales son referencia para comparar una implementacion nueva, no sustituyen
@@ -243,9 +243,8 @@ retencion/limpieza de releases antiguos para controlar almacenamiento.
 
 ## Proxima decision E1/E2
 
-`PERF-001`, `PERF-002` y `PERF-003` ya tienen evidencia productiva. El siguiente
-paso recomendado es `OPS-001`: alertas y metricas para latencia, 5xx, memoria,
-release activo y fallback. Despues se puede iniciar `BQ-001`/`BQ-002` en
-paralelo, manteniendo A/B/C y los bordes como casos de equivalencia. La parte
-restante de `ING-001` se coordina con `QUEUE-001` y `QUEUE-002` para persistir
-estado, heartbeat, concurrencia global y reintentos.
+`PERF-001`, `PERF-002`, `PERF-003` y `OPS-001` ya tienen implementacion y
+evidencia productiva. El siguiente paso recomendado es iniciar `BQ-001` y
+`BQ-002` en paralelo, manteniendo A/B/C y los bordes como casos de equivalencia.
+La parte restante de `ING-001` se coordina con `QUEUE-001` y `QUEUE-002` para
+persistir estado, heartbeat, concurrencia global y reintentos.

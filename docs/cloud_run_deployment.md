@@ -89,6 +89,9 @@ Cada despliegue debe usar un digest, no depender de una etiqueta mutable. API y
 Job se actualizan al mismo digest y luego se verifican:
 
 - `/health` de la API;
+- `/health/ready`, que valida Cloud SQL y activa/verifica el release analitico;
+- misma imagen inmutable en API y Job, con 100% del trafico en la revision nueva;
+- cache sin fallback obsoleto ni ultimo error;
 - ausencia de rutas sincronas y `/reports/jobs/<id>/execute` en OpenAPI;
 - creacion de un trabajo desde localhost y desde cloud;
 - finalizacion del Job y metadata completa en PostgreSQL;
@@ -103,6 +106,10 @@ contra propietarios anteriores del repositorio.
 
 El mismo despliegue fija `application_name` y los limites del pool: 1 a 4 para
 la API y 0 a 2 para cada ejecucion del Job.
+
+El ultimo paso de `cloudbuild.yaml` bloquea el cierre del despliegue si API y
+Job no usan la imagen del commit, el trafico no esta al 100%, readiness no esta
+saludable, no hay release activo o la cache esta usando fallback.
 
 El frontend conserva:
 
