@@ -11645,7 +11645,6 @@ def create_employee_record(
         returned = cursor.fetchone()
         employee_id = int(returned["id"] if returned else cursor.lastrowid)
         upsert_employee_functions(conn, employee_id, request.functions)
-        upsert_employee_user(conn, employee_id, request.username, request.user_role, request.user_active)
         if request.permissions is not None:
             upsert_employee_permissions(conn, employee_id, request.permissions)
         if not request.permissions or not any(
