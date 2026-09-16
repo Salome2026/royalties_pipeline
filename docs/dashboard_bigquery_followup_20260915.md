@@ -12,9 +12,9 @@ cambiar la lectura productiva hasta conciliar y comparar.
 | PERF-001 Linea base y casos testigo | Completo: tres casos productivos y respuestas testigo; percentiles pendientes de OPS-001 | Codex | Tabla de mediciones y hashes abajo; seis marts GCS verificados; politica v10 | Local previo: 6m 37.2 s, 1m 10.3 s, FUGA 6m 25.1 s; historico cloud hasta 147.2 s y dos 503 | Produccion: A 87.1 s, B 6.9 s, C 32.1 s; una muestra por caso | `7528dc7` | API `00162-brg`, GCS 18:33 |
 | PERF-002 Dashboard con una sola lectura | En uso: agregados principales unificados; opciones/meses aun aparte | Codex | Seis respuestas JSON equivalentes, hashes A/B/C iguales en canaria y publica; 17 planes en un `pl.collect_all`; pico local 1324 MB con una CPU | Produccion A 87.1 s, B 6.9 s, C 32.1 s | Cloud Run A 11.5 s, B 1.2 s, C 4.1 s; A publico 8.7 s con release cache | `8bf54ca` | Incluido en API `00168-9mj`; Job y Vercel alineados |
 | PERF-003 Cache por generacion de datos | Completo: release inmutable, manifiesto y fallback sano | Codex | Release y generaciones abajo; QA de concurrencia/corrupcion; dashboard con SHA-256 exacto; Job pinneado al release | Cache por existencia; reconstruccion >180 s y colision concurrente 500 | Dashboard publico 8.7 s; opciones de reportes 1.5-2.0 s; 0 errores en canaria final | `2e5dc14`, `6b592d0`, `8ffb969`, `224c50d` | API `00168-9mj` al 100%; release `20260916T054421Z-59591cb8592a` |
-| BQ-001 Dataset, esquemas y permisos | Completo: capa analitica sombra creada en US | Codex | Dataset `royalties_analytics`; 8 tablas, 3 vistas; particiones mensuales, clustering y permisos de lectura/consulta para API y Job | No habia datasets ni tablas BigQuery | Esquema completo validado y disponible sin cambiar lectores productivos | `861714f` | BigQuery `vpo-corp-royalties.royalties_analytics` |
+| BQ-001 Dataset, esquemas y permisos | Completo: capa analitica sombra creada en US | Codex | Dataset `royalties_analytics`; 10 tablas, 3 vistas; particiones mensuales, clustering y permisos de lectura/consulta para API y Job | No habia datasets ni tablas BigQuery | Esquema completo validado y disponible sin cambiar lectores productivos | `861714f`, `9d601d6` | BigQuery `vpo-corp-royalties.royalties_analytics` |
 | BQ-002 Carga versionada desde GCS | Completo: release vigente cargado y validado | Codex | Release `20260916T065558Z-4270970b55a3`; objetos curados inmutables en GCS; carga transaccional; conteos e importes conciliados a centavos | 0 releases en BigQuery | 12,355,023 movimientos y 3,194,911 filas de dashboard disponibles en sombra | `861714f` | BigQuery release `ready`; produccion sigue en Parquet/GCS |
-| BQ-003 Conciliacion por fuente, cuenta y mes | Pendiente | Por asignar | - | - | Pendiente | - | - |
+| BQ-003 Conciliacion por fuente, cuenta y mes | Completo: control automatico y persistente | Codex | Run `20260916T150010Z-ae47e0ab`; 757 grupos; 0 diferencias; informe y resultados inmutables en GCS/BigQuery | Solo validacion global de filas e importes | 306 grupos statement y 451 transaction conciliados; assets contados por ISRC | `9d601d6` | Release BigQuery `ready`; futuras cargas quedan bloqueadas hasta conciliar |
 | DASH-001 Consultas y agregados en BigQuery | Pendiente | Por asignar | - | - | Pendiente | - | - |
 | DASH-002 Comparacion y cambio gradual | Pendiente | Por asignar | - | - | Pendiente | - | - |
 | REP-001 Lectura de informes desde BigQuery | Pendiente | Por asignar | - | - | Pendiente | - | - |
@@ -243,18 +243,18 @@ retencion/limpieza de releases antiguos para controlar almacenamiento.
 
 ## Proxima decision E1/E2
 
-`PERF-001`, `PERF-002`, `PERF-003`, `OPS-001`, `BQ-001` y `BQ-002` ya tienen
-implementacion y evidencia. BigQuery permanece en modo sombra: el dashboard y
-los reportes productivos siguen leyendo el release Parquet/GCS. El siguiente
-paso recomendado es `BQ-003`, conciliando automaticamente por fuente, cuenta y
-mes antes de iniciar `DASH-001`. La parte restante de `ING-001` se coordina con
-`QUEUE-001` y `QUEUE-002` para persistir estado, heartbeat, concurrencia global
-y reintentos.
+`PERF-001`, `PERF-002`, `PERF-003`, `OPS-001`, `BQ-001`, `BQ-002` y `BQ-003`
+ya tienen implementacion y evidencia. BigQuery permanece en modo sombra: el
+dashboard y los reportes productivos siguen leyendo el release Parquet/GCS. El
+siguiente paso recomendado es `DASH-001`, implementando el contrato actual del
+dashboard sobre las tablas conciliadas. La parte restante de `ING-001` se
+coordina con `QUEUE-001` y `QUEUE-002` para persistir estado, heartbeat,
+concurrencia global y reintentos.
 
 ## BQ-001/BQ-002: base analitica sombra
 
 El 2026-09-16 se creo el dataset `vpo-corp-royalties.royalties_analytics` en
-`US`, la misma ubicacion multirregional del bucket. Contiene ocho tablas y tres
+`US`, la misma ubicacion multirregional del bucket. Contiene diez tablas y tres
 vistas. Las tablas de hechos y agregados mensuales estan particionadas por mes
 y agrupadas por release, fuente, cuenta y la dimension de busqueda principal.
 Las cuentas de servicio de la API/publicador y del Job de reportes tienen
@@ -282,3 +282,26 @@ operativa exige igualdad a un centavo. Una consulta representativa del
 dashboard para seis meses tiene un limite estimado de 44,023,631 bytes
 procesados. El procedimiento reproducible y los comandos de recuperacion
 quedan en `docs/bigquery_shadow.md`.
+
+## BQ-003: conciliacion por fuente, cuenta y mes
+
+La ejecucion valida `20260916T150010Z-ae47e0ab` comparo el release vigente en
+Parquet contra BigQuery en 757 grupos: 306 por mes de statement y 451 por mes
+de transaccion. No hubo diferencias de filas, unidades, cantidad de ISRC,
+filas sin ISRC ni grupos de titulos con multiples ISRC. La diferencia monetaria
+maxima fue menor a USD 0.000000002, ampliamente dentro de la tolerancia de un
+centavo.
+
+La identidad de asset es el ISRC. Un mismo titulo asociado a dos ISRC se trata
+como dos assets distintos; el titulo es descriptivo y nunca se utiliza para
+fusionar o deduplicar grabaciones. El control registro 4,376 apariciones
+mensuales de titulos con multiples ISRC entre ambas bases temporales y las
+concilio sin marcarlas como error.
+
+La carga BigQuery ahora deja cada release en estado `loaded`, ejecuta
+automaticamente la conciliacion y solo lo cambia a `ready` cuando el resultado
+no tiene diferencias. Un resultado fallido queda en
+`reconciliation_failed`, conserva su evidencia y hace fallar el proceso de
+carga. Los resultados se guardan en las tablas
+`analytics_reconciliation_runs` y `analytics_reconciliation_results`, ademas
+de objetos inmutables en GCS.
