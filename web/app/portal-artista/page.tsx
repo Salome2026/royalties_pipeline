@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   LayoutDashboard,
   LogOut,
@@ -139,6 +139,7 @@ export default function ArtistPortal() {
   const [periodBasis, setPeriodBasis] = useState<"statement_period" | "transaction_month">("statement_period");
   const [period, setPeriod] = useState<PeriodSelection>({ mode: "last_6_months" });
   const [tab, setTab] = useState<"overview" | "youtube">("overview");
+  const activeUsernameRef = useRef<string | undefined>(currentUser?.username);
 
   const permission = permissions?.find((item) => item.module_key === "royalties_dashboard");
   const artistScope = permission?.scope?.filter((item) => item.scope_type === "artist" && item.scope_ref) || [];
@@ -162,6 +163,20 @@ export default function ArtistPortal() {
     [dashboard],
   );
 
+  useEffect(() => {
+    activeUsernameRef.current = currentUser?.username;
+    setDashboard(null);
+    setLoading(false);
+    setDisplayName("");
+    setError("");
+    setKeyword("");
+    setSource("");
+    setAccount("");
+    setPeriodBasis("statement_period");
+    setPeriod({ mode: "last_6_months" });
+    setTab("overview");
+  }, [currentUser?.username]);
+
   const loadDashboard = useCallback(async (overrides?: {
     keyword?: string;
     source?: string;
@@ -169,6 +184,7 @@ export default function ArtistPortal() {
     period?: PeriodSelection;
     periodBasis?: "statement_period" | "transaction_month";
   }) => {
+    const requestUsername = activeUsernameRef.current;
     setLoading(true);
     setError("");
     try {
@@ -192,11 +208,13 @@ export default function ArtistPortal() {
       const response = await fetch(`/api/royalties-dashboard?${params.toString()}`, { cache: "no-store" });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "No se pudo cargar el dashboard.");
+      if (activeUsernameRef.current !== requestUsername) return;
       setDashboard(payload);
     } catch (loadError) {
+      if (activeUsernameRef.current !== requestUsername) return;
       setError(loadError instanceof Error ? loadError.message : "No se pudo cargar el dashboard.");
     } finally {
-      setLoading(false);
+      if (activeUsernameRef.current === requestUsername) setLoading(false);
     }
   }, [account, keyword, period, periodBasis, source]);
 
