@@ -82,5 +82,6 @@ fusionarlos accidentalmente.
 La carga deja primero el release en estado `loaded`. La conciliacion lo cambia
 a `ready` cuando no hay diferencias o a `reconciliation_failed` cuando alguna
 metrica excede su tolerancia. `DASH-001` ya expone el contrato completo en
-`/royalties-dashboard/bigquery-shadow`; el frontend sigue usando la ruta
-Parquet. El cambio productivo continua reservado para `DASH-002`.
+`/royalties-dashboard/bigquery-shadow`; desde DASH-002 el frontend usa la ruta
+principal con BigQuery y la ruta sombra queda disponible para diagnostico. El
+fallback automatico conserva Parquet como respaldo operativo.

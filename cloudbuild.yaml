@@ -28,7 +28,8 @@ steps:
       - --image=${_IMAGE_REPOSITORY}/vpo-corp-platform:${COMMIT_SHA}
       - --labels=managed-by=cloud-build,commit-sha=${COMMIT_SHA}
       - --set-cloudsql-instances=${_CLOUDSQL_CONNECTION_NAME}
-      - --update-env-vars=VPO_CLOUDSQL_CONNECTION_NAME=${_CLOUDSQL_CONNECTION_NAME},VPO_POSTGRES_APPLICATION_NAME=vpo-corp-api,VPO_POSTGRES_POOL_MIN_SIZE=1,VPO_POSTGRES_POOL_MAX_SIZE=4,VPO_POSTGRES_POOL_TIMEOUT_SECONDS=10,VPO_POSTGRES_POOL_MAX_WAITING=16,VPO_POSTGRES_POOL_MAX_LIFETIME_SECONDS=1800,VPO_POSTGRES_POOL_MAX_IDLE_SECONDS=300
+      - --update-env-vars=VPO_CLOUDSQL_CONNECTION_NAME=${_CLOUDSQL_CONNECTION_NAME},VPO_POSTGRES_APPLICATION_NAME=vpo-corp-api,VPO_POSTGRES_POOL_MIN_SIZE=1,VPO_POSTGRES_POOL_MAX_SIZE=4,VPO_POSTGRES_POOL_TIMEOUT_SECONDS=10,VPO_POSTGRES_POOL_MAX_WAITING=16,VPO_POSTGRES_POOL_MAX_LIFETIME_SECONDS=1800,VPO_POSTGRES_POOL_MAX_IDLE_SECONDS=300,VPO_ROYALTIES_DASHBOARD_BACKEND=bigquery,VPO_ROYALTIES_DASHBOARD_BIGQUERY_FALLBACK=1,VPO_BIGQUERY_PROJECT=vpo-corp-royalties,VPO_BIGQUERY_DATASET=royalties_analytics,VPO_BIGQUERY_LOCATION=US,VPO_BIGQUERY_MAX_BYTES_BILLED=2500000000
+      - --max=2
       - --region=${_REGION}
       - --quiet
 
@@ -46,6 +47,18 @@ steps:
       - --region=${_REGION}
       - --quiet
 
+  - id: Route API traffic
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - services
+      - update-traffic
+      - ${_API_SERVICE}
+      - --to-latest
+      - --region=${_REGION}
+      - --quiet
+
   - id: Verify production alignment
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     entrypoint: bash
@@ -56,17 +69,23 @@ steps:
         API_IMAGE="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --format='value(spec.template.spec.containers[0].image)')"
         JOB_IMAGE="$(gcloud run jobs describe "${_REPORT_JOB}" --region="${_REGION}" --format='value(spec.template.spec.template.spec.containers[0].image)')"
         TRAFFIC="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --format='value(status.traffic[0].percent)')"
+        LATEST_REVISION="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --format='value(status.latestReadyRevisionName)')"
+        SERVING_REVISION="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --format='value(status.traffic[0].revisionName)')"
+        SERVING_COMMIT="$(gcloud run revisions describe "$${SERVING_REVISION}" --region="${_REGION}" --format='value(metadata.labels.commit-sha)')"
         SERVICE_URL="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --format='value(status.url)')"
 
         test "$${API_IMAGE}" = "$${EXPECTED_IMAGE}"
         test "$${JOB_IMAGE}" = "$${EXPECTED_IMAGE}"
         test "$${TRAFFIC}" = "100"
+        test "$${SERVING_REVISION}" = "$${LATEST_REVISION}"
+        test "$${SERVING_COMMIT}" = "${COMMIT_SHA}"
 
         HEALTH_JSON="$(curl --fail --silent --show-error --retry 4 --retry-all-errors --retry-delay 10 --max-time 120 "$${SERVICE_URL}/health/ready")"
         printf '%s' "$${HEALTH_JSON}" | grep -q '"status":"ok"'
         printf '%s' "$${HEALTH_JSON}" | grep -q '"active_release_id":"'
         printf '%s' "$${HEALTH_JSON}" | grep -q '"using_stale_fallback":false'
         printf '%s' "$${HEALTH_JSON}" | grep -q '"last_error":null'
+        printf '%s' "$${HEALTH_JSON}" | grep -q '"backend":"bigquery"'
 
 images:
   - ${_IMAGE_REPOSITORY}/vpo-corp-platform:${COMMIT_SHA}

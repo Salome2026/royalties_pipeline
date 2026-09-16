@@ -13,10 +13,10 @@ cambiar la lectura productiva hasta conciliar y comparar.
 | PERF-002 Dashboard con una sola lectura | En uso: agregados principales unificados; opciones/meses aun aparte | Codex | Seis respuestas JSON equivalentes, hashes A/B/C iguales en canaria y publica; 17 planes en un `pl.collect_all`; pico local 1324 MB con una CPU | Produccion A 87.1 s, B 6.9 s, C 32.1 s | Cloud Run A 11.5 s, B 1.2 s, C 4.1 s; A publico 8.7 s con release cache | `8bf54ca` | Incluido en API `00168-9mj`; Job y Vercel alineados |
 | PERF-003 Cache por generacion de datos | Completo: release inmutable, manifiesto y fallback sano | Codex | Release y generaciones abajo; QA de concurrencia/corrupcion; dashboard con SHA-256 exacto; Job pinneado al release | Cache por existencia; reconstruccion >180 s y colision concurrente 500 | Dashboard publico 8.7 s; opciones de reportes 1.5-2.0 s; 0 errores en canaria final | `2e5dc14`, `6b592d0`, `8ffb969`, `224c50d` | API `00168-9mj` al 100%; release `20260916T054421Z-59591cb8592a` |
 | BQ-001 Dataset, esquemas y permisos | Completo: capa analitica sombra creada en US | Codex | Dataset `royalties_analytics`; 10 tablas, 3 vistas; particiones mensuales, clustering y permisos de lectura/consulta para API y Job | No habia datasets ni tablas BigQuery | Esquema completo validado y disponible sin cambiar lectores productivos | `861714f`, `9d601d6` | BigQuery `vpo-corp-royalties.royalties_analytics` |
-| BQ-002 Carga versionada desde GCS | Completo: release vigente cargado y validado | Codex | Release `20260916T065558Z-4270970b55a3`; objetos curados inmutables en GCS; carga transaccional; conteos e importes conciliados a centavos | 0 releases en BigQuery | 12,355,023 movimientos y 3,194,911 filas de dashboard disponibles en sombra | `861714f` | BigQuery release `ready`; produccion sigue en Parquet/GCS |
+| BQ-002 Carga versionada desde GCS | Completo: release vigente cargado y validado | Codex | Release `20260916T065558Z-4270970b55a3`; objetos curados inmutables en GCS; carga transaccional; conteos e importes conciliados a centavos | 0 releases en BigQuery | 12,355,023 movimientos y 3,194,911 filas de dashboard disponibles | `861714f` | BigQuery release `ready`; consumido por el dashboard desde DASH-002 |
 | BQ-003 Conciliacion por fuente, cuenta y mes | Completo: control automatico y persistente | Codex | Run `20260916T150010Z-ae47e0ab`; 757 grupos; 0 diferencias; informe y resultados inmutables en GCS/BigQuery | Solo validacion global de filas e importes | 306 grupos statement y 451 transaction conciliados; assets contados por ISRC | `9d601d6` | Release BigQuery `ready`; futuras cargas quedan bloqueadas hasta conciliar |
-| DASH-001 Consultas y agregados en BigQuery | Completo en sombra: contrato actual reproducido con una consulta | Codex | Ocho casos A-H equivalentes campo por campo en local y Cloud Run; ruta `/royalties-dashboard/bigquery-shadow`; opciones, matriz, rankings y YouTube | Parquet: A 8.7 s caliente; historico amplio puede superar un minuto | BigQuery productivo caliente: 1.05-1.58 s; frio local 3.5-8.5 s; respuestas exactas | `6cc60e7` | API `00176-8cm`, ruta sombra; dashboard visible sigue en Parquet |
-| DASH-002 Comparacion y cambio gradual | Pendiente | Por asignar | - | - | Pendiente | - | - |
+| DASH-001 Consultas y agregados en BigQuery | Completo y promovido por DASH-002 | Codex | Ocho casos A-H equivalentes campo por campo en local y Cloud Run; ruta `/royalties-dashboard/bigquery-shadow`; opciones, matriz, rankings y YouTube | Parquet: A 8.7 s caliente; historico amplio puede superar un minuto | BigQuery productivo caliente: 1.05-1.58 s; frio local 3.5-8.5 s; respuestas exactas | `6cc60e7` | Sombra en API `00176-8cm`; activado en `00197-vav` por DASH-002 |
+| DASH-002 Comparacion y cambio gradual | Completo: BigQuery activo con fallback automatico | Codex | Casos A-H equivalentes; canaria 8/8 sin fallback; trafico 10/50/100; evidencia JSON; salud y modulos vecinos verificados | Parquet: 6m 8.1 s caliente; ISRC historico 89.9 s | BigQuery: 6m 1.8-1.9 s; ISRC 1.25 s canaria y 1.50-2.23 s caliente publico | `2f44372` + cierre DASH-002 | API `00197-vav` al 100%; Job alineado en `2f44372`; rollback `00178-jrz` |
 | REP-001 Lectura de informes desde BigQuery | Pendiente | Por asignar | - | - | Pendiente | - | - |
 | REP-002 Equivalencia Excel/PDF y limites de detalle | Pendiente | Por asignar | - | - | Pendiente | - | - |
 | QUEUE-001 Heartbeat y deteccion de procesos trabados | Pendiente | Por asignar | - | - | Pendiente | - | - |
@@ -331,3 +331,31 @@ repitio los ocho casos contra ambas rutas. Todos fueron equivalentes. La ruta
 BigQuery respondio entre 1.05 y 1.58 segundos, incluida la busqueda historica
 por ISRC en 1.54 segundos. La espera prolongada observada durante esa prueba
 correspondio a la ruta Parquet usada como referencia, no a BigQuery.
+
+## DASH-002: comparacion y cambio gradual
+
+La revision `vpo-corp-api-00197-vav` se creo sin trafico con BigQuery como
+motor, fallback automatico a Parquet y un limite de 2.5 GB procesados por
+consulta. Los ocho casos A-H coincidieron campo por campo con la revision
+Parquet `00178-jrz`. La canaria registro ocho resultados `ok`, ningun fallback
+y ningun error. La evidencia reproducible esta en
+`docs/dashboard_bigquery_cutover_evidence_20260916.json`.
+
+El trafico se traslado de 0% a 10%, 50% y 100%. En 10% hubo 20/20 respuestas
+HTTP 200, cuatro atendidas por BigQuery y el mismo total en todas. En 50% hubo
+16/16 respuestas HTTP 200, diez BigQuery y seis Parquet, tambien con importes
+identicos. La ruta publica quedo finalmente al 100% en BigQuery.
+
+En la comparacion A-H, BigQuery tardo entre 1.25 y 2.60 segundos. El caso de
+seis meses bajo de 8.12 a 1.80 segundos y la busqueda historica por ISRC bajo
+de 89.90 a 1.25 segundos. Despues del cambio, tres repeticiones publicas del
+ISRC tardaron 1.50, 2.23 y 2.08 segundos. El primer acceso publico en una
+instancia fria tardo 15.98 segundos; las siguientes respuestas confirmaron el
+comportamiento caliente esperado.
+
+`/health/ready` informa `backend=bigquery`, release
+`20260916T065558Z-4270970b55a3`, base operativa sana y cache sin fallback.
+Ingresos Digitales respondio en 1.49 segundos y las opciones de reportes en
+2.82 segundos. El rollback inmediato conserva la revision Parquet
+`vpo-corp-api-00178-jrz`; ademas, una falla aislada de BigQuery usa Parquet
+automaticamente sin exponer un error al usuario.

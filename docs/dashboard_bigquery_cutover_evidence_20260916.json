@@ -1,0 +1,71 @@
+{
+  "candidate_url": "https://dashboard-bigquery-canary---vpo-corp-api-32v4t5iawa-uc.a.run.app",
+  "cases": [
+    {
+      "amount_usd": 235728.81,
+      "candidate_backend": "bigquery",
+      "candidate_seconds": 1.799,
+      "case": "A_6m",
+      "equivalent": true,
+      "reference_seconds": 8.118
+    },
+    {
+      "amount_usd": 16778.37,
+      "candidate_backend": "bigquery",
+      "candidate_seconds": 1.333,
+      "case": "B_2026_09",
+      "equivalent": true,
+      "reference_seconds": 1.1
+    },
+    {
+      "amount_usd": 118863.91,
+      "candidate_backend": "bigquery",
+      "candidate_seconds": 1.272,
+      "case": "C_fuga_6m",
+      "equivalent": true,
+      "reference_seconds": 3.448
+    },
+    {
+      "amount_usd": 0.0,
+      "candidate_backend": "bigquery",
+      "candidate_seconds": 2.598,
+      "case": "D_empty",
+      "equivalent": true,
+      "reference_seconds": 0.552
+    },
+    {
+      "amount_usd": 33034.14,
+      "candidate_backend": "bigquery",
+      "candidate_seconds": 1.407,
+      "case": "E_transaction_2026_07",
+      "equivalent": true,
+      "reference_seconds": 1.297
+    },
+    {
+      "amount_usd": 19898.92,
+      "candidate_backend": "bigquery",
+      "candidate_seconds": 2.011,
+      "case": "F_ada_2026_06",
+      "equivalent": true,
+      "reference_seconds": 0.8
+    },
+    {
+      "amount_usd": 419.59,
+      "candidate_backend": "bigquery",
+      "candidate_seconds": 1.248,
+      "case": "G_isrc_search",
+      "equivalent": true,
+      "reference_seconds": 89.897
+    },
+    {
+      "amount_usd": 683.18,
+      "candidate_backend": "bigquery",
+      "candidate_seconds": 1.344,
+      "case": "H_ada_indyana_2026_06",
+      "equivalent": true,
+      "reference_seconds": 0.702
+    }
+  ],
+  "checked_at": "2026-09-16T16:34:46.348746+00:00",
+  "reference_url": "https://vpo-corp-api-32v4t5iawa-uc.a.run.app"
+}
