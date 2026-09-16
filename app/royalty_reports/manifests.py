@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Iterable
 
+from google.api_core.exceptions import NotFound
 from google.cloud import storage
 
 
@@ -11,6 +13,7 @@ REPORT_INPUT_FILENAMES = (
     "catalog_master.parquet",
     "catalog_status.parquet",
 )
+RELEASE_MANIFEST_FILENAME = "release_manifest.json"
 
 
 def gcs_object_name(prefix: str, filename: str) -> str:
@@ -29,11 +32,50 @@ def build_gcs_input_manifest(
         raise RuntimeError("GCS_BUCKET no esta configurado para resolver los marts.")
 
     expected = list(dict.fromkeys(filenames))
-    names = {gcs_object_name(prefix, filename): filename for filename in expected}
+    bucket = client.bucket(bucket_name)
+    release_blob = bucket.blob(gcs_object_name(prefix, RELEASE_MANIFEST_FILENAME))
+    release_document: dict[str, Any] | None = None
+    try:
+        release_blob.reload(client=client)
+        release_document = json.loads(
+            release_blob.download_as_bytes(if_generation_match=int(release_blob.generation))
+        )
+    except NotFound:
+        release_document = None
+
     objects: dict[str, dict[str, Any]] = {}
-    for blob in client.list_blobs(bucket_name, prefix=prefix.strip("/") or None):
-        filename = names.get(blob.name)
-        if filename is None:
+    if release_document is not None:
+        if int(release_document.get("schema_version") or 0) != 1:
+            raise RuntimeError("El manifiesto de publicacion no es valido.")
+        release_files = release_document.get("files")
+        if not isinstance(release_files, dict):
+            raise RuntimeError("El manifiesto de publicacion no contiene archivos.")
+        for filename in expected:
+            entry = release_files.get(filename)
+            if not isinstance(entry, dict):
+                continue
+            object_name = str(entry.get("object_name") or "")
+            generation = int(entry.get("generation") or 0)
+            if not object_name or generation <= 0:
+                raise RuntimeError(f"La version publicada de {filename} no es valida.")
+            objects[filename] = {
+                "uri": f"gs://{bucket_name}/{object_name}",
+                "object": object_name,
+                "generation": generation,
+                "size_bytes": int(entry.get("size_bytes") or 0),
+                "crc32c": entry.get("crc32c"),
+                "updated_at": release_document.get("published_at"),
+            }
+
+    # Governance and legacy objects that are not in the analytics release keep
+    # their own pinned canonical generation.
+    for filename in expected:
+        if filename in objects:
+            continue
+        blob = bucket.blob(gcs_object_name(prefix, filename))
+        try:
+            blob.reload(client=client)
+        except NotFound:
             continue
         objects[filename] = {
             "uri": f"gs://{bucket_name}/{blob.name}",
@@ -54,6 +96,10 @@ def build_gcs_input_manifest(
         "schema_version": 1,
         "bucket": bucket_name,
         "prefix": prefix.strip("/"),
+        "release_id": release_document.get("release_id") if release_document else None,
+        "release_manifest_generation": (
+            int(release_blob.generation) if release_document is not None else None
+        ),
         "objects": {filename: objects[filename] for filename in expected},
     }
 

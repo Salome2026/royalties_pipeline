@@ -94,6 +94,11 @@ package remain individually generation-aware under `cache/auxiliary/`. They do
 not change the active release manifest. An auxiliary report still requires its
 canonical GCS object to exist; the cache does not synthesize missing inputs.
 
+New royalty-report jobs pin `song`, `standardized`, and `catalog_master` to
+the immutable objects and generations in the active release manifest.
+`catalog_status.parquet` remains a separately versioned governance input and
+is pinned to its canonical generation when the job is created.
+
 ## Catalog snapshot
 
 The catalog can be published independently from the full marts publish:

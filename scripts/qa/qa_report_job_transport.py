@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
 from google.auth.credentials import Signing
+from google.api_core.exceptions import NotFound
 
 
 BASE = Path(__file__).resolve().parents[2]
@@ -49,16 +51,31 @@ class FakeSigningCredentials(Signing):
 
 
 class FakeBlob:
-    def __init__(self, name: str, *, generation: int = 11, size: int = 25) -> None:
+    def __init__(
+        self,
+        name: str,
+        *,
+        generation: int = 11,
+        size: int = 25,
+        data: bytes | None = None,
+    ) -> None:
         self.name = name
         self.generation = generation
         self.size = size
         self.crc32c = "crc32c"
         self.updated = None
         self.signed_options: dict | None = None
+        self.data = data
 
     def reload(self, client) -> None:
+        if self.name.endswith("release_manifest.json") and self.data is None:
+            raise NotFound(self.name)
         return None
+
+    def download_as_bytes(self, if_generation_match: int | None = None) -> bytes:
+        if self.data is None:
+            raise NotFound(self.name)
+        return self.data
 
     def generate_signed_url(self, **kwargs) -> str:
         self.signed_options = kwargs
@@ -110,6 +127,26 @@ def main() -> None:
         raise AssertionError("El Job debe recibir solamente report_run_id.")
 
     client = FakeStorageClient()
+    release_objects = {
+        filename: {
+            "object_name": f"marts/releases/r1/{filename}",
+            "generation": "22",
+            "size_bytes": 25,
+            "crc32c": "release-crc",
+        }
+        for filename in REPORT_INPUT_FILENAMES
+        if filename != "catalog_status.parquet"
+    }
+    client._bucket.blobs["marts/release_manifest.json"] = FakeBlob(
+        "marts/release_manifest.json",
+        generation=33,
+        data=json.dumps({
+            "schema_version": 1,
+            "release_id": "r1",
+            "published_at": "2026-09-16T00:00:00+00:00",
+            "files": release_objects,
+        }).encode("utf-8"),
+    )
     manifest = build_gcs_input_manifest(
         client=client,
         bucket_name="bucket",
@@ -117,8 +154,12 @@ def main() -> None:
     )
     if set(manifest["objects"]) != set(REPORT_INPUT_FILENAMES):
         raise AssertionError("El manifiesto no congelo todas las entradas requeridas.")
-    if any(item["generation"] != 11 for item in manifest["objects"].values()):
-        raise AssertionError("El manifiesto no congelo generaciones GCS.")
+    if manifest["release_id"] != "r1" or manifest["release_manifest_generation"] != 33:
+        raise AssertionError("El Job no conservo la version del release.")
+    for filename, item in manifest["objects"].items():
+        expected_generation = 11 if filename == "catalog_status.parquet" else 22
+        if item["generation"] != expected_generation:
+            raise AssertionError("El manifiesto no congelo generaciones GCS.")
 
     if parse_gcs_uri("gs://bucket/reports/42/report.xlsx") != (
         "bucket",
