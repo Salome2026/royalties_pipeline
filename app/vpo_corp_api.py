@@ -70,6 +70,8 @@ from lib.distributor_policy_store import (  # noqa: E402
     load_distributor_policy_document,
     update_report_personalization,
 )
+from lib.mart_release import publish_mart_release  # noqa: E402
+from lib.mart_release_cache import MartReleaseCache, MartReleaseCacheError  # noqa: E402
 from build_fuga_gusty_contract_report import build_fuga_gusty_contract_report  # noqa: E402
 import build_la_nueva_sangre_report as la_nueva_sangre_report  # noqa: E402
 import build_la_juntada_report as la_juntada_report  # noqa: E402
@@ -203,6 +205,8 @@ VPO_CATALOG_STATUS_SYNC_GCS = (
 )
 PUBLISH_JOBS: dict[str, dict] = {}
 PUBLISH_JOBS_LOCK = threading.Lock()
+MART_RELEASE_CACHE: MartReleaseCache | None = None
+MART_RELEASE_CACHE_CONFIG: tuple[str, str, str] | None = None
 
 
 class RoyaltyReportJobRequest(BaseModel):
@@ -1259,6 +1263,31 @@ def catalog_status_object_name() -> str:
     return VPO_CATALOG_STATUS_GCS_OBJECT or object_name("catalog_status.parquet")
 
 
+def validate_cached_mart(path: Path) -> None:
+    if not path.exists() or path.stat().st_size <= 8:
+        raise ValueError(f"Invalid cached mart: {path}")
+    pl.read_parquet_schema(path)
+
+
+def mart_release_cache() -> MartReleaseCache:
+    global MART_RELEASE_CACHE, MART_RELEASE_CACHE_CONFIG
+    config = (str(VPO_API_CACHE_DIR.resolve()), GCS_BUCKET, GCS_PREFIX)
+    if MART_RELEASE_CACHE is None or MART_RELEASE_CACHE_CONFIG != config:
+        MART_RELEASE_CACHE = MartReleaseCache(
+            cache_dir=VPO_API_CACHE_DIR,
+            bucket_name=GCS_BUCKET,
+            prefix=GCS_PREFIX,
+            required_files=REQUIRED_MART_FILES,
+            client_factory=gcs_client,
+            validator=validate_cached_mart,
+            check_interval_seconds=float(
+                os.environ.get("VPO_MART_MANIFEST_CHECK_SECONDS", "15") or 15
+            ),
+        )
+        MART_RELEASE_CACHE_CONFIG = config
+    return MART_RELEASE_CACHE
+
+
 def ensure_marts(refresh_cache: bool = False, filenames: list[str] | None = None) -> dict[str, Path]:
     requested_files = filenames or REQUIRED_MART_FILES
 
@@ -1275,26 +1304,10 @@ def ensure_marts(refresh_cache: bool = False, filenames: list[str] | None = None
     if not GCS_BUCKET:
         raise HTTPException(status_code=500, detail="GCS_BUCKET is not configured.")
 
-    VPO_API_CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    client = gcs_client()
-    bucket = client.bucket(GCS_BUCKET)
-
-    paths: dict[str, Path] = {}
-
-    for filename in requested_files:
-        local_path = VPO_API_CACHE_DIR / filename
-        paths[filename] = local_path
-
-        if local_path.exists() and not refresh_cache:
-            continue
-
-        blob = bucket.blob(object_name(filename))
-        if not blob.exists(client):
-            raise HTTPException(status_code=500, detail=f"GCS object not found: gs://{GCS_BUCKET}/{blob.name}")
-
-        blob.download_to_filename(str(local_path))
-
-    return paths
+    try:
+        return mart_release_cache().ensure(requested_files, refresh=refresh_cache)
+    except MartReleaseCacheError as exc:
+        raise HTTPException(status_code=500, detail=f"Mart release cache failed: {exc}") from exc
 
 
 def load_catalog_status() -> pl.DataFrame:
@@ -1799,22 +1812,19 @@ def publish_required_marts_to_gcs() -> dict:
     client = gcs_client()
     bucket = client.bucket(GCS_BUCKET)
     prefix = GCS_PREFIX.strip("/")
+    uploads = []
     uploaded = []
-
     for filename in REQUIRED_MART_FILES:
         local_path = BASE / "warehouse" / "marts" / filename
         if not local_path.exists():
             raise HTTPException(status_code=500, detail=f"No existe mart requerido: {local_path}")
-
-        object_name = f"{prefix}/{filename}" if prefix else filename
-        blob = bucket.blob(object_name)
-        blob.upload_from_filename(str(local_path))
+        uploads.append((filename, local_path))
         uploaded.append({
             "file_name": filename,
-            "object_name": object_name,
             "size_bytes": local_path.stat().st_size,
             "size_mb": round(local_path.stat().st_size / 1024 / 1024, 2),
         })
+    release = publish_mart_release(bucket, prefix, uploads)
 
     return {
         "ok": True,
@@ -1824,6 +1834,7 @@ def publish_required_marts_to_gcs() -> dict:
         "preparation": preparation,
         "validation": validation,
         "uploaded": uploaded,
+        "release": release,
     }
 
 
@@ -6813,12 +6824,14 @@ def require_known_booking_artist(artist: str) -> str:
 @app.get("/health")
 def health() -> dict:
     sheets_auth_mode = "oauth_user" if GOOGLE_OAUTH_TOKEN_JSON else "service_account"
+    local_marts = VPO_LOCAL_MARTS_DIR is not None and VPO_LOCAL_MARTS_DIR.exists()
     return {
         "status": "ok",
         "bucket": GCS_BUCKET,
         "prefix": GCS_PREFIX,
-        "marts_mode": "local" if VPO_LOCAL_MARTS_DIR is not None and VPO_LOCAL_MARTS_DIR.exists() else "gcs",
+        "marts_mode": "local" if local_marts else "gcs",
         "local_marts_dir": str(VPO_LOCAL_MARTS_DIR) if VPO_LOCAL_MARTS_DIR is not None else "",
+        "mart_cache": None if local_marts else mart_release_cache().status(),
         "sheets_auth_mode": sheets_auth_mode,
         "drive_folder_configured": "yes" if GOOGLE_DRIVE_FOLDER_ID else "no",
         "share_email_configured": "yes" if GOOGLE_SHEETS_SHARE_EMAIL else "no",
@@ -8621,15 +8634,11 @@ def digital_income(
             raise HTTPException(status_code=500, detail=f"No existe standardized mart: {standardized_path}")
         summary_path = build_digital_income_summary_mart(standardized_path, refresh_cache=refresh_cache)
     else:
-        try:
-            summary_marts = ensure_marts(refresh_cache=refresh_cache, filenames=[DIGITAL_INCOME_SUMMARY_FILE])
-            summary_path = summary_marts[DIGITAL_INCOME_SUMMARY_FILE]
-        except HTTPException:
-            marts = ensure_marts(refresh_cache=refresh_cache, filenames=[STANDARDIZED_FILE])
-            standardized_path = marts[STANDARDIZED_FILE]
-            if not standardized_path.exists():
-                raise HTTPException(status_code=500, detail=f"No existe standardized mart: {standardized_path}")
-            summary_path = build_digital_income_summary_mart(standardized_path, refresh_cache=refresh_cache)
+        summary_marts = ensure_marts(
+            refresh_cache=refresh_cache,
+            filenames=[DIGITAL_INCOME_SUMMARY_FILE],
+        )
+        summary_path = summary_marts[DIGITAL_INCOME_SUMMARY_FILE]
     base = pl.scan_parquet(summary_path)
 
     source_account_options = (
@@ -8859,15 +8868,11 @@ def royalties_dashboard(
             raise HTTPException(status_code=500, detail=f"No existe standardized mart: {standardized_path}")
         summary_path = build_royalties_dashboard_summary_mart(standardized_path, refresh_cache=refresh_cache)
     else:
-        try:
-            summary_marts = ensure_marts(refresh_cache=refresh_cache, filenames=[ROYALTIES_DASHBOARD_SUMMARY_FILE])
-            summary_path = summary_marts[ROYALTIES_DASHBOARD_SUMMARY_FILE]
-        except HTTPException:
-            marts = ensure_marts(refresh_cache=refresh_cache, filenames=[STANDARDIZED_FILE])
-            standardized_path = marts[STANDARDIZED_FILE]
-            if not standardized_path.exists():
-                raise HTTPException(status_code=500, detail=f"No existe standardized mart: {standardized_path}")
-            summary_path = build_royalties_dashboard_summary_mart(standardized_path, refresh_cache=refresh_cache)
+        summary_marts = ensure_marts(
+            refresh_cache=refresh_cache,
+            filenames=[ROYALTIES_DASHBOARD_SUMMARY_FILE],
+        )
+        summary_path = summary_marts[ROYALTIES_DASHBOARD_SUMMARY_FILE]
     base = pl.scan_parquet(summary_path)
     policy_document = load_distributor_policy_document()
     base = apply_report_net_personalization(

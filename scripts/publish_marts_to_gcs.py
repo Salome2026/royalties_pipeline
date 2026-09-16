@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
+
+try:
+    from lib.mart_release import publish_mart_release
+except ModuleNotFoundError:
+    from scripts.lib.mart_release import publish_mart_release
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -95,16 +101,40 @@ def collect_uploads(prefix: str, only: list[str] | None = None) -> list[UploadIt
     return uploads
 
 
-def upload_to_gcs(bucket_name: str, credentials_path: str, uploads: list[UploadItem]) -> None:
+def upload_to_gcs(
+    bucket_name: str,
+    credentials_path: str,
+    prefix: str,
+    uploads: list[UploadItem],
+) -> dict | None:
     from google.cloud import storage
 
     client = storage.Client.from_service_account_json(credentials_path)
     bucket = client.bucket(bucket_name)
 
+    if {item.local_path.name for item in uploads} == set(DEFAULT_FILES):
+        release = publish_mart_release(
+            bucket,
+            prefix,
+            [(item.local_path.name, item.local_path) for item in uploads],
+        )
+        for filename, entry in release["files"].items():
+            print(
+                f"UPLOADED gs://{bucket_name}/{entry['object_name']} "
+                f"generation={entry['generation']}"
+            )
+        print(
+            f"ACTIVATED gs://{bucket_name}/{release['manifest_object_name']} "
+            f"generation={release['manifest_generation']}"
+        )
+        return release
+
     for item in uploads:
         blob = bucket.blob(item.object_name)
         blob.upload_from_filename(str(item.local_path))
         print(f"UPLOADED gs://{bucket_name}/{item.object_name}")
+    print("PARTIAL PUBLISH: release manifest was not changed.")
+    return None
 
 
 def main() -> None:
@@ -142,7 +172,12 @@ def main() -> None:
         return
 
     print()
-    upload_to_gcs(args.bucket, str(credentials_path), uploads)
+    release = upload_to_gcs(args.bucket, str(credentials_path), args.prefix or "", uploads)
+    if release:
+        print(json.dumps({
+            "release_id": release["release_id"],
+            "manifest_generation": release["manifest_generation"],
+        }, sort_keys=True))
     print("Listo.")
 
 
