@@ -81,6 +81,6 @@ fusionarlos accidentalmente.
 
 La carga deja primero el release en estado `loaded`. La conciliacion lo cambia
 a `ready` cuando no hay diferencias o a `reconciliation_failed` cuando alguna
-metrica excede su tolerancia. El siguiente paso, `DASH-001`, puede construir
-las consultas del dashboard sobre estas tablas, pero el cambio productivo
-continua reservado para `DASH-002`.
+metrica excede su tolerancia. `DASH-001` ya expone el contrato completo en
+`/royalties-dashboard/bigquery-shadow`; el frontend sigue usando la ruta
+Parquet. El cambio productivo continua reservado para `DASH-002`.

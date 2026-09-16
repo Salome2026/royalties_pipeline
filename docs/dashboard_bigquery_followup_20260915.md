@@ -15,7 +15,7 @@ cambiar la lectura productiva hasta conciliar y comparar.
 | BQ-001 Dataset, esquemas y permisos | Completo: capa analitica sombra creada en US | Codex | Dataset `royalties_analytics`; 10 tablas, 3 vistas; particiones mensuales, clustering y permisos de lectura/consulta para API y Job | No habia datasets ni tablas BigQuery | Esquema completo validado y disponible sin cambiar lectores productivos | `861714f`, `9d601d6` | BigQuery `vpo-corp-royalties.royalties_analytics` |
 | BQ-002 Carga versionada desde GCS | Completo: release vigente cargado y validado | Codex | Release `20260916T065558Z-4270970b55a3`; objetos curados inmutables en GCS; carga transaccional; conteos e importes conciliados a centavos | 0 releases en BigQuery | 12,355,023 movimientos y 3,194,911 filas de dashboard disponibles en sombra | `861714f` | BigQuery release `ready`; produccion sigue en Parquet/GCS |
 | BQ-003 Conciliacion por fuente, cuenta y mes | Completo: control automatico y persistente | Codex | Run `20260916T150010Z-ae47e0ab`; 757 grupos; 0 diferencias; informe y resultados inmutables en GCS/BigQuery | Solo validacion global de filas e importes | 306 grupos statement y 451 transaction conciliados; assets contados por ISRC | `9d601d6` | Release BigQuery `ready`; futuras cargas quedan bloqueadas hasta conciliar |
-| DASH-001 Consultas y agregados en BigQuery | Pendiente | Por asignar | - | - | Pendiente | - | - |
+| DASH-001 Consultas y agregados en BigQuery | Completo en sombra: contrato actual reproducido con una consulta | Codex | Ocho casos A-H equivalentes campo por campo; ruta `/royalties-dashboard/bigquery-shadow`; consulta unica con opciones, matriz, rankings y YouTube | Parquet: A 8.7 s caliente; historico amplio puede superar un minuto | BigQuery: 1.19-2.00 s caliente; 3.5-8.5 s frio; respuestas exactas | `6cc60e7` | Ruta sombra; dashboard productivo sigue en Parquet |
 | DASH-002 Comparacion y cambio gradual | Pendiente | Por asignar | - | - | Pendiente | - | - |
 | REP-001 Lectura de informes desde BigQuery | Pendiente | Por asignar | - | - | Pendiente | - | - |
 | REP-002 Equivalencia Excel/PDF y limites de detalle | Pendiente | Por asignar | - | - | Pendiente | - | - |
@@ -243,13 +243,13 @@ retencion/limpieza de releases antiguos para controlar almacenamiento.
 
 ## Proxima decision E1/E2
 
-`PERF-001`, `PERF-002`, `PERF-003`, `OPS-001`, `BQ-001`, `BQ-002` y `BQ-003`
-ya tienen implementacion y evidencia. BigQuery permanece en modo sombra: el
-dashboard y los reportes productivos siguen leyendo el release Parquet/GCS. El
-siguiente paso recomendado es `DASH-001`, implementando el contrato actual del
-dashboard sobre las tablas conciliadas. La parte restante de `ING-001` se
-coordina con `QUEUE-001` y `QUEUE-002` para persistir estado, heartbeat,
-concurrencia global y reintentos.
+`PERF-001`, `PERF-002`, `PERF-003`, `OPS-001`, `BQ-001`, `BQ-002`, `BQ-003` y
+`DASH-001` ya tienen implementacion y evidencia. BigQuery permanece en modo
+sombra: el dashboard productivo y los reportes siguen leyendo el release
+Parquet/GCS. El siguiente paso recomendado es `DASH-002`, ejecutando
+comparaciones productivas sostenidas, canaria y cambio gradual con rollback.
+La parte restante de `ING-001` se coordina con `QUEUE-001` y `QUEUE-002` para
+persistir estado, heartbeat, concurrencia global y reintentos.
 
 ## BQ-001/BQ-002: base analitica sombra
 
@@ -305,3 +305,23 @@ no tiene diferencias. Un resultado fallido queda en
 carga. Los resultados se guardan en las tablas
 `analytics_reconciliation_runs` y `analytics_reconciliation_results`, ademas
 de objetos inmutables en GCS.
+
+## DASH-001: dashboard BigQuery en sombra
+
+El contrato completo de `/royalties-dashboard` se implemento con una sola
+consulta BigQuery. Incluye opciones de fuente/cuenta, seleccion temporal,
+totales, meses, matriz, nueve rankings, YouTube, busqueda normalizada y los
+ajustes porcentuales vigentes por distribuidora/cuenta. La ruta separada
+`/royalties-dashboard/bigquery-shadow` usa el mismo API key y no esta conectada
+al frontend.
+
+Los casos A-F originales, la busqueda historica por ISRC y el filtro combinado
+ADA/Indyana junio produjeron respuestas equivalentes campo por campo contra el
+endpoint Parquet. En una segunda corrida, los seis casos base tardaron entre
+1.19 y 2.00 segundos con cache BigQuery; la busqueda historica por ISRC tardo
+8.49 segundos en frio. Las consultas sin cache procesaron hasta 1,572.94 MB;
+las repeticiones servidas por cache procesaron 0 bytes.
+
+`DASH-001` no cambia produccion. `DASH-002` debe probar la ruta sombra ya
+desplegada, registrar diferencias y latencias durante una ventana suficiente,
+habilitar una canaria y conservar rollback inmediato a Parquet.
