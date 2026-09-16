@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, FileDown, RefreshCw, RotateCcw, Search, Table2, Rows3 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, FileDown, LayoutDashboard, RefreshCw, RotateCcw, Search, ShieldCheck, Table2, Rows3, Youtube } from "lucide-react";
 import { PeriodControl } from "./components/PeriodControl";
 import { BookingDashboard, type BookingAgendaEvent } from "./components/BookingDashboard";
 import { VpoHome } from "./components/VpoHome";
@@ -14,6 +14,7 @@ import { RoyaltyReportModule } from "./features/royalties/RoyaltyReportModule";
 import { SourceMonitorModule } from "./features/source-monitor/SourceMonitorModule";
 import { StatementReportModule } from "./features/statements/StatementReportModule";
 import digitalStyles from "./features/digital-income/DigitalIncome.module.css";
+import royaltyDashboardStyles from "./features/royalties-dashboard/RoyaltyDashboard.module.css";
 import SelectionMenu, { type SelectionIntent } from "./features/digital-income/SelectionMenu";
 import type { DigitalIncomeReportScope } from "./features/digital-income/exportPdf";
 import {
@@ -2526,6 +2527,11 @@ export default function Home() {
       .map((item) => item.account);
   }, [royaltiesDashboard, royaltiesDashboardSource]);
 
+  const royaltiesDashboardMonthlyMax = useMemo(() => Math.max(
+    1,
+    ...(royaltiesDashboard?.monthly || []).map((item) => Math.abs(item.amount_usd || 0)),
+  ), [royaltiesDashboard]);
+
   const pieStyle = useMemo(() => {
     if (!participation?.items.length) return { background: "#e4e7ec" };
 
@@ -4022,18 +4028,29 @@ export default function Home() {
     }
   }
 
-  async function loadRoyaltiesDashboard() {
+  async function loadRoyaltiesDashboard(filters?: {
+    keyword?: string;
+    source?: string;
+    account?: string;
+    period?: PeriodSelection;
+    periodBasis?: "statement_period" | "transaction_month";
+  }) {
     setRoyaltiesDashboardLoading(true);
     try {
-      const dashboardPeriod = resolvePeriod(royaltiesDashboardPeriod, "dashboard_period");
+      const keyword = filters?.keyword ?? royaltiesDashboardKeyword;
+      const source = filters?.source ?? royaltiesDashboardSource;
+      const account = filters?.account ?? royaltiesDashboardAccount;
+      const period = filters?.period ?? royaltiesDashboardPeriod;
+      const periodBasis = filters?.periodBasis ?? royaltiesDashboardPeriodBasis;
+      const dashboardPeriod = resolvePeriod(period, "dashboard_period");
       const params = new URLSearchParams();
-      if (royaltiesDashboardKeyword.trim()) params.set("keyword", royaltiesDashboardKeyword.trim());
-      if (royaltiesDashboardSource) params.set("source", royaltiesDashboardSource);
-      if (royaltiesDashboardAccount) params.set("account", royaltiesDashboardAccount);
+      if (keyword.trim()) params.set("keyword", keyword.trim());
+      if (source) params.set("source", source);
+      if (account) params.set("account", account);
       if (dashboardPeriod.startMonth) params.set("start_month", dashboardPeriod.startMonth);
       if (dashboardPeriod.endMonth) params.set("end_month", dashboardPeriod.endMonth);
       params.set("period_mode", dashboardPeriod.mode);
-      params.set("period_basis", royaltiesDashboardPeriodBasis);
+      params.set("period_basis", periodBasis);
       params.set("limit", "10");
 
       const response = await fetch(`/api/royalties-dashboard?${params.toString()}`, { cache: "no-store" });
@@ -6337,6 +6354,22 @@ export default function Home() {
     void loadDigitalIncome({ artistKeyword: "", period });
   }
 
+  function resetRoyaltiesDashboardFilters() {
+    const period: PeriodSelection = { mode: "last_6_months" };
+    setRoyaltiesDashboardKeyword("");
+    setRoyaltiesDashboardSource("");
+    setRoyaltiesDashboardAccount("");
+    setRoyaltiesDashboardPeriodBasis("statement_period");
+    setRoyaltiesDashboardPeriod(period);
+    void loadRoyaltiesDashboard({
+      keyword: "",
+      source: "",
+      account: "",
+      period,
+      periodBasis: "statement_period",
+    });
+  }
+
   async function saveDigitalIncomeSelection(next: Omit<DigitalIncomeViewSelection, "version">) {
     if (!digitalIncomeViewSelection || digitalIncomeSelectionSaving) return;
     setDigitalIncomeSelectionSaving(true);
@@ -7294,32 +7327,32 @@ export default function Home() {
 
   function renderRoyaltiesRankTable(title: string, rows: RoyaltiesDashboardRank[], emptyText = "Sin datos para este filtro.") {
     return (
-      <div className="royalties-rank-card">
-        <div className="royalties-card-title">
+      <section className={royaltyDashboardStyles.rankSection}>
+        <div className={royaltyDashboardStyles.rankHeader}>
           <h2>{title}</h2>
-          <span>{rows.length ? `${rows.length} items` : "sin datos"}</span>
+          <span>{rows.length ? `${rows.length} resultados` : "Sin datos"}</span>
         </div>
-        {royaltiesDashboardLoading && <div className="royalties-empty">Cargando...</div>}
-        {!royaltiesDashboardLoading && rows.length === 0 && <div className="royalties-empty">{emptyText}</div>}
-        <div className="royalties-rank-list">
+        {royaltiesDashboardLoading && <div className={royaltyDashboardStyles.empty}>Cargando...</div>}
+        {!royaltiesDashboardLoading && rows.length === 0 && <div className={royaltyDashboardStyles.empty}>{emptyText}</div>}
+        <div className={royaltyDashboardStyles.rankList}>
           {rows.map((row, idx) => (
-            <div className="royalties-rank-row" key={`${title}-${row.name}-${idx}`}>
-              <div className="royalties-rank-main">
-                <span className="royalties-rank-index">{idx + 1}</span>
+            <div className={royaltyDashboardStyles.rankRow} key={`${title}-${row.name}-${idx}`}>
+              <span className={royaltyDashboardStyles.rankIndex}>{idx + 1}</span>
+              <div className={royaltyDashboardStyles.rankMain}>
                 <strong>{row.name || "-"}</strong>
                 <small>{Math.round(row.units || 0).toLocaleString("es-AR")} unidades</small>
               </div>
-              <div className="royalties-rank-value">
+              <div className={royaltyDashboardStyles.rankValue}>
                 <strong>{moneyCents(row.amount_usd || 0)}</strong>
                 <span>{(row.percentage || 0).toLocaleString("es-AR", { maximumFractionDigits: 2 })}%</span>
               </div>
-              <div className="royalties-rank-bar" aria-hidden="true">
+              <div className={royaltyDashboardStyles.rankBar} aria-hidden="true">
                 <span style={{ width: `${Math.max(2, Math.min(100, row.percentage || 0))}%` }} />
               </div>
             </div>
           ))}
         </div>
-      </div>
+      </section>
     );
   }
 
@@ -7345,7 +7378,7 @@ export default function Home() {
       onOpen={(targetView) => targetView === "booking" ? openBookingWorkspace() : openView(targetView as View)}
       onLogout={logout}
     >
-      <main className={view === "menu" ? "home-main" : view === "booking" && bookingSurface === "dashboard" ? "booking-main" : view === "employees" ? "employee-main" : view === "catalog" ? "catalog-main" : view === "digital-income" ? "digital-income-main" : undefined}>
+      <main className={view === "menu" ? "home-main" : view === "booking" && bookingSurface === "dashboard" ? "booking-main" : view === "employees" ? "employee-main" : view === "catalog" ? "catalog-main" : view === "royalties-dashboard" ? "royalties-dashboard-main" : view === "digital-income" ? "digital-income-main" : undefined}>
         {message && <div className={`message ${message.type === "error" ? "error" : ""}`}>{message.text}</div>}
 
         {view === "menu" && (
@@ -7619,44 +7652,40 @@ export default function Home() {
         )}
 
         {view === "royalties-dashboard" && (
-          <section className="panel wide-panel royalties-dashboard-panel">
-            <div className="royalties-dashboard-hero">
-              <div>
-                <span className="royalties-eyebrow">Royalty Intelligence</span>
-                <h1>Dashboard Regalias</h1>
-                <p>Generacion reportable multi-distribuidora: aplica catalogo activo/inactivo, policies de distribuidoras y ajustes de reporte configurados.</p>
+          <section className={`${digitalStyles.workspace} ${royaltyDashboardStyles.workspace}`}>
+            <header className={digitalStyles.header}>
+              <div className={digitalStyles.titleGroup}>
+                <span className={digitalStyles.eyebrow}>Royalty intelligence</span>
+                <h1>Dashboard de regalías</h1>
+                <p>Ingresos reportables consolidados por distribuidora, cuenta y período.</p>
               </div>
-              <div className="royalties-hero-actions">
-                <span>
-                  {royaltiesDashboard?.report_personalization.enabled ? "Ajuste VPO activo" : "Ajuste VPO desactivado"}
-                  {royaltiesDashboard?.report_personalization.policy_version
-                    ? ` · v${royaltiesDashboard.report_personalization.policy_version}`
-                    : ""}
-                </span>
-                <span>{royaltiesDashboard?.totals.first_month || "-"} / {royaltiesDashboard?.totals.last_month || "-"}</span>
-                <button type="button" onClick={loadRoyaltiesDashboard} disabled={royaltiesDashboardLoading}>
-                  {royaltiesDashboardLoading ? "Cargando..." : "Actualizar"}
+              <div className={digitalStyles.headerActions}>
+                <div className={royaltyDashboardStyles.policyStatus}>
+                  <ShieldCheck size={17} aria-hidden="true" />
+                  <div>
+                    <span>{royaltiesDashboard?.report_personalization.enabled ? "Ajuste VPO activo" : "Ajuste VPO desactivado"}</span>
+                    <small>
+                      {royaltiesDashboard?.report_personalization.policy_version
+                        ? `Política v${royaltiesDashboard.report_personalization.policy_version}`
+                        : "Política sin versión"}
+                    </small>
+                  </div>
+                </div>
+                <button type="button" className={digitalStyles.iconButton} onClick={() => void loadRoyaltiesDashboard()} disabled={royaltiesDashboardLoading} aria-label="Actualizar dashboard" title="Actualizar dashboard">
+                  <RefreshCw size={17} aria-hidden="true" className={royaltiesDashboardLoading ? digitalStyles.spin : undefined} />
                 </button>
               </div>
-            </div>
+            </header>
 
-            <div className="royalties-filterbar">
-              <div>
+            <form className={`${digitalStyles.filters} ${royaltyDashboardStyles.filters}`} onSubmit={(event) => { event.preventDefault(); void loadRoyaltiesDashboard(); }}>
+              <div className={`${digitalStyles.field} ${royaltyDashboardStyles.searchField}`}>
                 <label htmlFor="royalties_dashboard_keyword">Artista / tema / ISRC</label>
-                <input
-                  id="royalties_dashboard_keyword"
-                  value={royaltiesDashboardKeyword}
-                  onChange={(event) => setRoyaltiesDashboardKeyword(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      loadRoyaltiesDashboard();
-                    }
-                  }}
-                  placeholder="Ej: Gusty, Raka Taka, QZ..."
-                />
+                <div className={digitalStyles.inputShell}>
+                  <Search size={16} aria-hidden="true" />
+                  <input id="royalties_dashboard_keyword" value={royaltiesDashboardKeyword} onChange={(event) => setRoyaltiesDashboardKeyword(event.target.value)} placeholder="Buscar en el catálogo" />
+                </div>
               </div>
-              <div>
+              <div className={digitalStyles.field}>
                 <label htmlFor="royalties_dashboard_source">Distribuidora</label>
                 <select
                   id="royalties_dashboard_source"
@@ -7672,7 +7701,7 @@ export default function Home() {
                   ))}
                 </select>
               </div>
-              <div>
+              <div className={digitalStyles.field}>
                 <label htmlFor="royalties_dashboard_account">Cuenta</label>
                 <select
                   id="royalties_dashboard_account"
@@ -7685,7 +7714,7 @@ export default function Home() {
                   ))}
                 </select>
               </div>
-              <div>
+              <div className={digitalStyles.field}>
                 <label htmlFor="royalties_dashboard_basis">Base temporal</label>
                 <select
                   id="royalties_dashboard_basis"
@@ -7696,156 +7725,151 @@ export default function Home() {
                   <option value="transaction_month">Consumo</option>
                 </select>
               </div>
-              <PeriodControl
-                id="royalties_dashboard_period"
-                label="Periodo"
-                profile="dashboard_period"
-                selection={royaltiesDashboardPeriod}
-                presets={["last_6_months", "last_12_months", "all"]}
-                onChange={setRoyaltiesDashboardPeriod}
-                helperText="Todo carga el historico disponible. Statement y consumo pueden diferir por rango."
-              />
-              <button type="button" onClick={loadRoyaltiesDashboard} disabled={royaltiesDashboardLoading}>
-                Buscar
-              </button>
-            </div>
+              <div className={digitalStyles.periodField}>
+                <PeriodControl id="royalties_dashboard_period" label="Período" profile="dashboard_period" selection={royaltiesDashboardPeriod} presets={["last_6_months", "last_12_months", "all"]} minMonth={royaltiesDashboard?.options.first_month} maxMonth={royaltiesDashboard?.options.last_month} onChange={setRoyaltiesDashboardPeriod} />
+              </div>
+              <div className={digitalStyles.filterActions}>
+                <button type="button" className={digitalStyles.iconButton} onClick={resetRoyaltiesDashboardFilters} disabled={royaltiesDashboardLoading} aria-label="Limpiar filtros" title="Limpiar filtros">
+                  <RotateCcw size={17} aria-hidden="true" />
+                </button>
+                <button type="submit" className={digitalStyles.applyButton} disabled={royaltiesDashboardLoading}>
+                  <Search size={16} aria-hidden="true" />
+                  {royaltiesDashboardLoading ? "Cargando" : "Aplicar"}
+                </button>
+              </div>
+            </form>
 
-            <div className="royalties-tabs" role="tablist" aria-label="Vistas dashboard regalias">
-              <button
-                type="button"
-                className={royaltiesDashboardTab === "overview" ? "active" : ""}
-                onClick={() => setRoyaltiesDashboardTab("overview")}
-              >
-                Overview
-              </button>
-              <button
-                type="button"
-                className={royaltiesDashboardTab === "youtube" ? "active" : ""}
-                onClick={() => setRoyaltiesDashboardTab("youtube")}
-              >
-                YouTube
-              </button>
-            </div>
-
-            <div className="royalties-kpi-grid">
-              <div className="royalties-kpi primary">
+            <div className={`${digitalStyles.metricBand} ${royaltyDashboardStyles.metricBand}`} aria-live="polite">
+              <div className={digitalStyles.primaryMetric}>
                 <span>Ingreso reportable</span>
                 <strong>{moneyCents(royaltiesDashboard?.totals.amount_usd || 0)}</strong>
               </div>
-              <div className="royalties-kpi">
+              <div>
                 <span>Unidades</span>
                 <strong>{Math.round(royaltiesDashboard?.totals.units || 0).toLocaleString("es-AR")}</strong>
               </div>
-              <div className="royalties-kpi">
+              <div>
                 <span>Temas</span>
                 <strong>{(royaltiesDashboard?.totals.titles || 0).toLocaleString("es-AR")}</strong>
               </div>
-              <div className="royalties-kpi">
+              <div>
                 <span>Artistas</span>
                 <strong>{(royaltiesDashboard?.totals.artists || 0).toLocaleString("es-AR")}</strong>
               </div>
-              <div className="royalties-kpi">
+              <div>
                 <span>Distribuidoras</span>
                 <strong>{royaltiesDashboard?.totals.sources || 0}</strong>
               </div>
-              <div className="royalties-kpi">
+              <div className={royaltyDashboardStyles.rangeMetric}>
                 <span>Rango</span>
-                <strong>{royaltiesDashboard?.totals.first_month || "-"} / {royaltiesDashboard?.totals.last_month || "-"}</strong>
+                <strong>{royaltiesDashboard?.totals.first_month || "-"} a {royaltiesDashboard?.totals.last_month || "-"}</strong>
               </div>
             </div>
 
-            <div className="royalties-meta-strip">
-              <strong>Criterio</strong>
-              <span>{royaltiesDashboardPeriodBasis === "statement_period" ? "Statement" : "Consumo"}</span>
-              <strong>Fuente</strong>
-              <span>{royaltiesDashboard?.options.first_month || "-"} a {royaltiesDashboard?.options.last_month || "-"}</span>
-              <strong>Reglas</strong>
-              <span>Catalogo + policies + ajuste de reporte si esta activado</span>
+            <div className={digitalStyles.scopeLine}>
+              <span>Rango consultado: <strong>{royaltiesDashboard?.totals.first_month || "-"} a {royaltiesDashboard?.totals.last_month || "-"}</strong></span>
+              <span>Fuente disponible: <strong>{royaltiesDashboard?.options.first_month || "-"} a {royaltiesDashboard?.options.last_month || "-"}</strong></span>
+              <span>Base: <strong>{royaltiesDashboardPeriodBasis === "statement_period" ? "statement" : "consumo"}</strong></span>
             </div>
 
-            <div className="royalties-section-title">
-              <div>
-                <h2>Meses por distribuidora</h2>
-                <p>Cada fila es una distribuidora/cuenta. Las columnas muestran el rango elegido.</p>
-              </div>
-            </div>
-            <div className="royalties-table-shell">
-              <table className="summary-table digital-income-matrix royalties-matrix-table">
-                <thead>
-                  <tr>
-                    <th>Distribuidora / cuenta</th>
-                    {(royaltiesDashboard?.period_months || []).map((month) => (
-                      <th key={month}>{month}</th>
-                    ))}
-                    <th>Total</th>
-                    <th>Temas</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {royaltiesDashboardLoading && (
-                    <tr>
-                      <td colSpan={(royaltiesDashboard?.period_months.length || 0) + 3}>Cargando dashboard...</td>
-                    </tr>
-                  )}
-                  {!royaltiesDashboardLoading && royaltiesDashboard?.matrix.length === 0 && (
-                    <tr>
-                      <td colSpan={(royaltiesDashboard?.period_months.length || 0) + 3}>Sin datos para este filtro.</td>
-                    </tr>
-                  )}
-                  {royaltiesDashboard?.matrix.map((item) => (
-                    <tr key={`${item.source}-${item.account}`}>
-                      <td>
-                        <strong>{item.source}</strong>
-                        <span className="cell-note">{item.account}</span>
-                      </td>
-                      {royaltiesDashboard.period_months.map((month) => (
-                        <td key={month}>{moneyCents(item.months[month] || 0)}</td>
-                      ))}
-                      <td><strong>{moneyCents(item.amount_usd || 0)}</strong></td>
-                      <td>{item.titles.toLocaleString("es-AR")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className={digitalStyles.tabs} role="tablist" aria-label="Vista del dashboard">
+              <button type="button" role="tab" aria-selected={royaltiesDashboardTab === "overview"} className={royaltiesDashboardTab === "overview" ? digitalStyles.activeTab : undefined} onClick={() => setRoyaltiesDashboardTab("overview")}>
+                <LayoutDashboard size={15} aria-hidden="true" /> General
+              </button>
+              <button type="button" role="tab" aria-selected={royaltiesDashboardTab === "youtube"} className={royaltiesDashboardTab === "youtube" ? digitalStyles.activeTab : undefined} onClick={() => setRoyaltiesDashboardTab("youtube")}>
+                <Youtube size={15} aria-hidden="true" /> YouTube
+              </button>
             </div>
 
             {royaltiesDashboardTab === "overview" && (
-              <div className="royalties-rank-grid">
-                {renderRoyaltiesRankTable("Top Revenue by Product", royaltiesDashboard?.rankings.title || [])}
-                {renderRoyaltiesRankTable("Top Revenue by Artist", royaltiesDashboard?.rankings.artist || [])}
-                {renderRoyaltiesRankTable("Top Revenue by DSP", royaltiesDashboard?.rankings.dsp || [])}
-                {renderRoyaltiesRankTable("Ingresos por monetizacion", royaltiesDashboard?.rankings.monetization || [])}
-                {renderRoyaltiesRankTable("Ingresos por origen", royaltiesDashboard?.rankings.content_origin || [])}
-                {renderRoyaltiesRankTable("Sales per Territory", royaltiesDashboard?.rankings.territory || [])}
-                {renderRoyaltiesRankTable("Top Revenue by Label", royaltiesDashboard?.rankings.label || [])}
-              </div>
+              <>
+                <section className={digitalStyles.trendSection}>
+                  <div className={digitalStyles.sectionTitle}>
+                    <h2>Evolución mensual</h2>
+                    <span>USD reportable por {royaltiesDashboardPeriodBasis === "statement_period" ? "mes de statement" : "mes de consumo"}</span>
+                  </div>
+                  <div className={digitalStyles.trendRows}>
+                    {!royaltiesDashboardLoading && !royaltiesDashboard?.monthly.length && <div className={digitalStyles.emptyState}>Sin datos para este filtro.</div>}
+                    {(royaltiesDashboard?.monthly || []).map((month) => (
+                      <div className={digitalStyles.trendRow} key={month.month}>
+                        <span>{month.month}</span>
+                        <div className={digitalStyles.trendTrack} aria-hidden="true">
+                          <div className={month.amount_usd < 0 ? digitalStyles.negativeBar : digitalStyles.trendBar} style={{ width: `${Math.max(1, Math.abs(month.amount_usd) / royaltiesDashboardMonthlyMax * 100)}%` }} />
+                        </div>
+                        <strong className={month.amount_usd < 0 ? digitalStyles.negativeAmount : undefined}>{moneyCents(month.amount_usd)}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+
+                <section className={digitalStyles.tableSection}>
+                  <div className={digitalStyles.sectionTitle}>
+                    <h2>Meses por distribuidora</h2>
+                    <span>{royaltiesDashboard?.matrix.length || 0} cuentas</span>
+                  </div>
+                  <div className={digitalStyles.tableScroll}>
+                    <table className={`${digitalStyles.table} ${digitalStyles.matrixTable} ${royaltyDashboardStyles.matrixTable}`}>
+                      <thead>
+                        <tr>
+                          <th>Distribuidora / cuenta</th>
+                          {(royaltiesDashboard?.period_months || []).map((month) => <th key={month}>{month}</th>)}
+                          <th>Total</th>
+                          <th>Temas</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {royaltiesDashboardLoading && <tr><td className={digitalStyles.emptyCell} colSpan={(royaltiesDashboard?.period_months.length || 0) + 3}>Cargando dashboard...</td></tr>}
+                        {!royaltiesDashboardLoading && royaltiesDashboard?.matrix.length === 0 && <tr><td className={digitalStyles.emptyCell} colSpan={(royaltiesDashboard?.period_months.length || 0) + 3}>Sin datos para este filtro.</td></tr>}
+                        {royaltiesDashboard?.matrix.map((item) => (
+                          <tr key={`${item.source}-${item.account}`}>
+                            <td className={digitalStyles.accountCell}><strong>{item.source}</strong><span>{item.account}</span></td>
+                            {royaltiesDashboard.period_months.map((month) => <td key={month}>{moneyCents(item.months[month] || 0)}</td>)}
+                            <td className={digitalStyles.totalCell}>{moneyCents(item.amount_usd || 0)}</td>
+                            <td>{item.titles.toLocaleString("es-AR")}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+
+                <div className={royaltyDashboardStyles.rankGrid}>
+                  {renderRoyaltiesRankTable("Ingresos por tema", royaltiesDashboard?.rankings.title || [])}
+                  {renderRoyaltiesRankTable("Ingresos por artista", royaltiesDashboard?.rankings.artist || [])}
+                  {renderRoyaltiesRankTable("Ingresos por plataforma", royaltiesDashboard?.rankings.dsp || [])}
+                  {renderRoyaltiesRankTable("Monetización", royaltiesDashboard?.rankings.monetization || [])}
+                  {renderRoyaltiesRankTable("Origen del contenido", royaltiesDashboard?.rankings.content_origin || [])}
+                  {renderRoyaltiesRankTable("Territorios", royaltiesDashboard?.rankings.territory || [])}
+                  {renderRoyaltiesRankTable("Sellos", royaltiesDashboard?.rankings.label || [])}
+                </div>
+              </>
             )}
 
             {royaltiesDashboardTab === "youtube" && (
               <>
-                <div className="royalties-kpi-grid youtube-kpis">
-                  <div className="royalties-kpi primary">
-                    <span>YouTube net revenue</span>
+                <div className={`${digitalStyles.metricBand} ${royaltyDashboardStyles.youtubeMetricBand}`}>
+                  <div className={digitalStyles.primaryMetric}>
+                    <span>Ingreso YouTube</span>
                     <strong>{moneyCents(royaltiesDashboard?.youtube.totals.amount_usd || 0)}</strong>
                   </div>
-                  <div className="royalties-kpi">
-                    <span>Monetized units</span>
+                  <div>
+                    <span>Unidades monetizadas</span>
                     <strong>{Math.round(royaltiesDashboard?.youtube.totals.units || 0).toLocaleString("es-AR")}</strong>
                   </div>
-                  <div className="royalties-kpi">
+                  <div>
                     <span>Videos / assets</span>
                     <strong>{(royaltiesDashboard?.youtube.totals.titles || 0).toLocaleString("es-AR")}</strong>
                   </div>
-                  <div className="royalties-kpi">
+                  <div>
                     <span>Artistas</span>
                     <strong>{(royaltiesDashboard?.youtube.totals.artists || 0).toLocaleString("es-AR")}</strong>
                   </div>
                 </div>
-                <div className="royalties-rank-grid">
-                  {renderRoyaltiesRankTable("Ingresos por monetizacion", royaltiesDashboard?.youtube.monetization || [])}
-                  {renderRoyaltiesRankTable("Ingresos por origen", royaltiesDashboard?.youtube.content_origin || [])}
-                  {renderRoyaltiesRankTable("Revenue by Territory", royaltiesDashboard?.youtube.territory || [])}
-                  {renderRoyaltiesRankTable("Top YouTube Assets", royaltiesDashboard?.youtube.title || [])}
+                <div className={royaltyDashboardStyles.rankGrid}>
+                  {renderRoyaltiesRankTable("Monetización", royaltiesDashboard?.youtube.monetization || [])}
+                  {renderRoyaltiesRankTable("Origen del contenido", royaltiesDashboard?.youtube.content_origin || [])}
+                  {renderRoyaltiesRankTable("Territorios", royaltiesDashboard?.youtube.territory || [])}
+                  {renderRoyaltiesRankTable("Assets de YouTube", royaltiesDashboard?.youtube.title || [])}
                 </div>
               </>
             )}
