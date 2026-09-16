@@ -191,6 +191,11 @@ REQUIRED_MART_FILES = [
     ROYALTIES_DASHBOARD_SUMMARY_FILE,
     CATALOG_MASTER_FILE,
 ]
+AUXILIARY_MART_FILES = [
+    STANDARDIZED_ONERPM_FILE,
+    STANDARDIZED_FUGA_FILE,
+    CATALOG_RELEASE_METADATA_FILE,
+]
 CATALOG_STATUS_PATH = BASE / "warehouse" / "registry" / "catalog_status.parquet"
 CONFIG_REGISTRY_DIR = BASE / "warehouse" / "registry"
 CONFIG_SEED_FILES = {
@@ -1278,6 +1283,7 @@ def mart_release_cache() -> MartReleaseCache:
             bucket_name=GCS_BUCKET,
             prefix=GCS_PREFIX,
             required_files=REQUIRED_MART_FILES,
+            auxiliary_files=AUXILIARY_MART_FILES,
             client_factory=gcs_client,
             validator=validate_cached_mart,
             check_interval_seconds=float(

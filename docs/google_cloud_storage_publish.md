@@ -89,6 +89,11 @@ compatibility identity derived from the six canonical GCS generations.
 Dashboard and Digital Income requests never rebuild summaries in production;
 those summaries must be prepared and included in the published release.
 
+Special-report auxiliary marts that are not part of the six-file analytics
+package remain individually generation-aware under `cache/auxiliary/`. They do
+not change the active release manifest. An auxiliary report still requires its
+canonical GCS object to exist; the cache does not synthesize missing inputs.
+
 ## Catalog snapshot
 
 The catalog can be published independently from the full marts publish:

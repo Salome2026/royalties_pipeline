@@ -15,6 +15,7 @@ from scripts.lib.mart_release_cache import MartReleaseCache
 
 
 FILES = ("a.parquet", "b.parquet")
+AUXILIARY_FILE = "c.parquet"
 
 
 class FakeBlob:
@@ -132,6 +133,7 @@ def main() -> None:
         root = Path(temporary)
         bucket = FakeBucket()
         client = FakeClient(bucket)
+        bucket.put(f"marts/{AUXILIARY_FILE}", b"PAR1-aux-r1-PAR1")
         first = publish_mart_release(
             bucket,
             "marts",
@@ -147,6 +149,7 @@ def main() -> None:
             bucket_name="bucket",
             prefix="marts",
             required_files=FILES,
+            auxiliary_files=(AUXILIARY_FILE,),
             client_factory=lambda: client,
             validator=validate_test_parquet,
             check_interval_seconds=0,
@@ -154,6 +157,17 @@ def main() -> None:
         first_path = cache.ensure(["a.parquet"])["a.parquet"]
         assert b"r1" in first_path.read_bytes()
         assert cache.status()["active_release_id"] == first["release_id"]
+
+        auxiliary_r1 = cache.ensure([AUXILIARY_FILE])[AUXILIARY_FILE]
+        assert b"aux-r1" in auxiliary_r1.read_bytes()
+        bucket.put(f"marts/{AUXILIARY_FILE}", b"PAR1-aux-r2-PAR1")
+        auxiliary_r2 = cache.ensure([AUXILIARY_FILE])[AUXILIARY_FILE]
+        assert auxiliary_r2 != auxiliary_r1
+        assert b"aux-r2" in auxiliary_r2.read_bytes()
+        bucket.put(f"marts/{AUXILIARY_FILE}", b"broken")
+        auxiliary_fallback = cache.ensure([AUXILIARY_FILE])[AUXILIARY_FILE]
+        assert auxiliary_fallback == auxiliary_r2
+        assert cache.status()["using_stale_fallback"] is True
 
         second_start = len(bucket.events)
         publish_mart_release(

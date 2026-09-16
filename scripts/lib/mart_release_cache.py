@@ -28,6 +28,7 @@ class MartReleaseCache:
         bucket_name: str,
         prefix: str,
         required_files: Iterable[str],
+        auxiliary_files: Iterable[str] = (),
         client_factory: Callable[[], Any],
         validator: Callable[[Path], None],
         check_interval_seconds: float = 15.0,
@@ -36,6 +37,7 @@ class MartReleaseCache:
         self.bucket_name = bucket_name
         self.prefix = prefix.strip("/")
         self.required_files = tuple(required_files)
+        self.auxiliary_files = tuple(auxiliary_files)
         self.client_factory = client_factory
         self.validator = validator
         self.check_interval_seconds = max(0.0, float(check_interval_seconds))
@@ -44,6 +46,7 @@ class MartReleaseCache:
         self._snapshot_checked_at = 0.0
         self._last_error: str | None = None
         self._using_stale_fallback = False
+        self._auxiliary_generations: dict[str, str] = {}
 
     @property
     def active_path(self) -> Path:
@@ -51,27 +54,41 @@ class MartReleaseCache:
 
     def ensure(self, requested_files: Iterable[str], *, refresh: bool = False) -> dict[str, Path]:
         requested = tuple(dict.fromkeys(requested_files))
-        unsupported = [name for name in requested if name not in self.required_files]
+        supported = set(self.required_files) | set(self.auxiliary_files)
+        unsupported = [name for name in requested if name not in supported]
         if unsupported:
             raise MartReleaseCacheError(f"Unsupported mart files: {', '.join(unsupported)}")
 
         with self._lock:
-            previous = self._read_active()
-            try:
-                snapshot = self._remote_snapshot(force=refresh)
-                paths = self._activate(snapshot, requested, refresh=refresh)
-                self._last_error = None
-                self._using_stale_fallback = False
-                return paths
-            except Exception as exc:
-                self._last_error = str(exc)
-                fallback = self._paths_for_active(previous, requested)
-                if fallback and not refresh:
-                    self._using_stale_fallback = True
-                    return fallback
-                if isinstance(exc, MartReleaseCacheError):
-                    raise
-                raise MartReleaseCacheError(str(exc)) from exc
+            self._last_error = None
+            self._using_stale_fallback = False
+            release_requested = tuple(name for name in requested if name in self.required_files)
+            auxiliary_requested = tuple(name for name in requested if name in self.auxiliary_files)
+            result: dict[str, Path] = {}
+            if release_requested:
+                previous = self._read_active()
+                try:
+                    snapshot = self._remote_snapshot(force=refresh)
+                    result.update(self._activate(snapshot, release_requested, refresh=refresh))
+                except Exception as exc:
+                    self._last_error = str(exc)
+                    fallback = self._paths_for_active(previous, release_requested)
+                    if fallback and not refresh:
+                        self._using_stale_fallback = True
+                        result.update(fallback)
+                    else:
+                        if isinstance(exc, MartReleaseCacheError):
+                            raise
+                        raise MartReleaseCacheError(str(exc)) from exc
+            if auxiliary_requested:
+                try:
+                    result.update(self._ensure_auxiliary(auxiliary_requested, refresh=refresh))
+                except Exception as exc:
+                    self._last_error = str(exc)
+                    if isinstance(exc, MartReleaseCacheError):
+                        raise
+                    raise MartReleaseCacheError(str(exc)) from exc
+            return {name: result[name] for name in requested}
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -84,7 +101,79 @@ class MartReleaseCache:
                 "activated_at": active.get("activated_at"),
                 "using_stale_fallback": self._using_stale_fallback,
                 "last_error": self._last_error,
+                "auxiliary_generations": dict(self._auxiliary_generations),
             }
+
+    def _ensure_auxiliary(
+        self,
+        requested: tuple[str, ...],
+        *,
+        refresh: bool,
+    ) -> dict[str, Path]:
+        client = self.client_factory()
+        bucket = client.bucket(self.bucket_name)
+        paths: dict[str, Path] = {}
+        for filename in requested:
+            blob = bucket.blob(prefixed_object_name(self.prefix, filename))
+            try:
+                blob.reload(client=client)
+                generation = int(blob.generation)
+                target = self.cache_dir / "auxiliary" / filename / str(generation) / filename
+                if refresh or not target.exists():
+                    staging = (
+                        self.cache_dir / "staging" /
+                        f"aux-{filename}-{generation}-{uuid.uuid4().hex}"
+                    )
+                    staging.mkdir(parents=True, exist_ok=False)
+                    try:
+                        temporary = staging / filename
+                        pinned = bucket.blob(blob.name, generation=generation)
+                        pinned.download_to_filename(
+                            str(temporary),
+                            if_generation_match=generation,
+                        )
+                        expected_size = int(blob.size or 0)
+                        if expected_size and temporary.stat().st_size != expected_size:
+                            raise MartReleaseCacheError(
+                                f"Downloaded size mismatch for auxiliary {filename}."
+                            )
+                        self.validator(temporary)
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        os.replace(temporary, target)
+                    finally:
+                        if staging.exists():
+                            shutil.rmtree(staging)
+                self.validator(target)
+                paths[filename] = target
+                self._auxiliary_generations[filename] = str(generation)
+            except Exception as exc:
+                fallback = self._latest_auxiliary_path(filename)
+                if fallback is None or refresh:
+                    if isinstance(exc, MartReleaseCacheError):
+                        raise
+                    raise MartReleaseCacheError(str(exc)) from exc
+                self._last_error = str(exc)
+                self._using_stale_fallback = True
+                paths[filename] = fallback
+                self._auxiliary_generations[filename] = fallback.parent.name
+        return paths
+
+    def _latest_auxiliary_path(self, filename: str) -> Path | None:
+        root = self.cache_dir / "auxiliary" / filename
+        if not root.exists():
+            return None
+        candidates = sorted(
+            (path / filename for path in root.iterdir() if path.is_dir()),
+            key=lambda path: path.stat().st_mtime if path.exists() else 0,
+            reverse=True,
+        )
+        for path in candidates:
+            try:
+                self.validator(path)
+                return path
+            except Exception:
+                continue
+        return None
 
     def _remote_snapshot(self, *, force: bool) -> dict[str, Any]:
         now = time.monotonic()
