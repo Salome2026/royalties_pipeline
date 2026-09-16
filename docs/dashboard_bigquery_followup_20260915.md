@@ -10,8 +10,8 @@ cambiar la lectura productiva hasta conciliar y comparar.
 | Codigo | Estado | Responsable | Evidencia | Metrica anterior | Metrica nueva | Commit | Despliegue |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | PERF-001 Linea base y casos testigo | Completo: tres casos productivos y respuestas testigo; percentiles pendientes de OPS-001 | Codex | Tabla de mediciones y hashes abajo; seis marts GCS verificados; politica v10 | Local previo: 6m 37.2 s, 1m 10.3 s, FUGA 6m 25.1 s; historico cloud hasta 147.2 s y dos 503 | Produccion: A 87.1 s, B 6.9 s, C 32.1 s; una muestra por caso | `7528dc7` | API `00162-brg`, GCS 18:33 |
-| PERF-002 Dashboard con una sola lectura | En uso: agregados principales unificados; opciones/meses aun aparte | Codex | Seis respuestas JSON equivalentes, hashes A/B/C iguales en canaria y publica; 17 planes en un `pl.collect_all`; pico local 1324 MB con una CPU | Produccion A 87.1 s, B 6.9 s, C 32.1 s | Cloud Run A 11.5 s, B 1.2 s, C 4.1 s; A publico 8.2 s | `8bf54ca` | API `00163-bmw` al 100%; Job y Vercel mismo commit |
-| PERF-003 Cache por generacion de datos | Pendiente | Por asignar | El cache GCS usa existencia local; el resumen local se regenera por mtime durante GET | Primer GET >180 s; un GET concurrente dio 500 | Pendiente | - | - |
+| PERF-002 Dashboard con una sola lectura | En uso: agregados principales unificados; opciones/meses aun aparte | Codex | Seis respuestas JSON equivalentes, hashes A/B/C iguales en canaria y publica; 17 planes en un `pl.collect_all`; pico local 1324 MB con una CPU | Produccion A 87.1 s, B 6.9 s, C 32.1 s | Cloud Run A 11.5 s, B 1.2 s, C 4.1 s; A publico 8.7 s con release cache | `8bf54ca` | Incluido en API `00168-9mj`; Job y Vercel alineados |
+| PERF-003 Cache por generacion de datos | Completo: release inmutable, manifiesto y fallback sano | Codex | Release y generaciones abajo; QA de concurrencia/corrupcion; dashboard con SHA-256 exacto; Job pinneado al release | Cache por existencia; reconstruccion >180 s y colision concurrente 500 | Dashboard publico 8.7 s; opciones de reportes 1.5-2.0 s; 0 errores en canaria final | `2e5dc14`, `6b592d0`, `8ffb969`, `224c50d` | API `00168-9mj` al 100%; release `20260916T054421Z-59591cb8592a` |
 | BQ-001 Dataset, esquemas y permisos | Pendiente | Por asignar | - | - | Pendiente | - | - |
 | BQ-002 Carga versionada desde GCS | Pendiente | Por asignar | - | - | Pendiente | - | - |
 | BQ-003 Conciliacion por fuente, cuenta y mes | Pendiente | Por asignar | - | - | Pendiente | - | - |
@@ -21,7 +21,7 @@ cambiar la lectura productiva hasta conciliar y comparar.
 | REP-002 Equivalencia Excel/PDF y limites de detalle | Pendiente | Por asignar | - | - | Pendiente | - | - |
 | QUEUE-001 Heartbeat y deteccion de procesos trabados | Pendiente | Por asignar | - | - | Pendiente | - | - |
 | QUEUE-002 Concurrencia global y reintentos | Pendiente | Por asignar | - | - | Pendiente | - | - |
-| ING-001 Ingesta durable y publicacion atomica | Pendiente | Por asignar | - | - | Pendiente | - | - |
+| ING-001 Ingesta durable y publicacion atomica | En curso: publicacion atomica completa; job durable y reintentos pendientes | Codex / por asignar | Manifiesto escrito despues de los objetos inmutables; canonicales de compatibilidad; release activo abajo | Seis sobrescrituras secuenciales sin puntero comun | API y nuevos Jobs leen una sola version; persistencia del job de ingesta pendiente | `2e5dc14`, `224c50d` | Release inicial activo en GCS; API/Job alineados |
 | OPS-001 Metricas, alertas y despliegue | Pendiente | Por asignar | - | - | Pendiente | - | - |
 
 No se debe completar una tarea sin actualizar las ocho columnas. Las cifras
@@ -190,16 +190,62 @@ consultaron opciones de reportes, no se genero un reporte pesado. El pico
 local de 1324 MB con una CPU exige vigilar memoria y 5xx productivos en
 OPS-001; Cloud Monitoring a resolucion de un minuto no certifica el pico
 de cada request. PERF-002 reduce la lectura costosa de los agregados, pero
-todavia obtiene opciones y meses en pasos anteriores; la cache por generacion
-de PERF-003 y los agregados materializados de BigQuery siguen pendientes.
+todavia obtiene opciones y meses en pasos anteriores. PERF-003 cerro la cache
+por generacion; los agregados materializados de BigQuery siguen pendientes.
 
-## Proxima decision E1
+## PERF-003: release atomico y cache por generacion
 
-`PERF-002` ya unifico los agregados principales sin devolver las 3.15
-millones de filas completas a Python. La configuracion publicada, verificada con Cloud Run el
-2026-09-15, es 2 GiB, 1 CPU y concurrencia 1; el documento de despliegue de
-septiembre ya no refleja esa concurrencia. `PERF-003` debe separar
-preparacion/publicacion del
-GET y enlazar el cache a la generacion publicada, evitando que dos requests
-escriban las mismas carpetas. A/B/C y los bordes quedan como casos de
-equivalencia para las siguientes etapas.
+El 2026-09-16 se publico la primera version inmutable de los seis marts:
+
+- release: `20260916T054421Z-59591cb8592a`;
+- manifiesto: `marts/release_manifest.json`;
+- generacion del manifiesto: `1789537689957898`;
+- API final probada: `vpo-corp-api-00168-9mj`;
+- commit funcional final: `224c50d`.
+
+Los seis archivos locales fueron comparados por tamano y MD5 con los objetos
+canonicos antes de crear el release; todos coincidieron. La validacion del
+paquete dio OK. El publicador sube primero objetos bajo
+`marts/releases/<release_id>/`, conserva nombres canonicos para consumidores
+anteriores y activa el manifiesto solo cuando el paquete inmutable existe.
+Desde el segundo release, el manifiesto anterior permanece activo hasta que
+terminan todas las copias de compatibilidad y el manifiesto nuevo se escribe
+al final.
+
+La API consulta la generacion del manifiesto cada 15 segundos, descarga en un
+staging unico, valida tamano y metadata Parquet, y mueve el archivo a una
+carpeta identificada por release/generacion antes de cambiar el puntero local.
+Solicitudes concurrentes de una instancia comparten un lock. La QA simulo
+ocho solicitudes simultaneas y realizo una sola descarga; tambien publico un
+archivo corrupto y comprobo que se mantuviera la version sana anterior.
+`/health` expone release, generacion, fallback y ultimo error. Los marts
+auxiliares de informes especiales se cachean individualmente por generacion.
+
+Dashboard e Ingresos digitales ya no reconstruyen resumenes dentro del GET
+productivo. En la candidata y despues en la ruta publica, el dashboard de seis
+meses conservo la huella SHA-256 exacta de PERF-001. Resultado publico final:
+HTTP 200 en 8.7 s, release correcto, sin fallback ni error. Source Monitor,
+Ingresos digitales, web y opciones de reportes respondieron.
+
+Durante la canaria, `/reports/custom/options` mostro un 503 por memoria al leer
+783 MB solo para obtener distribuidoras/cuentas. El trafico seguia en la
+revision anterior. Se comprobo que `song_level` contiene exactamente las 10
+combinaciones de `standardized`; la ruta paso a ese mart compacto y bajo a
+1.5-2.0 s. La revision final tuvo 0 errores 5xx en la canaria. No se genero un
+reporte pesado. Los nuevos Jobs congelan `song`, `standardized` y
+`catalog_master` desde el release inmutable, y `catalog_status` por su propia
+generacion canonica.
+
+PERF-003 queda completo. ING-001 queda parcial: la publicacion del paquete ya
+es atomica, pero el estado del proceso de ingesta/publicacion todavia vive en
+memoria y faltan persistencia, heartbeat y reintentos. Tambien falta definir
+retencion/limpieza de releases antiguos para controlar almacenamiento.
+
+## Proxima decision E1/E2
+
+`PERF-001`, `PERF-002` y `PERF-003` ya tienen evidencia productiva. El siguiente
+paso recomendado es `OPS-001`: alertas y metricas para latencia, 5xx, memoria,
+release activo y fallback. Despues se puede iniciar `BQ-001`/`BQ-002` en
+paralelo, manteniendo A/B/C y los bordes como casos de equivalencia. La parte
+restante de `ING-001` se coordina con `QUEUE-001` y `QUEUE-002` para persistir
+estado, heartbeat, concurrencia global y reintentos.
