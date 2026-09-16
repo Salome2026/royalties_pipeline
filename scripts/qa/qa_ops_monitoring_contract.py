@@ -39,6 +39,7 @@ def main() -> None:
     }
     assert thresholds["VPO API - latencia p95"] == 30000
     assert thresholds["VPO API - memoria"] == 0.85
+    assert thresholds["VPO API - disponibilidad"] == 0.8
 
     print("OPS monitoring contract OK")
 

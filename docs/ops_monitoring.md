@@ -18,7 +18,7 @@ Las politicas administradas por `scripts/configure_ops_monitoring.py` son:
 
 | Politica | Umbral |
 | --- | --- |
-| VPO API - disponibilidad | readiness por debajo de 100% durante 2 minutos |
+| VPO API - disponibilidad | menos de 80% de ubicaciones saludables durante 2 minutos |
 | VPO API - errores 5xx | al menos un 5xx en una ventana de 5 minutos |
 | VPO API - latencia p95 | mas de 30 segundos durante 5 minutos |
 | VPO API - memoria | mas de 85% durante 5 minutos |

@@ -149,7 +149,7 @@ def desired_policies(
                     f'metric.label.check_id = "{check_id}"',
                 ),
                 comparison="COMPARISON_LT",
-                threshold=1,
+                threshold=0.8,
                 duration="120s",
                 aligner="ALIGN_FRACTION_TRUE",
                 reducer="REDUCE_MEAN",
@@ -254,7 +254,13 @@ def ensure_uptime_check(client: MonitoringClient, api_url: str) -> str:
     checks = client.list_items("uptimeCheckConfigs", "uptimeCheckConfigs")
     for check in checks:
         if check.get("displayName") == UPTIME_DISPLAY_NAME:
-            return str(check["name"]).rsplit("/", 1)[-1]
+            name = str(check["name"])
+            client.request(
+                "PATCH",
+                f"{name}?updateMask=timeout",
+                {"name": name, "timeout": "60s"},
+            )
+            return name.rsplit("/", 1)[-1]
 
     parsed = urlparse(api_url)
     payload = {
@@ -271,7 +277,7 @@ def ensure_uptime_check(client: MonitoringClient, api_url: str) -> str:
             "requestMethod": "GET",
         },
         "period": "60s",
-        "timeout": "30s",
+        "timeout": "60s",
         "contentMatchers": [
             {
                 "content": json.dumps("ok"),
