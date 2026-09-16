@@ -301,10 +301,12 @@ def query_rows(
     use_all_months: bool,
     month_limit: int,
     ranking_limit: int,
+    maximum_bytes_billed: int | None,
     client: bigquery.Client | None = None,
 ) -> list[dict[str, Any]]:
     query_client = client or dashboard_client(project, location)
     config = bigquery.QueryJobConfig(
+        maximum_bytes_billed=maximum_bytes_billed,
         query_parameters=[
             bigquery.ScalarQueryParameter("source", "STRING", source),
             bigquery.ScalarQueryParameter("account", "STRING", account),
@@ -492,6 +494,7 @@ def royalties_dashboard_bigquery(
     project: str = DEFAULT_PROJECT,
     dataset: str = DEFAULT_DATASET,
     location: str = DEFAULT_LOCATION,
+    maximum_bytes_billed: int | None = 2_500_000_000,
     client: bigquery.Client | None = None,
 ) -> dict[str, Any]:
     safe_limit = max(3, min(int(limit or 10), 50))
@@ -517,6 +520,7 @@ def royalties_dashboard_bigquery(
         use_all_months=use_all_months,
         month_limit=month_limit,
         ranking_limit=safe_limit,
+        maximum_bytes_billed=maximum_bytes_billed,
         client=client,
     )
     return format_dashboard_response(

@@ -11,6 +11,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 import unicodedata
 import uuid
 from calendar import monthrange
@@ -161,6 +162,19 @@ VPO_API_KEY = os.environ.get("VPO_API_KEY", "change-me")
 VPO_BIGQUERY_PROJECT = os.environ.get("VPO_BIGQUERY_PROJECT", "vpo-corp-royalties").strip()
 VPO_BIGQUERY_DATASET = os.environ.get("VPO_BIGQUERY_DATASET", "royalties_analytics").strip()
 VPO_BIGQUERY_LOCATION = os.environ.get("VPO_BIGQUERY_LOCATION", "US").strip()
+VPO_ROYALTIES_DASHBOARD_BACKEND = os.environ.get(
+    "VPO_ROYALTIES_DASHBOARD_BACKEND", "parquet"
+).strip().lower()
+VPO_ROYALTIES_DASHBOARD_BIGQUERY_FALLBACK = os.environ.get(
+    "VPO_ROYALTIES_DASHBOARD_BIGQUERY_FALLBACK", "1"
+).strip().lower() in {"1", "true", "yes", "on"}
+VPO_BIGQUERY_MAX_BYTES_BILLED = int(
+    os.environ.get("VPO_BIGQUERY_MAX_BYTES_BILLED", "2500000000") or 2_500_000_000
+)
+if VPO_ROYALTIES_DASHBOARD_BACKEND not in {"parquet", "bigquery"}:
+    raise RuntimeError(
+        "VPO_ROYALTIES_DASHBOARD_BACKEND debe ser 'parquet' o 'bigquery'."
+    )
 VPO_LOCAL_MARTS_DIR_RAW = os.environ.get("VPO_LOCAL_MARTS_DIR", "").strip()
 VPO_LOCAL_MARTS_DIR = Path(VPO_LOCAL_MARTS_DIR_RAW).expanduser() if VPO_LOCAL_MARTS_DIR_RAW else None
 VPO_API_CACHE_DIR = Path(os.environ.get("VPO_API_CACHE_DIR", BASE / "cache" / "gcs_marts"))
@@ -6869,6 +6883,10 @@ def build_health_payload(*, ensure_release: bool = False) -> dict:
         "drive_folder_configured": "yes" if GOOGLE_DRIVE_FOLDER_ID else "no",
         "share_email_configured": "yes" if GOOGLE_SHEETS_SHARE_EMAIL else "no",
         "operational_db": database_status,
+        "royalties_dashboard": {
+            "backend": VPO_ROYALTIES_DASHBOARD_BACKEND,
+            "bigquery_fallback": VPO_ROYALTIES_DASHBOARD_BIGQUERY_FALLBACK,
+        },
     }
 
 
@@ -8889,8 +8907,43 @@ def digital_income(
     }
 
 
+def query_royalties_dashboard_from_bigquery(
+    *,
+    source: str | None,
+    account: str | None,
+    keyword: str | None,
+    artist_keyword: str | None,
+    start_month: str | None,
+    end_month: str | None,
+    period_basis: str,
+    period_mode: str,
+    limit: int,
+) -> dict[str, Any]:
+    return query_royalties_dashboard_bigquery(
+        policy_document=load_distributor_policy_document(),
+        source=source,
+        account=account,
+        keyword=keyword,
+        artist_keyword=artist_keyword,
+        start_month=start_month,
+        end_month=end_month,
+        period_basis=period_basis,
+        period_mode=period_mode,
+        limit=limit,
+        project=VPO_BIGQUERY_PROJECT,
+        dataset=VPO_BIGQUERY_DATASET,
+        location=VPO_BIGQUERY_LOCATION,
+        maximum_bytes_billed=VPO_BIGQUERY_MAX_BYTES_BILLED,
+    )
+
+
+def log_dashboard_backend_event(**payload: Any) -> None:
+    print(json.dumps({"event": "royalties_dashboard_backend", **payload}, sort_keys=True), flush=True)
+
+
 @app.get("/royalties-dashboard")
 def royalties_dashboard(
+    response: Response,
     source: str | None = None,
     account: str | None = None,
     keyword: str | None = None,
@@ -8904,6 +8957,37 @@ def royalties_dashboard(
     x_vpo_api_key: str | None = Header(default=None),
 ):
     require_api_key(x_vpo_api_key)
+    response.headers["X-VPO-Dashboard-Backend"] = "parquet"
+    if VPO_ROYALTIES_DASHBOARD_BACKEND == "bigquery":
+        started = time.perf_counter()
+        try:
+            result = query_royalties_dashboard_from_bigquery(
+                source=source,
+                account=account,
+                keyword=keyword,
+                artist_keyword=artist_keyword,
+                start_month=start_month,
+                end_month=end_month,
+                period_basis=period_basis,
+                period_mode=period_mode,
+                limit=limit,
+            )
+        except Exception as exc:
+            elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+            log_dashboard_backend_event(
+                backend="bigquery",
+                outcome="fallback" if VPO_ROYALTIES_DASHBOARD_BIGQUERY_FALLBACK else "error",
+                elapsed_ms=elapsed_ms,
+                error_type=type(exc).__name__,
+            )
+            if not VPO_ROYALTIES_DASHBOARD_BIGQUERY_FALLBACK:
+                raise HTTPException(status_code=503, detail="El dashboard analitico no esta disponible.") from exc
+            response.headers["X-VPO-Dashboard-Backend"] = "parquet-fallback"
+        else:
+            elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+            response.headers["X-VPO-Dashboard-Backend"] = "bigquery"
+            log_dashboard_backend_event(backend="bigquery", outcome="ok", elapsed_ms=elapsed_ms)
+            return result
     safe_limit = max(3, min(int(limit or 10), 50))
     period_col = "transaction_month" if period_basis == "transaction_month" else "statement_period"
 
@@ -9206,10 +9290,8 @@ def royalties_dashboard_bigquery_shadow(
 ):
     require_api_key(x_vpo_api_key)
     del refresh_cache
-    policy_document = load_distributor_policy_document()
     try:
-        return query_royalties_dashboard_bigquery(
-            policy_document=policy_document,
+        return query_royalties_dashboard_from_bigquery(
             source=source,
             account=account,
             keyword=keyword,
@@ -9219,9 +9301,6 @@ def royalties_dashboard_bigquery_shadow(
             period_basis=period_basis,
             period_mode=period_mode,
             limit=limit,
-            project=VPO_BIGQUERY_PROJECT,
-            dataset=VPO_BIGQUERY_DATASET,
-            location=VPO_BIGQUERY_LOCATION,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

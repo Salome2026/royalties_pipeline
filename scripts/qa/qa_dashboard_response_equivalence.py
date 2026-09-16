@@ -8,6 +8,7 @@ import sys
 import time
 
 import requests
+from fastapi import Response
 
 from app import vpo_corp_api as api
 from lib.distributor_policy_store import use_distributor_policy_snapshot
@@ -156,7 +157,7 @@ def main() -> None:
                     response.raise_for_status()
                     expected = response.json()
                 started = time.perf_counter()
-                actual = api.royalties_dashboard(x_vpo_api_key=key, **params)
+                actual = api.royalties_dashboard(response=Response(), x_vpo_api_key=key, **params)
                 seconds = time.perf_counter() - started
                 if compare:
                     difference = first_difference(expected, actual)

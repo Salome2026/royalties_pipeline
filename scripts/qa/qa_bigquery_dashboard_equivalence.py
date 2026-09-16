@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -121,6 +123,9 @@ def first_difference(left: object, right: object, path: str = "") -> str | None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Compara el dashboard Parquet con BigQuery.")
     parser.add_argument("--shadow-endpoint", action="store_true")
+    parser.add_argument("--reference-url", default=API_URL)
+    parser.add_argument("--candidate-url")
+    parser.add_argument("--evidence-path")
     args = parser.parse_args()
     from scripts.load_bigquery_release import ENV_PATH, load_local_env
 
@@ -129,38 +134,80 @@ def main() -> None:
 
     session = requests.Session()
     session.headers.update({"x-vpo-api-key": api_key()})
-    policy_response = session.get(f"{API_URL}/config/distributor-account-policies", timeout=30)
-    policy_response.raise_for_status()
-    policy = policy_response.json()
+    reference_url = args.reference_url.rstrip("/")
+    candidate_url = args.candidate_url.rstrip("/") if args.candidate_url else None
+    policy = None
+    if candidate_url is None and not args.shadow_endpoint:
+        policy_response = session.get(f"{reference_url}/config/distributor-account-policies", timeout=30)
+        policy_response.raise_for_status()
+        policy = policy_response.json()
 
     selected = set(filter(None, os.environ.get("VPO_DASHBOARD_QA_CASES", "").split(",")))
     use_shadow_endpoint = args.shadow_endpoint or os.environ.get("VPO_DASHBOARD_QA_USE_SHADOW_ENDPOINT", "0") == "1"
+    evidence = {
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+        "reference_url": reference_url,
+        "candidate_url": candidate_url,
+        "cases": [],
+    }
     for name, params in CASES:
         if selected and name not in selected:
             continue
-        expected_response = session.get(f"{API_URL}/royalties-dashboard", params=params, timeout=180)
+        reference_started = time.perf_counter()
+        expected_response = session.get(f"{reference_url}/royalties-dashboard", params=params, timeout=180)
         expected_response.raise_for_status()
         expected = expected_response.json()
+        reference_seconds = time.perf_counter() - reference_started
         started = time.perf_counter()
-        if use_shadow_endpoint:
+        candidate_backend = "local-bigquery"
+        if candidate_url:
             actual_response = session.get(
-                f"{API_URL}/royalties-dashboard/bigquery-shadow",
+                f"{candidate_url}/royalties-dashboard",
                 params=params,
                 timeout=180,
             )
             actual_response.raise_for_status()
             actual = actual_response.json()
+            candidate_backend = actual_response.headers.get("X-VPO-Dashboard-Backend", "missing")
+            if candidate_backend != "bigquery":
+                raise AssertionError(f"{name}: backend canario inesperado: {candidate_backend}")
+        elif use_shadow_endpoint:
+            actual_response = session.get(
+                f"{reference_url}/royalties-dashboard/bigquery-shadow",
+                params=params,
+                timeout=180,
+            )
+            actual_response.raise_for_status()
+            actual = actual_response.json()
+            candidate_backend = "bigquery-shadow"
         else:
+            assert policy is not None
             actual = royalties_dashboard_bigquery(policy_document=policy, **params)
         seconds = time.perf_counter() - started
         difference = first_difference(expected, actual)
         if difference:
             raise AssertionError(f"{name}: {difference}")
+        evidence["cases"].append(
+            {
+                "case": name,
+                "equivalent": True,
+                "reference_seconds": round(reference_seconds, 3),
+                "candidate_seconds": round(seconds, 3),
+                "candidate_backend": candidate_backend,
+                "amount_usd": actual["totals"]["amount_usd"],
+            }
+        )
         print(
-            f"CASE={name} EQUIVALENT=1 BIGQUERY_SECONDS={seconds:.2f} "
+            f"CASE={name} EQUIVALENT=1 REFERENCE_SECONDS={reference_seconds:.2f} "
+            f"BIGQUERY_SECONDS={seconds:.2f} BACKEND={candidate_backend} "
             f"USD={actual['totals']['amount_usd']}",
             flush=True,
         )
+    if args.evidence_path:
+        evidence_path = Path(args.evidence_path)
+        evidence_path.parent.mkdir(parents=True, exist_ok=True)
+        evidence_path.write_text(json.dumps(evidence, indent=2, sort_keys=True), encoding="utf-8")
+        print(f"EVIDENCE={evidence_path}", flush=True)
 
 
 if __name__ == "__main__":
