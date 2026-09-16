@@ -7313,10 +7313,10 @@ def custom_report_options(
     x_vpo_api_key: str | None = Header(default=None),
 ) -> dict:
     require_api_key(x_vpo_api_key)
-    marts = ensure_marts(refresh_cache=refresh_cache, filenames=[STANDARDIZED_FILE])
+    marts = ensure_marts(refresh_cache=refresh_cache, filenames=[SONG_FILE])
     try:
         source_accounts_df = (
-            pl.scan_parquet(marts[STANDARDIZED_FILE])
+            pl.scan_parquet(marts[SONG_FILE])
             .select(
                 [
                     pl.col("source").cast(pl.Utf8, strict=False).str.to_lowercase().alias("source"),
