@@ -15,7 +15,7 @@ cambiar la lectura productiva hasta conciliar y comparar.
 | BQ-001 Dataset, esquemas y permisos | Completo: capa analitica sombra creada en US | Codex | Dataset `royalties_analytics`; 10 tablas, 3 vistas; particiones mensuales, clustering y permisos de lectura/consulta para API y Job | No habia datasets ni tablas BigQuery | Esquema completo validado y disponible sin cambiar lectores productivos | `861714f`, `9d601d6` | BigQuery `vpo-corp-royalties.royalties_analytics` |
 | BQ-002 Carga versionada desde GCS | Completo: release vigente cargado y validado | Codex | Release `20260916T065558Z-4270970b55a3`; objetos curados inmutables en GCS; carga transaccional; conteos e importes conciliados a centavos | 0 releases en BigQuery | 12,355,023 movimientos y 3,194,911 filas de dashboard disponibles en sombra | `861714f` | BigQuery release `ready`; produccion sigue en Parquet/GCS |
 | BQ-003 Conciliacion por fuente, cuenta y mes | Completo: control automatico y persistente | Codex | Run `20260916T150010Z-ae47e0ab`; 757 grupos; 0 diferencias; informe y resultados inmutables en GCS/BigQuery | Solo validacion global de filas e importes | 306 grupos statement y 451 transaction conciliados; assets contados por ISRC | `9d601d6` | Release BigQuery `ready`; futuras cargas quedan bloqueadas hasta conciliar |
-| DASH-001 Consultas y agregados en BigQuery | Completo en sombra: contrato actual reproducido con una consulta | Codex | Ocho casos A-H equivalentes campo por campo; ruta `/royalties-dashboard/bigquery-shadow`; consulta unica con opciones, matriz, rankings y YouTube | Parquet: A 8.7 s caliente; historico amplio puede superar un minuto | BigQuery: 1.19-2.00 s caliente; 3.5-8.5 s frio; respuestas exactas | `6cc60e7` | Ruta sombra; dashboard productivo sigue en Parquet |
+| DASH-001 Consultas y agregados en BigQuery | Completo en sombra: contrato actual reproducido con una consulta | Codex | Ocho casos A-H equivalentes campo por campo en local y Cloud Run; ruta `/royalties-dashboard/bigquery-shadow`; opciones, matriz, rankings y YouTube | Parquet: A 8.7 s caliente; historico amplio puede superar un minuto | BigQuery productivo caliente: 1.05-1.58 s; frio local 3.5-8.5 s; respuestas exactas | `6cc60e7` | API `00176-8cm`, ruta sombra; dashboard visible sigue en Parquet |
 | DASH-002 Comparacion y cambio gradual | Pendiente | Por asignar | - | - | Pendiente | - | - |
 | REP-001 Lectura de informes desde BigQuery | Pendiente | Por asignar | - | - | Pendiente | - | - |
 | REP-002 Equivalencia Excel/PDF y limites de detalle | Pendiente | Por asignar | - | - | Pendiente | - | - |
@@ -325,3 +325,9 @@ las repeticiones servidas por cache procesaron 0 bytes.
 `DASH-001` no cambia produccion. `DASH-002` debe probar la ruta sombra ya
 desplegada, registrar diferencias y latencias durante una ventana suficiente,
 habilitar una canaria y conservar rollback inmediato a Parquet.
+
+La verificacion posterior al despliegue en API `vpo-corp-api-00176-8cm`
+repitio los ocho casos contra ambas rutas. Todos fueron equivalentes. La ruta
+BigQuery respondio entre 1.05 y 1.58 segundos, incluida la busqueda historica
+por ISRC en 1.54 segundos. La espera prolongada observada durante esa prueba
+correspondio a la ruta Parquet usada como referencia, no a BigQuery.
