@@ -38,6 +38,7 @@ from app.operational_db import (
     operational_sqlite_compatible_connect,
     open_operational_db_pool,
 )
+from app.bigquery_dashboard import royalties_dashboard_bigquery as query_royalties_dashboard_bigquery
 from app.report_jobs import (
     create_or_reuse_report_job,
     fail_report_job,
@@ -157,6 +158,9 @@ GOOGLE_APPLICATION_CREDENTIALS = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"
 GCS_SERVICE_ACCOUNT_JSON = os.environ.get("GCS_SERVICE_ACCOUNT_JSON", "")
 GOOGLE_OAUTH_TOKEN_JSON = os.environ.get("GOOGLE_OAUTH_TOKEN_JSON", "")
 VPO_API_KEY = os.environ.get("VPO_API_KEY", "change-me")
+VPO_BIGQUERY_PROJECT = os.environ.get("VPO_BIGQUERY_PROJECT", "vpo-corp-royalties").strip()
+VPO_BIGQUERY_DATASET = os.environ.get("VPO_BIGQUERY_DATASET", "royalties_analytics").strip()
+VPO_BIGQUERY_LOCATION = os.environ.get("VPO_BIGQUERY_LOCATION", "US").strip()
 VPO_LOCAL_MARTS_DIR_RAW = os.environ.get("VPO_LOCAL_MARTS_DIR", "").strip()
 VPO_LOCAL_MARTS_DIR = Path(VPO_LOCAL_MARTS_DIR_RAW).expanduser() if VPO_LOCAL_MARTS_DIR_RAW else None
 VPO_API_CACHE_DIR = Path(os.environ.get("VPO_API_CACHE_DIR", BASE / "cache" / "gcs_marts"))
@@ -9184,6 +9188,43 @@ def royalties_dashboard(
         },
         "options": options,
     }
+
+
+@app.get("/royalties-dashboard/bigquery-shadow")
+def royalties_dashboard_bigquery_shadow(
+    source: str | None = None,
+    account: str | None = None,
+    keyword: str | None = None,
+    artist_keyword: str | None = None,
+    start_month: str | None = None,
+    end_month: str | None = None,
+    period_basis: Literal["statement_period", "transaction_month"] = "statement_period",
+    period_mode: Literal["last_6_months", "last_12_months", "all", "single_month", "closed_range"] = "last_6_months",
+    limit: int = 10,
+    refresh_cache: bool = False,
+    x_vpo_api_key: str | None = Header(default=None),
+):
+    require_api_key(x_vpo_api_key)
+    del refresh_cache
+    policy_document = load_distributor_policy_document()
+    try:
+        return query_royalties_dashboard_bigquery(
+            policy_document=policy_document,
+            source=source,
+            account=account,
+            keyword=keyword,
+            artist_keyword=artist_keyword,
+            start_month=start_month,
+            end_month=end_month,
+            period_basis=period_basis,
+            period_mode=period_mode,
+            limit=limit,
+            project=VPO_BIGQUERY_PROJECT,
+            dataset=VPO_BIGQUERY_DATASET,
+            location=VPO_BIGQUERY_LOCATION,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/booking/shows")
