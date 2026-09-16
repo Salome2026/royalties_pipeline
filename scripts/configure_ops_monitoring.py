@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import urllib.error
 import urllib.parse
@@ -16,8 +17,11 @@ UPTIME_DISPLAY_NAME = "VPO API readiness"
 
 
 def access_token() -> str:
+    executable = shutil.which("gcloud") or shutil.which("gcloud.cmd")
+    if not executable:
+        raise RuntimeError("No se encontro gcloud en PATH.")
     result = subprocess.run(
-        ["gcloud", "auth", "print-access-token"],
+        [executable, "auth", "print-access-token"],
         check=True,
         capture_output=True,
         text=True,
@@ -270,7 +274,7 @@ def ensure_uptime_check(client: MonitoringClient, api_url: str) -> str:
         "timeout": "30s",
         "contentMatchers": [
             {
-                "content": "ok",
+                "content": json.dumps("ok"),
                 "matcher": "MATCHES_JSON_PATH",
                 "jsonPathMatcher": {"jsonPath": "$.status", "jsonMatcher": "EXACT_MATCH"},
             }
