@@ -4800,6 +4800,25 @@ main.booking-settlement-main {
   background: rgba(121, 203, 182, .11);
 }
 
+.booking-settlement-main .booking-actions .secondary-danger {
+  width: auto;
+  min-height: 36px;
+  margin: 0;
+  padding: 0 12px;
+  gap: 7px;
+  color: #efaaa2;
+  border-color: rgba(236, 170, 160, .25);
+  background: rgba(236, 170, 160, .07);
+  box-shadow: none;
+}
+
+.booking-settlement-main .booking-actions .secondary-danger:hover {
+  color: #ffd5d0;
+  border-color: rgba(236, 170, 160, .42);
+  background: rgba(236, 170, 160, .12);
+  transform: none;
+}
+
 .booking-settlement-main .event-card {
   color: var(--booking-glass-text);
   border-color: var(--booking-glass-border-soft);

@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, CircleDollarSign, FileDown, LayoutDashboard, Pencil, RefreshCw, RotateCcw, Search, ShieldCheck, Table2, Rows3, Youtube } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CircleDollarSign, FileDown, LayoutDashboard, Pencil, RefreshCw, RotateCcw, Search, ShieldCheck, Table2, Trash2, Rows3, Youtube } from "lucide-react";
 import { PeriodControl } from "./components/PeriodControl";
 import { BookingDashboard, type BookingAgendaEvent } from "./components/BookingDashboard";
 import { VpoHome } from "./components/VpoHome";
@@ -14155,6 +14155,7 @@ export default function Home() {
                       )}
                       {canApproveModule("booking") && (
                         <button type="button" className="secondary-danger" onClick={() => deleteBookingShow(item)}>
+                          <Trash2 size={14} aria-hidden="true" />
                           Eliminar
                         </button>
                       )}
