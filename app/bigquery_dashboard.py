@@ -351,6 +351,97 @@ def query_rows(
     return [dict(row.items()) for row in query_client.query(sql, job_config=config, location=location).result()]
 
 
+def royalty_detail_count_bigquery(
+    *,
+    keywords: Iterable[str],
+    mode: str,
+    start_month: str | None,
+    end_month: str | None,
+    period_basis: str,
+    source: str | None = None,
+    account: str | None = None,
+    project: str = DEFAULT_PROJECT,
+    dataset: str = DEFAULT_DATASET,
+    location: str = DEFAULT_LOCATION,
+    maximum_bytes_billed: int | None = 2_500_000_000,
+    client: bigquery.Client | None = None,
+) -> int:
+    if period_basis == "transaction_month":
+        period_column = "transaction_month"
+    elif period_basis == "statement_period":
+        period_column = "statement_month"
+    else:
+        raise ValueError(f"Base temporal no soportada: {period_basis}")
+    if mode not in {"any", "all"}:
+        raise ValueError(f"Modo de coincidencia no soportado: {mode}")
+
+    search_terms = [
+        normalized
+        for value in keywords
+        for normalized in [normalize_search_text(value)]
+        if normalized
+    ]
+    table = f"`{project}.{dataset}.royalty_dashboard_current`"
+    sql = rf"""
+WITH scoped AS (
+  SELECT
+    COALESCE(raw_rows, 0) AS raw_rows,
+    REGEXP_REPLACE(NORMALIZE_AND_CASEFOLD(COALESCE(search_text, ''), NFD), r'\pM', '') AS normalized_search
+  FROM {table}
+  WHERE (@source IS NULL OR source = @source)
+    AND (@account IS NULL OR account = @account)
+    AND (@start_month IS NULL OR {period_column} >= @start_month)
+    AND (@end_month IS NULL OR {period_column} <= @end_month)
+),
+matched AS (
+  SELECT raw_rows
+  FROM scoped
+  WHERE COALESCE(ARRAY_LENGTH(@search_terms), 0) = 0
+    OR (
+      @mode = 'all'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM UNNEST(@search_terms) AS term
+        WHERE STRPOS(normalized_search, term) = 0
+          AND STRPOS(
+            REGEXP_REPLACE(normalized_search, r'[\s_-]+', ''),
+            REGEXP_REPLACE(term, r'[\s_-]+', '')
+          ) = 0
+      )
+    )
+    OR (
+      @mode = 'any'
+      AND EXISTS (
+        SELECT 1
+        FROM UNNEST(@search_terms) AS term
+        WHERE STRPOS(normalized_search, term) > 0
+          OR STRPOS(
+            REGEXP_REPLACE(normalized_search, r'[\s_-]+', ''),
+            REGEXP_REPLACE(term, r'[\s_-]+', '')
+          ) > 0
+      )
+    )
+)
+SELECT COALESCE(SUM(raw_rows), 0) AS row_count
+FROM matched
+""".strip()
+    query_client = client or dashboard_client(project, location)
+    config = bigquery.QueryJobConfig(
+        maximum_bytes_billed=maximum_bytes_billed,
+        query_parameters=[
+            bigquery.ScalarQueryParameter("source", "STRING", source),
+            bigquery.ScalarQueryParameter("account", "STRING", account),
+            bigquery.ScalarQueryParameter("start_month", "DATE", month_date(start_month)),
+            bigquery.ScalarQueryParameter("end_month", "DATE", month_date(end_month)),
+            bigquery.ArrayQueryParameter("search_terms", "STRING", search_terms),
+            bigquery.ScalarQueryParameter("mode", "STRING", mode),
+        ],
+    )
+    rows = query_client.query(sql, job_config=config, location=location).result()
+    first = next(iter(rows), None)
+    return int(first["row_count"] or 0) if first is not None else 0
+
+
 def rank_rows(rows: Iterable[dict[str, Any]], denominator: float) -> list[dict[str, Any]]:
     output: list[dict[str, Any]] = []
     for row in sorted(rows, key=lambda item: (-float(item.get("amount_usd") or 0.0), str(item.get("name") or ""))):

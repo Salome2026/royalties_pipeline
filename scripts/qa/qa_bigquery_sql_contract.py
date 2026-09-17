@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -11,6 +12,29 @@ if str(ROOT) not in sys.path:
 from scripts.bootstrap_bigquery_analytics import rendered_schema
 from scripts.load_bigquery_release import insert_sql
 from scripts.reconcile_bigquery_release import aggregate_bigquery_sql
+from app.bigquery_dashboard import royalty_detail_count_bigquery
+
+
+class FakeQuery:
+    def result(self) -> list[dict[str, int]]:
+        return [{"row_count": 123}]
+
+
+class FakeClient:
+    def __init__(self) -> None:
+        self.sql = ""
+        self.parameters: dict[str, Any] = {}
+
+    def query(self, sql: str, *, job_config: Any, location: str) -> FakeQuery:
+        self.sql = sql
+        self.parameters = {
+            parameter.name: getattr(parameter, "value", None)
+            if hasattr(parameter, "value")
+            else parameter.values
+            for parameter in job_config.query_parameters
+        }
+        assert location == "US"
+        return FakeQuery()
 
 
 def main() -> None:
@@ -59,6 +83,23 @@ def main() -> None:
         period_basis="transaction",
     )
     assert "`project-test.dataset_test.royalty_transaction_fact`" in transaction_sql
+
+    fake_client = FakeClient()
+    detail_count = royalty_detail_count_bigquery(
+        keywords=["Mamiyosoyelth", "Perreo TH"],
+        mode="any",
+        start_month="2025-01",
+        end_month="2026-08",
+        period_basis="transaction_month",
+        project="project-test",
+        dataset="dataset_test",
+        client=fake_client,
+    )
+    assert detail_count == 123
+    assert "SUM(raw_rows)" in fake_client.sql
+    assert "transaction_month" in fake_client.sql
+    assert fake_client.parameters["search_terms"] == ["mamiyosoyelth", "perreo th"]
+    assert fake_client.parameters["mode"] == "any"
 
     print("BigQuery SQL contract OK")
 

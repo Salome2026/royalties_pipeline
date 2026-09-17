@@ -39,7 +39,10 @@ from app.operational_db import (
     operational_sqlite_compatible_connect,
     open_operational_db_pool,
 )
-from app.bigquery_dashboard import royalties_dashboard_bigquery as query_royalties_dashboard_bigquery
+from app.bigquery_dashboard import (
+    royalties_dashboard_bigquery as query_royalties_dashboard_bigquery,
+    royalty_detail_count_bigquery as query_royalty_detail_count_bigquery,
+)
 from app.report_jobs import (
     create_or_reuse_report_job,
     fail_report_job,
@@ -62,7 +65,6 @@ if str(SCRIPTS) not in sys.path:
 
 from build_keyword_royalty_report import (  # noqa: E402
     EXCEL_MAX_DATA_ROWS,
-    count_report_detail_rows,
     normalize_keywords,
 )
 from build_statement_report_from_mart import build_statement_report_from_mart  # noqa: E402
@@ -75,7 +77,6 @@ from lib.text_search import contains_search_expr, normalize_search_text  # noqa:
 from lib.distributor_policy_store import (  # noqa: E402
     load_distributor_policy_document,
     update_report_personalization,
-    use_distributor_policy_snapshot,
 )
 from lib.mart_release import publish_mart_release  # noqa: E402
 from lib.mart_release_cache import MartReleaseCache, MartReleaseCacheError  # noqa: E402
@@ -7197,18 +7198,19 @@ def royalty_report_detail_count(
     policy_snapshot = load_distributor_policy_document()
     params = canonical_royalty_report_params(request, policy_snapshot)
     try:
-        marts = ensure_marts(refresh_cache=False, filenames=[STANDARDIZED_FILE])
-        with use_distributor_policy_snapshot(policy_snapshot):
-            rows = count_report_detail_rows(
-                keywords=params["keywords"],
-                mode=params["mode"],
-                start_month=params["start_month"],
-                end_month=params["end_month"],
-                period_basis=params["period_basis"],
-                standardized_path=marts[STANDARDIZED_FILE],
-                source=params["source"],
-                account=params["account"],
-            )
+        rows = query_royalty_detail_count_bigquery(
+            keywords=params["keywords"],
+            mode=params["mode"],
+            start_month=params["start_month"],
+            end_month=params["end_month"],
+            period_basis=params["period_basis"],
+            source=params["source"],
+            account=params["account"],
+            project=VPO_BIGQUERY_PROJECT,
+            dataset=VPO_BIGQUERY_DATASET,
+            location=VPO_BIGQUERY_LOCATION,
+            maximum_bytes_billed=VPO_BIGQUERY_MAX_BYTES_BILLED,
+        )
     except Exception as exc:
         raise HTTPException(
             status_code=500,
