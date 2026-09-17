@@ -4749,6 +4749,8 @@ main.booking-settlement-main {
 .booking-settlement-main .adjustment-card,
 .booking-settlement-main .booking-payment-box,
 .booking-settlement-main .booking-item,
+.booking-settlement-main .booking-account-panel,
+.booking-settlement-main .booking-account-balances button,
 .booking-settlement-main .booking-metrics span,
 .booking-settlement-main .booking-status span,
 .booking-settlement-main .checkbox-field,
@@ -4756,6 +4758,46 @@ main.booking-settlement-main {
   color: var(--booking-glass-text);
   border-color: var(--booking-glass-border-soft);
   background: var(--booking-glass-surface-soft);
+}
+
+.booking-settlement-main .booking-account-balances button.active {
+  color: #dff8f2;
+  border-color: rgba(121, 203, 182, .42);
+  background: rgba(121, 203, 182, .11);
+}
+
+.booking-settlement-main .booking-account-balances span {
+  color: var(--booking-glass-muted);
+}
+
+.booking-settlement-main .booking-account-balances strong {
+  color: var(--booking-glass-text);
+}
+
+.booking-settlement-main .booking-actions .booking-item-action {
+  width: auto;
+  min-height: 36px;
+  margin: 0;
+  padding: 0 12px;
+  gap: 7px;
+  color: #d6dde1;
+  border: 1px solid var(--booking-glass-border-soft);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .045);
+  box-shadow: none;
+}
+
+.booking-settlement-main .booking-actions .booking-item-action:hover {
+  color: #fff;
+  border-color: rgba(121, 203, 182, .38);
+  background: rgba(121, 203, 182, .09);
+  transform: none;
+}
+
+.booking-settlement-main .booking-actions .booking-item-action-settle {
+  color: #bfe9df;
+  border-color: rgba(121, 203, 182, .3);
+  background: rgba(121, 203, 182, .11);
 }
 
 .booking-settlement-main .control-dashboard span,

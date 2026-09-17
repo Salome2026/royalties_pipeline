@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, FileDown, LayoutDashboard, RefreshCw, RotateCcw, Search, ShieldCheck, Table2, Rows3, Youtube } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CircleDollarSign, FileDown, LayoutDashboard, Pencil, RefreshCw, RotateCcw, Search, ShieldCheck, Table2, Rows3, Youtube } from "lucide-react";
 import { PeriodControl } from "./components/PeriodControl";
 import { BookingDashboard, type BookingAgendaEvent } from "./components/BookingDashboard";
 import { VpoHome } from "./components/VpoHome";
@@ -14138,9 +14138,15 @@ export default function Home() {
                       </div>
                     )}
                     <div className="booking-actions">
-                      {canEditModule("booking") && <button type="button" onClick={() => editBookingShow(item)}>Editar</button>}
+                      {canEditModule("booking") && (
+                        <button type="button" className="booking-item-action" onClick={() => editBookingShow(item)}>
+                          <Pencil size={14} aria-hidden="true" />
+                          Editar
+                        </button>
+                      )}
                       {canEditModule("booking") && bookingOpenBalanceAmount(item) > 0.01 && (
-                        <button type="button" onClick={() => openBookingAccountApplication(item)}>
+                        <button type="button" className="booking-item-action booking-item-action-settle" onClick={() => openBookingAccountApplication(item)}>
+                          <CircleDollarSign size={15} aria-hidden="true" />
                           Saldar / aplicar
                         </button>
                       )}
