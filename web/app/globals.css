@@ -3147,7 +3147,7 @@ button:disabled:hover {
   width: 100%;
   min-height: calc(100vh - 104px);
   display: block;
-  background: #0c1722;
+  background: transparent;
 }
 
 .booking-dashboard-toolbar {
@@ -3156,9 +3156,10 @@ button:disabled:hover {
   display: flex;
   align-items: center;
   color: #f5f7fa;
-  border-bottom: 1px solid #203142;
-  background: rgba(7, 19, 30, .88);
-  backdrop-filter: blur(18px);
+  border-bottom: 1px solid rgba(255, 255, 255, .12);
+  background: linear-gradient(155deg, rgba(255, 255, 255, .12), rgba(255, 255, 255, .02));
+  backdrop-filter: blur(30px) saturate(1.5);
+  -webkit-backdrop-filter: blur(30px) saturate(1.5);
 }
 
 .booking-dashboard-toolbar nav {
@@ -3208,7 +3209,7 @@ button:disabled:hover {
   min-width: 0;
   padding: 26px 30px 34px;
   color: #e9f0f5;
-  background: #0c1722;
+  background: transparent;
 }
 
 .booking-dashboard-header {
@@ -3287,9 +3288,12 @@ button:disabled:hover {
   padding: 16px 18px;
   display: grid;
   align-content: space-between;
-  border: 1px solid #26394b;
+  border: 1px solid rgba(255, 255, 255, .14);
   border-radius: 7px;
-  background: #111f2d;
+  background: linear-gradient(155deg, rgba(255, 255, 255, .12), rgba(255, 255, 255, .025));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08);
+  backdrop-filter: blur(22px) saturate(1.4);
+  -webkit-backdrop-filter: blur(22px) saturate(1.4);
 }
 
 .booking-kpi-grid span,
@@ -3372,8 +3376,10 @@ button:disabled:hover {
 
 .booking-list-overview {
   padding: 16px;
-  border: 1px solid #26394b;
-  background: #101e2b;
+  border: 1px solid rgba(255, 255, 255, .14);
+  background: linear-gradient(155deg, rgba(255, 255, 255, .1), rgba(255, 255, 255, .018));
+  backdrop-filter: blur(28px) saturate(1.45);
+  -webkit-backdrop-filter: blur(28px) saturate(1.45);
 }
 
 .booking-list-overview .booking-quick-panel {
@@ -3396,8 +3402,10 @@ button:disabled:hover {
   min-width: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 288px;
-  border: 1px solid #26394b;
-  background: #0f1d2a;
+  border: 1px solid rgba(255, 255, 255, .14);
+  background: linear-gradient(155deg, rgba(255, 255, 255, .11), rgba(255, 255, 255, .018));
+  backdrop-filter: blur(28px) saturate(1.45);
+  -webkit-backdrop-filter: blur(28px) saturate(1.45);
 }
 
 .booking-calendar-surface {
@@ -3496,7 +3504,7 @@ button:disabled:hover {
   gap: 7px;
   color: #dce6ed;
   text-align: left;
-  background: #101e2b;
+  background: rgba(8, 20, 29, .54);
   border: 0;
   border-right: 1px solid #223446;
   border-bottom: 1px solid #223446;
@@ -3515,7 +3523,7 @@ button:disabled:hover {
 
 .booking-calendar-day:hover,
 .booking-calendar-day.selected {
-  background: #152838;
+  background: rgba(34, 64, 79, .68);
 }
 
 .booking-calendar-day.selected {
@@ -3524,7 +3532,7 @@ button:disabled:hover {
 
 .booking-calendar-day.outside {
   color: #566b7c;
-  background: #0d1924;
+  background: rgba(5, 14, 22, .44);
 }
 
 .booking-calendar-day-number {
@@ -3599,7 +3607,7 @@ button:disabled:hover {
 .booking-calendar-side {
   min-width: 0;
   padding: 18px;
-  background: #101e2b;
+  background: rgba(7, 18, 27, .46);
 }
 
 .booking-calendar-side-heading {
@@ -4624,5 +4632,199 @@ button:disabled:hover {
   .report-format-switch,
   .report-scope-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Booking settlement glass treatment */
+main.booking-settlement-main {
+  --booking-glass-border: rgba(255, 255, 255, .16);
+  --booking-glass-border-soft: rgba(255, 255, 255, .1);
+  --booking-glass-surface: linear-gradient(155deg, rgba(255, 255, 255, .16), rgba(255, 255, 255, .025) 54%, rgba(255, 255, 255, .008));
+  --booking-glass-surface-soft: rgba(255, 255, 255, .045);
+  --booking-glass-input: rgba(3, 10, 16, .58);
+  --booking-glass-text: #f3f6f7;
+  --booking-glass-muted: #a9b4bc;
+  width: min(1460px, 100%);
+  min-width: 0;
+  margin: 0 auto;
+  padding: 28px clamp(18px, 3vw, 42px) 52px;
+  color: var(--booking-glass-text);
+}
+
+.booking-settlement-main .booking-mode-bar,
+.booking-settlement-main .panel {
+  color: var(--booking-glass-text);
+  border: 1px solid var(--booking-glass-border);
+  background: var(--booking-glass-surface);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .13), 0 24px 58px -34px rgba(0, 0, 0, .9);
+  backdrop-filter: blur(34px) saturate(1.55);
+  -webkit-backdrop-filter: blur(34px) saturate(1.55);
+}
+
+.booking-settlement-main .booking-mode-bar {
+  border-radius: 12px;
+}
+
+.booking-settlement-main .panel {
+  border-radius: 12px;
+}
+
+.booking-settlement-main h1,
+.booking-settlement-main h2,
+.booking-settlement-main h3,
+.booking-settlement-main .list-title,
+.booking-settlement-main label,
+.booking-settlement-main .check-row,
+.booking-settlement-main .checkbox-field,
+.booking-settlement-main .adjustment-card-title strong,
+.booking-settlement-main .booking-item strong,
+.booking-settlement-main .control-alert strong {
+  color: var(--booking-glass-text);
+}
+
+.booking-settlement-main p,
+.booking-settlement-main .field-help,
+.booking-settlement-main .booking-agenda-prefill small,
+.booking-settlement-main .booking-item span,
+.booking-settlement-main .control-alert span,
+.booking-settlement-main .booking-suggestion span,
+.booking-settlement-main .booking-suggestion p {
+  color: var(--booking-glass-muted);
+}
+
+.booking-settlement-main input,
+.booking-settlement-main select,
+.booking-settlement-main textarea,
+.booking-settlement-main .readonly-metric {
+  color: var(--booking-glass-text);
+  border-color: var(--booking-glass-border-soft);
+  background: var(--booking-glass-input);
+  color-scheme: dark;
+}
+
+.booking-settlement-main input::placeholder,
+.booking-settlement-main textarea::placeholder {
+  color: #75828c;
+}
+
+.booking-settlement-main input:hover,
+.booking-settlement-main select:hover,
+.booking-settlement-main textarea:hover {
+  border-color: rgba(121, 203, 182, .5);
+}
+
+.booking-settlement-main input:focus,
+.booking-settlement-main select:focus,
+.booking-settlement-main textarea:focus {
+  border-color: #79cbb6;
+  box-shadow: 0 0 0 3px rgba(121, 203, 182, .1);
+}
+
+.booking-settlement-main select option {
+  color: #edf2f4;
+  background: #11191f;
+}
+
+.booking-settlement-main .booking-mode-switch {
+  border-color: var(--booking-glass-border-soft);
+  background: rgba(2, 9, 14, .38);
+}
+
+.booking-settlement-main .booking-mode-switch button {
+  color: var(--booking-glass-muted);
+}
+
+.booking-settlement-main .booking-mode-switch button:hover:not(:disabled) {
+  color: #fff;
+  background: rgba(255, 255, 255, .07);
+}
+
+.booking-settlement-main .booking-agenda-prefill {
+  border-color: var(--booking-glass-border-soft);
+}
+
+.booking-settlement-main .control-dashboard div,
+.booking-settlement-main .booking-suggestion div,
+.booking-settlement-main .expense-card,
+.booking-settlement-main .adjustment-card,
+.booking-settlement-main .booking-payment-box,
+.booking-settlement-main .booking-item,
+.booking-settlement-main .booking-metrics span,
+.booking-settlement-main .booking-status span,
+.booking-settlement-main .checkbox-field,
+.booking-settlement-main .adjustment-summary span {
+  color: var(--booking-glass-text);
+  border-color: var(--booking-glass-border-soft);
+  background: var(--booking-glass-surface-soft);
+}
+
+.booking-settlement-main .control-dashboard span,
+.booking-settlement-main .booking-suggestion span {
+  color: var(--booking-glass-muted);
+}
+
+.booking-settlement-main .control-dashboard strong,
+.booking-settlement-main .booking-suggestion strong,
+.booking-settlement-main .booking-metrics span {
+  color: var(--booking-glass-text);
+}
+
+.booking-settlement-main .control-dashboard div.warn,
+.booking-settlement-main .booking-suggestion div.warn {
+  color: #f3d38d;
+  border-color: rgba(230, 186, 115, .28);
+  background: rgba(168, 116, 27, .12);
+}
+
+.booking-settlement-main .control-dashboard div.danger,
+.booking-settlement-main .readonly-metric.danger-text {
+  color: #efaaa2;
+  border-color: rgba(236, 170, 160, .28);
+  background: rgba(172, 69, 58, .12);
+}
+
+.booking-settlement-main .control-alerts {
+  color: #f3d38d;
+  border-color: rgba(230, 186, 115, .28);
+  background: rgba(148, 103, 28, .11);
+}
+
+.booking-settlement-main .control-alert {
+  border-color: var(--booking-glass-border-soft);
+  background: rgba(2, 9, 14, .38);
+}
+
+.booking-settlement-main .booking-suggestion {
+  border-color: rgba(121, 203, 182, .23);
+  background: linear-gradient(135deg, rgba(121, 203, 182, .08), rgba(139, 159, 215, .055));
+}
+
+.booking-settlement-main .adjustment-card-title button {
+  color: #bdc6cc;
+  border: 1px solid var(--booking-glass-border-soft);
+  background: rgba(255, 255, 255, .05);
+}
+
+.booking-settlement-main .booking-status .status-ok {
+  color: #a9d9c2;
+  border-color: rgba(79, 192, 141, .25);
+  background: rgba(79, 192, 141, .1);
+}
+
+.booking-settlement-main .booking-status .status-warn {
+  color: #e8c986;
+  border-color: rgba(230, 186, 115, .27);
+  background: rgba(230, 186, 115, .1);
+}
+
+.booking-settlement-main .booking-status .status-danger {
+  color: #efaaa2;
+  border-color: rgba(236, 170, 160, .27);
+  background: rgba(236, 170, 160, .1);
+}
+
+@media (max-width: 900px) {
+  main.booking-settlement-main {
+    padding: 22px 16px 38px;
   }
 }
