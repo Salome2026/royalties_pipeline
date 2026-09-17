@@ -4800,6 +4800,71 @@ main.booking-settlement-main {
   background: rgba(121, 203, 182, .11);
 }
 
+.booking-settlement-main .event-card {
+  color: var(--booking-glass-text);
+  border-color: var(--booking-glass-border-soft);
+  background: rgba(255, 255, 255, .04);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .045);
+}
+
+.booking-settlement-main .event-card-header strong {
+  color: var(--booking-glass-text);
+}
+
+.booking-settlement-main .event-card-header > div > span {
+  color: var(--booking-glass-muted);
+}
+
+.booking-settlement-main .event-card .button-row .booking-item-action {
+  width: auto;
+  min-height: 36px;
+  margin: 0;
+  padding: 0 12px;
+  gap: 7px;
+  color: #d6dde1;
+  border: 1px solid var(--booking-glass-border-soft);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, .045);
+  box-shadow: none;
+}
+
+.booking-settlement-main .event-card .button-row .booking-item-action:hover {
+  color: #fff;
+  border-color: rgba(121, 203, 182, .38);
+  background: rgba(121, 203, 182, .09);
+  transform: none;
+}
+
+.booking-settlement-main .event-card .status-pill.ok {
+  color: #a9d9c2;
+  border-color: rgba(79, 192, 141, .25);
+  background: rgba(79, 192, 141, .1);
+}
+
+.booking-settlement-main .event-card .status-pill.warning {
+  color: #e8c986;
+  border-color: rgba(230, 186, 115, .27);
+  background: rgba(230, 186, 115, .1);
+}
+
+.booking-settlement-main .event-card .summary-table-wrap {
+  border-color: var(--booking-glass-border-soft);
+  background: rgba(2, 9, 14, .34);
+}
+
+.booking-settlement-main .event-card .summary-table th {
+  color: #eaf2f4;
+  border-color: var(--booking-glass-border-soft);
+  background: rgba(18, 43, 58, .82);
+}
+
+.booking-settlement-main .event-card .summary-table td,
+.booking-settlement-main .event-card .summary-table td:first-child {
+  color: #bdc7cd;
+  border-color: var(--booking-glass-border-soft);
+  background: rgba(3, 11, 17, .34);
+}
+
 .booking-settlement-main .control-dashboard span,
 .booking-settlement-main .booking-suggestion span {
   color: var(--booking-glass-muted);

@@ -12765,7 +12765,10 @@ export default function Home() {
                       <span>{event.event_date} - #{event.id} - {event.status}</span>
                     </div>
                     <div className="button-row">
-                      <button type="button" onClick={() => editCompositeBookingEvent(event)}>Editar</button>
+                      <button type="button" className="booking-item-action" onClick={() => editCompositeBookingEvent(event)}>
+                        <Pencil size={14} aria-hidden="true" />
+                        Editar
+                      </button>
                       <span className={event.balance_amount === 0 ? "status-pill ok" : "status-pill warning"}>
                         {event.balance_amount === 0 ? "Cerrado" : "Pendiente"}
                       </span>
