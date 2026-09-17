@@ -1,16 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { AlertCircle, CheckCircle2, Clock3, Download, ExternalLink, FileSpreadsheet, FileText, LoaderCircle, Search, SlidersHorizontal } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock3, Download, ExternalLink, FileSpreadsheet, FileText, Globe2, LoaderCircle, Rows3, Search, SlidersHorizontal } from "lucide-react";
 import { PeriodControl } from "../../components/PeriodControl";
 import { isResolvedPeriodInvalid, resolvePeriod, type PeriodSelection } from "../../lib/period";
 import {
   createRoyaltyReportJob,
   requestRecentRoyaltyReportJobs,
+  requestRoyaltyDetailCount,
   requestRoyaltyReportOptions,
   requestRoyaltyReportJob,
   royaltyReportJobDownloadUrl,
   type RoyaltyMatchMode,
+  type RoyaltyDetailMode,
   type RoyaltyPeriodBasis,
   type RoyaltyReportJob,
   type RoyaltyReportOptions,
@@ -32,10 +34,17 @@ export function RoyaltyReportModule({ onMessage }: Props) {
   const [periodBasis, setPeriodBasis] = useState<RoyaltyPeriodBasis>("transaction_month");
   const [matchMode, setMatchMode] = useState<RoyaltyMatchMode>("any");
   const [rawLimit, setRawLimit] = useState("5000");
+  const [detailMode, setDetailMode] = useState<RoyaltyDetailMode>("limited");
   const [options, setOptions] = useState<RoyaltyReportOptions | null>(null);
   const [source, setSource] = useState("");
   const [account, setAccount] = useState("");
   const [loading, setLoading] = useState(false);
+  const [countingRows, setCountingRows] = useState(false);
+  const [pendingFullReport, setPendingFullReport] = useState<{
+    payload: RoyaltyReportPayload;
+    output: RoyaltyReportOutput | "google_sheet";
+    rows: number;
+  } | null>(null);
   const [activeJob, setActiveJob] = useState<RoyaltyReportJob | null>(null);
   const [recentJobs, setRecentJobs] = useState<RoyaltyReportJob[]>([]);
   const [lastFile, setLastFile] = useState("");
@@ -113,6 +122,20 @@ export function RoyaltyReportModule({ onMessage }: Props) {
     };
   }, [activeJob?.id, activeJob?.status, onMessage]);
 
+  useEffect(() => {
+    if (!pendingFullReport) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPendingFullReport(null);
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [pendingFullReport]);
+
   const accountOptions = useMemo(() => {
     if (!options || !source) return [];
     return options.source_accounts.filter((item) => item.source === source);
@@ -129,13 +152,23 @@ export function RoyaltyReportModule({ onMessage }: Props) {
       onMessage({ type: "error", text: "Ingresá al menos una palabra clave para el Excel detallado." });
       return null;
     }
+    const parsedRawLimit = Number(rawLimit);
+    if (
+      output === "excel"
+      && detailMode === "limited"
+      && (!Number.isInteger(parsedRawLimit) || parsedRawLimit < 0 || parsedRawLimit > 50000)
+    ) {
+      onMessage({ type: "error", text: "La cantidad máxima debe ser un número entero entre 0 y 50.000." });
+      return null;
+    }
     return {
       keywords: terms,
       start_month: resolved.startMonth,
       end_month: resolved.endMonth,
       period_basis: periodBasis,
       mode: matchMode,
-      raw_limit: Number(rawLimit) || 0,
+      raw_limit: Number.isFinite(parsedRawLimit) ? parsedRawLimit : 0,
+      detail_mode: output === "excel" ? detailMode : "limited",
       source: source || null,
       account: account || null,
     };
@@ -147,39 +180,75 @@ export function RoyaltyReportModule({ onMessage }: Props) {
     setLastSheetUrl("");
   }
 
+  async function startReport(
+    payload: RoyaltyReportPayload,
+    requestedOutput: RoyaltyReportOutput | "google_sheet",
+  ) {
+    setLoading(true);
+    try {
+      const job = await createRoyaltyReportJob(payload, requestedOutput);
+      setActiveJob(job);
+      setRecentJobs((items) => [job, ...items.filter((item) => item.id !== job.id)].slice(0, 8));
+      onMessage({
+        type: "ok",
+        text: requestedOutput === "google_sheet"
+          ? "Google Sheet recibido. Podés salir de esta pantalla y volver más tarde."
+          : "Reporte recibido. Podés salir de esta pantalla y volver más tarde.",
+      });
+    } catch (error) {
+      onMessage({
+        type: "error",
+        text: error instanceof Error
+          ? error.message
+          : requestedOutput === "google_sheet"
+            ? "No se pudo iniciar el Google Sheet."
+            : "No se pudo iniciar el reporte.",
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function requestReport(
+    payload: RoyaltyReportPayload,
+    requestedOutput: RoyaltyReportOutput | "google_sheet",
+  ) {
+    if (payload.detail_mode !== "full") {
+      await startReport(payload, requestedOutput);
+      return;
+    }
+
+    setCountingRows(true);
+    try {
+      const count = await requestRoyaltyDetailCount(payload);
+      if (count.exceeds_excel_limit) {
+        onMessage({
+          type: "error",
+          text: `No se puede generar el detalle completo. Contiene ${count.rows.toLocaleString("es-AR")} filas y supera el máximo permitido por Excel de ${count.excel_max_data_rows.toLocaleString("es-AR")}. Reducí el período o aplicá más filtros.`,
+        });
+        return;
+      }
+      setPendingFullReport({ payload, output: requestedOutput, rows: count.rows });
+    } catch (error) {
+      onMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo calcular la cantidad de filas." });
+    } finally {
+      setCountingRows(false);
+    }
+  }
+
   async function submitReport(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     resetResults();
     const payload = buildPayload();
     if (!payload) return;
-    setLoading(true);
-    try {
-      const job = await createRoyaltyReportJob(payload, output);
-      setActiveJob(job);
-      setRecentJobs((items) => [job, ...items.filter((item) => item.id !== job.id)].slice(0, 8));
-      onMessage({ type: "ok", text: "Reporte recibido. Podés salir de esta pantalla y volver más tarde." });
-    } catch (error) {
-      onMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo iniciar el reporte." });
-    } finally {
-      setLoading(false);
-    }
+    await requestReport(payload, output);
   }
 
   async function createGoogleSheet() {
     resetResults();
     const payload = buildPayload();
     if (!payload) return;
-    setLoading(true);
-    try {
-      const job = await createRoyaltyReportJob(payload, "google_sheet");
-      setActiveJob(job);
-      setRecentJobs((items) => [job, ...items.filter((item) => item.id !== job.id)].slice(0, 8));
-      onMessage({ type: "ok", text: "Google Sheet recibido. Podés salir de esta pantalla y volver más tarde." });
-    } catch (error) {
-      onMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo iniciar el Google Sheet." });
-    } finally {
-      setLoading(false);
-    }
+    await requestReport(payload, "google_sheet");
   }
 
   const jobInProgress = Boolean(activeJob && ["queued", "running"].includes(activeJob.status));
@@ -276,9 +345,44 @@ export function RoyaltyReportModule({ onMessage }: Props) {
                   </select>
                 </div>
                 <div className={styles.field}>
-                  <label htmlFor="royalty_raw_limit">Máximo de filas en detalle</label>
-                  <input id="royalty_raw_limit" type="number" min="0" max="50000" value={rawLimit} onChange={(event) => setRawLimit(event.target.value)} />
-                  <small>El valor no modifica los resúmenes ni los totales del informe.</small>
+                  <label htmlFor="royalty_raw_limit">Cantidad máxima de filas</label>
+                  <input
+                    id="royalty_raw_limit"
+                    type="number"
+                    min="0"
+                    max="50000"
+                    step="1"
+                    value={rawLimit}
+                    disabled={detailMode !== "limited"}
+                    onChange={(event) => setRawLimit(event.target.value)}
+                  />
+                  <small>Ingrese un valor entre 0 y 50.000. Use 0 para generar solo los resúmenes.</small>
+                </div>
+                <div className={styles.detailOptions} aria-label="Opciones de detalle">
+                  <label className={detailMode === "top_countries" ? styles.detailOptionActive : ""}>
+                    <input
+                      type="checkbox"
+                      checked={detailMode === "top_countries"}
+                      onChange={(event) => setDetailMode(event.target.checked ? "top_countries" : "limited")}
+                    />
+                    <Globe2 size={17} aria-hidden="true" />
+                    <span>
+                      <strong>Priorizar los 5 países con mayores ingresos</strong>
+                      <small>Incluye Spotify y YouTube en detalle. Las demás plataformas y países se muestran consolidados.</small>
+                    </span>
+                  </label>
+                  <label className={detailMode === "full" ? styles.detailOptionActive : ""}>
+                    <input
+                      type="checkbox"
+                      checked={detailMode === "full"}
+                      onChange={(event) => setDetailMode(event.target.checked ? "full" : "limited")}
+                    />
+                    <Rows3 size={17} aria-hidden="true" />
+                    <span>
+                      <strong>Incluir todas las filas del detalle</strong>
+                      <small>Genera el detalle completo, sin aplicar el límite indicado arriba.</small>
+                    </span>
+                  </label>
                 </div>
               </>
             ) : (
@@ -338,13 +442,13 @@ export function RoyaltyReportModule({ onMessage }: Props) {
           </div>
           <div className={styles.actionButtons}>
             {output === "excel" && (
-              <button type="button" className={styles.secondaryAction} disabled={loading || jobInProgress} onClick={() => void createGoogleSheet()}>
+              <button type="button" className={styles.secondaryAction} disabled={loading || countingRows || jobInProgress} onClick={() => void createGoogleSheet()}>
                 <ExternalLink size={17} aria-hidden="true" /> Crear Google Sheet
               </button>
             )}
-            <button type="submit" className={styles.primaryAction} disabled={loading || jobInProgress}>
-              {jobInProgress ? <LoaderCircle size={18} aria-hidden="true" /> : <Download size={18} aria-hidden="true" />}
-              {loading ? "Solicitando..." : jobInProgress ? "Procesando" : output === "executive_pdf" ? "Generar PDF" : "Generar Excel"}
+            <button type="submit" className={styles.primaryAction} disabled={loading || countingRows || jobInProgress}>
+              {jobInProgress || countingRows ? <LoaderCircle size={18} aria-hidden="true" /> : <Download size={18} aria-hidden="true" />}
+              {countingRows ? "Calculando detalle..." : loading ? "Solicitando..." : jobInProgress ? "Procesando" : output === "executive_pdf" ? "Generar PDF" : "Generar Excel"}
             </button>
           </div>
         </footer>
@@ -368,6 +472,36 @@ export function RoyaltyReportModule({ onMessage }: Props) {
             ))}
           </div>
         </section>
+      )}
+
+      {pendingFullReport && (
+        <div className={styles.modalBackdrop} role="presentation">
+          <div className={styles.confirmModal} role="dialog" aria-modal="true" aria-labelledby="full-detail-title">
+            <div className={styles.confirmIcon} aria-hidden="true"><AlertCircle size={22} /></div>
+            <div className={styles.confirmCopy}>
+              <span>Confirmación</span>
+              <h2 id="full-detail-title">Generar detalle completo</h2>
+              <p>
+                Este reporte contiene <strong>{pendingFullReport.rows.toLocaleString("es-AR")} filas de detalle</strong>.
+                La generación puede llevar bastante tiempo.
+              </p>
+            </div>
+            <div className={styles.modalActions}>
+              <button type="button" className={styles.modalCancel} autoFocus onClick={() => setPendingFullReport(null)}>Cancelar</button>
+              <button
+                type="button"
+                className={styles.modalConfirm}
+                onClick={() => {
+                  const pending = pendingFullReport;
+                  setPendingFullReport(null);
+                  void startReport(pending.payload, pending.output);
+                }}
+              >
+                Generar igualmente
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );

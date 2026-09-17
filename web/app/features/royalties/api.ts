@@ -2,6 +2,7 @@ export type RoyaltyReportOutput = "excel" | "executive_pdf";
 export type RoyaltyReportJobOutput = RoyaltyReportOutput | "google_sheet";
 export type RoyaltyPeriodBasis = "transaction_month" | "statement_period";
 export type RoyaltyMatchMode = "any" | "all";
+export type RoyaltyDetailMode = "limited" | "top_countries" | "full";
 export type RoyaltyReportJobStatus = "queued" | "running" | "completed" | "failed";
 
 export type RoyaltyReportSourceAccount = {
@@ -22,8 +23,15 @@ export type RoyaltyReportPayload = {
   period_basis: RoyaltyPeriodBasis;
   mode: RoyaltyMatchMode;
   raw_limit: number;
+  detail_mode: RoyaltyDetailMode;
   source: string | null;
   account: string | null;
+};
+
+export type RoyaltyDetailCount = {
+  rows: number;
+  excel_max_data_rows: number;
+  exceeds_excel_limit: boolean;
 };
 
 export type RoyaltyReportJob = {
@@ -68,6 +76,16 @@ export async function createRoyaltyReportJob(payload: RoyaltyReportPayload, outp
   const data = await response.json();
   if (!data.item?.id) throw new Error("El servidor no devolvió un trabajo válido.");
   return data.item as RoyaltyReportJob;
+}
+
+export async function requestRoyaltyDetailCount(payload: RoyaltyReportPayload) {
+  const response = await fetch("/api/report-detail-count", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...payload, output: "excel" }),
+  });
+  if (!response.ok) throw await responseError(response, "No se pudo calcular la cantidad de filas.");
+  return response.json() as Promise<RoyaltyDetailCount>;
 }
 
 export async function requestRoyaltyReportJob(jobId: number) {

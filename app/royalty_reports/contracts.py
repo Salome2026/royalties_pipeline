@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 
 ReportOutputFormat = Literal["excel", "executive_pdf", "google_sheet"]
+DetailMode = Literal["limited", "top_countries", "full"]
 
 REPORT_FORMAT_BY_KEY: dict[str, ReportOutputFormat] = {
     "royalty_keyword": "excel",
@@ -25,6 +26,7 @@ class ReportRequest:
     period_basis: str
     mode: str
     raw_limit: int
+    detail_mode: DetailMode
     source: str | None
     account: str | None
 
@@ -48,6 +50,11 @@ class ReportRequest:
         if output_format in {"excel", "google_sheet"} and not keywords:
             raise ValueError("El reporte requiere al menos una palabra clave.")
 
+        detail_mode_value = str(params.get("detail_mode") or "limited")
+        if detail_mode_value not in {"limited", "top_countries", "full"}:
+            raise ValueError(f"Modo de detalle no soportado: {detail_mode_value}.")
+        detail_mode = cast(DetailMode, detail_mode_value)
+
         return cls(
             job_id=int(job["id"]),
             report_key=report_key,
@@ -58,6 +65,7 @@ class ReportRequest:
             period_basis=str(params.get("period_basis") or "transaction_month"),
             mode=str(params.get("mode") or "any"),
             raw_limit=max(0, min(int(params.get("raw_limit") or 0), 50000)),
+            detail_mode=detail_mode,
             source=(str(params.get("source") or "").strip().lower() or None),
             account=(str(params.get("account") or "").strip().lower() or None),
         )

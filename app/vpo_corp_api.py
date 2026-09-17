@@ -60,7 +60,11 @@ ENV_PATH = BASE / ".env"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from build_keyword_royalty_report import normalize_keywords  # noqa: E402
+from build_keyword_royalty_report import (  # noqa: E402
+    EXCEL_MAX_DATA_ROWS,
+    count_report_detail_rows,
+    normalize_keywords,
+)
 from build_statement_report_from_mart import build_statement_report_from_mart  # noqa: E402
 from build_custom_title_royalty_report import (  # noqa: E402
     DEFAULT_LOS_ANORMALES_TERMS,
@@ -71,6 +75,7 @@ from lib.text_search import contains_search_expr, normalize_search_text  # noqa:
 from lib.distributor_policy_store import (  # noqa: E402
     load_distributor_policy_document,
     update_report_personalization,
+    use_distributor_policy_snapshot,
 )
 from lib.mart_release import publish_mart_release  # noqa: E402
 from lib.mart_release_cache import MartReleaseCache, MartReleaseCacheError  # noqa: E402
@@ -240,6 +245,7 @@ class RoyaltyReportJobRequest(BaseModel):
     period_basis: Literal["transaction_month", "statement_period"] = "transaction_month"
     mode: Literal["any", "all"] = "any"
     raw_limit: int = Field(default=5000, ge=0, le=50000)
+    detail_mode: Literal["limited", "top_countries", "full"] = "limited"
     source: str | None = Field(default=None, max_length=80)
     account: str | None = Field(default=None, max_length=120)
 
@@ -7163,6 +7169,7 @@ def canonical_royalty_report_params(
     params["account"] = account
     if request.output == "executive_pdf":
         params["raw_limit"] = 0
+        params["detail_mode"] = "limited"
     return params
 
 
@@ -7172,6 +7179,47 @@ def require_report_job_access(username: str, job: dict[str, Any], action: Litera
     if not permission.get("is_admin") and str(job.get("requested_by") or "").casefold() != username.casefold():
         raise HTTPException(status_code=403, detail="No tenes permiso para ver este reporte.")
     return permission
+
+
+@app.post("/reports/royalty/detail-count")
+def royalty_report_detail_count(
+    request: RoyaltyReportJobRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict[str, Any]:
+    require_api_key(x_vpo_api_key)
+    username = clean_username(x_vpo_username or "")
+    if not username:
+        raise HTTPException(status_code=401, detail="Usuario requerido.")
+    with operational_connect() as conn:
+        require_module_permission(conn, username, "royalty_reports", "create")
+
+    policy_snapshot = load_distributor_policy_document()
+    params = canonical_royalty_report_params(request, policy_snapshot)
+    try:
+        marts = ensure_marts(refresh_cache=False, filenames=[STANDARDIZED_FILE])
+        with use_distributor_policy_snapshot(policy_snapshot):
+            rows = count_report_detail_rows(
+                keywords=params["keywords"],
+                mode=params["mode"],
+                start_month=params["start_month"],
+                end_month=params["end_month"],
+                period_basis=params["period_basis"],
+                standardized_path=marts[STANDARDIZED_FILE],
+                source=params["source"],
+                account=params["account"],
+            )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudo calcular la cantidad de filas del detalle.",
+        ) from exc
+
+    return {
+        "rows": rows,
+        "excel_max_data_rows": EXCEL_MAX_DATA_ROWS,
+        "exceeds_excel_limit": rows > EXCEL_MAX_DATA_ROWS,
+    }
 
 
 @app.post("/reports/jobs", status_code=202)

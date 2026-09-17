@@ -30,6 +30,7 @@ def job_payload(report_key: str = "royalty_keyword", output_format: str = "excel
             "period_basis": "statement_period",
             "mode": "any",
             "raw_limit": 5000,
+            "detail_mode": "top_countries",
             "source": "FUGA",
             "account": "MAWZ",
         },
@@ -88,6 +89,7 @@ def check_binary_report() -> None:
             assert request.keywords == ("un boton",)
             assert request.source == "fuga"
             assert request.account == "mawz"
+            assert request.detail_mode == "top_countries"
             assert inputs.output_dir == temp_dir
             return BuiltReport(
                 output_path=artifact,
@@ -144,6 +146,15 @@ def check_registry_guards() -> None:
         assert "no soportado" in str(exc)
     else:
         raise AssertionError("Un builder no registrado debe rechazarse.")
+
+    invalid_detail = job_payload()
+    invalid_detail["params"]["detail_mode"] = "desconocido"
+    try:
+        ReportRequest.from_job(invalid_detail, keywords=["x"])
+    except ValueError as exc:
+        assert "Modo de detalle no soportado" in str(exc)
+    else:
+        raise AssertionError("Un modo de detalle desconocido debe rechazarse.")
 
 
 def main() -> None:

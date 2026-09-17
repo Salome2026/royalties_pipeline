@@ -227,6 +227,32 @@ PERIOD_BASIS_LABELS = {
     "statement_period": "Liquidacion / mes de statement",
 }
 
+DETAIL_MODE_LIMITED = "limited"
+DETAIL_MODE_TOP_COUNTRIES = "top_countries"
+DETAIL_MODE_FULL = "full"
+DETAIL_MODES = {
+    DETAIL_MODE_LIMITED,
+    DETAIL_MODE_TOP_COUNTRIES,
+    DETAIL_MODE_FULL,
+}
+EXCEL_MAX_DATA_ROWS = 1_048_575
+TOP_COUNTRY_LIMIT = 5
+COUNTRY_DISPLAY_NAMES = {
+    "AR": "Argentina",
+    "BR": "Brasil",
+    "CL": "Chile",
+    "CO": "Colombia",
+    "DE": "Alemania",
+    "ES": "España",
+    "FR": "Francia",
+    "GB": "Reino Unido",
+    "IT": "Italia",
+    "MX": "México",
+    "PE": "Perú",
+    "US": "Estados Unidos",
+    "UY": "Uruguay",
+}
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -851,6 +877,7 @@ def prepare_sheet(ws):
         "Filas",
         "Filas song level",
         "Filas raw",
+        "Filas representadas",
     }
 
     header_by_column = {
@@ -917,6 +944,299 @@ def add_source_account_filter(
     return lf
 
 
+def build_filtered_raw_detail_lf(
+    *,
+    keywords: list[str],
+    mode: str,
+    start_month: str | None,
+    end_month: str | None,
+    period_basis: str,
+    standardized_path: Path,
+    exclude_isrcs: list[str] | None = None,
+    source: str | None = None,
+    account: str | None = None,
+) -> tuple[pl.LazyFrame, set[str]]:
+    columns = existing_columns(standardized_path)
+    period_column = "statement_period" if period_basis == "statement_period" else "transaction_month"
+    raw_filter = build_filter(columns, SEARCH_COLUMNS_STANDARDIZED, keywords, mode)
+    excluded = normalize_isrcs(exclude_isrcs)
+    detail = (
+        add_report_code(
+            normalize_report_usage(
+                normalize_report_store(
+                    normalize_report_units(
+                        add_period_filter(
+                            add_match_text(
+                                add_source_account_filter(
+                                    pl.scan_parquet(standardized_path),
+                                    columns,
+                                    source,
+                                    account,
+                                ),
+                                columns,
+                                SEARCH_COLUMNS_STANDARDIZED,
+                            ),
+                            columns,
+                            start_month,
+                            end_month,
+                            period_column,
+                        ),
+                        columns,
+                    ),
+                    columns,
+                ),
+                columns,
+            ),
+            columns,
+        )
+        .pipe(lambda frame: filter_reportable_generation(frame, columns))
+        .pipe(lambda frame: apply_report_net_personalization(frame))
+        .filter(raw_filter)
+        .filter(exclude_isrc_expr(columns, excluded))
+    )
+    return detail, columns
+
+
+def count_report_detail_rows(
+    *,
+    keywords: list[str],
+    mode: str,
+    start_month: str | None,
+    end_month: str | None,
+    period_basis: str,
+    standardized_path: Path = STANDARDIZED_PATH,
+    exclude_isrcs: list[str] | None = None,
+    source: str | None = None,
+    account: str | None = None,
+) -> int:
+    detail, _columns = build_filtered_raw_detail_lf(
+        keywords=keywords,
+        mode=mode,
+        start_month=start_month,
+        end_month=end_month,
+        period_basis=period_basis,
+        standardized_path=standardized_path,
+        exclude_isrcs=exclude_isrcs,
+        source=source,
+        account=account,
+    )
+    result = detail.select(pl.len().alias("rows")).collect(engine="streaming")
+    return int(result["rows"][0] or 0)
+
+
+def _country_display_name(code: object) -> str:
+    value = str(code or "Sin territorio").strip() or "Sin territorio"
+    return COUNTRY_DISPLAY_NAMES.get(value.upper(), value)
+
+
+def _aggregate_detail_row(
+    detail_columns: list[str],
+    *,
+    keywords: list[str],
+    country: str,
+    territory: str,
+    row_type: str,
+    dsp: str,
+    label: str,
+    lines: int,
+    amount_usd: float,
+    units: float,
+) -> dict[str, object]:
+    row = {column: None for column in detail_columns}
+    row.update(
+        {
+            "artist_statement_style": ", ".join(keywords),
+            "track_statement_style": label,
+            "report_territory": territory,
+            "territory": territory,
+            "dsp_normalized": dsp,
+            "amount_usd": amount_usd,
+            "units": units,
+            "source": "varias",
+            "account": "varias",
+        }
+    )
+    return {
+        "País consolidado": country,
+        "Tipo de fila": row_type,
+        **row,
+        "Filas representadas": lines,
+    }
+
+
+def build_report_detail(
+    raw_matches_lf: pl.LazyFrame,
+    raw_columns: set[str],
+    *,
+    keywords: list[str],
+    detail_mode: str,
+    raw_limit: int,
+    include_statement_metadata: bool = False,
+) -> pd.DataFrame:
+    if detail_mode not in DETAIL_MODES:
+        raise ValueError(f"Modo de detalle no soportado: {detail_mode}.")
+
+    detail_columns = public_detail_columns(
+        raw_columns,
+        include_statement_metadata=include_statement_metadata,
+    )
+    if detail_mode == DETAIL_MODE_LIMITED:
+        if raw_limit <= 0:
+            return pd.DataFrame()
+        return display_dataframe(
+            raw_matches_lf.select(detail_columns).limit(raw_limit).collect(engine="streaming").to_pandas()
+        )
+
+    if detail_mode == DETAIL_MODE_FULL:
+        row_count = int(
+            raw_matches_lf.select(pl.len().alias("rows")).collect(engine="streaming")["rows"][0]
+            or 0
+        )
+        if row_count > EXCEL_MAX_DATA_ROWS:
+            raise ValueError(
+                "No se puede generar el detalle completo. "
+                f"El resultado contiene {row_count:,} filas y supera el máximo permitido "
+                f"por Excel de {EXCEL_MAX_DATA_ROWS:,}. Reducí el período o aplicá más filtros."
+            )
+        return display_dataframe(
+            raw_matches_lf.select(detail_columns).collect(engine="streaming").to_pandas()
+        )
+
+    ranked_matches_lf = raw_matches_lf.with_columns(
+        normalize_report_territory_expr().alias("report_territory")
+    )
+    top_countries = (
+        ranked_matches_lf.group_by("report_territory")
+        .agg(pl.sum("amount_usd").fill_null(0).alias("amount_usd"))
+        .sort("amount_usd", descending=True)
+        .limit(TOP_COUNTRY_LIMIT)
+        .collect(engine="streaming")
+    )
+    top_codes = top_countries.get_column("report_territory").to_list()
+    output_frames: list[pd.DataFrame] = []
+    raw_schema = set(ranked_matches_lf.collect_schema().names())
+    primary_store_column = "store" if "store" in raw_schema else "dsp_normalized"
+    primary_dsp = (
+        pl.col(primary_store_column)
+        .fill_null("")
+        .cast(pl.Utf8)
+        .str.to_lowercase()
+        .str.contains("spotify|youtube")
+    )
+
+    sort_columns = [
+        column
+        for column in [
+            "report_territory",
+            primary_store_column,
+            "statement_period",
+            "transaction_month",
+            "amount_usd",
+        ]
+        if column in raw_schema
+    ]
+    primary_detail = (
+        ranked_matches_lf.filter(
+            pl.col("report_territory").is_in(top_codes) & primary_dsp
+        )
+        .sort(sort_columns, descending=[False] * (len(sort_columns) - 1) + [True])
+        .select(detail_columns)
+        .collect(engine="streaming")
+    )
+    aggregate_groups = (
+        ranked_matches_lf.with_columns(
+            pl.when(
+                pl.col("report_territory").is_in(top_codes) & ~primary_dsp
+            )
+            .then(pl.col("report_territory"))
+            .when(~pl.col("report_territory").is_in(top_codes))
+            .then(pl.lit("__REST_OF_WORLD__"))
+            .otherwise(None)
+            .alias("_aggregate_group")
+        )
+        .filter(pl.col("_aggregate_group").is_not_null())
+        .group_by("_aggregate_group")
+        .agg(
+            pl.len().alias("lines"),
+            pl.sum("amount_usd").alias("amount_usd"),
+            pl.sum("units").alias("units"),
+        )
+        .collect(engine="streaming")
+    )
+    aggregate_by_group = {
+        str(row["_aggregate_group"]): row for row in aggregate_groups.to_dicts()
+    }
+
+    for code in top_codes:
+        country = _country_display_name(code)
+        primary_frame = primary_detail.filter(
+            pl.col("report_territory") == code
+        ).to_pandas()
+        primary_frame.insert(0, "País consolidado", country)
+        primary_frame.insert(1, "Tipo de fila", "Detalle Spotify/YouTube")
+        primary_frame["Filas representadas"] = 1
+        output_frames.append(primary_frame)
+
+        other = aggregate_by_group.get(
+            str(code),
+            {"lines": 0, "amount_usd": 0, "units": 0},
+        )
+        if int(other["lines"] or 0) > 0:
+            output_frames.append(
+                pd.DataFrame(
+                    [
+                        _aggregate_detail_row(
+                            detail_columns,
+                            keywords=keywords,
+                            country=country,
+                            territory=str(code),
+                            row_type="Consolidado país",
+                            dsp="Resto de plataformas",
+                            label=f"{country} - resto de plataformas",
+                            lines=int(other["lines"]),
+                            amount_usd=float(other["amount_usd"] or 0),
+                            units=float(other["units"] or 0),
+                        )
+                    ]
+                )
+            )
+
+    rest = aggregate_by_group.get(
+        "__REST_OF_WORLD__",
+        {"lines": 0, "amount_usd": 0, "units": 0},
+    )
+    if int(rest["lines"] or 0) > 0:
+        output_frames.append(
+            pd.DataFrame(
+                [
+                    _aggregate_detail_row(
+                        detail_columns,
+                        keywords=keywords,
+                        country="Resto del mundo",
+                        territory="Resto del mundo",
+                        row_type="Consolidado global",
+                        dsp="Todas las plataformas",
+                        label="Resto del mundo",
+                        lines=int(rest["lines"]),
+                        amount_usd=float(rest["amount_usd"] or 0),
+                        units=float(rest["units"] or 0),
+                    )
+                ]
+            )
+        )
+
+    if not output_frames:
+        return pd.DataFrame()
+    detail = pd.concat(output_frames, ignore_index=True)
+    if len(detail) > EXCEL_MAX_DATA_ROWS:
+        raise ValueError(
+            "No se puede generar el detalle priorizado. "
+            f"El resultado contiene {len(detail):,} filas y supera el máximo permitido "
+            f"por Excel de {EXCEL_MAX_DATA_ROWS:,}. Reducí el período o aplicá más filtros."
+        )
+    return display_dataframe(detail)
+
+
 def style_workbook(writer):
     for ws in writer.book.worksheets:
         prepare_sheet(ws)
@@ -948,6 +1268,7 @@ def build_report_tables(
     exclude_isrcs: list[str] | None = None,
     source: str | None = None,
     account: str | None = None,
+    detail_mode: str = DETAIL_MODE_LIMITED,
 ) -> dict[str, pd.DataFrame]:
     period_column = "statement_period" if period_basis == "statement_period" else "transaction_month"
     period_label = PERIOD_BASIS_LABELS.get(period_column, period_column)
@@ -1065,44 +1386,16 @@ def build_report_tables(
 
         track_summary_lf = build_track_summary_lf(statement_base_lf)
 
-        raw_sample_lf = (
-            add_report_code(
-                normalize_report_usage(
-                    normalize_report_store(
-                        normalize_report_units(
-                            add_period_filter(
-                                add_match_text(
-                                    add_source_account_filter(
-                                        pl.scan_parquet(standardized_path),
-                                        standardized_cols,
-                                        source,
-                                        account,
-                                    ),
-                                    standardized_cols,
-                                    SEARCH_COLUMNS_STANDARDIZED,
-                                ),
-                                standardized_cols,
-                                start_month,
-                                end_month,
-                                period_column,
-                            ),
-                            standardized_cols,
-                        ),
-                        standardized_cols,
-                    ),
-                    standardized_cols,
-                ),
-                standardized_cols,
-            )
-            .pipe(lambda frame: filter_reportable_generation(frame, standardized_cols))
-            .pipe(lambda frame: apply_report_net_personalization(frame))
-            .filter(raw_filter)
-            .filter(exclude_isrc_expr(standardized_cols, excluded_isrcs))
-            .select(public_detail_columns(
-                standardized_cols,
-                include_statement_metadata=True,
-            ))
-            .limit(raw_limit)
+        raw_matches_lf, raw_detail_columns = build_filtered_raw_detail_lf(
+            keywords=keywords,
+            mode=mode,
+            start_month=start_month,
+            end_month=end_month,
+            period_basis=period_basis,
+            standardized_path=standardized_path,
+            exclude_isrcs=excluded_isrcs,
+            source=source,
+            account=account,
         )
 
         metrics = metrics_lf.collect()
@@ -1135,7 +1428,14 @@ def build_report_tables(
         store_summary = store_summary_lf.collect()
         territory_summary = territory_summary_lf.collect()
         track_summary = track_summary_lf.collect()
-        raw_sample = raw_sample_lf.collect()
+        raw_sample = build_report_detail(
+            raw_matches_lf,
+            raw_detail_columns,
+            keywords=keywords,
+            detail_mode=detail_mode,
+            raw_limit=raw_limit,
+            include_statement_metadata=True,
+        )
 
         tables = {
             "resumen general": display_dataframe(pd.DataFrame([{
@@ -1148,7 +1448,7 @@ def build_report_tables(
                 "song_level_rows": song_rows,
                 "song_level_amount_usd": song_amount_usd,
                 "song_level_units": song_units,
-                "raw_sample_rows": raw_sample.height if raw_sample.height > 0 else 0,
+                "raw_sample_rows": len(raw_sample),
                 "generated_at": datetime.now().isoformat(timespec="seconds"),
             }])),
             "resumen mensual": display_dataframe(monthly_summary.to_pandas()),
@@ -1157,8 +1457,8 @@ def build_report_tables(
             "resumen por tema": display_dataframe(track_summary.to_pandas()),
         }
 
-        if raw_sample.height > 0:
-            tables["detalle"] = display_dataframe(raw_sample.to_pandas())
+        if not raw_sample.empty:
+            tables["detalle"] = raw_sample
 
         return tables
     else:
@@ -1227,7 +1527,7 @@ def build_report_tables(
 
     track_summary = build_track_summary_lf(song.lazy()).collect()
 
-    raw_sample = pl.DataFrame()
+    raw_sample = pd.DataFrame()
     store_summary = pl.DataFrame()
     territory_summary = pl.DataFrame()
     if standardized_path.exists():
@@ -1292,11 +1592,12 @@ def build_report_tables(
             .collect()
         )
 
-        raw_sample = (
-            raw_matches_lf
-            .select(public_detail_columns(raw_cols))
-            .limit(raw_limit)
-            .collect()
+        raw_sample = build_report_detail(
+            raw_matches_lf,
+            raw_cols,
+            keywords=keywords,
+            detail_mode=detail_mode,
+            raw_limit=raw_limit,
         )
 
     tables = {
@@ -1310,7 +1611,7 @@ def build_report_tables(
             "song_level_rows": song.height,
             "song_level_amount_usd": song["amount_usd"].sum(),
             "song_level_units": song["units"].sum(),
-            "raw_sample_rows": raw_sample.height if raw_sample.height > 0 else 0,
+            "raw_sample_rows": len(raw_sample),
             "generated_at": datetime.now().isoformat(timespec="seconds"),
         }])),
         "resumen mensual": display_dataframe(monthly_summary.to_pandas()),
@@ -1319,8 +1620,8 @@ def build_report_tables(
         "resumen por tema": display_dataframe(track_summary.to_pandas()),
     }
 
-    if raw_sample.height > 0:
-        tables["detalle"] = display_dataframe(raw_sample.to_pandas())
+    if not raw_sample.empty:
+        tables["detalle"] = raw_sample
 
     return tables
 
@@ -1336,12 +1637,14 @@ def build_report(
     standardized_path: Path = STANDARDIZED_PATH,
     output_dir: Path = REPORTS,
     exclude_isrcs: list[str] | None = None,
+    detail_mode: str = DETAIL_MODE_LIMITED,
 ) -> Path:
     output_path = report_output_path(keywords, start_month, end_month, output_dir)
     tables = build_report_tables(
         keywords=keywords,
         mode=mode,
         raw_limit=raw_limit,
+        detail_mode=detail_mode,
         start_month=start_month,
         end_month=end_month,
         period_basis=period_basis,

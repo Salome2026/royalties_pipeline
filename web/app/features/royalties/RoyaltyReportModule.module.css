@@ -204,6 +204,11 @@
   opacity: 0.48;
 }
 
+.field input:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .field small,
 .periodField :global(.field-help) {
   margin: 0;
@@ -246,6 +251,61 @@
   border-color: rgba(101, 217, 200, 0.42);
   background: rgba(29, 158, 140, 0.17);
   color: #69dfcd;
+}
+
+.detailOptions {
+  display: grid;
+  gap: 8px;
+}
+
+.detailOptions > label {
+  display: grid;
+  grid-template-columns: 18px 18px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(164, 188, 199, 0.16);
+  border-radius: 7px;
+  background: rgba(3, 12, 20, 0.48);
+  color: #8298a2;
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+.detailOptions > label:hover {
+  border-color: rgba(101, 217, 200, 0.3);
+  background: rgba(101, 217, 200, 0.05);
+  color: #65d9c8;
+}
+
+.detailOptions > label.detailOptionActive {
+  border-color: rgba(101, 217, 200, 0.42);
+  background: rgba(29, 158, 140, 0.11);
+  color: #69dfcd;
+}
+
+.detailOptions input {
+  width: 16px;
+  height: 16px;
+  margin: 1px 0 0;
+  accent-color: #4fc9b6;
+}
+
+.detailOptions > label > span {
+  display: grid;
+  gap: 4px;
+}
+
+.detailOptions strong {
+  color: #e2ebed;
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.detailOptions small {
+  color: #7f95a0;
+  font-size: 0.68rem;
+  line-height: 1.45;
 }
 
 .actions {
@@ -497,6 +557,109 @@
   text-decoration: none;
 }
 
+.modalBackdrop {
+  position: fixed;
+  z-index: 80;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 7, 12, 0.72);
+  backdrop-filter: blur(8px);
+}
+
+.confirmModal {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  width: min(100%, 480px);
+  gap: 14px;
+  padding: 22px;
+  border: 1px solid rgba(164, 188, 199, 0.24);
+  border-radius: 8px;
+  background: #10202b;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.48);
+}
+
+.confirmIcon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 7px;
+  background: rgba(224, 174, 83, 0.12);
+  color: #e4bd72;
+}
+
+.confirmCopy {
+  display: grid;
+  gap: 5px;
+}
+
+.confirmCopy > span {
+  color: #e4bd72;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.confirmCopy h2 {
+  margin: 0;
+  color: #f5f8f8;
+  font-size: 1rem;
+}
+
+.confirmCopy p {
+  margin: 5px 0 0;
+  color: #9cafb7;
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.confirmCopy p strong {
+  color: #eef4f5;
+}
+
+.modalActions {
+  display: flex;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+  gap: 9px;
+  padding-top: 6px;
+}
+
+.modalActions button {
+  width: auto;
+  min-height: 39px;
+  margin: 0;
+  padding: 0 14px;
+  border-radius: 7px;
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.modalCancel {
+  border: 1px solid rgba(164, 188, 199, 0.22);
+  background: transparent;
+  color: #c8d4d8;
+}
+
+.modalConfirm {
+  border: 1px solid rgba(105, 235, 211, 0.2);
+  background: #168c7c;
+  color: #ffffff;
+}
+
+.modalCancel:hover {
+  border-color: rgba(164, 188, 199, 0.38);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.modalConfirm:hover {
+  background: #1ca38f;
+}
+
 @keyframes report-spin {
   to { transform: rotate(360deg); }
 }
@@ -569,6 +732,27 @@
 
   .actionButtons button {
     width: 100%;
+  }
+
+  .detailOptions > label {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+
+  .detailOptions > label > svg {
+    display: none;
+  }
+
+  .confirmModal {
+    grid-template-columns: 1fr;
+  }
+
+  .confirmIcon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .modalActions {
+    grid-column: 1;
   }
 
   .periodField :global(.period-popover) {
