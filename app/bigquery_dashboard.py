@@ -105,7 +105,7 @@ def dashboard_sql(
 WITH option_base AS (
   SELECT source, account, {period_column} AS period_month
   FROM {table}
-  WHERE ARRAY_LENGTH(@artist_scope_tokens) = 0
+  WHERE COALESCE(ARRAY_LENGTH(@artist_scope_tokens), 0) = 0
     OR EXISTS (
       SELECT 1
       FROM UNNEST(@artist_scope_tokens) AS token
@@ -139,7 +139,7 @@ base AS (
   FROM {table}
   WHERE {period_column} IS NOT NULL
     AND (
-      ARRAY_LENGTH(@artist_scope_tokens) = 0
+      COALESCE(ARRAY_LENGTH(@artist_scope_tokens), 0) = 0
       OR EXISTS (
         SELECT 1
         FROM UNNEST(@artist_scope_tokens) AS token

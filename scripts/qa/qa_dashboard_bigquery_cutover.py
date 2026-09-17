@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app import vpo_corp_api as api
-from app.bigquery_dashboard import query_rows
+from app.bigquery_dashboard import dashboard_sql, query_rows
 
 
 class EmptyQueryJob:
@@ -56,6 +56,16 @@ def assert_bigquery_cost_guard() -> None:
     assert parameters["artist_scope_tokens"].values == ["candu"]
 
 
+def assert_unrestricted_artist_scope_handles_null_array() -> None:
+    sql = dashboard_sql(
+        project="test-project",
+        dataset="test_dataset",
+        period_basis="statement_period",
+        policy_document={"report_personalization": {"enabled": False}, "entries": []},
+    )
+    assert sql.count("COALESCE(ARRAY_LENGTH(@artist_scope_tokens), 0) = 0") == 2
+
+
 def assert_dashboard_switch() -> None:
     original_backend = api.VPO_ROYALTIES_DASHBOARD_BACKEND
     original_key = api.VPO_API_KEY
@@ -77,6 +87,7 @@ def assert_dashboard_switch() -> None:
 
 def main() -> None:
     assert_bigquery_cost_guard()
+    assert_unrestricted_artist_scope_handles_null_array()
     assert_dashboard_switch()
     print("Dashboard BigQuery cutover contract OK")
 
