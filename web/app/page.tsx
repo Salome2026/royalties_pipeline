@@ -7400,7 +7400,7 @@ export default function Home() {
       onOpen={(targetView) => targetView === "booking" ? openBookingWorkspace() : openView(targetView as View)}
       onLogout={logout}
     >
-      <main className={view === "menu" ? "home-main" : view === "booking" && bookingSurface === "dashboard" ? "booking-main" : view === "booking" && bookingSurface === "settlement" ? "booking-settlement-main" : view === "employees" ? "employee-main" : view === "catalog" ? "catalog-main" : view === "royalties-dashboard" ? "royalties-dashboard-main" : view === "digital-income" ? "digital-income-main" : undefined}>
+      <main className={view === "menu" ? "home-main" : view === "booking" && bookingSurface === "dashboard" ? "booking-main" : view === "booking" && bookingSurface === "settlement" ? "booking-settlement-main" : view === "booking-lab" ? "booking-settlement-main booking-lab-main" : view === "employees" ? "employee-main" : view === "catalog" ? "catalog-main" : view === "royalties-dashboard" ? "royalties-dashboard-main" : view === "digital-income" ? "digital-income-main" : undefined}>
         {message && <div className={`message ${message.type === "error" ? "error" : ""}`}>{message.text}</div>}
 
         {view === "menu" && (
