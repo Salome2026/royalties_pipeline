@@ -363,7 +363,7 @@ def royalty_detail_count_bigquery(
     project: str = DEFAULT_PROJECT,
     dataset: str = DEFAULT_DATASET,
     location: str = DEFAULT_LOCATION,
-    maximum_bytes_billed: int | None = 2_500_000_000,
+    maximum_bytes_billed: int | None = 5_000_000_000,
     client: bigquery.Client | None = None,
 ) -> int:
     if period_basis == "transaction_month":
@@ -616,7 +616,7 @@ def royalties_dashboard_bigquery(
     project: str = DEFAULT_PROJECT,
     dataset: str = DEFAULT_DATASET,
     location: str = DEFAULT_LOCATION,
-    maximum_bytes_billed: int | None = 2_500_000_000,
+    maximum_bytes_billed: int | None = 5_000_000_000,
     client: bigquery.Client | None = None,
 ) -> dict[str, Any]:
     safe_limit = max(3, min(int(limit or 10), 50))

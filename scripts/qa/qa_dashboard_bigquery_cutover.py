@@ -46,12 +46,12 @@ def assert_bigquery_cost_guard() -> None:
         use_all_months=False,
         month_limit=6,
         ranking_limit=10,
-        maximum_bytes_billed=2_500_000_000,
+        maximum_bytes_billed=5_000_000_000,
         client=client,
     )
     assert rows == []
     assert client.job_config is not None
-    assert client.job_config.maximum_bytes_billed == 2_500_000_000
+    assert client.job_config.maximum_bytes_billed == 5_000_000_000
     parameters = {parameter.name: parameter for parameter in client.job_config.query_parameters}
     assert parameters["artist_scope_tokens"].values == ["candu"]
 

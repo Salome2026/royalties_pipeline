@@ -12,7 +12,7 @@ actuales.
 - `VPO_ROYALTIES_DASHBOARD_BACKEND=parquet|bigquery` elige el motor.
 - `VPO_ROYALTIES_DASHBOARD_BIGQUERY_FALLBACK=1` vuelve automaticamente a
   Parquet si BigQuery falla.
-- `VPO_BIGQUERY_MAX_BYTES_BILLED=2500000000` bloquea consultas que excedan el
+- `VPO_BIGQUERY_MAX_BYTES_BILLED=5000000000` bloquea consultas que excedan el
   presupuesto tecnico esperado.
 - `X-VPO-Dashboard-Backend` identifica `bigquery`, `parquet` o
   `parquet-fallback` en cada respuesta.

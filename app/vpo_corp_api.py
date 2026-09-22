@@ -175,7 +175,7 @@ VPO_ROYALTIES_DASHBOARD_BIGQUERY_FALLBACK = os.environ.get(
     "VPO_ROYALTIES_DASHBOARD_BIGQUERY_FALLBACK", "1"
 ).strip().lower() in {"1", "true", "yes", "on"}
 VPO_BIGQUERY_MAX_BYTES_BILLED = int(
-    os.environ.get("VPO_BIGQUERY_MAX_BYTES_BILLED", "2500000000") or 2_500_000_000
+    os.environ.get("VPO_BIGQUERY_MAX_BYTES_BILLED", "5000000000") or 5_000_000_000
 )
 if VPO_ROYALTIES_DASHBOARD_BACKEND not in {"parquet", "bigquery"}:
     raise RuntimeError(
