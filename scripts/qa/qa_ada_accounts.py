@@ -22,16 +22,28 @@ RAW_ACCOUNT = "99500"
 INITIAL_STATEMENT_PERIOD = "2026-07"
 INITIAL_NET_USD = 7161.66557022
 TOLERANCE = 1e-8
+VALENTINO_TITLES = {
+    "BK4DA2659049": ("DÓNDE ESTÁS CORAZÓN", "A10302B0014196415A"),
+    "BK4DA2659050": ("SI UN DÍA ESTÁS SOLA", "A10302B00141964168"),
+    "BK4DA2659051": ("TU FOTO", "A10302B00141964176"),
+    "BK4DA2659052": ("HOY", "A10302B00141964184"),
+    "BK4DA2659053": ("ME VOY", "A10302B00141964192"),
+}
 
 
-def account_total(path: Path, amount_column: str) -> tuple[int, float]:
+def account_total(
+    path: Path,
+    amount_column: str,
+    *,
+    statement_period: str | None = INITIAL_STATEMENT_PERIOD,
+) -> tuple[int, float]:
     schema = pl.read_parquet_schema(path)
     frame = pl.scan_parquet(path).filter(
         (pl.col("source") == SOURCE)
         & (pl.col("account") == ACCOUNT)
     )
-    if "statement_period" in schema:
-        frame = frame.filter(pl.col("statement_period") == INITIAL_STATEMENT_PERIOD)
+    if statement_period is not None and "statement_period" in schema:
+        frame = frame.filter(pl.col("statement_period") == statement_period)
     result = frame.select(
         pl.len().alias("rows"),
         pl.col(amount_column).cast(pl.Float64, strict=False).sum().alias("amount_usd"),
@@ -91,20 +103,86 @@ def main() -> None:
             f"La identidad cruda ADA no coincide: {sorted(raw_accounts)} != {[RAW_ACCOUNT]}"
         )
 
+    title_semantic_violations = (
+        pl.scan_parquet(ada_path)
+        .filter(
+            pl.col("track_statement_style").fill_null("").str.strip_chars()
+            != pl.col("Product Title").fill_null("").str.strip_chars()
+        )
+        .select(pl.len())
+        .collect()
+        .item()
+    )
+    release_semantic_violations = (
+        pl.scan_parquet(ada_path)
+        .filter(
+            pl.col("release_statement_style").fill_null("").str.strip_chars()
+            != pl.col("Project Title").fill_null("").str.strip_chars()
+        )
+        .select(pl.len())
+        .collect()
+        .item()
+    )
+    if title_semantic_violations or release_semantic_violations:
+        raise AssertionError(
+            "ADA no conserva Product Title como tema y Project Title como lanzamiento: "
+            f"title={title_semantic_violations}, release={release_semantic_violations}"
+        )
+
+    song_ada = pl.read_parquet(MARTS / "song_level_ada.parquet")
+    required_song_columns = {
+        "asset_title_statement",
+        "release_statement_style",
+        "gpid",
+        "catalog_number",
+        "source_asset_id",
+        "track_id",
+    }
+    missing_song_columns = sorted(required_song_columns - set(song_ada.columns))
+    if missing_song_columns:
+        raise AssertionError(f"song_level_ada no conserva campos ADA: {missing_song_columns}")
+
+    expected_isrcs = set(VALENTINO_TITLES)
+    valentino_song = (
+        song_ada
+        .filter(pl.col("asset_isrc").is_in(sorted(expected_isrcs)))
+        .select(["asset_isrc", "track_statement_style", "release_statement_style", "source_asset_id"])
+        .unique()
+    )
+    if set(valentino_song.get_column("asset_isrc").to_list()) != expected_isrcs:
+        raise AssertionError("Faltan pistas de Valentino Merlo en song_level_ada.")
+    for row in valentino_song.to_dicts():
+        expected_title, expected_source_id = VALENTINO_TITLES[row["asset_isrc"]]
+        if row["track_statement_style"] != expected_title:
+            raise AssertionError(f"Titulo ADA incorrecto: {row}")
+        if row["source_asset_id"] != expected_source_id:
+            raise AssertionError(f"GPID ADA incorrecto: {row}")
+        if "VALENTINO MERLO" not in str(row["release_statement_style"] or "").upper():
+            raise AssertionError(f"Proyecto ADA incorrecto: {row}")
+
+    all_period_net_usd = account_total(
+        ada_path,
+        "amount_usd",
+        statement_period=None,
+    )[1]
     checks = [
-        ("standardized_raw_ada.parquet", "amount_usd"),
-        ("song_level_ada.parquet", "amount_usd"),
-        ("standardized_raw_all_sources.parquet", "amount_usd"),
-        ("song_level_all_sources.parquet", "amount_usd"),
-        ("digital_income_statement_summary.parquet", "total_usd"),
-        ("royalties_dashboard_summary.parquet", "amount_usd"),
+        ("standardized_raw_ada.parquet", "amount_usd", INITIAL_NET_USD, INITIAL_STATEMENT_PERIOD),
+        ("song_level_ada.parquet", "amount_usd", all_period_net_usd, None),
+        ("standardized_raw_all_sources.parquet", "amount_usd", INITIAL_NET_USD, INITIAL_STATEMENT_PERIOD),
+        ("song_level_all_sources.parquet", "amount_usd", all_period_net_usd, None),
+        ("digital_income_statement_summary.parquet", "total_usd", INITIAL_NET_USD, INITIAL_STATEMENT_PERIOD),
+        ("royalties_dashboard_summary.parquet", "amount_usd", INITIAL_NET_USD, INITIAL_STATEMENT_PERIOD),
     ]
     results = {}
-    for filename, amount_column in checks:
-        rows, amount_usd = account_total(MARTS / filename, amount_column)
+    for filename, amount_column, expected_amount, statement_period in checks:
+        rows, amount_usd = account_total(
+            MARTS / filename,
+            amount_column,
+            statement_period=statement_period,
+        )
         if rows <= 0:
             raise AssertionError(f"{filename} no contiene ADA / Indyana Records.")
-        assert_close(amount_usd, INITIAL_NET_USD, filename)
+        assert_close(amount_usd, expected_amount, filename)
         results[filename] = {"rows": rows, "amount_usd": amount_usd}
 
     statement_rows, statement_amount = account_total(
@@ -150,6 +228,19 @@ def main() -> None:
     )
     if catalog_matches <= 0:
         raise AssertionError("El catalogo no contiene obras observadas en ADA / Indyana Records.")
+
+    catalog = pl.read_parquet(MARTS / "catalog_master.parquet")
+    valentino_catalog = (
+        catalog
+        .filter(pl.col("asset_isrc").is_in(sorted(expected_isrcs)))
+        .select(["asset_isrc", "track_title", "track_id"])
+    )
+    if valentino_catalog.height != len(expected_isrcs):
+        raise AssertionError("El catalogo no conserva las cinco pistas de Valentino Merlo.")
+    for row in valentino_catalog.to_dicts():
+        expected_title, expected_source_id = VALENTINO_TITLES[row["asset_isrc"]]
+        if row["track_title"] != expected_title or row["track_id"] != expected_source_id:
+            raise AssertionError(f"Catalogo ADA incorrecto: {row}")
 
     print({
         "ok": True,

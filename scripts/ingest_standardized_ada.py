@@ -177,10 +177,11 @@ def standardize(
 
         text_expr("Artist Name", columns).alias("artist_statement_style"),
         pl.coalesce([
-            text_expr("Project Title", columns),
             text_expr("Product Title", columns),
+            text_expr("Project Title", columns),
         ]).alias("track_statement_style"),
         text_expr("Product Title", columns).alias("asset_title_statement"),
+        text_expr("Project Title", columns).alias("release_statement_style"),
         text_expr("ISRC", columns).alias("asset_isrc"),
         pl.lit(None).cast(pl.Utf8).alias("product_upc"),
         text_expr("GPID", columns).alias("gpid"),

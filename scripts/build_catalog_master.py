@@ -236,7 +236,17 @@ def standardized_identity_frame(path: Path) -> pl.LazyFrame | None:
         .otherwise(pl.lit(None).cast(pl.Utf8))
     )
     channel_raw = coalesce_text(schema, ["channel_id", "Channel ID", "ChannelId", "Parent ID"])
-    track_id_raw = coalesce_text(schema, ["track_id", "label_track_id", "Label Track ID", "Track ID"])
+    track_id_raw = coalesce_text(schema, [
+        "track_id",
+        "label_track_id",
+        "Label Track ID",
+        "Track ID",
+        "source_asset_id",
+        "gpid",
+        "catalog_number",
+        "GPID",
+        "Catalog Number",
+    ])
     title = coalesce_text(schema, [
         "track_statement_style",
         "asset_title_statement",

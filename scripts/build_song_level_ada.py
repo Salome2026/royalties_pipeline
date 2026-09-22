@@ -24,6 +24,10 @@ def main() -> None:
             "possible_internal_transfer",
             "asset_isrc",
             "track_statement_style",
+            "asset_title_statement",
+            "release_statement_style",
+            "gpid",
+            "catalog_number",
             "artist_statement_style",
             "transaction_month",
         ])
@@ -35,10 +39,14 @@ def main() -> None:
             pl.sum("units").alias("units"),
         ])
         .with_columns(
-            pl.when(pl.col("asset_isrc").is_null() | (pl.col("asset_isrc").str.strip_chars() == ""))
-            .then(pl.lit("unidentified"))
-            .otherwise(pl.lit("catalog"))
-            .alias("content_type")
+            [
+                pl.coalesce(["gpid", "catalog_number"]).alias("source_asset_id"),
+                pl.coalesce(["gpid", "catalog_number"]).alias("track_id"),
+                pl.when(pl.col("asset_isrc").is_null() | (pl.col("asset_isrc").str.strip_chars() == ""))
+                .then(pl.lit("unidentified"))
+                .otherwise(pl.lit("catalog"))
+                .alias("content_type"),
+            ]
         )
     )
 
