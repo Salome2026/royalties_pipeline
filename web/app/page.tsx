@@ -7400,7 +7400,7 @@ export default function Home() {
       onOpen={(targetView) => targetView === "booking" ? openBookingWorkspace() : openView(targetView as View)}
       onLogout={logout}
     >
-      <main className={view === "menu" ? "home-main" : view === "booking" && bookingSurface === "dashboard" ? "booking-main" : view === "booking" && bookingSurface === "settlement" ? "booking-settlement-main" : view === "booking-lab" ? "booking-settlement-main booking-lab-main" : view === "employees" ? "employee-main" : view === "catalog" ? "catalog-main" : view === "royalties-dashboard" ? "royalties-dashboard-main" : view === "digital-income" ? "digital-income-main" : undefined}>
+      <main className={view === "menu" ? "home-main" : view === "booking" && bookingSurface === "dashboard" ? "booking-main" : view === "booking" && bookingSurface === "settlement" ? "booking-settlement-main" : view === "booking-artist-summary" ? "booking-detail-main" : view === "booking-lab" ? "booking-settlement-main booking-lab-main" : view === "employees" ? "employee-main" : view === "catalog" ? "catalog-main" : view === "royalties-dashboard" ? "royalties-dashboard-main" : view === "digital-income" ? "digital-income-main" : undefined}>
         {message && <div className={`message ${message.type === "error" ? "error" : ""}`}>{message.text}</div>}
 
         {view === "menu" && (
@@ -9113,29 +9113,32 @@ export default function Home() {
         )}
 
         {view === "booking-artist-summary" && (
-          <section className="panel wide-panel">
+          <section className="booking-detail-page">
             <div className="section-heading">
               <div>
                 <h1>Detalle Booking</h1>
-                <p>Control show por show con fecha, venue, cachet total, ingreso artista e ingreso Indyana.</p>
+                <p>{bookingArtistSummaryArtist || "Todos los artistas"}</p>
               </div>
               <div className="button-row">
-                <button type="button" className="secondary" onClick={openBookingWorkspace}>Volver a Booking</button>
+                <button type="button" className="booking-detail-button" onClick={openBookingWorkspace}><ArrowLeft size={16} />Volver a Booking</button>
                 <button
                   type="button"
-                  className="secondary"
+                  className={`booking-detail-button${bookingArtistSummaryLatestOnly ? "" : " is-active"}`}
                   onClick={() => setBookingArtistSummaryLatestOnly((current) => !current)}
                   disabled={!bookingArtistSummary}
+                  aria-pressed={!bookingArtistSummaryLatestOnly}
                 >
+                  <Rows3 size={16} />
                   {bookingArtistSummaryLatestOnly ? "Mostrar todos" : "Mostrar ultimos 5"}
                 </button>
-                <button type="button" onClick={loadBookingArtistSummary} disabled={bookingArtistSummaryLoading}>
+                <button type="button" className="booking-detail-button" onClick={loadBookingArtistSummary} disabled={bookingArtistSummaryLoading}>
+                  <RefreshCw size={16} />
                   {bookingArtistSummaryLoading ? "Actualizando..." : "Actualizar"}
                 </button>
               </div>
             </div>
 
-            <div className="row">
+            <div className="row booking-detail-filter">
               <div>
                 <label htmlFor="booking_artist_summary_artist">Artista</label>
                 <select
