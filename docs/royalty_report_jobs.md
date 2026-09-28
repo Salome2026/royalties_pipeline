@@ -240,9 +240,23 @@ Etapas humanas:
 - `completed`;
 - `failed`.
 
-No se muestra un porcentaje ficticio. `updated_at` funciona como heartbeat. Una
-ejecucion que pierde su lease queda fallida de manera explicita; nunca vuelve
-silenciosamente a `queued`.
+No se muestra un porcentaje ficticio. El Job actualiza `updated_at` al cambiar
+de etapa y, mientras construye el reporte, con un heartbeat periodico. La
+consulta de estado no declara fallido a un Job porque la etapa lleve mucho
+tiempo sin cambiar. Si la actividad tiene mas de cinco minutos, la API consulta
+la ejecucion concreta en Cloud Run. Solo si Cloud Run confirma que termino y
+pasaron dos minutos de gracia, una actualizacion condicionada por estado,
+ejecucion y ultima actividad puede marcar el trabajo como fallido. Una
+ejecucion activa, una consulta incierta o un cambio concurrente dejan el estado
+intacto. Un error del constructor o del lanzamiento tambien deja el trabajo en
+`failed`.
+
+La API usa un rol de proyecto limitado a `run.executions.get` y
+`run.operations.get`; no tiene permisos para listar, cancelar ni modificar
+ejecuciones. La conciliacion se realiza al consultar la lista o el estado de
+un trabajo, no mediante un proceso programado. Si Cloud Run ya no conserva la
+ejecucion o un trabajo viejo no tiene referencia a ella, se requiere revision
+manual; no se infiere una falla solo por antiguedad.
 
 Transiciones validas:
 

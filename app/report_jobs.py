@@ -160,18 +160,6 @@ def create_or_reuse_report_job(
 
 def get_report_job(job_id: int) -> dict[str, Any] | None:
     def read(conn):
-        conn.execute(
-            """
-            UPDATE report_runs
-            SET status = 'failed', progress_stage = 'failed',
-                error_message = 'La ejecucion se interrumpio antes de completar el reporte.',
-                finished_at = now(), updated_at = now()
-            WHERE id = %s
-              AND status = 'running'
-              AND updated_at < now() - interval '35 minutes'
-            """,
-            (job_id,),
-        )
         row = conn.execute("SELECT * FROM report_runs WHERE id = %s", (job_id,)).fetchone()
         return report_job_item(row) if row is not None else None
     return _db_retry(read)
@@ -260,6 +248,49 @@ def set_report_job_stage(job_id: int, stage: str) -> None:
             (stage, job_id),
         )
     _db_retry(update)
+
+
+def heartbeat_report_job(job_id: int) -> bool:
+    def update(conn):
+        cursor = conn.execute(
+            "UPDATE report_runs SET updated_at = now() WHERE id = %s AND status = 'running'",
+            (job_id,),
+        )
+        return cursor.rowcount == 1
+    return _db_retry(update, attempts=1)
+
+
+def fail_interrupted_report_job(
+    job_id: int,
+    *,
+    expected_status: str,
+    expected_execution_name: str,
+    expected_updated_at: str,
+    error_message: str,
+) -> bool:
+    clean_message = (error_message or "La ejecucion termino sin resultado.")[:2000]
+
+    def update(conn):
+        cursor = conn.execute(
+            """
+            UPDATE report_runs
+            SET status = 'failed', progress_stage = 'failed', error_message = %s,
+                finished_at = now(), updated_at = now()
+            WHERE id = %s AND status = %s AND execution_name = %s
+              AND updated_at = %s
+              AND output_uri IS NULL AND result_url IS NULL
+            """,
+            (
+                clean_message,
+                job_id,
+                expected_status,
+                expected_execution_name,
+                expected_updated_at,
+            ),
+        )
+        return cursor.rowcount == 1
+
+    return _db_retry(update)
 
 
 def complete_report_job(

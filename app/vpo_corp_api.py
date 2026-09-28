@@ -54,6 +54,7 @@ from app.report_jobs import (
 from app.royalty_reports.delivery import create_signed_download_url
 from app.royalty_reports.launcher import CloudRunReportJobLauncher
 from app.royalty_reports.manifests import build_gcs_input_manifest
+from app.royalty_reports.reconciliation import reconcile_report_job_if_stale
 
 
 BASE = Path(__file__).resolve().parents[1]
@@ -7288,7 +7289,12 @@ def recent_royalty_report_jobs(
     with operational_connect() as conn:
         permission = require_module_permission(conn, username, "royalty_reports", "access")
     requested_by = None if permission.get("is_admin") else username
-    return {"items": list_report_jobs(requested_by, limit=limit)}
+    return {
+        "items": [
+            reconcile_report_job_if_stale(job)
+            for job in list_report_jobs(requested_by, limit=limit)
+        ]
+    }
 
 
 @app.get("/reports/jobs/{job_id}")
@@ -7305,7 +7311,7 @@ def royalty_report_job_status(
     if job is None:
         raise HTTPException(status_code=404, detail="Reporte no encontrado.")
     require_report_job_access(username, job)
-    return {"item": job}
+    return {"item": reconcile_report_job_if_stale(job)}
 
 
 @app.get("/reports/jobs/{job_id}/download")
