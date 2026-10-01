@@ -4713,13 +4713,12 @@ main.booking-detail-main {
 
 .booking-detail-filter {
   margin: 0 0 20px;
-  padding: 15px 17px;
-  border: 1px solid var(--detail-line);
-  border-radius: 8px;
-  background: linear-gradient(150deg, rgba(255, 255, 255, .12), rgba(255, 255, 255, .025) 60%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .11), 0 20px 34px -30px rgba(0, 0, 0, .9);
-  backdrop-filter: blur(24px) saturate(1.25);
-  -webkit-backdrop-filter: blur(24px) saturate(1.25);
+  padding: 15px 0 20px;
+  border: 0;
+  border-bottom: 1px solid var(--detail-line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .booking-detail-filter > div {
@@ -4755,34 +4754,41 @@ main.booking-detail-main {
 
 .booking-detail-page .control-dashboard {
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
+  gap: 0;
   margin: 0 0 30px;
+  padding: 14px 0;
+  border-top: 1px solid var(--detail-line);
+  border-bottom: 1px solid var(--detail-line);
 }
 
 .booking-detail-page .control-dashboard div {
-  position: relative;
   min-width: 0;
-  min-height: 86px;
-  padding: 14px 16px;
-  border: 1px solid var(--detail-line);
-  border-radius: 8px;
-  background: linear-gradient(155deg, rgba(255, 255, 255, .1), rgba(255, 255, 255, .025) 54%, rgba(255, 255, 255, .008));
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .16), 0 22px 36px -28px rgba(0, 0, 0, .92);
-  backdrop-filter: blur(28px) saturate(1.3);
-  -webkit-backdrop-filter: blur(28px) saturate(1.3);
+  min-height: 62px;
+  padding: 4px 18px;
+  border: 0;
+  border-right: 1px solid var(--detail-line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
-.booking-detail-page .control-dashboard div:nth-child(3n + 2) {
-  background: linear-gradient(155deg, rgba(121, 203, 182, .1), rgba(255, 255, 255, .025) 58%, rgba(255, 255, 255, .008));
+.booking-detail-page .control-dashboard div:nth-child(3n + 1) {
+  padding-left: 0;
 }
 
 .booking-detail-page .control-dashboard div:nth-child(3n) {
-  background: linear-gradient(155deg, rgba(141, 169, 198, .09), rgba(255, 255, 255, .025) 58%, rgba(255, 255, 255, .008));
+  border-right: 0;
+}
+
+.booking-detail-page .control-dashboard div:nth-child(n + 4) {
+  margin-top: 13px;
+  padding-top: 13px;
+  border-top: 1px solid var(--detail-line-soft);
 }
 
 .booking-detail-page .control-dashboard div.warn {
-  border-color: rgba(230, 186, 115, .31);
-  background: linear-gradient(155deg, rgba(197, 145, 55, .17), rgba(255, 255, 255, .035) 66%);
+  border-color: var(--detail-line);
+  background: transparent;
 }
 
 .booking-detail-page .control-dashboard span {
@@ -4816,12 +4822,12 @@ main.booking-detail-main {
 }
 
 .booking-detail-page .summary-table-wrap {
-  border: 1px solid var(--detail-line);
-  border-radius: 8px;
+  border: 0;
+  border-top: 1px solid var(--detail-line);
+  border-bottom: 1px solid var(--detail-line);
+  border-radius: 0;
   background: rgba(5, 13, 18, .08);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .09), 0 22px 40px -32px rgba(0, 0, 0, .94);
-  backdrop-filter: blur(24px) saturate(1.25);
-  -webkit-backdrop-filter: blur(24px) saturate(1.25);
+  box-shadow: none;
 }
 
 .booking-detail-page .summary-table {
@@ -4927,6 +4933,29 @@ main.booking-detail-main {
   .booking-detail-page .control-dashboard {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .booking-detail-page .control-dashboard div:nth-child(3n + 1) {
+    padding-left: 18px;
+  }
+
+  .booking-detail-page .control-dashboard div:nth-child(3n) {
+    border-right: 1px solid var(--detail-line);
+  }
+
+  .booking-detail-page .control-dashboard div:nth-child(2n + 1) {
+    padding-left: 0;
+    border-right: 1px solid var(--detail-line);
+  }
+
+  .booking-detail-page .control-dashboard div:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .booking-detail-page .control-dashboard div:nth-child(3) {
+    margin-top: 13px;
+    padding-top: 13px;
+    border-top: 1px solid var(--detail-line-soft);
+  }
 }
 
 @media (max-width: 520px) {
@@ -4943,7 +4972,7 @@ main.booking-detail-main {
   }
 
   .booking-detail-page .control-dashboard {
-    gap: 8px;
+    gap: 0;
   }
 
   .booking-detail-page .control-dashboard strong {
@@ -4951,8 +4980,8 @@ main.booking-detail-main {
   }
 
   .booking-detail-page .control-dashboard div {
-    min-height: 78px;
-    padding: 11px 12px;
+    min-height: 64px;
+    padding: 9px 12px;
   }
 }
 
@@ -4961,8 +4990,22 @@ main.booking-detail-main {
 }
 
 .booking-summary-page .control-dashboard div:last-child {
-  border-color: rgba(121, 203, 182, .32);
-  background: linear-gradient(155deg, rgba(121, 203, 182, .12), rgba(255, 255, 255, .025) 62%);
+  border-right: 0;
+  background: transparent;
+}
+
+.booking-summary-page .control-dashboard div:first-child {
+  padding-left: 0;
+}
+
+.booking-summary-page .control-dashboard div:nth-child(3) {
+  border-right: 1px solid var(--detail-line);
+}
+
+.booking-summary-page .control-dashboard div:nth-child(4) {
+  margin-top: 0;
+  padding-top: 4px;
+  border-top: 0;
 }
 
 .booking-summary-page .field-help {
@@ -5001,6 +5044,16 @@ main.booking-detail-main {
 @media (max-width: 900px) {
   .booking-summary-page .control-dashboard {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .booking-summary-page .control-dashboard div:nth-child(3) {
+    padding-left: 0;
+  }
+
+  .booking-summary-page .control-dashboard div:nth-child(4) {
+    margin-top: 13px;
+    padding-top: 13px;
+    border-top: 1px solid var(--detail-line-soft);
   }
 }
 
