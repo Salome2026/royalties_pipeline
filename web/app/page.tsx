@@ -7400,7 +7400,7 @@ export default function Home() {
       onOpen={(targetView) => targetView === "booking" ? openBookingWorkspace() : openView(targetView as View)}
       onLogout={logout}
     >
-      <main className={view === "menu" ? "home-main" : view === "booking" && bookingSurface === "dashboard" ? "booking-main" : view === "booking" && bookingSurface === "settlement" ? "booking-settlement-main" : view === "booking-artist-summary" ? "booking-detail-main" : view === "booking-lab" ? "booking-settlement-main booking-lab-main" : view === "employees" ? "employee-main" : view === "catalog" ? "catalog-main" : view === "royalties-dashboard" ? "royalties-dashboard-main" : view === "digital-income" ? "digital-income-main" : undefined}>
+      <main className={view === "menu" ? "home-main" : view === "booking" && bookingSurface === "dashboard" ? "booking-main" : view === "booking" && bookingSurface === "settlement" ? "booking-settlement-main" : view === "booking-artist-summary" || view === "booking-summary" ? "booking-detail-main" : view === "booking-lab" ? "booking-settlement-main booking-lab-main" : view === "employees" ? "employee-main" : view === "catalog" ? "catalog-main" : view === "royalties-dashboard" ? "royalties-dashboard-main" : view === "digital-income" ? "digital-income-main" : undefined}>
         {message && <div className={`message ${message.type === "error" ? "error" : ""}`}>{message.text}</div>}
 
         {view === "menu" && (
@@ -8660,15 +8660,16 @@ export default function Home() {
         )}
 
         {view === "booking-summary" && (
-          <section className="panel wide-panel">
+          <section className="booking-detail-page booking-summary-page">
             <div className="section-heading">
               <div>
                 <h1>Resumen booking</h1>
                 <p>Ingreso Indyana por artista y mes, comisiones aplicables y neto real de booking.</p>
               </div>
               <div className="button-row">
-                <button type="button" className="secondary" onClick={openBookingWorkspace}>Volver a Booking</button>
-                <button type="button" onClick={loadBookingSummary} disabled={bookingSummaryLoading}>
+                <button type="button" className="booking-detail-button" onClick={openBookingWorkspace}><ArrowLeft size={16} />Volver a Booking</button>
+                <button type="button" className="booking-detail-button" onClick={loadBookingSummary} disabled={bookingSummaryLoading}>
+                  <RefreshCw size={16} />
                   {bookingSummaryLoading ? "Actualizando..." : "Actualizar"}
                 </button>
               </div>
@@ -8697,7 +8698,7 @@ export default function Home() {
               Las comisiones se calculan show por show segun reglas activas. Un show excluido de comision general no genera deuda, salvo que una regla particular indique que esa persona cobra igual.
             </p>
 
-            <div className="summary-table-wrap">
+            <div className="summary-table-wrap compact-table">
               <table className="summary-table">
                 <thead>
                   <tr>
@@ -9254,7 +9255,9 @@ export default function Home() {
                       <td>{ars(item.artist_income)}</td>
                       <td>{ars(item.indyana_income)}</td>
                       <td>
-                        <strong>{item.is_commissionable ? "Aplica general" : "Excluye general"}</strong>
+                        <strong className={`booking-detail-commission${item.is_commissionable ? "" : " is-excluded"}`}>
+                          {item.is_commissionable ? "Aplica general" : "Excluye general"}
+                        </strong>
                         <span className="cell-note">
                           {item.is_commissionable ? ars(item.commissionable_income) : ars(item.non_commissionable_income)}
                         </span>
@@ -9263,7 +9266,7 @@ export default function Home() {
                         )}
                       </td>
                       <td>
-                        <span>{item.settlement_status}</span>
+                        <span className="booking-detail-status">{item.settlement_status}</span>
                         {item.origin_type === "booking_composite" && item.origin_id && (
                           <span className="cell-note">Madre #{item.origin_id}</span>
                         )}
