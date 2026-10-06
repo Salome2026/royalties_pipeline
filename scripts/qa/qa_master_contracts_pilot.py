@@ -11,6 +11,7 @@ from app.master_contracts import (
     active_artist_contracts,
     artist_suggestions,
     contract_analysis_catalog,
+    contract_statement_baseline,
     list_artist_contracts,
     read_split,
     save_artist_contract,
@@ -18,30 +19,55 @@ from app.master_contracts import (
     suggested_split,
     validate_split,
 )
+from scripts.lib.catalog_report_filter import apply_report_net_personalization
+from scripts.lib.distributor_policy_store import use_distributor_policy_snapshot
 
 
 class MasterContractsPilotTests(unittest.TestCase):
-    def test_contract_income_uses_fixed_july_catalog_without_changing_current_data(self) -> None:
+    def test_contract_income_matches_dashboard_statement_cutoff_and_net_policy(self) -> None:
         current = pl.DataFrame({
             "asset_isrc": ["ARDL12600041", "BK4DA2634549", "ARDL12600999"],
             "amount_usd": [500.0, 7000.0, 25.0],
             "last_transaction_month": ["2026-09", "2026-08", "2026-09"],
         })
-        baseline = pl.DataFrame({
-            "asset_isrc": ["ARDL12600041", "BK4DA2634549"],
-            "amount_usd": [216.410485, 4382.209966],
-            "last_transaction_month": ["2026-07", "2026-07"],
-        })
-        result = contract_analysis_catalog(current, baseline, "2026-07")
+        summary = pl.DataFrame([
+            {"isrc": "ARDL12600041", "source": "fuga", "account": "indyana_records",
+             "transaction_month": "2026-05", "statement_period": "2026-07", "amount_usd": 100.0},
+            {"isrc": "ARDL12600041", "source": "fuga", "account": "indyana_records",
+             "transaction_month": "2026-06", "statement_period": "2026-08", "amount_usd": 50.0},
+            {"isrc": "BK4DA2634549", "source": "ada", "account": "indyana_records",
+             "transaction_month": "2026-07", "statement_period": "2026-07", "amount_usd": 200.0},
+            {"isrc": "", "source": "fuga", "account": "indyana_records",
+             "transaction_month": "2026-07", "statement_period": "2026-07", "amount_usd": 999.0},
+        ])
+        baseline = contract_statement_baseline(summary.lazy(), "2026-07")
+        policy = {
+            "schema_version": 1, "policy_version": 1,
+            "report_personalization": {"enabled": True},
+            "entries": [
+                {"source": "fuga", "account": "indyana_records", "report_net_adjustment_pct": 10},
+                {"source": "ada", "account": "indyana_records", "report_net_adjustment_pct": 0},
+            ],
+        }
+        with use_distributor_policy_snapshot(policy):
+            adjusted = apply_report_net_personalization(baseline.lazy(), set(baseline.columns))
+            by_isrc = adjusted.group_by("asset_isrc").agg([
+                pl.sum("amount_usd").alias("amount_usd"),
+                pl.min("first_statement_month").alias("first_statement_month"),
+                pl.max("last_statement_month").alias("last_statement_month"),
+            ]).collect()
+        result = contract_analysis_catalog(current, by_isrc)
         self.assertEqual(result.get_column("asset_isrc").to_list(),
                          ["BK4DA2634549", "ARDL12600041", "ARDL12600999"])
-        self.assertEqual(result.get_column("amount_usd").to_list(), [4382.209966, 216.410485, 0.0])
+        self.assertEqual(result.get_column("amount_usd").to_list(), [200.0, 90.0, 0.0])
+        self.assertEqual(result.get_column("_contract_last_statement_month").to_list(),
+                         ["2026-07", "2026-07", None])
         self.assertEqual(current.get_column("amount_usd").to_list(), [500.0, 7000.0, 25.0])
-        with self.assertRaisesRegex(ValueError, "mes esperado"):
-            contract_analysis_catalog(current, baseline.with_columns(
-                pl.when(pl.col("asset_isrc") == "ARDL12600041").then(pl.lit("2026-08"))
-                .otherwise(pl.col("last_transaction_month")).alias("last_transaction_month")
-            ), "2026-07")
+        with self.assertRaisesRegex(ValueError, "mes de venta esperado"):
+            contract_statement_baseline(summary.with_columns(
+                pl.when(pl.col("isrc") == "ARDL12600041").then(pl.lit("2026-08"))
+                .otherwise(pl.col("transaction_month")).alias("transaction_month")
+            ).lazy(), "2026-07")
 
     def test_artist_contract_suggestions_are_reusable_and_do_not_change_saved_splits(self) -> None:
         with sqlite3.connect(":memory:") as conn:

@@ -205,17 +205,40 @@ def artist_suggestions(isrc: str, raw_path: Path | None, fallback: str | None) -
     }
 
 
-def contract_analysis_catalog(current: pl.DataFrame, baseline: pl.DataFrame, cutoff_month: str) -> pl.DataFrame:
-    last_month = baseline.get_column("last_transaction_month").drop_nulls().max()
-    if last_month is None or last_month > cutoff_month:
-        raise ValueError("La base de análisis de Contratos no termina en el mes esperado.")
-    historical_amounts = (
-        baseline
-        .filter(pl.col("asset_isrc").is_not_null())
-        .sort(["amount_usd", "asset_isrc"], descending=[True, False])
-        .unique(subset=["asset_isrc"], keep="first", maintain_order=True)
-        .select(["asset_isrc", pl.col("amount_usd").alias("_contract_analysis_amount_usd")])
+def contract_statement_baseline(summary: pl.LazyFrame, cutoff_month: str) -> pl.DataFrame:
+    required = {"statement_period", "transaction_month", "source", "account", "isrc", "amount_usd"}
+    missing = required - set(summary.collect_schema().names())
+    if missing:
+        raise ValueError(f"Faltan columnas en la base de Contratos: {', '.join(sorted(missing))}.")
+    last_transaction_month = summary.select(pl.max("transaction_month")).collect().item()
+    if last_transaction_month is None or last_transaction_month > cutoff_month:
+        raise ValueError("La base de análisis de Contratos no termina en el mes de venta esperado.")
+    return (
+        summary
+        .filter(
+            (pl.col("statement_period") <= cutoff_month)
+            & pl.col("isrc").fill_null("").str.contains(ISRC_PATTERN.pattern)
+        )
+        .group_by(["isrc", "source", "account"])
+        .agg([
+            pl.sum("amount_usd").alias("amount_usd"),
+            pl.min("statement_period").alias("first_statement_month"),
+            pl.max("statement_period").alias("last_statement_month"),
+        ])
+        .rename({"isrc": "asset_isrc"})
+        .collect(engine="streaming")
     )
+
+
+def contract_analysis_catalog(current: pl.DataFrame, baseline_net: pl.DataFrame) -> pl.DataFrame:
+    if baseline_net.get_column("asset_isrc").n_unique() != baseline_net.height:
+        raise ValueError("La base neta de Contratos tiene ISRC duplicados.")
+    historical_amounts = baseline_net.select([
+        "asset_isrc",
+        pl.col("amount_usd").alias("_contract_analysis_amount_usd"),
+        pl.col("first_statement_month").alias("_contract_first_statement_month"),
+        pl.col("last_statement_month").alias("_contract_last_statement_month"),
+    ])
     return (
         current
         .join(historical_amounts, on="asset_isrc", how="left")

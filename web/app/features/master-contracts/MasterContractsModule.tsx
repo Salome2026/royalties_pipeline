@@ -249,7 +249,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
 
         <div className={styles.identityLine}>
           <div><span>ISRC</span><strong>{detail.isrc}</strong></div>
-          <div><span>Ingreso del catálogo</span><strong>{money(detail.amount_usd)}</strong></div>
+          <div><span>Ingreso base</span><strong>{money(detail.amount_usd)}</strong></div>
           <div><span>Actividad</span><strong>{detail.first_month || "-"} a {detail.last_month || "-"}</strong></div>
           <div><span>Distribuidoras</span><strong>{detail.sources || "-"}</strong></div>
         </div>
@@ -325,7 +325,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
           {openAgreementId && <aside className={styles.previewColumn}>
             <section className={styles.previewBand}>
               <div className={styles.sectionHeading}><h2>Simulación en USD</h2></div>
-              <p>Base observada en el catálogo: {money(detail.amount_usd)}. No es una liquidación ni afecta reportes.</p>
+              <p>Base para simulación: {money(detail.amount_usd)}. No es una liquidación ni afecta reportes.</p>
               {preview ? <div className={styles.previewRows}>
                 <div><span>Indyana</span><strong>{money(preview.indyanaAmount)}</strong><small>{percent(preview.indyanaPercent)}%</small></div>
                 <div><span>{draft.principal || "Principal"}</span><strong>{money(preview.principalAmount)}</strong><small>{percent(draft.principal_percent || 0)}%</small></div>

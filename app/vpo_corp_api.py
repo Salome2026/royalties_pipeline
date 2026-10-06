@@ -10,6 +10,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import unicodedata
@@ -45,6 +46,7 @@ from app.master_contracts import (
     artist_suggestions,
     clean_isrc,
     contract_analysis_catalog,
+    contract_statement_baseline,
     list_artist_contracts,
     read_split,
     read_split_statuses,
@@ -216,8 +218,8 @@ STANDARDIZED_ONERPM_FILE = "standardized_raw_onerpm.parquet"
 STANDARDIZED_FUGA_FILE = "standardized_raw_fuga.parquet"
 CATALOG_MASTER_FILE = "catalog_master.parquet"
 CONTRACT_ANALYSIS_CUTOFF_MONTH = "2026-07"
-CONTRACT_ANALYSIS_BASELINE_OBJECT = "marts/releases/20260922T160603Z-df288d7cce3c/catalog_master.parquet"
-CONTRACT_ANALYSIS_BASELINE_GENERATION = 1790093187143319
+CONTRACT_ANALYSIS_BASELINE_OBJECT = "marts/releases/20260922T160603Z-df288d7cce3c/royalties_dashboard_summary.parquet"
+CONTRACT_ANALYSIS_BASELINE_GENERATION = 1790093189242250
 CATALOG_RELEASE_METADATA_FILE = "catalog_release_metadata.parquet"
 STATEMENT_SUMMARY_FILE = "statement_summary_all_sources.parquet"
 DIGITAL_INCOME_SUMMARY_FILE = "digital_income_statement_summary.parquet"
@@ -8105,12 +8107,15 @@ def update_catalog_status(
 @lru_cache(maxsize=1)
 def master_contract_income_baseline() -> pl.DataFrame:
     if VPO_LOCAL_MARTS_DIR is not None and VPO_LOCAL_MARTS_DIR.exists():
-        return pl.read_parquet(VPO_LOCAL_MARTS_DIR / CATALOG_MASTER_FILE)
+        path = VPO_LOCAL_MARTS_DIR / ROYALTIES_DASHBOARD_SUMMARY_FILE
+        return contract_statement_baseline(pl.scan_parquet(path), CONTRACT_ANALYSIS_CUTOFF_MONTH)
     if not GCS_BUCKET:
         raise HTTPException(status_code=500, detail="No está configurada la base de análisis de Contratos.")
     blob = gcs_client().bucket(GCS_BUCKET).blob(CONTRACT_ANALYSIS_BASELINE_OBJECT)
-    payload = blob.download_as_bytes(if_generation_match=CONTRACT_ANALYSIS_BASELINE_GENERATION)
-    return pl.read_parquet(BytesIO(payload))
+    with tempfile.TemporaryDirectory(prefix="vpo-contract-analysis-") as directory:
+        path = Path(directory) / ROYALTIES_DASHBOARD_SUMMARY_FILE
+        blob.download_to_filename(str(path), if_generation_match=CONTRACT_ANALYSIS_BASELINE_GENERATION)
+        return contract_statement_baseline(pl.scan_parquet(path), CONTRACT_ANALYSIS_CUTOFF_MONTH)
 
 
 def master_contract_catalog() -> pl.DataFrame:
@@ -8122,7 +8127,21 @@ def master_contract_catalog() -> pl.DataFrame:
         .sort(["amount_usd", "asset_isrc"], descending=[True, False])
         .unique(subset=["asset_isrc"], keep="first", maintain_order=True)
     )
-    return contract_analysis_catalog(current, master_contract_income_baseline(), CONTRACT_ANALYSIS_CUTOFF_MONTH)
+    baseline = master_contract_income_baseline()
+    adjusted = apply_report_net_personalization(
+        baseline.lazy(), set(baseline.columns), amount_col="amount_usd",
+    )
+    by_isrc = (
+        adjusted
+        .group_by("asset_isrc")
+        .agg([
+            pl.sum("amount_usd").alias("amount_usd"),
+            pl.min("first_statement_month").alias("first_statement_month"),
+            pl.max("last_statement_month").alias("last_statement_month"),
+        ])
+        .collect()
+    )
+    return contract_analysis_catalog(current, by_isrc)
 
 
 def require_master_contract_user(conn: Any, username: str | None, action: Literal["access", "edit", "approve"]) -> str:
@@ -8207,8 +8226,8 @@ def list_master_contracts(
             "title": row["track_title"],
             "artists_informed": row["artist_statement"],
             "amount_usd": float(row["amount_usd"] or 0),
-            "first_month": row["first_transaction_month"],
-            "last_month": row["last_transaction_month"],
+            "first_month": row["_contract_first_statement_month"],
+            "last_month": row["_contract_last_statement_month"],
             "sources": row["sources"],
             **states.get(row["asset_isrc"], {"closed": False, "future_reports_selected": False, "version": 0}),
         }
@@ -8220,7 +8239,7 @@ def list_master_contracts(
         "summary": summary,
         "limit": safe_limit,
         "offset": safe_offset,
-        "amount_basis": "catalog_observed_usd",
+        "amount_basis": "dashboard_net_statement_usd",
         "reports_effective": False,
     }
 
@@ -8261,8 +8280,8 @@ def get_master_contract(
         "first_sale_date": first_sale_date,
         "first_sale_precision": first_sale_precision,
         "amount_usd": float(catalog_row.get("amount_usd") or 0),
-        "first_month": catalog_row.get("first_transaction_month"),
-        "last_month": catalog_row.get("last_transaction_month"),
+        "first_month": catalog_row.get("_contract_first_statement_month"),
+        "last_month": catalog_row.get("_contract_last_statement_month"),
         "sources": catalog_row.get("sources"),
         "accounts": catalog_row.get("accounts"),
         "split": saved["split"] if saved else suggested_split(
@@ -8274,7 +8293,7 @@ def get_master_contract(
         "version": saved["version"] if saved else 0,
         "updated_by": saved["updated_by"] if saved else None,
         "updated_at": saved["updated_at"] if saved else None,
-        "amount_basis": "catalog_observed_usd",
+        "amount_basis": "dashboard_net_statement_usd",
         "reports_effective": False,
     }
 
