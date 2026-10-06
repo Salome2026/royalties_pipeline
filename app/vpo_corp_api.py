@@ -57,6 +57,7 @@ from app.master_contracts import (
 from app.bigquery_dashboard import (
     royalties_dashboard_bigquery as query_royalties_dashboard_bigquery,
     royalty_detail_count_bigquery as query_royalty_detail_count_bigquery,
+    royalty_isrc_income_bigquery,
 )
 from app.report_jobs import (
     create_or_reuse_report_job,
@@ -218,8 +219,6 @@ STANDARDIZED_ONERPM_FILE = "standardized_raw_onerpm.parquet"
 STANDARDIZED_FUGA_FILE = "standardized_raw_fuga.parquet"
 CATALOG_MASTER_FILE = "catalog_master.parquet"
 CONTRACT_ANALYSIS_CUTOFF_MONTH = "2026-07"
-CONTRACT_ANALYSIS_BASELINE_OBJECT = "marts/releases/20260922T160603Z-df288d7cce3c/royalties_dashboard_summary.parquet"
-CONTRACT_ANALYSIS_BASELINE_GENERATION = 1790093189242250
 CATALOG_RELEASE_METADATA_FILE = "catalog_release_metadata.parquet"
 STATEMENT_SUMMARY_FILE = "statement_summary_all_sources.parquet"
 DIGITAL_INCOME_SUMMARY_FILE = "digital_income_statement_summary.parquet"
@@ -8104,18 +8103,36 @@ def update_catalog_status(
     return {"ok": True, "catalog_key": catalog_key, "active": bool(request.active), "updated_at": now}
 
 
-@lru_cache(maxsize=1)
 def master_contract_income_baseline() -> pl.DataFrame:
+    if VPO_ROYALTIES_DASHBOARD_BACKEND == "bigquery":
+        try:
+            rows = royalty_isrc_income_bigquery(
+                policy_document=load_distributor_policy_document(),
+                end_month=CONTRACT_ANALYSIS_CUTOFF_MONTH,
+                project=VPO_BIGQUERY_PROJECT,
+                dataset=VPO_BIGQUERY_DATASET,
+                location=VPO_BIGQUERY_LOCATION,
+                maximum_bytes_billed=VPO_BIGQUERY_MAX_BYTES_BILLED,
+            )
+            return pl.DataFrame(rows, schema={
+                "asset_isrc": pl.Utf8, "amount_usd": pl.Float64,
+                "first_statement_month": pl.Utf8, "last_statement_month": pl.Utf8,
+            })
+        except Exception:
+            if not VPO_ROYALTIES_DASHBOARD_BIGQUERY_FALLBACK:
+                raise
     if VPO_LOCAL_MARTS_DIR is not None and VPO_LOCAL_MARTS_DIR.exists():
-        path = VPO_LOCAL_MARTS_DIR / ROYALTIES_DASHBOARD_SUMMARY_FILE
-        return contract_statement_baseline(pl.scan_parquet(path), CONTRACT_ANALYSIS_CUTOFF_MONTH)
-    if not GCS_BUCKET:
-        raise HTTPException(status_code=500, detail="No está configurada la base de análisis de Contratos.")
-    blob = gcs_client().bucket(GCS_BUCKET).blob(CONTRACT_ANALYSIS_BASELINE_OBJECT)
-    with tempfile.TemporaryDirectory(prefix="vpo-contract-analysis-") as directory:
-        path = Path(directory) / ROYALTIES_DASHBOARD_SUMMARY_FILE
-        blob.download_to_filename(str(path), if_generation_match=CONTRACT_ANALYSIS_BASELINE_GENERATION)
-        return contract_statement_baseline(pl.scan_parquet(path), CONTRACT_ANALYSIS_CUTOFF_MONTH)
+        marts = ensure_marts(filenames=[STANDARDIZED_FILE])
+        path = build_royalties_dashboard_summary_mart(marts[STANDARDIZED_FILE])
+    else:
+        path = ensure_marts(filenames=[ROYALTIES_DASHBOARD_SUMMARY_FILE])[ROYALTIES_DASHBOARD_SUMMARY_FILE]
+    baseline = contract_statement_baseline(pl.scan_parquet(path), CONTRACT_ANALYSIS_CUTOFF_MONTH)
+    adjusted = apply_report_net_personalization(baseline.lazy(), set(baseline.columns), amount_col="amount_usd")
+    return adjusted.group_by("asset_isrc").agg([
+        pl.sum("amount_usd").alias("amount_usd"),
+        pl.min("first_statement_month").alias("first_statement_month"),
+        pl.max("last_statement_month").alias("last_statement_month"),
+    ]).collect()
 
 
 def master_contract_catalog() -> pl.DataFrame:
@@ -8127,21 +8144,7 @@ def master_contract_catalog() -> pl.DataFrame:
         .sort(["amount_usd", "asset_isrc"], descending=[True, False])
         .unique(subset=["asset_isrc"], keep="first", maintain_order=True)
     )
-    baseline = master_contract_income_baseline()
-    adjusted = apply_report_net_personalization(
-        baseline.lazy(), set(baseline.columns), amount_col="amount_usd",
-    )
-    by_isrc = (
-        adjusted
-        .group_by("asset_isrc")
-        .agg([
-            pl.sum("amount_usd").alias("amount_usd"),
-            pl.min("first_statement_month").alias("first_statement_month"),
-            pl.max("last_statement_month").alias("last_statement_month"),
-        ])
-        .collect()
-    )
-    return contract_analysis_catalog(current, by_isrc)
+    return contract_analysis_catalog(current, master_contract_income_baseline())
 
 
 def require_master_contract_user(conn: Any, username: str | None, action: Literal["access", "edit", "approve"]) -> str:

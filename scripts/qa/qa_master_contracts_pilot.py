@@ -20,12 +20,38 @@ from app.master_contracts import (
     suggested_split,
     validate_split,
 )
+from app.bigquery_dashboard import royalty_isrc_income_bigquery
 from scripts.lib.catalog_report_filter import apply_report_net_personalization
 from scripts.lib.distributor_policy_store import use_distributor_policy_snapshot
 from app import vpo_corp_api
 
 
 class MasterContractsPilotTests(unittest.TestCase):
+    def test_contract_income_queries_current_dashboard_with_policy_and_july_cutoff(self) -> None:
+        class Client:
+            def query(self, sql, *, job_config, location):
+                self.sql = sql
+                self.config = job_config
+                self.location = location
+                return self
+
+            def result(self):
+                return [{"asset_isrc": "ARDL12600006", "amount_usd": 11646.10,
+                         "first_statement_month": "2026-01", "last_statement_month": "2026-07"}]
+
+        client = Client()
+        rows = royalty_isrc_income_bigquery(
+            policy_document={"report_personalization": {"enabled": True}, "entries": [
+                {"source": "fuga", "account": "indyana_records", "report_net_adjustment_pct": 10},
+            ]},
+            end_month="2026-07", project="project", dataset="dataset", location="US",
+            maximum_bytes_billed=5000000000, client=client,
+        )
+        self.assertEqual(rows[0]["amount_usd"], 11646.10)
+        self.assertIn("project.dataset.royalty_dashboard_current", client.sql)
+        self.assertIn("source = 'fuga' AND account = 'indyana_records'", client.sql)
+        self.assertEqual(str(client.config.query_parameters[0].value), "2026-07-01")
+
     def test_contract_list_uses_statement_month_columns(self) -> None:
         catalog = pl.DataFrame({
             "asset_isrc": ["ARDL12600006"],
@@ -87,11 +113,10 @@ class MasterContractsPilotTests(unittest.TestCase):
         self.assertEqual(result.get_column("_contract_last_statement_month").to_list(),
                          ["2026-07", "2026-07", None])
         self.assertEqual(current.get_column("amount_usd").to_list(), [500.0, 7000.0, 25.0])
-        with self.assertRaisesRegex(ValueError, "mes de venta esperado"):
-            contract_statement_baseline(summary.with_columns(
-                pl.when(pl.col("isrc") == "ARDL12600041").then(pl.lit("2026-08"))
-                .otherwise(pl.col("transaction_month")).alias("transaction_month")
-            ).lazy(), "2026-07")
+        self.assertEqual(contract_statement_baseline(summary.with_columns(
+            pl.when(pl.col("isrc") == "ARDL12600041").then(pl.lit("2026-08"))
+            .otherwise(pl.col("transaction_month")).alias("transaction_month")
+        ).lazy(), "2026-07").height, 2)
 
     def test_artist_contract_suggestions_are_reusable_and_do_not_change_saved_splits(self) -> None:
         with sqlite3.connect(":memory:") as conn:

@@ -206,13 +206,10 @@ def artist_suggestions(isrc: str, raw_path: Path | None, fallback: str | None) -
 
 
 def contract_statement_baseline(summary: pl.LazyFrame, cutoff_month: str) -> pl.DataFrame:
-    required = {"statement_period", "transaction_month", "source", "account", "isrc", "amount_usd"}
+    required = {"statement_period", "source", "account", "isrc", "amount_usd"}
     missing = required - set(summary.collect_schema().names())
     if missing:
         raise ValueError(f"Faltan columnas en la base de Contratos: {', '.join(sorted(missing))}.")
-    last_transaction_month = summary.select(pl.max("transaction_month")).collect().item()
-    if last_transaction_month is None or last_transaction_month > cutoff_month:
-        raise ValueError("La base de análisis de Contratos no termina en el mes de venta esperado.")
     return (
         summary
         .filter(

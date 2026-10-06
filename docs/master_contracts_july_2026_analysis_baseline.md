@@ -1,27 +1,16 @@
-# Contratos: base temporal para contraste de ingresos
+# Contratos: ingresos de prueba hasta julio de 2026
 
-Solo la pantalla de Contratos usa temporalmente el resumen del dashboard de la
-publicacion `20260922T160603Z-df288d7cce3c`. La base termina en el mes de
-transaccion `2026-07`, pero el importe de prueba incluye solamente statements
-con `statement_period <= 2026-07`. El objeto es
-`gs://vpo-corp-royalties-marts/marts/releases/20260922T160603Z-df288d7cce3c/royalties_dashboard_summary.parquet`,
-generacion `1790093189242250`.
+Contratos consulta la misma vista vigente de BigQuery que el dashboard de
+regalias (`royalty_dashboard_current`) y aplica la misma politica de descuento
+por fuente y cuenta. El unico limite temporal de esta prueba es el mes de
+statement: se incluyen statements hasta julio de 2026 inclusive. No se fija
+una publicacion anterior ni se mantiene un importe alternativo.
 
-La lista y la ficha siguen tomando ISRC, titulo, credito de origen y fuentes
-del catalogo activo. El ingreso de Contratos agrupa el resumen reportable por
-ISRC, fuente y cuenta, aplica `apply_report_net_personalization` con la politica
-vigente (la misma funcion del dashboard) y luego suma por ISRC. Los meses de
-actividad mostrados son meses de statement. La primera fecha de venta usada
-para la vigencia del contrato sigue saliendo del crudo o del catalogo, no del
-mes de statement. Los ISRC sin ingresos en el corte figuran con cero.
+Si el dashboard usa su respaldo Parquet, Contratos consulta el mismo resumen
+vigente y aplica `apply_report_net_personalization`. La lista y la ficha
+conservan los ISRC, titulos y creditos del catalogo activo; un ISRC sin
+ingresos en el periodo figura con cero. La primera venta sugerida para la
+vigencia contractual sigue saliendo del crudo o del catalogo.
 
-Este importe coincide con una busqueda exacta del ISRC en el dashboard con
-base `statement_period` y rango hasta julio, si se compara la misma publicacion
-y politica. No se modifica ningun mart, status, split guardado, dashboard ni
-reporte; tampoco se aplica un filtro al catalogo general.
-
-Es una base **fija para pruebas**: nuevos statements o correcciones no entran
-automaticamente, aunque correspondan a meses anteriores. El descuento sigue la
-politica vigente y puede cambiar si esa politica se edita. Al terminar la
-validacion, retirar el corte temporal o disenar un mart mensual versionado y
-conciliado antes de usarlo en Contratos.
+Esta vista es solo para validar contratos. No modifica el catalogo, los
+repartos guardados, el dashboard ni los reportes actuales.

@@ -316,6 +316,29 @@ def dashboard_client(project: str, location: str) -> bigquery.Client:
     return bigquery.Client(project=project, location=location)
 
 
+def royalty_isrc_income_bigquery(
+    *, policy_document: dict[str, Any], end_month: str,
+    project: str, dataset: str, location: str, maximum_bytes_billed: int | None,
+    client: bigquery.Client | None = None,
+) -> list[dict[str, Any]]:
+    sql = f"""
+SELECT
+  isrc AS asset_isrc,
+  SUM(COALESCE(amount_usd, 0) * ({personalization_factor_sql(policy_document)})) AS amount_usd,
+  FORMAT_DATE('%Y-%m', MIN(statement_month)) AS first_statement_month,
+  FORMAT_DATE('%Y-%m', MAX(statement_month)) AS last_statement_month
+FROM `{project}.{dataset}.royalty_dashboard_current`
+WHERE statement_month <= @end_month AND isrc IS NOT NULL AND isrc != ''
+GROUP BY isrc
+"""
+    config = bigquery.QueryJobConfig(
+        maximum_bytes_billed=maximum_bytes_billed,
+        query_parameters=[bigquery.ScalarQueryParameter("end_month", "DATE", month_date(end_month))],
+    )
+    query_client = client or dashboard_client(project, location)
+    return [dict(row.items()) for row in query_client.query(sql, job_config=config, location=location).result()]
+
+
 def query_rows(
     *,
     sql: str,
