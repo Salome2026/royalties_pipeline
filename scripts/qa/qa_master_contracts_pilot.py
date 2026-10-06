@@ -10,6 +10,7 @@ import polars as pl
 from app.master_contracts import (
     active_artist_contracts,
     artist_suggestions,
+    contract_analysis_catalog,
     list_artist_contracts,
     read_split,
     save_artist_contract,
@@ -20,6 +21,28 @@ from app.master_contracts import (
 
 
 class MasterContractsPilotTests(unittest.TestCase):
+    def test_contract_income_uses_fixed_july_catalog_without_changing_current_data(self) -> None:
+        current = pl.DataFrame({
+            "asset_isrc": ["ARDL12600041", "BK4DA2634549", "ARDL12600999"],
+            "amount_usd": [500.0, 7000.0, 25.0],
+            "last_transaction_month": ["2026-09", "2026-08", "2026-09"],
+        })
+        baseline = pl.DataFrame({
+            "asset_isrc": ["ARDL12600041", "BK4DA2634549"],
+            "amount_usd": [216.410485, 4382.209966],
+            "last_transaction_month": ["2026-07", "2026-07"],
+        })
+        result = contract_analysis_catalog(current, baseline, "2026-07")
+        self.assertEqual(result.get_column("asset_isrc").to_list(),
+                         ["BK4DA2634549", "ARDL12600041", "ARDL12600999"])
+        self.assertEqual(result.get_column("amount_usd").to_list(), [4382.209966, 216.410485, 0.0])
+        self.assertEqual(current.get_column("amount_usd").to_list(), [500.0, 7000.0, 25.0])
+        with self.assertRaisesRegex(ValueError, "mes esperado"):
+            contract_analysis_catalog(current, baseline.with_columns(
+                pl.when(pl.col("asset_isrc") == "ARDL12600041").then(pl.lit("2026-08"))
+                .otherwise(pl.col("last_transaction_month")).alias("last_transaction_month")
+            ), "2026-07")
+
     def test_artist_contract_suggestions_are_reusable_and_do_not_change_saved_splits(self) -> None:
         with sqlite3.connect(":memory:") as conn:
             conn.row_factory = sqlite3.Row

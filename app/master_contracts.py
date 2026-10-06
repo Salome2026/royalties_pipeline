@@ -205,6 +205,26 @@ def artist_suggestions(isrc: str, raw_path: Path | None, fallback: str | None) -
     }
 
 
+def contract_analysis_catalog(current: pl.DataFrame, baseline: pl.DataFrame, cutoff_month: str) -> pl.DataFrame:
+    last_month = baseline.get_column("last_transaction_month").drop_nulls().max()
+    if last_month is None or last_month > cutoff_month:
+        raise ValueError("La base de análisis de Contratos no termina en el mes esperado.")
+    historical_amounts = (
+        baseline
+        .filter(pl.col("asset_isrc").is_not_null())
+        .sort(["amount_usd", "asset_isrc"], descending=[True, False])
+        .unique(subset=["asset_isrc"], keep="first", maintain_order=True)
+        .select(["asset_isrc", pl.col("amount_usd").alias("_contract_analysis_amount_usd")])
+    )
+    return (
+        current
+        .join(historical_amounts, on="asset_isrc", how="left")
+        .with_columns(pl.col("_contract_analysis_amount_usd").fill_null(0.0).alias("amount_usd"))
+        .drop("_contract_analysis_amount_usd")
+        .sort(["amount_usd", "asset_isrc"], descending=[True, False])
+    )
+
+
 def suggested_split(
     artists: list[str], contracts: dict[str, dict[str, Any]] | None = None,
     first_sale_date: str | None = None,

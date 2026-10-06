@@ -18,6 +18,7 @@ from calendar import monthrange
 from contextlib import asynccontextmanager
 from datetime import date
 from datetime import datetime
+from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Literal
@@ -43,6 +44,7 @@ from app.master_contracts import (
     active_artist_contracts,
     artist_suggestions,
     clean_isrc,
+    contract_analysis_catalog,
     list_artist_contracts,
     read_split,
     read_split_statuses,
@@ -213,6 +215,9 @@ STANDARDIZED_FILE = "standardized_raw_all_sources.parquet"
 STANDARDIZED_ONERPM_FILE = "standardized_raw_onerpm.parquet"
 STANDARDIZED_FUGA_FILE = "standardized_raw_fuga.parquet"
 CATALOG_MASTER_FILE = "catalog_master.parquet"
+CONTRACT_ANALYSIS_CUTOFF_MONTH = "2026-07"
+CONTRACT_ANALYSIS_BASELINE_OBJECT = "marts/releases/20260922T160603Z-df288d7cce3c/catalog_master.parquet"
+CONTRACT_ANALYSIS_BASELINE_GENERATION = 1790093187143319
 CATALOG_RELEASE_METADATA_FILE = "catalog_release_metadata.parquet"
 STATEMENT_SUMMARY_FILE = "statement_summary_all_sources.parquet"
 DIGITAL_INCOME_SUMMARY_FILE = "digital_income_statement_summary.parquet"
@@ -8097,15 +8102,27 @@ def update_catalog_status(
     return {"ok": True, "catalog_key": catalog_key, "active": bool(request.active), "updated_at": now}
 
 
+@lru_cache(maxsize=1)
+def master_contract_income_baseline() -> pl.DataFrame:
+    if VPO_LOCAL_MARTS_DIR is not None and VPO_LOCAL_MARTS_DIR.exists():
+        return pl.read_parquet(VPO_LOCAL_MARTS_DIR / CATALOG_MASTER_FILE)
+    if not GCS_BUCKET:
+        raise HTTPException(status_code=500, detail="No está configurada la base de análisis de Contratos.")
+    blob = gcs_client().bucket(GCS_BUCKET).blob(CONTRACT_ANALYSIS_BASELINE_OBJECT)
+    payload = blob.download_as_bytes(if_generation_match=CONTRACT_ANALYSIS_BASELINE_GENERATION)
+    return pl.read_parquet(BytesIO(payload))
+
+
 def master_contract_catalog() -> pl.DataFrame:
     marts = ensure_marts(filenames=[CATALOG_MASTER_FILE])
     catalog = pl.read_parquet(marts[CATALOG_MASTER_FILE])
-    return (
+    current = (
         catalog
         .filter(pl.col("asset_isrc").fill_null("").str.contains(r"^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$"))
         .sort(["amount_usd", "asset_isrc"], descending=[True, False])
         .unique(subset=["asset_isrc"], keep="first", maintain_order=True)
     )
+    return contract_analysis_catalog(current, master_contract_income_baseline(), CONTRACT_ANALYSIS_CUTOFF_MONTH)
 
 
 def require_master_contract_user(conn: Any, username: str | None, action: Literal["access", "edit", "approve"]) -> str:
