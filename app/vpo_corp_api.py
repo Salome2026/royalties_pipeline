@@ -8021,6 +8021,14 @@ def catalog_items(
                 | contains_search_expr(pl.col("asset_isrc"), needle)
                 | contains_search_expr(pl.col("title_variants"), needle)
                 | contains_search_expr(pl.col("artist_variants"), needle)
+                | (
+                    pl.col("sources").fill_null("").str.split(" | ").list.contains("ada")
+                    & (
+                        contains_search_expr(pl.col("catalog_key"), needle)
+                        | contains_search_expr(pl.col("track_id"), needle)
+                        | contains_search_expr(pl.col("track_ids"), needle)
+                    )
+                )
             )
     if label:
         clean_label = label.strip()
