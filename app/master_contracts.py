@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import unicodedata
 from datetime import datetime, timezone
@@ -33,11 +34,11 @@ FIELD_RANK = {
     "PRODUCT ARTIST": 3,
 }
 KNOWN_ARTISTS = {
-    "aneley": ("Aneley", 50.0),
-    "candu dominguez": ("Candu Dominguez", 70.0),
-    "g sony": ("G Sony", 50.0),
-    "gusty dj": ("Gusty DJ", 70.0),
-    "la juntada de los artistas": ("La Juntada de los Artistas", 70.0),
+    "aneley": "Aneley",
+    "candu dominguez": "Candu Dominguez",
+    "g sony": "G Sony",
+    "gusty dj": "Gusty DJ",
+    "la juntada de los artistas": "La Juntada de los Artistas",
 }
 
 
@@ -56,7 +57,7 @@ def artist_key(value: str) -> str:
 
 def canonical_artist(value: str) -> str:
     cleaned = re.sub(r"\s+", " ", value.strip())
-    return KNOWN_ARTISTS.get(artist_key(cleaned), (cleaned, None))[0]
+    return KNOWN_ARTISTS.get(artist_key(cleaned), cleaned)
 
 
 def parse_artists(raw: str, source: str) -> list[str]:
@@ -126,27 +127,26 @@ def artist_suggestions(isrc: str, raw_path: Path | None, fallback: str | None) -
     }
 
 
-def suggested_split(artists: list[str]) -> dict[str, Any]:
+def suggested_split(artists: list[str], contracts: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+    contracts = contracts or {}
     principal = artists[0] if artists else ""
-    base = KNOWN_ARTISTS.get(artist_key(principal), (None, None))[1]
+    main_contract = contracts.get(artist_key(principal))
+    base = main_contract["indyana_percent"] if main_contract else None
+    is_project = bool(main_contract and main_contract["is_project"])
     return {
         "master_type": "pending",
-        "has_contract": None,
+        "has_contract": main_contract["has_contract"] if main_contract else None,
         "agreement_confirmed": False,
-        "effective_from": None,
+        "effective_from": main_contract["effective_from"] if main_contract else None,
         "principal": principal,
         "indyana_percent": base,
-        "principal_percent": None,
-        "apply_guest_contracts": artist_key(principal) == "la juntada de los artistas",
+        "principal_percent": 100 - base if base is not None and len(artists) == 1 else None,
+        "apply_guest_contracts": is_project,
         "participants": [
             {
                 "artist": artist,
                 "percent": None,
-                "internal_contract_indyana_percent": (
-                    KNOWN_ARTISTS[artist_key(artist)][1]
-                    if artist_key(principal) == "la juntada de los artistas" and artist_key(artist) in KNOWN_ARTISTS
-                    else None
-                ),
+                "internal_contract_indyana_percent": contracts.get(artist_key(artist), {}).get("indyana_percent"),
             }
             for artist in artists[1:11]
         ],
@@ -181,6 +181,112 @@ def ensure_sqlite_tables(conn: Any) -> None:
         )"""
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_master_contract_splits_closed ON master_contract_splits(is_closed)")
+
+
+def ensure_artist_contract_tables(conn: Any) -> None:
+    if is_postgres_connection(conn):
+        return
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS master_artist_contracts (
+            artist_key TEXT PRIMARY KEY, artist_name TEXT NOT NULL,
+            indyana_percent REAL NOT NULL, has_contract INTEGER NOT NULL,
+            effective_from TEXT, is_project INTEGER NOT NULL DEFAULT 0,
+            is_active INTEGER NOT NULL DEFAULT 1, notes TEXT NOT NULL DEFAULT '',
+            version INTEGER NOT NULL, updated_by TEXT NOT NULL, updated_at TEXT NOT NULL
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS master_artist_contract_history (
+            artist_key TEXT NOT NULL, version INTEGER NOT NULL, payload_json TEXT NOT NULL,
+            updated_by TEXT NOT NULL, updated_at TEXT NOT NULL,
+            PRIMARY KEY (artist_key, version)
+        )"""
+    )
+
+
+def list_artist_contracts(conn: Any) -> list[dict[str, Any]]:
+    ensure_artist_contract_tables(conn)
+    rows = conn.execute("SELECT * FROM master_artist_contracts ORDER BY artist_name").fetchall()
+    return [
+        {
+            "artist_key": row["artist_key"],
+            "artist_name": row["artist_name"],
+            "indyana_percent": float(row["indyana_percent"]),
+            "has_contract": bool(row["has_contract"]),
+            "effective_from": row["effective_from"],
+            "is_project": bool(row["is_project"]),
+            "is_active": bool(row["is_active"]),
+            "notes": row["notes"],
+            "version": int(row["version"]),
+            "updated_by": row["updated_by"],
+            "updated_at": row["updated_at"],
+        }
+        for row in rows
+    ]
+
+
+def active_artist_contracts(conn: Any) -> dict[str, dict[str, Any]]:
+    return {row["artist_key"]: row for row in list_artist_contracts(conn) if row["is_active"]}
+
+
+def save_artist_contract(
+    conn: Any, contract: dict[str, Any], *, expected_version: int, actor: str,
+) -> dict[str, Any]:
+    ensure_artist_contract_tables(conn)
+    name = canonical_artist(str(contract.get("artist_name") or ""))
+    key = artist_key(name)
+    if not key or len(name) > 200:
+        raise ValueError("Indicá un nombre de artista válido.")
+    percent = float(contract["indyana_percent"])
+    if not math.isfinite(percent) or percent < 0 or percent > 100:
+        raise ValueError("El porcentaje de Indyana debe estar entre 0 y 100.")
+    effective_from = contract.get("effective_from") or None
+    if effective_from and not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", str(effective_from)):
+        raise ValueError("La vigencia debe tener formato AAAA-MM.")
+    notes = str(contract.get("notes") or "").strip()
+    if len(notes) > 3000:
+        raise ValueError("Las notas no pueden superar 3000 caracteres.")
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    version = expected_version + 1
+    values = (
+        name, percent, int(bool(contract["has_contract"])), effective_from,
+        int(bool(contract.get("is_project"))), int(bool(contract.get("is_active", True))),
+        notes, version, actor, now, key,
+    )
+    if expected_version == 0:
+        insert = """INSERT INTO master_artist_contracts
+            (artist_name, indyana_percent, has_contract, effective_from, is_project,
+             is_active, notes, version, updated_by, updated_at, artist_key)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(artist_key) DO NOTHING"""
+        if is_postgres_connection(conn):
+            cursor = conn.execute(db_sql(conn, f"WITH inserted AS ({insert} RETURNING artist_key) SELECT artist_key FROM inserted"), values)
+            saved = cursor.fetchone() is not None
+        else:
+            saved = conn.execute(insert, values).rowcount == 1
+    else:
+        cursor = conn.execute(
+            db_sql(conn, """UPDATE master_artist_contracts SET artist_name = ?, indyana_percent = ?,
+                has_contract = ?, effective_from = ?, is_project = ?, is_active = ?,
+                notes = ?, version = ?, updated_by = ?, updated_at = ?
+                WHERE artist_key = ? AND version = ?"""), values + (expected_version,),
+        )
+        saved = cursor.rowcount == 1
+    if not saved:
+        raise ValueError("El contrato cambió desde que lo abriste. Actualizalo antes de guardar.")
+    result = {
+        "artist_key": key, "artist_name": name, "indyana_percent": percent,
+        "has_contract": bool(contract["has_contract"]), "effective_from": effective_from,
+        "is_project": bool(contract.get("is_project")), "is_active": bool(contract.get("is_active", True)),
+        "notes": notes, "version": version, "updated_by": actor, "updated_at": now,
+    }
+    history_values = (key, version, json.dumps(result, ensure_ascii=False, sort_keys=True), actor, now)
+    history_insert = """INSERT INTO master_artist_contract_history
+        (artist_key, version, payload_json, updated_by, updated_at) VALUES (?, ?, ?, ?, ?)"""
+    if is_postgres_connection(conn):
+        conn.execute(db_sql(conn, f"WITH inserted AS ({history_insert} RETURNING artist_key) SELECT artist_key FROM inserted"), history_values)
+    else:
+        conn.execute(history_insert, history_values)
+    return result
 
 
 def read_split(conn: Any, isrc: str) -> dict[str, Any] | None:

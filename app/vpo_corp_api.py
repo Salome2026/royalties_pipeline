@@ -40,10 +40,14 @@ from app.operational_db import (
     open_operational_db_pool,
 )
 from app.master_contracts import (
+    active_artist_contracts,
+    artist_key,
     artist_suggestions,
     clean_isrc,
+    list_artist_contracts,
     read_split,
     read_split_statuses,
+    save_artist_contract,
     save_split,
     suggested_split,
 )
@@ -303,6 +307,17 @@ class MasterContractSaveRequest(BaseModel):
     split: MasterContractSplit
     closed: bool = False
     future_reports_selected: bool = False
+    expected_version: int = Field(default=0, ge=0)
+
+
+class MasterArtistContractSaveRequest(BaseModel):
+    artist_name: str = Field(..., min_length=1, max_length=200)
+    indyana_percent: float = Field(..., ge=0, le=100)
+    has_contract: bool
+    effective_from: str | None = None
+    is_project: bool = False
+    is_active: bool = True
+    notes: str = Field(default="", max_length=3000)
     expected_version: int = Field(default=0, ge=0)
 
 
@@ -8083,6 +8098,37 @@ def require_master_contract_user(conn: Any, username: str | None, action: Litera
     return clean
 
 
+@app.get("/master-contract-artists")
+def get_master_contract_artists(
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+):
+    require_api_key(x_vpo_api_key)
+    with operational_connect() as conn:
+        require_master_contract_user(conn, x_vpo_username, "access")
+        items = list_artist_contracts(conn)
+    return {"items": items, "total": len(items), "reports_effective": False}
+
+
+@app.put("/master-contract-artists")
+def put_master_contract_artist(
+    request: MasterArtistContractSaveRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+):
+    require_api_key(x_vpo_api_key)
+    with operational_connect() as conn:
+        actor = require_master_contract_user(conn, x_vpo_username, "edit")
+        try:
+            saved = save_artist_contract(
+                conn, request.model_dump(), expected_version=request.expected_version, actor=actor,
+            )
+        except ValueError as exc:
+            status_code = 409 if "cambió desde" in str(exc) else 400
+            raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    return {**saved, "reports_effective": False}
+
+
 @app.get("/master-contracts")
 def list_master_contracts(
     keyword: str | None = None,
@@ -8158,6 +8204,7 @@ def get_master_contract(
     with operational_connect() as conn:
         require_master_contract_user(conn, x_vpo_username, "access")
         saved = read_split(conn, clean)
+        contracts = active_artist_contracts(conn)
     matches = master_contract_catalog().filter(pl.col("asset_isrc") == clean)
     if matches.is_empty():
         raise HTTPException(status_code=404, detail="El ISRC no figura en el catálogo publicado.")
@@ -8173,12 +8220,13 @@ def get_master_contract(
         "title": catalog_row.get("track_title"),
         "artists_informed": catalog_row.get("artist_statement"),
         "artist_suggestions": suggestions,
+        "artist_contracts": [contracts[key] for artist in suggestions["artists"] if (key := artist_key(artist)) in contracts],
         "amount_usd": float(catalog_row.get("amount_usd") or 0),
         "first_month": catalog_row.get("first_transaction_month"),
         "last_month": catalog_row.get("last_transaction_month"),
         "sources": catalog_row.get("sources"),
         "accounts": catalog_row.get("accounts"),
-        "split": saved["split"] if saved else suggested_split(suggestions["artists"]),
+        "split": saved["split"] if saved else suggested_split(suggestions["artists"], contracts),
         "closed": saved["closed"] if saved else False,
         "future_reports_selected": saved["future_reports_selected"] if saved else False,
         "version": saved["version"] if saved else 0,

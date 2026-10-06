@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { ArrowLeft, Check, ChevronLeft, ChevronRight, FilePenLine, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import styles from "./MasterContractsModule.module.css";
+import { ArtistContractsPanel, type ArtistContract } from "./ArtistContractsPanel";
 
 type Participant = {
   artist: string;
@@ -50,6 +51,7 @@ type ContractDetail = ContractItem & {
     evidence: Array<{ source: string; field: string; raw: string }>;
     warnings: string[];
   };
+  artist_contracts: ArtistContract[];
   split: Split;
   updated_by: string | null;
   updated_at: string | null;
@@ -67,6 +69,7 @@ const PAGE_SIZE = 50;
 const money = (value: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value || 0);
 const percent = (value: number) => new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(value);
 const numberOrNull = (value: string) => value.trim() === "" ? null : Number(value);
+const artistKey = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { cache: "no-store", ...init });
@@ -76,6 +79,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props) {
+  const [mode, setMode] = useState<"isrc" | "artists">("isrc");
   const [keyword, setKeyword] = useState("");
   const [appliedKeyword, setAppliedKeyword] = useState("");
   const [status, setStatus] = useState<"all" | "open" | "closed">("all");
@@ -143,6 +147,21 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
     } : current);
   }
 
+  function contractFor(artist: string): ArtistContract | undefined {
+    return detail?.artist_contracts.find((item) => artistKey(item.artist_name) === artistKey(artist));
+  }
+
+  function applyPrincipalContract(contract: ArtistContract) {
+    if (!draft) return;
+    updateDraft({
+      indyana_percent: contract.indyana_percent,
+      principal_percent: draft.participants.length === 0 ? 100 - contract.indyana_percent : draft.principal_percent,
+      has_contract: contract.has_contract,
+      effective_from: contract.effective_from,
+      apply_guest_contracts: contract.is_project,
+    });
+  }
+
   async function save(nextClosed = closed, nextSelected = futureSelected) {
     if (!detail || !draft || !canEditCurrent) return;
     setSaving(true);
@@ -204,6 +223,8 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
     if (keyword.trim() === appliedKeyword) void loadList();
   }
 
+  if (mode === "artists") return <ArtistContractsPanel canEdit={canEdit} onBack={() => setMode("isrc")} onMessage={onMessage} />;
+
   if (detail && draft) {
     return (
       <section className={styles.workspace}>
@@ -228,6 +249,10 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
           <div className={styles.formColumn}>
             <section className={styles.band}>
               <div className={styles.sectionHeading}><h2>Contrato principal</h2><span>{detail.version ? `Versión ${detail.version}` : "Sin guardar"}</span></div>
+              {contractFor(draft.principal) && <div className={styles.contractReference}>
+                <span>Contrato de {contractFor(draft.principal)?.artist_name}: Indyana {percent(contractFor(draft.principal)!.indyana_percent)}% · artista {percent(100 - contractFor(draft.principal)!.indyana_percent)}%</span>
+                {canEditCurrent && <button type="button" className={styles.secondaryButton} onClick={() => applyPrincipalContract(contractFor(draft.principal)!)}>Usar propuesta</button>}
+              </div>}
               <div className={styles.fieldGrid}>
                 <label>Tipo de master
                   <select disabled={!canEditCurrent} value={draft.master_type} onChange={(event) => updateDraft({ master_type: event.target.value as Split["master_type"] })}>
@@ -266,6 +291,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
                     <label>Porcentaje<input inputMode="decimal" type="number" min="0" max="100" step="0.01" disabled={!canEditCurrent} value={item.percent ?? ""} onChange={(event) => updateParticipant(index, { percent: numberOrNull(event.target.value) })} /></label>
                     {canEditCurrent && <button type="button" className={styles.iconButton} title={`Quitar participante ${index + 1}`} aria-label={`Quitar participante ${index + 1}`} onClick={() => updateDraft({ participants: draft.participants.filter((_, position) => position !== index) })}><Trash2 size={16} /></button>}
                     {draft.apply_guest_contracts && <label className={styles.nestedField}>Indyana del contrato del invitado %<input inputMode="decimal" type="number" min="0" max="100" step="0.01" disabled={!canEditCurrent} value={item.internal_contract_indyana_percent ?? ""} onChange={(event) => updateParticipant(index, { internal_contract_indyana_percent: numberOrNull(event.target.value) })} placeholder="Externo: vacío" /></label>}
+                    {draft.apply_guest_contracts && contractFor(item.artist) && <div className={styles.guestReference}><span>Contrato de {contractFor(item.artist)?.artist_name}: {percent(contractFor(item.artist)!.indyana_percent)}% para Indyana</span>{canEditCurrent && <button type="button" className={styles.secondaryButton} onClick={() => updateParticipant(index, { internal_contract_indyana_percent: contractFor(item.artist)!.indyana_percent })}>Usar propuesta</button>}</div>}
                   </div>
                 ))}
               </div>
@@ -321,6 +347,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
     <section className={styles.workspace}>
       <header className={styles.listHeader}>
         <div className={styles.heading}><span>Catálogo y distribución</span><h1>Contratos</h1><p>Repartos por ISRC ordenados por ingreso acumulado.</p></div>
+        <button type="button" className={styles.secondaryButton} onClick={() => setMode("artists")}>Contratos de artistas</button>
         <button type="button" className={styles.iconButton} title="Actualizar catálogo" aria-label="Actualizar catálogo" disabled={loading} onClick={() => void loadList()}><RefreshCw size={18} /></button>
       </header>
       <form className={styles.toolbar} onSubmit={submitSearch}>
