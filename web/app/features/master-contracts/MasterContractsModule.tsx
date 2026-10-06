@@ -12,7 +12,8 @@ type Participant = {
 };
 
 type Split = {
-  master_type: "pending" | "indyana_master" | "distribution";
+  master_type: "pending" | "indyana_master" | "distribution" | "mawz_master" | "distribution_mawz" | "indyana_and_other" | "mawz_and_other";
+  other_master_artist?: string | null;
   has_contract: boolean | null;
   agreement_confirmed: boolean;
   effective_from: string | null;
@@ -52,6 +53,8 @@ type ContractDetail = ContractItem & {
     warnings: string[];
   };
   artist_contracts: ArtistContract[];
+  first_sale_date: string | null;
+  first_sale_precision: "day" | "month" | null;
   split: Split;
   updated_by: string | null;
   updated_at: string | null;
@@ -157,7 +160,6 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
       indyana_percent: contract.indyana_percent,
       principal_percent: draft.participants.length === 0 ? 100 - contract.indyana_percent : draft.principal_percent,
       has_contract: contract.has_contract,
-      effective_from: contract.effective_from,
       apply_guest_contracts: contract.is_project,
     });
   }
@@ -226,6 +228,9 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   if (mode === "artists") return <ArtistContractsPanel canEdit={canEdit} onBack={() => setMode("isrc")} onMessage={onMessage} />;
 
   if (detail && draft) {
+    const otherOwner = draft.master_type === "indyana_and_other" || draft.master_type === "mawz_and_other";
+    const monthOnly = /^\d{4}-\d{2}$/.test(draft.effective_from || "");
+    const artistOptions = [...new Set([...detail.artist_suggestions.artists, ...detail.artist_contracts.map((item) => item.artist_name)])];
     return (
       <section className={styles.workspace}>
         <header className={styles.detailHeader}>
@@ -255,17 +260,31 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
               </div>}
               <div className={styles.fieldGrid}>
                 <label>Tipo de master
-                  <select disabled={!canEditCurrent} value={draft.master_type} onChange={(event) => updateDraft({ master_type: event.target.value as Split["master_type"] })}>
-                    <option value="pending">Por definir</option><option value="indyana_master">Master Indyana</option><option value="distribution">Distribución</option>
+                  <select disabled={!canEditCurrent} value={draft.master_type} onChange={(event) => {
+                    const master_type = event.target.value as Split["master_type"];
+                    updateDraft({ master_type, other_master_artist: master_type.endsWith("_and_other") ? draft.other_master_artist : null });
+                  }}>
+                    <option value="pending">Por definir</option>
+                    <option value="indyana_master">Indyana</option>
+                    <option value="distribution">Distribución Indyana</option>
+                    <option value="mawz_master">Mawz</option>
+                    <option value="distribution_mawz">Distribución Mawz</option>
+                    <option value="indyana_and_other">Indyana y otro</option>
+                    <option value="mawz_and_other">Mawz y otro</option>
                   </select>
                 </label>
+                {otherOwner && <label>Otro artista titular
+                  <input list="master-other-artists" disabled={!canEditCurrent} value={draft.other_master_artist || ""} onChange={(event) => updateDraft({ other_master_artist: event.target.value })} placeholder="Elegir o escribir artista" />
+                  <datalist id="master-other-artists">{artistOptions.map((name) => <option value={name} key={name} />)}</datalist>
+                </label>}
                 <label>¿Existe contrato?
                   <select disabled={!canEditCurrent} value={draft.has_contract === null ? "unknown" : draft.has_contract ? "yes" : "no"} onChange={(event) => updateDraft({ has_contract: event.target.value === "unknown" ? null : event.target.value === "yes" })}>
                     <option value="unknown">Por confirmar</option><option value="yes">Sí</option><option value="no">No</option>
                   </select>
                 </label>
                 <label>Vigente desde
-                  <input type="month" disabled={!canEditCurrent} value={draft.effective_from || ""} onChange={(event) => updateDraft({ effective_from: event.target.value || null })} />
+                  <input type={monthOnly ? "month" : "date"} disabled={!canEditCurrent} value={draft.effective_from || ""} onChange={(event) => updateDraft({ effective_from: event.target.value || null })} />
+                  {detail.first_sale_date && <small className={styles.fieldHint}>Primera venta registrada: {detail.first_sale_date}{detail.first_sale_precision === "month" ? " (solo mes informado)" : ""}</small>}
                 </label>
               </div>
               <label className={styles.checkboxLine}>

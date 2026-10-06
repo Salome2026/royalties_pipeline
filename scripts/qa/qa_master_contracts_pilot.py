@@ -64,18 +64,23 @@ class MasterContractsPilotTests(unittest.TestCase):
                     "asset_isrc": "ARDL12600041", "source": "fuga",
                     "Asset Artist": "La Juntada De Los Artistas, Aneley and Onda Sabanera",
                     "Product Artist": "La Juntada De Los Artistas and Aneley",
-                    "artists_raw": None,
+                    "artists_raw": None, "transaction_month": "2026-02",
+                    "sale_start_date": "2026-02-27", "transaction_date": None,
                 },
                 {
                     "asset_isrc": "QZW9L2346202", "source": "onerpm",
                     "Asset Artist": None, "Product Artist": None,
                     "artists_raw": "GUSTY DJ(performer), SALASTKBRON(featuring), Someone(writer)",
+                    "transaction_month": "2026-03", "sale_start_date": None, "transaction_date": None,
                 },
             ]).write_parquet(path)
             fuga = artist_suggestions("ARDL12600041", path, None)
             onerpm = artist_suggestions("QZW9L2346202", path, None)
             self.assertEqual(fuga["artists"], ["La Juntada de los Artistas", "Aneley", "Onda Sabanera"])
             self.assertEqual(onerpm["artists"], ["Gusty DJ", "SALASTKBRON"])
+            self.assertEqual((fuga["first_sale_date"], fuga["first_sale_precision"]), ("2026-02-27", "day"))
+            self.assertEqual((onerpm["first_sale_date"], onerpm["first_sale_precision"]), ("2026-03", "month"))
+            self.assertEqual(suggested_split(fuga["artists"], first_sale_date=fuga["first_sale_date"])["effective_from"], "2026-02-27")
 
     def test_close_requires_confirmed_complete_split(self) -> None:
         split = {
@@ -100,6 +105,9 @@ class MasterContractsPilotTests(unittest.TestCase):
             validate_split({**split, "participants": [{"artist": "La Juntada de los Artistas", "percent": 20}]}, False, False)
         with self.assertRaisesRegex(ValueError, "Solo un ISRC cerrado"):
             validate_split(split, False, True)
+        with self.assertRaisesRegex(ValueError, "otro artista"):
+            validate_split({**split, "master_type": "indyana_and_other", "other_master_artist": None}, True, False)
+        validate_split({**split, "master_type": "mawz_and_other", "other_master_artist": "Aneley", "effective_from": "2026-02-27"}, True, False)
 
     def test_versions_and_optimistic_lock(self) -> None:
         with sqlite3.connect(":memory:") as conn:

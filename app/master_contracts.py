@@ -4,7 +4,7 @@ import json
 import math
 import re
 import unicodedata
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -75,11 +75,33 @@ def _artist_suggestions(isrc: str, raw_path: str, file_mtime_ns: int) -> dict[st
     del file_mtime_ns
     frame = pl.scan_parquet(raw_path)
     schema = set(frame.collect_schema().names())
+    filtered = frame.filter(pl.col("asset_isrc") == isrc) if "asset_isrc" in schema else None
+    first_sale_date = None
+    first_sale_precision = None
+    if filtered is not None:
+        date_fields = [name for name in ("sale_start_date", "transaction_date") if name in schema]
+        day_values = [
+            pl.col(name).cast(pl.Utf8).str.extract(r"^(\d{4}-\d{2}-\d{2})", 1).str.strptime(pl.Date, "%Y-%m-%d", strict=False)
+            for name in date_fields
+        ]
+        day_expr = pl.min_horizontal(day_values) if day_values else pl.lit(None).cast(pl.Date)
+        month_expr = (
+            pl.col("transaction_month").cast(pl.Utf8).str.extract(r"^(\d{4}-(?:0[1-9]|1[0-2]))$", 1)
+            if "transaction_month" in schema else pl.lit(None).cast(pl.Utf8)
+        )
+        first = filtered.select(day_expr.min().alias("day"), month_expr.min().alias("month")).collect().row(0, named=True)
+        day = first["day"].isoformat() if first["day"] else None
+        month = first["month"]
+        if month and (not day or month < day[:7]):
+            first_sale_date, first_sale_precision = month, "month"
+        elif day:
+            first_sale_date, first_sale_precision = day, "day"
     columns = ["source"] + sorted({field for fields in ARTIST_FIELDS.values() for field in fields if field in schema})
     if "asset_isrc" not in schema or len(columns) == 1:
-        return {"artists": [], "evidence": [], "warnings": ["Sin campos de artistas en el crudo."]}
+        return {"artists": [], "evidence": [], "warnings": ["Sin campos de artistas en el crudo."],
+                "first_sale_date": first_sale_date, "first_sale_precision": first_sale_precision}
     rows = (
-        frame.filter(pl.col("asset_isrc") == isrc)
+        filtered
         .select(columns)
         .unique()
         .collect()
@@ -108,15 +130,17 @@ def _artist_suggestions(isrc: str, raw_path: str, file_mtime_ns: int) -> dict[st
     warnings = ["Las fuentes difieren en el artista principal."] if len(first_names) > 1 else []
     if len(artists) > 11:
         warnings.append("Hay más de diez participantes sugeridos; revisar el crudo.")
-    return {"artists": artists, "evidence": evidence, "warnings": warnings}
+    return {"artists": artists, "evidence": evidence, "warnings": warnings,
+            "first_sale_date": first_sale_date, "first_sale_precision": first_sale_precision}
 
 
 def artist_suggestions(isrc: str, raw_path: Path | None, fallback: str | None) -> dict[str, Any]:
+    raw_result = None
     if raw_path and raw_path.exists():
         try:
-            result = _artist_suggestions(isrc, str(raw_path), raw_path.stat().st_mtime_ns)
-            if result["artists"]:
-                return result
+            raw_result = _artist_suggestions(isrc, str(raw_path), raw_path.stat().st_mtime_ns)
+            if raw_result["artists"]:
+                return raw_result
         except (OSError, pl.PolarsError):
             pass
     artists = parse_artists(fallback or "", "catalog")
@@ -124,10 +148,15 @@ def artist_suggestions(isrc: str, raw_path: Path | None, fallback: str | None) -
         "artists": artists,
         "evidence": [{"source": "catalog", "field": "artist_statement", "raw": fallback or "", "artists": artists}],
         "warnings": ["Sugerencia basada en el catálogo; confirmar con el statement."],
+        "first_sale_date": raw_result.get("first_sale_date") if raw_result else None,
+        "first_sale_precision": raw_result.get("first_sale_precision") if raw_result else None,
     }
 
 
-def suggested_split(artists: list[str], contracts: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
+def suggested_split(
+    artists: list[str], contracts: dict[str, dict[str, Any]] | None = None,
+    first_sale_date: str | None = None,
+) -> dict[str, Any]:
     contracts = contracts or {}
     principal = artists[0] if artists else ""
     main_contract = contracts.get(artist_key(principal))
@@ -135,9 +164,10 @@ def suggested_split(artists: list[str], contracts: dict[str, dict[str, Any]] | N
     is_project = bool(main_contract and main_contract["is_project"])
     return {
         "master_type": "pending",
+        "other_master_artist": None,
         "has_contract": main_contract["has_contract"] if main_contract else None,
         "agreement_confirmed": False,
-        "effective_from": main_contract["effective_from"] if main_contract else None,
+        "effective_from": first_sale_date,
         "principal": principal,
         "indyana_percent": base,
         "principal_percent": 100 - base if base is not None and len(artists) == 1 else None,
@@ -326,8 +356,13 @@ def read_split_statuses(conn: Any) -> dict[str, dict[str, Any]]:
 def validate_split(split: dict[str, Any], closed: bool, future_reports_selected: bool) -> None:
     principal = str(split.get("principal") or "").strip()
     effective_from = split.get("effective_from")
-    if effective_from and not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", str(effective_from)):
-        raise ValueError("La vigencia debe tener formato AAAA-MM.")
+    if effective_from and not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])(?:-(0[1-9]|[12][0-9]|3[01]))?", str(effective_from)):
+        raise ValueError("La vigencia debe tener formato AAAA-MM o AAAA-MM-DD.")
+    if effective_from and len(str(effective_from)) == 10:
+        try:
+            date.fromisoformat(str(effective_from))
+        except ValueError as exc:
+            raise ValueError("La fecha de vigencia no es válida.") from exc
     participants = split.get("participants") or []
     if len(participants) > 10:
         raise ValueError("El piloto admite hasta diez participantes por ISRC.")
@@ -346,6 +381,8 @@ def validate_split(split: dict[str, Any], closed: bool, future_reports_selected:
         raise ValueError("Para cerrar, confirmá el acuerdo y el artista principal.")
     if split.get("master_type") == "pending" or split.get("has_contract") is None:
         raise ValueError("Para cerrar, indicá el tipo de master y si existe contrato.")
+    if split.get("master_type") in {"indyana_and_other", "mawz_and_other"} and not str(split.get("other_master_artist") or "").strip():
+        raise ValueError("Para cerrar, elegí el otro artista titular del master.")
     percentages = [split.get("indyana_percent"), split.get("principal_percent")]
     percentages.extend(item.get("percent") for item in participants)
     if any(value is None for value in percentages):

@@ -41,7 +41,6 @@ from app.operational_db import (
 )
 from app.master_contracts import (
     active_artist_contracts,
-    artist_key,
     artist_suggestions,
     clean_isrc,
     list_artist_contracts,
@@ -291,7 +290,11 @@ class MasterContractParticipant(BaseModel):
 
 
 class MasterContractSplit(BaseModel):
-    master_type: Literal["pending", "indyana_master", "distribution"] = "pending"
+    master_type: Literal[
+        "pending", "indyana_master", "distribution", "mawz_master",
+        "distribution_mawz", "indyana_and_other", "mawz_and_other",
+    ] = "pending"
+    other_master_artist: str | None = Field(default=None, max_length=200)
     has_contract: bool | None = None
     agreement_confirmed: bool = False
     effective_from: str | None = None
@@ -8215,18 +8218,22 @@ def get_master_contract(
     except Exception:
         pass
     suggestions = artist_suggestions(clean, raw_path, catalog_row.get("artist_statement"))
+    first_sale_date = suggestions.get("first_sale_date") or catalog_row.get("first_transaction_month")
+    first_sale_precision = suggestions.get("first_sale_precision") or ("month" if first_sale_date else None)
     return {
         "isrc": clean,
         "title": catalog_row.get("track_title"),
         "artists_informed": catalog_row.get("artist_statement"),
         "artist_suggestions": suggestions,
-        "artist_contracts": [contracts[key] for artist in suggestions["artists"] if (key := artist_key(artist)) in contracts],
+        "artist_contracts": list(contracts.values()),
+        "first_sale_date": first_sale_date,
+        "first_sale_precision": first_sale_precision,
         "amount_usd": float(catalog_row.get("amount_usd") or 0),
         "first_month": catalog_row.get("first_transaction_month"),
         "last_month": catalog_row.get("last_transaction_month"),
         "sources": catalog_row.get("sources"),
         "accounts": catalog_row.get("accounts"),
-        "split": saved["split"] if saved else suggested_split(suggestions["artists"], contracts),
+        "split": saved["split"] if saved else suggested_split(suggestions["artists"], contracts, first_sale_date),
         "closed": saved["closed"] if saved else False,
         "future_reports_selected": saved["future_reports_selected"] if saved else False,
         "version": saved["version"] if saved else 0,

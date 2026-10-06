@@ -165,6 +165,7 @@
 .sectionHeading span { color: #9fb7bd; font-size: .74rem; }
 .fieldGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .fieldGrid label, .splitRows label, .notesLabel { display: grid; gap: 6px; color: #bad0d3; font-size: .72rem; font-weight: 700; min-width: 0; }
+.fieldHint { color: #91abb1; font-size: .69rem; font-weight: 500; line-height: 1.35; }
 .fieldGrid input:disabled, .fieldGrid select:disabled, .splitRows input:disabled, .notesLabel textarea:disabled { opacity: .77; }
 .checkboxLine { display: flex; align-items: center; gap: 9px; margin-top: 16px; color: #d3e2e3; font-size: .8rem; font-weight: 650; }
 .checkboxLine input { width: 16px; height: 16px; margin: 0; accent-color: #47cbb6; }
