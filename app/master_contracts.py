@@ -265,11 +265,22 @@ def save_split(
     version = expected_version + 1
     values = (payload, int(closed), int(future_reports_selected), version, actor, now, isrc)
     if expected_version == 0:
-        cursor = conn.execute(
-            db_sql(conn, """INSERT INTO master_contract_splits
+        if is_postgres_connection(conn):
+            cursor = conn.execute(
+                db_sql(conn, """WITH inserted AS (
+                    INSERT INTO master_contract_splits
+                    (payload_json, is_closed, future_reports_selected, version, updated_by, updated_at, isrc)
+                    VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(isrc) DO NOTHING RETURNING isrc
+                ) SELECT isrc FROM inserted"""), values
+            )
+            saved = cursor.fetchone() is not None
+        else:
+            cursor = conn.execute(
+                """INSERT INTO master_contract_splits
                 (payload_json, is_closed, future_reports_selected, version, updated_by, updated_at, isrc)
-                VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(isrc) DO NOTHING"""), values
-        )
+                VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(isrc) DO NOTHING""", values
+            )
+            saved = cursor.rowcount == 1
     else:
         cursor = conn.execute(
             db_sql(conn, """UPDATE master_contract_splits SET
@@ -277,14 +288,24 @@ def save_split(
                 updated_by = ?, updated_at = ? WHERE isrc = ? AND version = ?"""),
             values + (expected_version,),
         )
-    if cursor.rowcount != 1:
+        saved = cursor.rowcount == 1
+    if not saved:
         raise ValueError("La ficha cambió desde que la abriste. Actualizala antes de guardar.")
-    conn.execute(
-        db_sql(conn, """INSERT INTO master_contract_split_history
+    history_values = (isrc, version, payload, int(closed), int(future_reports_selected), actor, now)
+    if is_postgres_connection(conn):
+        conn.execute(
+            db_sql(conn, """WITH inserted AS (
+                INSERT INTO master_contract_split_history
+                (isrc, version, payload_json, is_closed, future_reports_selected, updated_by, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING isrc
+            ) SELECT isrc FROM inserted"""), history_values,
+        )
+    else:
+        conn.execute(
+            """INSERT INTO master_contract_split_history
             (isrc, version, payload_json, is_closed, future_reports_selected, updated_by, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)"""),
-        (isrc, version, payload, int(closed), int(future_reports_selected), actor, now),
-    )
+            VALUES (?, ?, ?, ?, ?, ?, ?)""", history_values,
+        )
     return {
         "isrc": isrc,
         "split": split,
