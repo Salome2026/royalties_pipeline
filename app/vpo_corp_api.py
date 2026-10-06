@@ -8208,7 +8208,7 @@ def list_master_contracts(
             )
     all_rows = catalog.select([
         "asset_isrc", "track_title", "artist_statement", "amount_usd",
-        "first_transaction_month", "last_transaction_month", "sources",
+        "_contract_first_statement_month", "_contract_last_statement_month", "sources",
     ]).to_dicts()
     summary = {
         "open": sum(not states.get(row["asset_isrc"], {}).get("closed", False) for row in all_rows),

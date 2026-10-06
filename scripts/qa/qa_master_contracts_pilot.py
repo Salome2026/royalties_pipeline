@@ -4,6 +4,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import polars as pl
 
@@ -21,9 +22,32 @@ from app.master_contracts import (
 )
 from scripts.lib.catalog_report_filter import apply_report_net_personalization
 from scripts.lib.distributor_policy_store import use_distributor_policy_snapshot
+from app import vpo_corp_api
 
 
 class MasterContractsPilotTests(unittest.TestCase):
+    def test_contract_list_uses_statement_month_columns(self) -> None:
+        catalog = pl.DataFrame({
+            "asset_isrc": ["ARDL12600006"],
+            "track_title": ["Tema"],
+            "artist_statement": ["Artista"],
+            "artist_variants": ["Artista"],
+            "amount_usd": [11646.10],
+            "_contract_first_statement_month": ["2026-01"],
+            "_contract_last_statement_month": ["2026-07"],
+            "sources": ["fuga"],
+        })
+        with sqlite3.connect(":memory:") as conn, \
+                patch.object(vpo_corp_api, "require_api_key"), \
+                patch.object(vpo_corp_api, "operational_connect", return_value=conn), \
+                patch.object(vpo_corp_api, "require_master_contract_user"), \
+                patch.object(vpo_corp_api, "read_split_statuses", return_value={}), \
+                patch.object(vpo_corp_api, "master_contract_catalog", return_value=catalog):
+            result = vpo_corp_api.list_master_contracts(x_vpo_username="tester")
+        self.assertEqual(result["items"][0]["amount_usd"], 11646.10)
+        self.assertEqual(result["items"][0]["first_month"], "2026-01")
+        self.assertEqual(result["items"][0]["last_month"], "2026-07")
+
     def test_contract_income_matches_dashboard_statement_cutoff_and_net_policy(self) -> None:
         current = pl.DataFrame({
             "asset_isrc": ["ARDL12600041", "BK4DA2634549", "ARDL12600999"],
