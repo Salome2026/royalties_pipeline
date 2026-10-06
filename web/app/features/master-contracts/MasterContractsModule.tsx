@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import { ArrowLeft, Check, ChevronLeft, ChevronRight, FilePenLine, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import styles from "./MasterContractsModule.module.css";
 import { ArtistContractsPanel, type ArtistContract } from "./ArtistContractsPanel";
+import { MasterAgreementsEditor, visibleAgreements, type MasterAgreement } from "./MasterAgreementsEditor";
 
 type Participant = {
   artist: string;
@@ -12,6 +13,7 @@ type Participant = {
 };
 
 type Split = {
+  agreements?: MasterAgreement[];
   master_type: "pending" | "indyana_master" | "distribution" | "mawz_master" | "distribution_mawz" | "indyana_and_other" | "mawz_and_other";
   other_master_artist?: string | null;
   has_contract: boolean | null;
@@ -90,6 +92,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   const [list, setList] = useState<ContractList | null>(null);
   const [detail, setDetail] = useState<ContractDetail | null>(null);
   const [draft, setDraft] = useState<Split | null>(null);
+  const [openAgreementId, setOpenAgreementId] = useState<string | null>(null);
   const [closed, setClosed] = useState(false);
   const [futureSelected, setFutureSelected] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -116,6 +119,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
       const loaded = await requestJson<ContractDetail>(`/api/master-contracts/${encodeURIComponent(isrc)}`);
       setDetail(loaded);
       setDraft(structuredClone(loaded.split));
+      setOpenAgreementId(null);
       setClosed(loaded.closed);
       setFutureSelected(loaded.future_reports_selected);
     } catch (error) {
@@ -136,6 +140,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
     if (dirty && !window.confirm("Hay cambios sin guardar. ¿Volver al catálogo?")) return;
     setDetail(null);
     setDraft(null);
+    setOpenAgreementId(null);
     void loadList();
   }
 
@@ -228,9 +233,8 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   if (mode === "artists") return <ArtistContractsPanel canEdit={canEdit} onBack={() => setMode("isrc")} onMessage={onMessage} />;
 
   if (detail && draft) {
-    const otherOwner = draft.master_type === "indyana_and_other" || draft.master_type === "mawz_and_other";
-    const monthOnly = /^\d{4}-\d{2}$/.test(draft.effective_from || "");
     const artistOptions = [...new Set([...detail.artist_suggestions.artists, ...detail.artist_contracts.map((item) => item.artist_name)])];
+    const agreements = visibleAgreements(draft.agreements, draft, detail.first_sale_date);
     return (
       <section className={styles.workspace}>
         <header className={styles.detailHeader}>
@@ -250,51 +254,26 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
           <div><span>Distribuidoras</span><strong>{detail.sources || "-"}</strong></div>
         </div>
 
-        <div className={styles.detailColumns}>
+        <div className={`${styles.detailColumns} ${openAgreementId ? "" : styles.detailColumnsSolo}`}>
           <div className={styles.formColumn}>
+            <MasterAgreementsEditor
+              agreements={agreements}
+              canEdit={canEditCurrent}
+              artistOptions={artistOptions}
+              firstSaleDate={detail.first_sale_date}
+              firstSalePrecision={detail.first_sale_precision}
+              openId={openAgreementId}
+              onOpenChange={setOpenAgreementId}
+              onChange={(next) => updateDraft({ agreements: next })}
+            />
+
+            {openAgreementId && <>
             <section className={styles.band}>
-              <div className={styles.sectionHeading}><h2>Contrato principal</h2><span>{detail.version ? `Versión ${detail.version}` : "Sin guardar"}</span></div>
+              <div className={styles.sectionHeading}><h2>Reparto económico</h2><span>Participaciones del ingreso base</span></div>
               {contractFor(draft.principal) && <div className={styles.contractReference}>
                 <span>Contrato de {contractFor(draft.principal)?.artist_name}: Indyana {percent(contractFor(draft.principal)!.indyana_percent)}% · artista {percent(100 - contractFor(draft.principal)!.indyana_percent)}%</span>
                 {canEditCurrent && <button type="button" className={styles.secondaryButton} onClick={() => applyPrincipalContract(contractFor(draft.principal)!)}>Usar propuesta</button>}
               </div>}
-              <div className={styles.fieldGrid}>
-                <label>Tipo de master
-                  <select disabled={!canEditCurrent} value={draft.master_type} onChange={(event) => {
-                    const master_type = event.target.value as Split["master_type"];
-                    updateDraft({ master_type, other_master_artist: master_type.endsWith("_and_other") ? draft.other_master_artist : null });
-                  }}>
-                    <option value="pending">Por definir</option>
-                    <option value="indyana_master">Indyana</option>
-                    <option value="distribution">Distribución Indyana</option>
-                    <option value="mawz_master">Mawz</option>
-                    <option value="distribution_mawz">Distribución Mawz</option>
-                    <option value="indyana_and_other">Indyana y otro</option>
-                    <option value="mawz_and_other">Mawz y otro</option>
-                  </select>
-                </label>
-                {otherOwner && <label>Otro artista titular
-                  <input list="master-other-artists" disabled={!canEditCurrent} value={draft.other_master_artist || ""} onChange={(event) => updateDraft({ other_master_artist: event.target.value })} placeholder="Elegir o escribir artista" />
-                  <datalist id="master-other-artists">{artistOptions.map((name) => <option value={name} key={name} />)}</datalist>
-                </label>}
-                <label>¿Existe contrato?
-                  <select disabled={!canEditCurrent} value={draft.has_contract === null ? "unknown" : draft.has_contract ? "yes" : "no"} onChange={(event) => updateDraft({ has_contract: event.target.value === "unknown" ? null : event.target.value === "yes" })}>
-                    <option value="unknown">Por confirmar</option><option value="yes">Sí</option><option value="no">No</option>
-                  </select>
-                </label>
-                <label>Vigente desde
-                  <input type={monthOnly ? "month" : "date"} disabled={!canEditCurrent} value={draft.effective_from || ""} onChange={(event) => updateDraft({ effective_from: event.target.value || null })} />
-                  {detail.first_sale_date && <small className={styles.fieldHint}>Primera venta registrada: {detail.first_sale_date}{detail.first_sale_precision === "month" ? " (solo mes informado)" : ""}</small>}
-                </label>
-              </div>
-              <label className={styles.checkboxLine}>
-                <input type="checkbox" disabled={!canEditCurrent} checked={draft.agreement_confirmed} onChange={(event) => updateDraft({ agreement_confirmed: event.target.checked })} />
-                <span>Acuerdo y porcentajes confirmados</span>
-              </label>
-            </section>
-
-            <section className={styles.band}>
-              <div className={styles.sectionHeading}><h2>Reparto del master</h2><span>Participaciones del ingreso base</span></div>
               <div className={styles.splitRows}>
                 <div className={styles.splitRow}>
                   <label>Indyana<input type="text" value="Indyana" readOnly /></label>
@@ -324,6 +303,10 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
 
             <section className={styles.band}>
               <div className={styles.sectionHeading}><h2>Estado y seguimiento</h2></div>
+              <label className={styles.checkboxLine}>
+                <input type="checkbox" disabled={!canEditCurrent} checked={draft.agreement_confirmed} onChange={(event) => updateDraft({ agreement_confirmed: event.target.checked })} />
+                <span>Acuerdo y porcentajes confirmados</span>
+              </label>
               <label className={styles.notesLabel}>Notas del acuerdo<textarea disabled={!canEditCurrent} rows={3} value={draft.notes} onChange={(event) => updateDraft({ notes: event.target.value })} /></label>
               <label className={styles.checkboxLine}>
                 <input type="checkbox" disabled={!canEditCurrent || !canApprove || !closed} checked={futureSelected} onChange={(event) => setFutureSelected(event.target.checked)} />
@@ -336,9 +319,10 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
                 {canApprove && canEdit && <button type="button" className={styles.primaryButton} disabled={saving} onClick={() => void save(!closed, closed ? false : futureSelected)}><Check size={16} />{closed ? "Reabrir" : "Cerrar reparto"}</button>}
               </div>
             </section>
+            </>}
           </div>
 
-          <aside className={styles.previewColumn}>
+          {openAgreementId && <aside className={styles.previewColumn}>
             <section className={styles.previewBand}>
               <div className={styles.sectionHeading}><h2>Simulación en USD</h2></div>
               <p>Base observada en el catálogo: {money(detail.amount_usd)}. No es una liquidación ni afecta reportes.</p>
@@ -356,7 +340,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
                 {detail.artist_suggestions.evidence.map((item, index) => <div className={styles.evidenceRow} key={index}><strong>{item.source} · {item.field}</strong><span>{item.raw}</span></div>)}
               </details>
             </section>
-          </aside>
+          </aside>}
         </div>
       </section>
     );

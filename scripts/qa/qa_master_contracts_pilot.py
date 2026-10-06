@@ -81,6 +81,42 @@ class MasterContractsPilotTests(unittest.TestCase):
             self.assertEqual((fuga["first_sale_date"], fuga["first_sale_precision"]), ("2026-02-27", "day"))
             self.assertEqual((onerpm["first_sale_date"], onerpm["first_sale_precision"]), ("2026-03", "month"))
             self.assertEqual(suggested_split(fuga["artists"], first_sale_date=fuga["first_sale_date"])["effective_from"], "2026-02-27")
+            self.assertEqual(suggested_split(fuga["artists"], first_sale_date=fuga["first_sale_date"])["agreements"][0]["effective_from"], "2026-02-27")
+
+    def test_multiple_commercial_contracts_validate_ownership_and_periods(self) -> None:
+        split = {
+            "principal": "Aneley", "agreement_confirmed": True,
+            "indyana_percent": 50, "principal_percent": 50, "participants": [],
+            "agreements": [
+                {"id": "principal", "label": "Contrato principal", "commercialization": "master",
+                 "owners": [{"name": "Indyana", "percent": 60}, {"name": "Mawz", "percent": 40}],
+                 "effective_from": "2026-02-27", "effective_until": "2026-06-30"},
+                {"id": "second", "label": "Contrato 2", "commercialization": "distribution",
+                 "owners": [], "effective_from": "2026-07", "effective_until": None},
+            ],
+        }
+        validate_split(split, True, False)
+        with self.assertRaisesRegex(ValueError, "100%"):
+            validate_split({**split, "agreements": [
+                {**split["agreements"][0], "owners": [{"name": "Indyana", "percent": 60}]},
+                split["agreements"][1],
+            ]}, True, False)
+        with self.assertRaisesRegex(ValueError, "anterior"):
+            validate_split({**split, "agreements": [
+                {**split["agreements"][0], "effective_until": "2026-01"},
+                split["agreements"][1],
+            ]}, True, False)
+        with self.assertRaisesRegex(ValueError, "no lleva titulares"):
+            validate_split({**split, "agreements": [
+                split["agreements"][0],
+                {**split["agreements"][1], "owners": [{"name": "Mawz", "percent": 100}]},
+            ]}, True, False)
+        with sqlite3.connect(":memory:") as conn:
+            conn.row_factory = sqlite3.Row
+            saved = save_split(conn, "ARDL12600041", split, closed=True,
+                               future_reports_selected=False, expected_version=0, actor="ruben")
+            self.assertEqual(saved["version"], 1)
+            self.assertEqual(read_split(conn, "ARDL12600041")["split"]["agreements"], split["agreements"])
 
     def test_close_requires_confirmed_complete_split(self) -> None:
         split = {

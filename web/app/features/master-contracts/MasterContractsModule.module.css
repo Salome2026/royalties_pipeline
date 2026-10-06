@@ -158,6 +158,7 @@
 .identityLine strong { color: #f5f9f9; font-size: .85rem; font-weight: 750; overflow-wrap: anywhere; }
 
 .detailColumns { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(280px, .8fr); gap: clamp(24px, 3vw, 46px); align-items: start; }
+.detailColumnsSolo { grid-template-columns: minmax(0, 1fr); }
 .formColumn, .previewColumn { min-width: 0; }
 .band, .previewBand, .evidenceBand { padding: 23px 0; border-bottom: 1px solid rgba(164, 188, 199, .2); }
 .sectionHeading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 15px; }
@@ -225,11 +226,37 @@
 .contractReference .secondaryButton, .guestReference .secondaryButton { min-height: 32px; }
 .guestReference { grid-column: 1 / -1; margin: -2px 0 8px 16px; }
 
+.agreementList { border-top: 1px solid rgba(164, 188, 199, .2); }
+.agreementItem { border-bottom: 1px solid rgba(164, 188, 199, .2); }
+.agreementRow { display: flex; align-items: center; gap: 8px; }
+.agreementToggle { display: flex; align-items: center; gap: 11px; width: 100%; min-width: 0; min-height: 53px; margin: 0; padding: 8px 4px; border: 0; border-radius: 0; background: transparent; color: #eef8f7; text-align: left; box-shadow: none; transform: none; }
+.agreementToggle:hover { background: rgba(41, 119, 112, .16); transform: none; }
+.agreementToggle strong { min-width: 0; font-size: .84rem; overflow-wrap: anywhere; }
+.agreementToggle span { margin-left: auto; color: #a5bdc0; font-size: .73rem; white-space: nowrap; }
+.agreementToggle svg { flex: 0 0 auto; color: #80cfc2; transition: transform .15s; }
+.chevronOpen { transform: rotate(180deg); }
+.agreementRow > .iconButton { flex: 0 0 38px; }
+.agreementBody { padding: 6px 0 20px 28px; }
+.agreementFields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.agreementFields label, .ownerRow label { display: grid; gap: 6px; min-width: 0; color: #bad0d3; font-size: .72rem; font-weight: 700; }
+.agreementFields input, .agreementFields select, .ownerRow input { width: 100%; min-width: 0; min-height: 39px; margin: 0; padding: 8px 11px; border: 1px solid rgba(164, 188, 199, .27); border-radius: 6px; outline: none; color: #f7fbfb; background: rgba(3, 13, 21, .62); font: inherit; font-size: .81rem; }
+.agreementFields input:focus, .agreementFields select:focus, .ownerRow input:focus { border-color: #65d9c8; box-shadow: 0 0 0 2px rgba(101, 217, 200, .13); }
+.agreementFields select option { color: #162b38; }
+.agreementBody > .fieldHint { margin: 9px 0 0; }
+.ownerSection { margin-top: 20px; padding-top: 17px; border-top: 1px solid rgba(164, 188, 199, .17); }
+.ownerSection .sectionHeading h3 { margin: 0; color: #f4f8f8; font-size: .88rem; }
+.ownerTotalOk { color: #77e4c9 !important; }
+.ownerTotalPending { color: #f5c47a !important; }
+.ownerRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(92px, 130px) 38px; gap: 9px; align-items: end; margin-bottom: 9px; }
+.ownerRow > .iconButton { align-self: end; }
+.ownerSection .addButton { margin-top: 4px; }
+
 @media (max-width: 1100px) {
   .detailColumns { grid-template-columns: 1fr; gap: 0; }
   .previewColumn { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
   .artistLayout { grid-template-columns: 1fr; gap: 10px; }
   .artistForm { border-left: 0; border-top: 1px solid rgba(164, 188, 199, .17); padding-left: 0; }
+  .agreementFields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 720px) {
@@ -247,9 +274,12 @@
   .listMeta { flex-wrap: wrap; }
   .listHeader { flex-wrap: wrap; }
   .artistFormFields { grid-template-columns: 1fr; }
+  .agreementBody { padding-left: 10px; }
+  .agreementFields { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 430px) {
+  .agreementToggle span { display: none; }
   .splitRow { grid-template-columns: minmax(0, 1fr) 94px auto; gap: 5px; }
   .splitRow > .iconButton { width: 32px; height: 39px; flex-basis: 32px; }
   .splitRows input { padding: 8px 6px; }

@@ -289,7 +289,22 @@ class MasterContractParticipant(BaseModel):
     internal_contract_indyana_percent: float | None = Field(default=None, ge=0, le=100)
 
 
+class MasterAgreementOwner(BaseModel):
+    name: str = Field(default="", max_length=200)
+    percent: float | None = Field(default=None, ge=0, le=100)
+
+
+class MasterAgreement(BaseModel):
+    id: str = Field(..., min_length=1, max_length=100)
+    label: str = Field(default="", max_length=120)
+    commercialization: Literal["pending", "distribution", "master"] = "pending"
+    owners: list[MasterAgreementOwner] = Field(default_factory=list, max_length=12)
+    effective_from: str | None = None
+    effective_until: str | None = None
+
+
 class MasterContractSplit(BaseModel):
+    agreements: list[MasterAgreement] = Field(default_factory=list, max_length=20)
     master_type: Literal[
         "pending", "indyana_master", "distribution", "mawz_master",
         "distribution_mawz", "indyana_and_other", "mawz_and_other",
