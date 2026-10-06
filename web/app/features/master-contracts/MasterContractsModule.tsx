@@ -51,7 +51,7 @@ type ContractDetail = ContractItem & {
   accounts: string | null;
   artist_suggestions: {
     artists: string[];
-    evidence: Array<{ source: string; field: string; raw: string }>;
+    evidence: Array<{ source: string; field: string; raw: string; used?: boolean }>;
     warnings: string[];
   };
   artist_contracts: ArtistContract[];
@@ -242,7 +242,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
           <div className={styles.heading}>
             <span>Contratos / {detail.isrc}</span>
             <h1>{detail.title || "Sin título"}</h1>
-            <p>{detail.artists_informed || "Sin artistas informados"}</p>
+            <p>{detail.artist_suggestions.artists.join(", ") || "Participantes por confirmar"}</p>
           </div>
           <span className={`${styles.status} ${closed ? styles.closed : styles.open}`}>{closed ? "Cerrado" : "Abierto"}</span>
         </header>
@@ -333,11 +333,11 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
               </div> : <p className={styles.previewEmpty}>Completá todos los participantes y un reparto que sume 100% para ver la simulación.</p>}
             </section>
             <section className={styles.evidenceBand}>
-              <div className={styles.sectionHeading}><h2>Artistas informados</h2></div>
+              <div className={styles.sectionHeading}><h2>Participantes sugeridos</h2></div>
               <p>{detail.artist_suggestions.artists.join(", ") || "Sin nombres detectados"}</p>
               {detail.artist_suggestions.warnings.map((warning) => <p className={styles.warning} key={warning}>{warning}</p>)}
               <details><summary>Ver campos de origen</summary>
-                {detail.artist_suggestions.evidence.map((item, index) => <div className={styles.evidenceRow} key={index}><strong>{item.source} · {item.field}</strong><span>{item.raw}</span></div>)}
+                {detail.artist_suggestions.evidence.map((item, index) => <div className={styles.evidenceRow} key={index}><strong>{item.source} · {item.field}{item.used === false ? " (contexto)" : ""}</strong><span>{item.raw}</span></div>)}
               </details>
             </section>
           </aside>}
@@ -362,7 +362,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
       </form>
       <div className={styles.listMeta}><span>{list ? `${list.total.toLocaleString("es-AR")} ISRC` : "Cargando catálogo..."}</span><span>{list?.summary.open.toLocaleString("es-AR") || "0"} abiertos · {list?.summary.closed.toLocaleString("es-AR") || "0"} cerrados</span></div>
       <div className={styles.tableWrap}><table className={styles.table}>
-        <thead><tr><th>Tema</th><th>ISRC</th><th>Artistas informados</th><th>Ingreso acumulado</th><th>Estado</th></tr></thead>
+        <thead><tr><th>Tema</th><th>ISRC</th><th>Crédito en catálogo</th><th>Ingreso acumulado</th><th>Estado</th></tr></thead>
         <tbody>
           {!loading && list?.items.length === 0 && <tr><td colSpan={5} className={styles.empty}>No hay ISRC para este filtro.</td></tr>}
           {(list?.items || []).map((item) => <tr key={item.isrc}>

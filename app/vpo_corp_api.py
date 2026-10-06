@@ -8248,7 +8248,10 @@ def get_master_contract(
         "last_month": catalog_row.get("last_transaction_month"),
         "sources": catalog_row.get("sources"),
         "accounts": catalog_row.get("accounts"),
-        "split": saved["split"] if saved else suggested_split(suggestions["artists"], contracts, first_sale_date),
+        "split": saved["split"] if saved else suggested_split(
+            [] if suggestions.get("principal_uncertain") else suggestions["artists"],
+            contracts, first_sale_date,
+        ),
         "closed": saved["closed"] if saved else False,
         "future_reports_selected": saved["future_reports_selected"] if saved else False,
         "version": saved["version"] if saved else 0,

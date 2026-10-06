@@ -17,21 +17,17 @@ from app.operational_db import db_sql, is_postgres_connection
 ISRC_PATTERN = re.compile(r"^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$")
 ARTIST_FIELDS = {
     "soundon": ("Track Artists",),
-    "fuga": ("Asset Artist", "Product Artist"),
+    "fuga": ("Asset Artist",),
     "onerpm": ("artists_raw",),
-    "orchard": ("TRACK ARTIST", "PRODUCT ARTIST"),
+    "orchard": ("TRACK ARTIST",),
     "ada": ("Artist Name",),
-    "dashgo": ("Track Artist", "Artist Name"),
+    "dashgo": ("Track Artist",),
 }
-FIELD_RANK = {
-    "Track Artists": 5,
-    "Asset Artist": 5,
-    "TRACK ARTIST": 5,
-    "Track Artist": 5,
-    "artists_raw": 5,
-    "Artist Name": 4,
-    "Product Artist": 3,
-    "PRODUCT ARTIST": 3,
+CONTEXT_FIELDS = {
+    "ada": ("Project Title", "Product Title"),
+    "fuga": ("Product Artist",),
+    "orchard": ("PRODUCT ARTIST",),
+    "dashgo": ("Artist Name",),
 }
 KNOWN_ARTISTS = {
     "aneley": "Aneley",
@@ -66,8 +62,33 @@ def parse_artists(raw: str, source: str) -> list[str]:
             r"(?:^|,)\s*([^,]+?)\s*\(\s*(performer|featuring)\s*\)", raw, re.I
         )
         return [canonical_artist(name) for name, _role in matches]
-    parts = re.split(r"\s*,\s*|\s+and\s+|\s+&\s+|\s+featuring\s+|\s+feat\.?\s+", raw, flags=re.I)
+    separator = {
+        "orchard": r"\|",
+        "soundon": r"\s*,\s*",
+        "dashgo": r"(?!)",
+        "fuga": r"\s*,\s*|\s+and\s+|\s+featuring\s+|\s+feat\.?\s+",
+    }.get(source, r"\s*,\s*|\s+and\s+|\s+&\s+|\s+featuring\s+|\s+feat\.?\s+")
+    parts = re.split(separator, raw, flags=re.I)
     return [canonical_artist(name) for name in parts if name.strip()]
+
+
+def _ada_artists(raw: str, project_title: str) -> tuple[list[str], str | None]:
+    if len(raw) < 30:
+        return parse_artists(raw, "ada"), None
+    parts = parse_artists(raw, "ada")
+    if len(parts) < 2:
+        return [], "ADA limita Artist Name a 30 caracteres; confirmar el artista en la fuente."
+    complete = parts[:-1]
+    fragment = parts[-1]
+    guest = re.match(r"^(.+?)\s*/\s*(?:Enganchado\b|LA JUNTADA\b)", project_title, re.I)
+    if (len(complete) == 1 and artist_key(complete[0]) == artist_key("La Juntada de los Artistas")
+            and guest and "LA JUNTADA DE LOS ARTISTAS" in project_title.upper()):
+        candidate = canonical_artist(guest.group(1))
+        if (not re.search(r"\s+[xX&]\s+|,", candidate)
+                and artist_key(candidate).startswith(artist_key(fragment))
+                and len(candidate) > len(fragment)):
+            return [*complete, candidate], None
+    return complete, "ADA recortó el último artista; el título del proyecto no permite identificarlo con certeza."
 
 
 @lru_cache(maxsize=512)
@@ -96,7 +117,10 @@ def _artist_suggestions(isrc: str, raw_path: str, file_mtime_ns: int) -> dict[st
             first_sale_date, first_sale_precision = month, "month"
         elif day:
             first_sale_date, first_sale_precision = day, "day"
-    columns = ["source"] + sorted({field for fields in ARTIST_FIELDS.values() for field in fields if field in schema})
+    columns = ["source"] + sorted({
+        field for fields in (*ARTIST_FIELDS.values(), *CONTEXT_FIELDS.values())
+        for field in fields if field in schema
+    })
     if "asset_isrc" not in schema or len(columns) == 1:
         return {"artists": [], "evidence": [], "warnings": ["Sin campos de artistas en el crudo."],
                 "first_sale_date": first_sale_date, "first_sale_precision": first_sale_precision}
@@ -107,30 +131,54 @@ def _artist_suggestions(isrc: str, raw_path: str, file_mtime_ns: int) -> dict[st
         .collect()
         .to_dicts()
     )
+    rows.sort(key=lambda row: tuple(str(row.get(column) or "") for column in columns))
     evidence: list[dict[str, Any]] = []
+    candidates: list[tuple[list[str], bool]] = []
+    warnings: list[str] = []
+    evidence_seen: set[tuple[str, str, str]] = set()
     for row in rows:
         source = str(row.get("source") or "").lower()
+        derived_from_project = False
         for field in ARTIST_FIELDS.get(source, ()):
             raw = str(row.get(field) or "").strip()
             if not raw:
                 continue
-            artists = parse_artists(raw, source)
+            if source == "ada":
+                artists, warning = _ada_artists(raw, str(row.get("Project Title") or ""))
+                derived_from_project = len(raw) == 30 and warning is None
+            else:
+                artists, warning = parse_artists(raw, source), None
+            if warning:
+                warnings.append(warning)
             if artists:
-                evidence.append({"source": source, "field": field, "raw": raw, "artists": artists})
-    evidence.sort(key=lambda item: (len(item["artists"]), FIELD_RANK.get(item["field"], 0)), reverse=True)
-    artists: list[str] = []
-    seen: set[str] = set()
-    for item in evidence:
-        for artist in item["artists"]:
-            key = artist_key(artist)
-            if key and key not in seen:
-                artists.append(artist)
-                seen.add(key)
-    first_names = {artist_key(item["artists"][0]) for item in evidence}
-    warnings = ["Las fuentes difieren en el artista principal."] if len(first_names) > 1 else []
+                candidates.append((artists, warning is None))
+            evidence_key = (source, field, raw)
+            if evidence_key not in evidence_seen:
+                evidence.append({"source": source, "field": field, "raw": raw, "artists": artists, "used": True})
+                evidence_seen.add(evidence_key)
+        for field in CONTEXT_FIELDS.get(source, ()):
+            raw = str(row.get(field) or "").strip()
+            evidence_key = (source, field, raw)
+            if raw and evidence_key not in evidence_seen:
+                evidence.append({"source": source, "field": field, "raw": raw, "artists": [],
+                                 "used": source == "ada" and derived_from_project})
+                evidence_seen.add(evidence_key)
+    complete = [names for names, reliable in candidates if reliable]
+    comparable = complete or [names for names, _ in candidates]
+    artists = max(comparable, key=len, default=[])
+    principal_uncertain = False
+    if comparable:
+        common = set.intersection(*(set(map(artist_key, names)) for names in comparable))
+        if any(set(map(artist_key, names)) != common for names in comparable):
+            artists = [name for name in artists if artist_key(name) in common]
+            warnings.append("Las fuentes de pista discrepan; sugerimos solo los nombres comunes. Revisar antes de cerrar.")
+        if len({artist_key(names[0]) for names in comparable if names}) > 1:
+            principal_uncertain = True
+            warnings.append("Las fuentes difieren en el artista principal; confirmar el orden manualmente.")
     if len(artists) > 11:
         warnings.append("Hay más de diez participantes sugeridos; revisar el crudo.")
-    return {"artists": artists, "evidence": evidence, "warnings": warnings,
+    return {"artists": artists, "evidence": evidence, "warnings": list(dict.fromkeys(warnings)),
+            "principal_uncertain": principal_uncertain,
             "first_sale_date": first_sale_date, "first_sale_precision": first_sale_precision}
 
 
@@ -139,15 +187,19 @@ def artist_suggestions(isrc: str, raw_path: Path | None, fallback: str | None) -
     if raw_path and raw_path.exists():
         try:
             raw_result = _artist_suggestions(isrc, str(raw_path), raw_path.stat().st_mtime_ns)
-            if raw_result["artists"]:
+            if raw_result["evidence"]:
                 return raw_result
         except (OSError, pl.PolarsError):
             pass
-    artists = parse_artists(fallback or "", "catalog")
+    fallback = fallback or ""
+    artists = parse_artists(fallback, "catalog")
+    if len(fallback) == 30 and len(artists) > 1:
+        artists = artists[:-1]
     return {
         "artists": artists,
-        "evidence": [{"source": "catalog", "field": "artist_statement", "raw": fallback or "", "artists": artists}],
+        "evidence": [{"source": "catalog", "field": "artist_statement", "raw": fallback, "artists": artists, "used": True}],
         "warnings": ["Sugerencia basada en el catálogo; confirmar con el statement."],
+        "principal_uncertain": False,
         "first_sale_date": raw_result.get("first_sale_date") if raw_result else None,
         "first_sale_precision": raw_result.get("first_sale_precision") if raw_result else None,
     }

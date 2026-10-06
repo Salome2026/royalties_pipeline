@@ -83,6 +83,70 @@ class MasterContractsPilotTests(unittest.TestCase):
             self.assertEqual(suggested_split(fuga["artists"], first_sale_date=fuga["first_sale_date"])["effective_from"], "2026-02-27")
             self.assertEqual(suggested_split(fuga["artists"], first_sale_date=fuga["first_sale_date"])["agreements"][0]["effective_from"], "2026-02-27")
 
+    def test_distributor_field_rules_do_not_promote_release_artists(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "raw.parquet"
+            pl.DataFrame([
+                {"asset_isrc": "BK4DA2634549", "source": "ada",
+                 "Artist Name": "LA JUNTADA DE LOS ARTISTAS & S",
+                 "Project Title": "SOFI B / Enganchado En Vivo en LA JUNTADA DE LOS ARTISTAS"},
+                {"asset_isrc": "BK4DA2634548", "source": "ada",
+                 "Artist Name": "LA JUNTADA DE LOS ARTISTAS & S",
+                 "Project Title": "Solamente Tú"},
+                {"asset_isrc": "ARDL12600007", "source": "fuga",
+                 "Asset Artist": "La Juntada De Los Artistas and G Sony",
+                 "Product Artist": "La Juntada De Los Artistas, Candu Dominguez and G Sony"},
+                {"asset_isrc": "QM4TX2613905", "source": "orchard",
+                 "TRACK ARTIST": "TOTI|Benja Garcia|Falcone", "PRODUCT ARTIST": "TOTI"},
+                {"asset_isrc": "ARDL12500056", "source": "soundon",
+                 "Track Artists": "Aneley,Maxi Espindola,Valen"},
+                {"asset_isrc": "ARDL12300007", "source": "dashgo",
+                 "Track Artist": "Juli Jones", "Artist Name": "Juli Jones"},
+                {"asset_isrc": "QZW9L2346202", "source": "onerpm",
+                 "artists_raw": "GUSTY DJ(performer), SALASTKBRON(featuring), Someone(writer)"},
+            ]).write_parquet(path)
+            self.assertEqual(artist_suggestions("BK4DA2634549", path, None)["artists"],
+                             ["La Juntada de los Artistas", "SOFI B"])
+            ambiguous = artist_suggestions("BK4DA2634548", path, None)
+            self.assertEqual(ambiguous["artists"], ["La Juntada de los Artistas"])
+            self.assertTrue(ambiguous["warnings"])
+            self.assertEqual(artist_suggestions("ARDL12600007", path, None)["artists"],
+                             ["La Juntada de los Artistas", "G Sony"])
+            self.assertEqual(artist_suggestions("QM4TX2613905", path, None)["artists"],
+                             ["TOTI", "Benja Garcia", "Falcone"])
+            self.assertEqual(artist_suggestions("ARDL12500056", path, None)["artists"],
+                             ["Aneley", "Maxi Espindola", "Valen"])
+            self.assertEqual(artist_suggestions("ARDL12300007", path, None)["artists"], ["Juli Jones"])
+            self.assertEqual(artist_suggestions("QZW9L2346202", path, None)["artists"],
+                             ["Gusty DJ", "SALASTKBRON"])
+
+    def test_conflicting_track_credits_require_review(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "raw.parquet"
+            pl.DataFrame([
+                {"asset_isrc": "ARDL12600007", "source": "fuga",
+                 "Asset Artist": "La Juntada De Los Artistas and G Sony"},
+                {"asset_isrc": "ARDL12600007", "source": "soundon",
+                 "Track Artists": "La Juntada de los Artistas,Candu Dominguez"},
+            ]).write_parquet(path)
+            result = artist_suggestions("ARDL12600007", path, None)
+            self.assertEqual(result["artists"], ["La Juntada de los Artistas"])
+            self.assertTrue(any("discrepan" in warning for warning in result["warnings"]))
+
+    def test_changed_artist_order_never_picks_an_unconfirmed_principal(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "raw.parquet"
+            pl.DataFrame([
+                {"asset_isrc": "QT5M22664077", "source": "soundon",
+                 "Track Artists": "La Juntada de los Artistas,Candu Dominguez"},
+                {"asset_isrc": "QT5M22664077", "source": "soundon",
+                 "Track Artists": "Candu Dominguez,La Juntada de los Artistas"},
+            ]).write_parquet(path)
+            result = artist_suggestions("QT5M22664077", path, None)
+            self.assertEqual(set(result["artists"]), {"La Juntada de los Artistas", "Candu Dominguez"})
+            self.assertTrue(result["principal_uncertain"])
+            self.assertTrue(any("principal" in warning for warning in result["warnings"]))
+
     def test_multiple_commercial_contracts_validate_ownership_and_periods(self) -> None:
         split = {
             "principal": "Aneley", "agreement_confirmed": True,
