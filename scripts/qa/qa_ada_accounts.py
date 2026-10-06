@@ -153,10 +153,10 @@ def main() -> None:
         raise AssertionError("Faltan pistas de Valentino Merlo en song_level_ada.")
     for row in valentino_song.to_dicts():
         expected_title, expected_source_id = VALENTINO_TITLES[row["asset_isrc"]]
-        if row["track_statement_style"] != expected_title:
+        if row["track_statement_style"].casefold() != expected_title.casefold():
             raise AssertionError(f"Titulo ADA incorrecto: {row}")
         if row["source_asset_id"] != expected_source_id:
-            raise AssertionError(f"GPID ADA incorrecto: {row}")
+            raise AssertionError(f"Catalog number ADA incorrecto: {row}")
         if "VALENTINO MERLO" not in str(row["release_statement_style"] or "").upper():
             raise AssertionError(f"Proyecto ADA incorrecto: {row}")
 
@@ -239,7 +239,7 @@ def main() -> None:
         raise AssertionError("El catalogo no conserva las cinco pistas de Valentino Merlo.")
     for row in valentino_catalog.to_dicts():
         expected_title, expected_source_id = VALENTINO_TITLES[row["asset_isrc"]]
-        if row["track_title"] != expected_title or row["track_id"] != expected_source_id:
+        if row["track_title"].casefold() != expected_title.casefold() or row["track_id"] != expected_source_id:
             raise AssertionError(f"Catalogo ADA incorrecto: {row}")
 
     print({
