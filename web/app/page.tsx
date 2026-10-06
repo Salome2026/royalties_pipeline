@@ -8,6 +8,7 @@ import { BookingDashboard, type BookingAgendaEvent } from "./components/BookingD
 import { VpoHome } from "./components/VpoHome";
 import { VpoAppFrame } from "./components/VpoAppFrame";
 import { CatalogModule } from "./features/catalog/CatalogModule";
+import { MasterContractsModule } from "./features/master-contracts/MasterContractsModule";
 import type { CatalogInitialFilter } from "./features/catalog/types";
 import { EmployeesModule } from "./features/employees/EmployeesModule";
 import { RoyaltyReportModule } from "./features/royalties/RoyaltyReportModule";
@@ -7400,7 +7401,7 @@ export default function Home() {
       onOpen={(targetView) => targetView === "booking" ? openBookingWorkspace() : openView(targetView as View)}
       onLogout={logout}
     >
-      <main className={view === "menu" ? "home-main" : view === "booking" && bookingSurface === "dashboard" ? "booking-main" : view === "booking" && bookingSurface === "settlement" ? "booking-settlement-main" : view === "booking-artist-summary" || view === "booking-summary" ? "booking-detail-main" : view === "booking-lab" ? "booking-settlement-main booking-lab-main" : view === "employees" ? "employee-main" : view === "catalog" ? "catalog-main" : view === "royalties-dashboard" ? "royalties-dashboard-main" : view === "digital-income" ? "digital-income-main" : undefined}>
+      <main className={view === "menu" ? "home-main" : view === "booking" && bookingSurface === "dashboard" ? "booking-main" : view === "booking" && bookingSurface === "settlement" ? "booking-settlement-main" : view === "booking-artist-summary" || view === "booking-summary" ? "booking-detail-main" : view === "booking-lab" ? "booking-settlement-main booking-lab-main" : view === "employees" ? "employee-main" : view === "catalog" || view === "master-contracts" ? "catalog-main" : view === "royalties-dashboard" ? "royalties-dashboard-main" : view === "digital-income" ? "digital-income-main" : undefined}>
         {message && <div className={`message ${message.type === "error" ? "error" : ""}`}>{message.text}</div>}
 
         {view === "menu" && (
@@ -8055,6 +8056,9 @@ export default function Home() {
 
         {view === "catalog" && (
           <CatalogModule canEdit={canEditModule("catalog")} initialFilter={catalogInitialFilter} onMessage={setMessage} />
+        )}
+        {view === "master-contracts" && (
+          <MasterContractsModule canEdit={canEditModule("master_contracts")} canApprove={canApproveModule("master_contracts")} onMessage={setMessage} />
         )}
         {view === "distributor-config" && (
           <section className="panel wide-panel">

@@ -8,6 +8,7 @@ export type View =
   | "royalties-dashboard"
   | "source-monitor"
   | "catalog"
+  | "master-contracts"
   | "distributor-config"
   | "booking"
   | "booking-lab"
@@ -22,7 +23,7 @@ export type View =
 
 export type BookingWorkspaceMode = "individual" | "shared";
 export type NavigationTone = "cyan" | "blue" | "green" | "amber" | "coral";
-export type NavigationIcon = "booking" | "commissions" | "booking-load" | "caserio" | "royalties-dashboard" | "statement" | "royalties" | "custom-reports" | "digital-income" | "participation" | "catalog" | "source-monitor" | "distributor-config" | "finance-movements" | "artist-finance" | "artists" | "employees";
+export type NavigationIcon = "booking" | "commissions" | "booking-load" | "caserio" | "royalties-dashboard" | "statement" | "royalties" | "custom-reports" | "digital-income" | "participation" | "catalog" | "master-contracts" | "source-monitor" | "distributor-config" | "finance-movements" | "artist-finance" | "artists" | "employees";
 
 export type NavigationModule = {
   view: View;
@@ -66,6 +67,7 @@ export const APP_NAVIGATION_GROUPS: NavigationGroup[] = [
     key: "catalog", title: "Catálogo y distribución", eyebrow: "Activos",
     modules: [
       { view: "catalog", moduleKey: "catalog", title: "Catálogo general", description: "Temas, artistas, ISRC, labels y metadata.", icon: "catalog", tone: "cyan", featured: true },
+      { view: "master-contracts", moduleKey: "master_contracts", title: "Contratos", description: "Repartos de masters por ISRC.", icon: "master-contracts", tone: "green" },
       { view: "source-monitor", moduleKey: "source_monitor", title: "Control de distribuidoras", description: "Statements, pendientes y alertas.", icon: "source-monitor", tone: "amber" },
       { view: "distributor-config", moduleKey: "distributor_config", title: "Configurador", description: "Políticas, cuentas y reglas vigentes.", icon: "distributor-config", tone: "blue" },
     ],

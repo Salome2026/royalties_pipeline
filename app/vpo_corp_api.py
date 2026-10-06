@@ -39,6 +39,14 @@ from app.operational_db import (
     operational_sqlite_compatible_connect,
     open_operational_db_pool,
 )
+from app.master_contracts import (
+    artist_suggestions,
+    clean_isrc,
+    read_split,
+    read_split_statuses,
+    save_split,
+    suggested_split,
+)
 from app.bigquery_dashboard import (
     royalties_dashboard_bigquery as query_royalties_dashboard_bigquery,
     royalty_detail_count_bigquery as query_royalty_detail_count_bigquery,
@@ -270,6 +278,32 @@ class CatalogStatusRequest(BaseModel):
     business_status: Literal["vpo_catalog", "artist_personal", "external_catalog", "pending_review", "inactive"] = "vpo_catalog"
     notes: str | None = Field(default=None, max_length=1000)
     label_normalized_override: str | None = Field(default=None, max_length=300)
+
+
+class MasterContractParticipant(BaseModel):
+    artist: str = Field(..., min_length=1, max_length=200)
+    percent: float | None = Field(default=None, ge=0, le=100)
+    internal_contract_indyana_percent: float | None = Field(default=None, ge=0, le=100)
+
+
+class MasterContractSplit(BaseModel):
+    master_type: Literal["pending", "indyana_master", "distribution"] = "pending"
+    has_contract: bool | None = None
+    agreement_confirmed: bool = False
+    effective_from: str | None = None
+    principal: str = Field(default="", max_length=200)
+    indyana_percent: float | None = Field(default=None, ge=0, le=100)
+    principal_percent: float | None = Field(default=None, ge=0, le=100)
+    apply_guest_contracts: bool = False
+    participants: list[MasterContractParticipant] = Field(default_factory=list, max_length=10)
+    notes: str = Field(default="", max_length=3000)
+
+
+class MasterContractSaveRequest(BaseModel):
+    split: MasterContractSplit
+    closed: bool = False
+    future_reports_selected: bool = False
+    expected_version: int = Field(default=0, ge=0)
 
 
 class CustomRoyaltyReportRequest(BaseModel):
@@ -2914,6 +2948,7 @@ APP_MODULES = [
     ("artists", "ABM Artistas"),
     ("employees", "ABM Empleados"),
     ("catalog", "Catalogo General"),
+    ("master_contracts", "Contratos de masters"),
     ("digital_income", "Ingresos Digitales"),
     ("royalties_dashboard", "Dashboard Regalias"),
     ("distributor_config", "Configuracion Distribuidoras"),
@@ -8027,6 +8062,164 @@ def update_catalog_status(
         ], how="diagonal_relaxed")
     save_catalog_status(final)
     return {"ok": True, "catalog_key": catalog_key, "active": bool(request.active), "updated_at": now}
+
+
+def master_contract_catalog() -> pl.DataFrame:
+    marts = ensure_marts(filenames=[CATALOG_MASTER_FILE])
+    catalog = pl.read_parquet(marts[CATALOG_MASTER_FILE])
+    return (
+        catalog
+        .filter(pl.col("asset_isrc").fill_null("").str.contains(r"^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$"))
+        .sort(["amount_usd", "asset_isrc"], descending=[True, False])
+        .unique(subset=["asset_isrc"], keep="first", maintain_order=True)
+    )
+
+
+def require_master_contract_user(conn: Any, username: str | None, action: Literal["access", "edit", "approve"]) -> str:
+    clean = clean_username(username)
+    if not clean:
+        raise HTTPException(status_code=401, detail="Se requiere una sesión de usuario.")
+    require_module_permission(conn, clean, "master_contracts", action)
+    return clean
+
+
+@app.get("/master-contracts")
+def list_master_contracts(
+    keyword: str | None = None,
+    status: Literal["all", "open", "closed"] = "all",
+    limit: int = 50,
+    offset: int = 0,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+):
+    require_api_key(x_vpo_api_key)
+    with operational_connect() as conn:
+        require_master_contract_user(conn, x_vpo_username, "access")
+        states = read_split_statuses(conn)
+    catalog = master_contract_catalog()
+    search = normalize_search_text(keyword or "")
+    if search:
+        for token in search.split():
+            catalog = catalog.filter(
+                contains_search_expr(pl.col("track_title"), token)
+                | contains_search_expr(pl.col("artist_statement"), token)
+                | contains_search_expr(pl.col("asset_isrc"), token)
+                | contains_search_expr(pl.col("artist_variants"), token)
+            )
+    all_rows = catalog.select([
+        "asset_isrc", "track_title", "artist_statement", "amount_usd",
+        "first_transaction_month", "last_transaction_month", "sources",
+    ]).to_dicts()
+    summary = {
+        "open": sum(not states.get(row["asset_isrc"], {}).get("closed", False) for row in all_rows),
+        "closed": sum(states.get(row["asset_isrc"], {}).get("closed", False) for row in all_rows),
+    }
+    filtered = [
+        row for row in all_rows
+        if status == "all" or bool(states.get(row["asset_isrc"], {}).get("closed", False)) == (status == "closed")
+    ]
+    safe_offset = max(0, offset)
+    safe_limit = max(1, min(limit, 100))
+    items = [
+        {
+            "isrc": row["asset_isrc"],
+            "title": row["track_title"],
+            "artists_informed": row["artist_statement"],
+            "amount_usd": float(row["amount_usd"] or 0),
+            "first_month": row["first_transaction_month"],
+            "last_month": row["last_transaction_month"],
+            "sources": row["sources"],
+            **states.get(row["asset_isrc"], {"closed": False, "future_reports_selected": False, "version": 0}),
+        }
+        for row in filtered[safe_offset:safe_offset + safe_limit]
+    ]
+    return {
+        "items": items,
+        "total": len(filtered),
+        "summary": summary,
+        "limit": safe_limit,
+        "offset": safe_offset,
+        "amount_basis": "catalog_observed_usd",
+        "reports_effective": False,
+    }
+
+
+@app.get("/master-contracts/{isrc}")
+def get_master_contract(
+    isrc: str,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+):
+    require_api_key(x_vpo_api_key)
+    try:
+        clean = clean_isrc(isrc)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    with operational_connect() as conn:
+        require_master_contract_user(conn, x_vpo_username, "access")
+        saved = read_split(conn, clean)
+    matches = master_contract_catalog().filter(pl.col("asset_isrc") == clean)
+    if matches.is_empty():
+        raise HTTPException(status_code=404, detail="El ISRC no figura en el catálogo publicado.")
+    catalog_row = matches.row(0, named=True)
+    raw_path = None
+    try:
+        raw_path = ensure_marts(filenames=[STANDARDIZED_FILE])[STANDARDIZED_FILE]
+    except Exception:
+        pass
+    suggestions = artist_suggestions(clean, raw_path, catalog_row.get("artist_statement"))
+    return {
+        "isrc": clean,
+        "title": catalog_row.get("track_title"),
+        "artists_informed": catalog_row.get("artist_statement"),
+        "artist_suggestions": suggestions,
+        "amount_usd": float(catalog_row.get("amount_usd") or 0),
+        "first_month": catalog_row.get("first_transaction_month"),
+        "last_month": catalog_row.get("last_transaction_month"),
+        "sources": catalog_row.get("sources"),
+        "accounts": catalog_row.get("accounts"),
+        "split": saved["split"] if saved else suggested_split(suggestions["artists"]),
+        "closed": saved["closed"] if saved else False,
+        "future_reports_selected": saved["future_reports_selected"] if saved else False,
+        "version": saved["version"] if saved else 0,
+        "updated_by": saved["updated_by"] if saved else None,
+        "updated_at": saved["updated_at"] if saved else None,
+        "amount_basis": "catalog_observed_usd",
+        "reports_effective": False,
+    }
+
+
+@app.put("/master-contracts/{isrc}")
+def put_master_contract(
+    isrc: str,
+    request: MasterContractSaveRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+):
+    require_api_key(x_vpo_api_key)
+    try:
+        clean = clean_isrc(isrc)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    with operational_connect() as conn:
+        actor = require_master_contract_user(conn, x_vpo_username, "edit")
+        if master_contract_catalog().filter(pl.col("asset_isrc") == clean).is_empty():
+            raise HTTPException(status_code=404, detail="El ISRC no figura en el catálogo publicado.")
+        previous = read_split(conn, clean)
+        if bool(previous and previous["closed"]) or request.closed or request.future_reports_selected != bool(previous and previous["future_reports_selected"]):
+            require_master_contract_user(conn, actor, "approve")
+        try:
+            saved = save_split(
+                conn, clean, request.split.model_dump(),
+                closed=request.closed,
+                future_reports_selected=request.future_reports_selected,
+                expected_version=request.expected_version,
+                actor=actor,
+            )
+        except ValueError as exc:
+            status_code = 409 if "cambió desde" in str(exc) else 400
+            raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    return {**saved, "reports_effective": False}
 
 
 def build_royalties_dashboard_summary_mart(
