@@ -7,6 +7,7 @@ import polars as pl
 
 from lib.identity import valid_youtube_channel_id_expr
 from lib.distributor_policy_store import load_distributor_policy_document
+from lib.ada_identity import ada_catalog_key_expr
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -284,6 +285,7 @@ def standardized_identity_frame(path: Path) -> pl.LazyFrame | None:
             artist.alias("identity_artist"),
             transaction_month.alias("transaction_month"),
             amount.alias("identity_amount_usd"),
+            ada_catalog_key_expr(schema).alias("_ada_catalog_key"),
         ])
         .with_columns([
             normalized_text(pl.col("identity_title")).alias("_title_norm"),
@@ -304,6 +306,7 @@ def standardized_identity_frame(path: Path) -> pl.LazyFrame | None:
             "identity_amount_usd",
             "_title_norm",
             "_artist_norm",
+            "_ada_catalog_key",
         ])
     )
 
@@ -337,7 +340,7 @@ def identity_with_canonical_key() -> pl.LazyFrame | None:
             pl.coalesce(["identity_isrc", "_mapped_isrc"]).alias("effective_isrc")
         )
         .with_columns(
-            build_catalog_key_expr("effective_isrc", "identity_video_id", "_title_norm", "_artist_norm")
+            pl.coalesce([pl.col("_ada_catalog_key"), build_catalog_key_expr("effective_isrc", "identity_video_id", "_title_norm", "_artist_norm")])
             .alias("catalog_key")
         )
         .filter(pl.col("catalog_key").is_not_null() & (pl.col("catalog_key") != "TEXT:|"))
@@ -548,6 +551,7 @@ def build_catalog_master() -> pl.DataFrame:
             transaction_month.alias("transaction_month"),
             amount.alias("observed_amount_usd"),
             units.alias("units"),
+            ada_catalog_key_expr(schema).alias("_ada_catalog_key"),
         ])
         .join(policy_rules.lazy(), on=["source", "account", "source_sheet"], how="left")
         .with_columns([
@@ -572,7 +576,7 @@ def build_catalog_master() -> pl.DataFrame:
             normalized_text(pl.col("artist_statement")).alias("_artist_norm"),
         ])
         .with_columns(
-            build_catalog_key_expr("asset_isrc", "track_id", "_title_norm", "_artist_norm")
+            pl.coalesce([pl.col("_ada_catalog_key"), build_catalog_key_expr("asset_isrc", "track_id", "_title_norm", "_artist_norm")])
             .alias("catalog_key")
         )
         .filter(pl.col("catalog_key").is_not_null() & (pl.col("catalog_key") != "TEXT:|"))

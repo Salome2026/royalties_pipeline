@@ -73,7 +73,7 @@ def parse_artists(raw: str, source: str) -> list[str]:
 
 
 def _ada_artists(raw: str, project_title: str) -> tuple[list[str], str | None]:
-    if len(raw) < 30:
+    if len(raw) != 30:
         return parse_artists(raw, "ada"), None
     parts = parse_artists(raw, "ada")
     if len(parts) < 2:

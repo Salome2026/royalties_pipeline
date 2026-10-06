@@ -1,7 +1,9 @@
 import hashlib
+import re
 import shutil
 import sys
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 
 import polars as pl
@@ -12,6 +14,7 @@ sys.path.append(str(SCRIPT_DIR))
 
 from lib.statement_period import from_ada_filename
 from lib.distributor_policy_store import load_distributor_policy_document
+from lib.ada_identity import ada_isrc_expr, ada_native_code_expr
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -88,6 +91,8 @@ def decimal_expr(name: str, columns: set[str]) -> pl.Expr:
 
 
 def read_statement(path: Path) -> pl.DataFrame | None:
+    if path.suffix.lower() == ".xlsx":
+        return read_excel_statement(path)
     text = path.read_text(encoding="utf-8-sig").strip()
     if text == NO_ACTIVITY_MESSAGE:
         return None
@@ -101,6 +106,111 @@ def read_statement(path: Path) -> pl.DataFrame | None:
         truncate_ragged_lines=False,
     )
     return clean_columns(frame)
+
+
+def read_excel_statement(path: Path) -> pl.DataFrame:
+    from openpyxl import load_workbook
+
+    period = from_ada_filename(path.name).period
+    match = re.fullmatch(r"(\d+)_\d{6}_\d{6}_\1_DTL\.xlsx", path.name, flags=re.IGNORECASE)
+    if period == "unknown" or match is None:
+        raise ValueError(f"Nombre de statement Excel ADA no valido: {path.name}")
+    account = match.group(1)
+    workbook = load_workbook(path, read_only=True, data_only=True)
+    try:
+        sheet = workbook["Distribution Statement"]
+        rows = iter(sheet.iter_rows(values_only=True))
+        required = {"Artist Name", "Project Title", "Catalogue Number", "ISRC", "Catalogue Title", "Reported Month", "Territory", "Country Code", "Sales", "Receipts Value", "Distribution Fees"}
+        contract = None
+        workbook_period = None
+        headers = None
+        for row_number, row in enumerate(rows, start=1):
+            names = [str(value).strip() if value is not None else "" for value in row]
+            for index, name in enumerate(names[:-1]):
+                if name.rstrip(":") == "Contract":
+                    contract = names[index + 1]
+                if name.rstrip(":") == "Royalties Statement for Period":
+                    workbook_period = names[index + 1]
+            if required.issubset(set(names)):
+                headers = names
+                break
+            if row_number >= 20:
+                break
+        if headers is None:
+            raise ValueError(f"No se encontro la cabecera de detalle ADA: {path.name}")
+        if not contract or not re.match(rf"^{re.escape(account)}\s*-", contract):
+            raise ValueError(f"Contrato del Excel no coincide con la cuenta {account}: {path.name}")
+        expected_period = datetime.strptime(period, "%Y-%m").strftime("%m/%y")
+        if not workbook_period or re.sub(r"\s+", "", workbook_period) != f"{expected_period}-{expected_period}":
+            raise ValueError(f"Periodo del Excel no coincide con {period}: {path.name}")
+        positions = [(index, name) for index, name in enumerate(headers) if name]
+        if len({name for _, name in positions}) != len(positions):
+            raise ValueError(f"Columnas duplicadas en ADA: {path.name}")
+        records = []
+        footer_labels = {"sub totals", "previously accounted deductions", "totals"}
+        for row in rows:
+            if not any(value is not None for value in row):
+                continue
+            if any(str(value or "").strip().rstrip(":").lower() in footer_labels for value in row):
+                continue
+            records.append([str(row[index]).strip() if row[index] is not None else None for index, _ in positions])
+        frame = pl.DataFrame(records, schema={name: pl.Utf8 for _, name in positions}, orient="row")
+    finally:
+        workbook.close()
+
+    columns = set(frame.columns)
+    # The audited exports only deduct Distribution Fees. Fail closed if ADA
+    # introduces another nonzero component rather than guessing its meaning.
+    fee_names = ["Distribution Fees", "Mechanical Fees", "Admin Fees", "Upload Fees", "Other Fees"]
+    for name in ["Artist Royalties", *fee_names[1:]]:
+        if frame.select((decimal_expr(name, columns).fill_null(0.0) != 0).any()).item():
+            raise ValueError(f"{name} no es cero; revisar la regla economica de ADA: {path.name}")
+    gross = decimal_expr("Receipts Value", columns)
+    exact_fees = [sum((Decimal(str(row.get(name) or "0")) for name in fee_names), Decimal(0)) for row in frame.iter_rows(named=True)]
+    exact_net = [float(Decimal(str(value)) - fee) for value, fee in zip(frame.get_column("Receipts Value"), exact_fees)]
+    consumed = text_expr("Reported Month", columns).str.replace(r"^(\d{4})(\d{2})$", "${1}-${2}")
+    frame = frame.with_columns([
+        text_expr("Catalogue Number", columns).alias("Catalog Number"),
+        text_expr("Catalogue Title", columns).alias("Product Title"),
+        text_expr("Parent Product ID", columns).alias("parent_product_id"),
+        text_expr("UPC", columns).alias("ada_explicit_upc"),
+        pl.lit(None).cast(pl.Utf8).alias("GPID"),
+        pl.lit(account).alias("Account"),
+        pl.lit(period).alias("Start Period"),
+        pl.lit(period).alias("End Period"),
+        pl.lit(period).alias("Recdate Month ID"),
+        consumed.alias("Repdate Month ID"),
+        text_expr("Territory", columns).alias("Digital Service Provider(DSP)"),
+        text_expr("Country Code", columns).alias("Country"),
+        text_expr("Revenue Type Desc", columns).alias("Dist Chan Desc"),
+        text_expr("Price Name", columns).alias("Price Desc"),
+        text_expr("Sales", columns).alias("Sale Units"),
+        gross.alias("Royalty Payable"),
+        pl.Series("Deductible Fees", [float(value) for value in exact_fees], dtype=pl.Float64),
+        pl.Series("Net Royalty Payable", exact_net, dtype=pl.Float64),
+    ])
+    months = frame.get_column("Repdate Month ID").unique().to_list()
+    for month in months:
+        if month is None:
+            raise ValueError(f"Mes de consumo vacio en ADA: {path.name}")
+        datetime.strptime(month, "%Y-%m")
+    return frame
+
+
+def select_statement_files(input_dir: Path) -> list[Path]:
+    statements: dict[str, dict[str, Path]] = {}
+    for path in sorted(input_dir.iterdir()):
+        suffix = path.suffix.lower()
+        if not path.is_file() or suffix not in {".txt", ".xlsx"}:
+            continue
+        period = from_ada_filename(path.name).period
+        if period == "unknown":
+            raise ValueError(f"No se pudo identificar el statement ADA: {path.name}")
+        formats = statements.setdefault(period, {})
+        if suffix in formats:
+            raise ValueError(f"Statements ADA duplicados para {period}: {formats[suffix].name}, {path.name}")
+        formats[suffix] = path
+    return [formats.get(".xlsx") or formats[".txt"] for _, formats in sorted(statements.items())]
 
 
 def standardize(
@@ -125,6 +235,8 @@ def standardize(
     missing = sorted(required - columns)
     if missing:
         raise ValueError(f"Faltan columnas requeridas ADA: {missing}")
+    if frame.select((ada_isrc_expr(columns).is_null() & ada_native_code_expr(columns).is_null()).any()).item():
+        raise ValueError(f"ADA contiene ingresos sin ISRC ni identificador nativo: {path.name}")
 
     original_accounts = {
         str(value).strip()
@@ -183,9 +295,13 @@ def standardize(
         text_expr("Product Title", columns).alias("asset_title_statement"),
         text_expr("Project Title", columns).alias("release_statement_style"),
         text_expr("ISRC", columns).alias("asset_isrc"),
-        pl.lit(None).cast(pl.Utf8).alias("product_upc"),
+        text_expr("ada_explicit_upc", columns).alias("product_upc"),
         text_expr("GPID", columns).alias("gpid"),
         text_expr("Catalog Number", columns).alias("catalog_number"),
+        ada_native_code_expr(columns).alias("source_asset_id"),
+        pl.lit(expected_original_account).alias("ada_account_id"),
+        text_expr("parent_product_id", columns).alias("parent_product_id"),
+        pl.lit("excel" if path.suffix.lower() == ".xlsx" else "txt").alias("ada_statement_format"),
         text_expr("Local Product Number", columns).alias("local_product_number"),
 
         text_expr("Digital Service Provider(DSP)", columns).alias("store_name"),
@@ -226,7 +342,7 @@ def main() -> None:
 
     for account, config in ACCOUNTS.items():
         input_dir = INPUT_ROOT / str(config["input_directory"])
-        files = sorted(input_dir.glob("*.txt"))
+        files = select_statement_files(input_dir)
         if not files:
             raise FileNotFoundError(f"No hay statements ADA/{account} en {input_dir}")
 

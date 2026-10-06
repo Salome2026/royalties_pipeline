@@ -6,6 +6,11 @@ from pathlib import Path
 import polars as pl
 
 try:
+    from lib.ada_identity import ada_catalog_key_expr
+except ModuleNotFoundError:
+    from scripts.lib.ada_identity import ada_catalog_key_expr
+
+try:
     from lib.distributor_policy_store import load_distributor_policy_document
 except ModuleNotFoundError:
     from scripts.lib.distributor_policy_store import load_distributor_policy_document
@@ -146,7 +151,7 @@ def row_catalog_key_expr(schema: set[str]) -> pl.Expr:
         "PRODUCT ARTIST",
     ]))
 
-    return (
+    legacy_key = (
         pl.when(isrc.is_not_null() & (isrc != ""))
         .then(pl.concat_str([pl.lit("ISRC:"), isrc]))
         .when(upc.is_not_null() & (upc != ""))
@@ -155,6 +160,7 @@ def row_catalog_key_expr(schema: set[str]) -> pl.Expr:
         .then(pl.concat_str([pl.lit("VIDEO:"), video]))
         .otherwise(pl.concat_str([pl.lit("TEXT:"), title, pl.lit("|"), artist]))
     )
+    return pl.coalesce([ada_catalog_key_expr(schema), legacy_key])
 
 
 def catalog_alias_lookup(catalog_path: Path | None = None) -> pl.DataFrame:

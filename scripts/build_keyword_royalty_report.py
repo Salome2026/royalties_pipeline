@@ -6,6 +6,11 @@ from pathlib import Path
 import pandas as pd
 import polars as pl
 
+try:
+    from lib.ada_identity import ada_isrc_expr, ada_native_code_expr, ada_native_code_type_expr, ada_source_expr
+except ModuleNotFoundError:
+    from scripts.lib.ada_identity import ada_isrc_expr, ada_native_code_expr, ada_native_code_type_expr, ada_source_expr
+
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -364,6 +369,9 @@ def contains_expr(columns: set[str], search_columns: list[str], keyword: str) ->
         if col in columns:
             match = contains_search_expr(pl.col(col), normalized_keyword)
             exprs.append(match.fill_null(False))
+    for col in ["catalog_number", "gpid", "Catalog Number", "Catalogue Number", "GPID"]:
+        if col in columns:
+            exprs.append((ada_source_expr(columns) & contains_search_expr(pl.col(col), normalized_keyword)).fill_null(False))
 
     if not exprs:
         return pl.lit(False)
@@ -436,9 +444,10 @@ def report_code_source_expr(columns: set[str]) -> pl.Expr:
 
 
 def add_report_code(lf: pl.LazyFrame, columns: set[str]) -> pl.LazyFrame:
+    ada_product = ada_source_expr(columns).fill_null(False) & ada_isrc_expr(columns).is_null()
     return lf.with_columns([
-        report_code_expr(columns).alias("report_code"),
-        report_code_source_expr(columns).alias("report_code_source"),
+        pl.when(ada_product).then(ada_native_code_expr(columns)).otherwise(report_code_expr(columns)).alias("report_code"),
+        pl.when(ada_product).then(ada_native_code_type_expr(columns)).otherwise(report_code_source_expr(columns)).alias("report_code_source"),
         report_territory_expr(columns).alias("report_territory"),
     ])
 

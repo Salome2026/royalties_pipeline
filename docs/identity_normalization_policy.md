@@ -97,6 +97,24 @@ Validated example:
 - Reason: the same UPC maps to a single ISRC in catalog evidence, and Spotify
   confirms the UPC/ISRC pair on a one-track release.
 
+## ADA rules
+
+ADA identities are shared by ingestion, catalog and reports in
+`scripts/lib/ada_identity.py`. Read `ada_pipeline_notes.md` before changing ADA.
+
+- Valid ISRC: `ISRC:<ISRC>` as before.
+- No ISRC: `ADA:<original account>:CATALOG:<Catalogue Number / Catalog Number>`.
+- Only when catalog number is absent: `ADA:<original account>:GPID:<GPID>`.
+- Missing both native identifiers on a non-ISRC row is an ingest error.
+- Native identifiers are not videos, UPCs or inferred ISRCs.
+- Excel `Parent Product ID` is release context, not a song-level alias.
+- Product revenue remains separate; no allocation to tracks.
+- Richer titles or artist strings do not change the native identity.
+- Historical releases preserve the original raw identifiers.
+
+This ADA-specific rule takes precedence over video/text fallbacks. Other
+distributors' identity rules are unchanged.
+
 ## Catalog key priority
 
 1. `ISRC:<asset_isrc>`

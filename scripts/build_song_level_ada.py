@@ -2,6 +2,8 @@ from pathlib import Path
 
 import polars as pl
 
+from lib.ada_identity import ada_native_code_expr
+
 
 BASE = Path(r"C:\royalties_pipeline")
 INPUT_PATH = BASE / "warehouse" / "marts" / "standardized_raw_ada.parquet"
@@ -28,6 +30,8 @@ def main() -> None:
             "release_statement_style",
             "gpid",
             "catalog_number",
+            "ada_account_id",
+            "parent_product_id",
             "artist_statement_style",
             "transaction_month",
         ])
@@ -40,10 +44,10 @@ def main() -> None:
         ])
         .with_columns(
             [
-                pl.coalesce(["gpid", "catalog_number"]).alias("source_asset_id"),
-                pl.coalesce(["gpid", "catalog_number"]).alias("track_id"),
+                ada_native_code_expr({"catalog_number", "gpid"}).alias("source_asset_id"),
+                ada_native_code_expr({"catalog_number", "gpid"}).alias("track_id"),
                 pl.when(pl.col("asset_isrc").is_null() | (pl.col("asset_isrc").str.strip_chars() == ""))
-                .then(pl.lit("unidentified"))
+                .then(pl.lit("product"))
                 .otherwise(pl.lit("catalog"))
                 .alias("content_type"),
             ]

@@ -118,6 +118,12 @@ def from_soundon_filename(file_name: str) -> StatementPeriodInfo:
 
 
 def from_ada_filename(file_name: str) -> StatementPeriodInfo:
+    excel = re.fullmatch(r"(\d+)_(\d{4})(\d{2})_(\d{4})(\d{2})_\1_DTL\.xlsx", file_name, flags=re.IGNORECASE)
+    if excel:
+        start = f"{excel.group(2)}-{excel.group(3)}"
+        end = f"{excel.group(4)}-{excel.group(5)}"
+        if start == end and 1 <= int(excel.group(3)) <= 12:
+            return StatementPeriodInfo(start, "filename", "ADA Excel statement month validated against the workbook period and account.")
     match = re.search(r"_(\d{4})(\d{2})\d{2}(?:\s*\(\d+\))?\.txt$", file_name, flags=re.IGNORECASE)
     if not match:
         return StatementPeriodInfo(

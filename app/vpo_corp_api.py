@@ -1505,7 +1505,7 @@ def default_source_monitor_config() -> list[dict]:
             "monitoring_active": True,
             "alert_silenced": False,
             "portal_url": "",
-            "notes": "TXT mensual. Net Royalty Payable es el neto reportable; statements sin actividad son validos.",
+            "notes": "TXT o Excel mensual. Excel reemplaza al TXT del mismo periodo; statements sin actividad son validos.",
         },
         {
             "id": "ada_indyana_records",
@@ -8426,6 +8426,9 @@ def build_royalties_dashboard_summary_mart(
         "ID",
         "Parent ID",
         "track_id",
+        "catalog_number",
+        "gpid",
+        "ada_account_id",
         "artist_statement_style",
         "artist_best_available",
         "artist_name_statement",
@@ -8620,6 +8623,11 @@ def build_royalties_dashboard_summary_mart(
             isrc.alias("asset_isrc"),
             upc.alias("UPC"),
             coalesce_text_expr(["video_id", "Video ID", "VideoId", "YOUTUBE VIDEO ID", "YouTube Video ID", "YouTube Asset ID", "ID", "Parent ID", "track_id"]).alias("video_id"),
+            *[
+                pl.when(text_expr("source") == "ada").then(non_empty_text_expr(field))
+                .otherwise(pl.lit(None).cast(pl.Utf8)).alias(field)
+                for field in ["catalog_number", "gpid", "ada_account_id"]
+            ],
             dsp.alias("dsp"),
             territory.alias("territory"),
             sale_type.alias("sale_type"),
@@ -8664,6 +8672,9 @@ def build_royalties_dashboard_summary_mart(
             "classification_status",
             "label",
             "_search_variants",
+            "catalog_number",
+            "gpid",
+            "ada_account_id",
         ])
         .agg([
             pl.sum("_dashboard_amount_usd").alias("_dashboard_amount_usd"),

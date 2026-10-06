@@ -42,6 +42,10 @@ DETAIL_FIELDS = [
     "asset_isrc",
     "product_upc",
     "track_id",
+    "catalog_number",
+    "gpid",
+    "parent_product_id",
+    "release_title",
     "video_id",
     "channel_id",
     "label",
@@ -315,7 +319,17 @@ def build_detail(source: Path, target: Path, release_id: str) -> None:
                 ).alias("title"),
                 text_expr(columns, ["asset_isrc", "Asset ISRC", "ISRC"]).alias("asset_isrc"),
                 text_expr(columns, ["product_upc", "UPC Code", "UPC"]).alias("product_upc"),
-                text_expr(columns, ["track_id", "Label Track ID", "Track ID", "gpid"]).alias("track_id"),
+                pl.when(text_expr(columns, ["source"]) == "ada")
+                .then(text_expr(columns, ["source_asset_id", "catalog_number", "gpid"]))
+                .otherwise(text_expr(columns, ["track_id", "Label Track ID", "Track ID", "gpid"]))
+                .alias("track_id"),
+                *[
+                    pl.when(text_expr(columns, ["source"]) == "ada")
+                    .then(text_expr(columns, [field]))
+                    .otherwise(pl.lit(None).cast(pl.Utf8))
+                    .alias(target_field)
+                    for field, target_field in [("catalog_number", "catalog_number"), ("gpid", "gpid"), ("parent_product_id", "parent_product_id"), ("release_statement_style", "release_title")]
+                ],
                 text_expr(columns, ["video_id", "Video ID", "VideoId"]).alias("video_id"),
                 text_expr(columns, ["channel_id", "Channel ID", "ChannelId"]).alias("channel_id"),
                 text_expr(
@@ -669,6 +683,12 @@ def main() -> None:
     suffix = re.sub(r"[^a-zA-Z0-9]", "", release_id)[-20:].lower()
     stages = {key: f"_stage_{key}_{suffix}" for key in prepared}
     bq = executable("bq")
+    schema_sql = "\n".join(
+        f"ALTER TABLE `{args.project}.{args.dataset}.{table}` ADD COLUMN IF NOT EXISTS {field} STRING;"
+        for table in ["royalty_statement_fact", "royalty_transaction_fact"]
+        for field in ["catalog_number", "gpid", "parent_product_id", "release_title"]
+    )
+    run([bq, f"--project_id={args.project}", "query", f"--location={args.location}", "--use_legacy_sql=false"], input_text=schema_sql)
     for key, table in stages.items():
         bq_load(
             bq=bq,
