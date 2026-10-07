@@ -80,7 +80,7 @@ def dashboard_sql(
     else:
         raise ValueError(f"Base temporal no soportada: {period_basis}")
     factor_sql = personalization_factor_sql(policy_document)
-    table = f"`{project}.{dataset}.royalty_dashboard_current`"
+    table = f"`{project}.{dataset}.royalty_dashboard_rankings`"
     ranking_unions = [
         ("sources", "source"),
         ("dsp", "dsp"),
@@ -105,7 +105,8 @@ def dashboard_sql(
 WITH option_base AS (
   SELECT source, account, {period_column} AS period_month
   FROM {table}
-  WHERE COALESCE(ARRAY_LENGTH(@artist_scope_tokens), 0) = 0
+  WHERE release_id = @release_id
+    AND (COALESCE(ARRAY_LENGTH(@artist_scope_tokens), 0) = 0
     OR EXISTS (
       SELECT 1
       FROM UNNEST(@artist_scope_tokens) AS token
@@ -117,7 +118,7 @@ WITH option_base AS (
           REGEXP_REPLACE(REGEXP_REPLACE(NORMALIZE_AND_CASEFOLD(COALESCE(artist, ''), NFD), r'\pM', ''), r'[\s_-]+', ''),
           REGEXP_REPLACE(token, r'[\s_-]+', '')
         ) > 0
-    )
+    ))
 ),
 base AS (
   SELECT
@@ -137,7 +138,7 @@ base AS (
     COALESCE(raw_rows, 0) AS raw_rows,
     REGEXP_REPLACE(NORMALIZE_AND_CASEFOLD(COALESCE(search_text, ''), NFD), r'\pM', '') AS normalized_search
   FROM {table}
-  WHERE {period_column} IS NOT NULL
+  WHERE release_id = @release_id AND {period_column} IS NOT NULL
     AND (
       COALESCE(ARRAY_LENGTH(@artist_scope_tokens), 0) = 0
       OR EXISTS (
@@ -342,6 +343,7 @@ GROUP BY isrc
 def query_rows(
     *,
     sql: str,
+    release_id: str,
     project: str,
     location: str,
     source: str | None,
@@ -360,6 +362,7 @@ def query_rows(
     config = bigquery.QueryJobConfig(
         maximum_bytes_billed=maximum_bytes_billed,
         query_parameters=[
+            bigquery.ScalarQueryParameter("release_id", "STRING", release_id),
             bigquery.ScalarQueryParameter("source", "STRING", source),
             bigquery.ScalarQueryParameter("account", "STRING", account),
             bigquery.ScalarQueryParameter("start_month", "DATE", month_date(start_month)),
@@ -653,6 +656,16 @@ def royalties_dashboard_bigquery(
     })
     use_all_months = bool(start_month or end_month or period_mode in {"single_month", "closed_range", "all"})
     month_limit = 12 if period_mode == "last_12_months" else 6
+    query_client = client or dashboard_client(project, location)
+    # Resolve a ready snapshot first so clustering can skip historical releases.
+    release_rows = query_client.query(
+        f"SELECT release_id FROM `{project}.{dataset}.current_release`",
+        job_config=bigquery.QueryJobConfig(maximum_bytes_billed=maximum_bytes_billed),
+        location=location,
+    ).result()
+    release = next(iter(release_rows), None)
+    if release is None:
+        raise RuntimeError("No hay una version analitica conciliada disponible.")
     sql = dashboard_sql(
         project=project,
         dataset=dataset,
@@ -661,6 +674,7 @@ def royalties_dashboard_bigquery(
     )
     rows = query_rows(
         sql=sql,
+        release_id=release["release_id"],
         project=project,
         location=location,
         source=source.strip() if source else None,
@@ -673,7 +687,7 @@ def royalties_dashboard_bigquery(
         month_limit=month_limit,
         ranking_limit=safe_limit,
         maximum_bytes_billed=maximum_bytes_billed,
-        client=client,
+        client=query_client,
     )
     return format_dashboard_response(
         rows=rows,

@@ -19,6 +19,12 @@ actuales.
 - `/health/ready` expone la configuracion activa del dashboard.
 - Los logs `royalties_dashboard_backend` registran resultado, latencia y tipo
   de error sin guardar filtros ni datos del usuario.
+- Cada consulta resuelve primero la version `ready` de `current_release` y
+  pasa ese identificador como parametro a `royalty_dashboard_rankings`. Las
+  opciones y los importes leen la misma version. El filtro explicito permite
+  omitir bloques de versiones historicas sin borrar respaldos ni aumentar el
+  limite de bytes. Si no existe una version conciliada, se usa el retorno
+  operativo existente; nunca se consulta una version pendiente de validacion.
 
 ## Secuencia de activacion
 
