@@ -47,6 +47,29 @@ No Earning Activity for this Royalty Period
 son statements validos sin movimientos. Cuentan para continuidad mensual, pero
 no crean filas de regalias de importe cero.
 
+### Mapa de lectura obligatorio
+
+| Dato | TXT | Excel |
+| --- | --- | --- |
+| Artista informado | Artist Name | Artist Name |
+| Tema | Product Title | Catalogue Title |
+| Lanzamiento | Project Title | Project Title |
+| ISRC | ISRC | ISRC |
+| Identificador nativo | Catalog Number; fallback GPID | Catalogue Number |
+| UPC de lanzamiento validado | UPC si existe; GPID numerico validado | UPC; fallback Parent Product ID |
+| Mes de consumo | Repdate Month ID | Reported Month |
+| Mes de statement | Filename, validado con Start/End Period | Filename, validado con encabezado |
+| DSP / plataforma | Digital Service Provider(DSP) | Territory (no es el pais) |
+| Pais | Country | Country Code |
+| Unidades | Sale Units | Sales |
+| Bruto | Royalty Payable | Receipts Value |
+| Deduccion | Deductible Fees | Distribution Fees |
+| Neto | Net Royalty Payable | Receipts Value menos Distribution Fees |
+
+El lector rechaza importes nulos/no numericos/no finitos, bruto menos fees que
+no concilie con el neto y meses de consumo invalidos. No elimina esas filas
+silenciosamente ni cambia un importe para hacerlo cerrar.
+
 ## Periodos
 
 - `statement_period`: mes del filename, tanto TXT como Excel.
@@ -136,6 +159,22 @@ Evidencia: `C:/royalties_pipeline/staging/ada_release_codes_20261007/validation.
 Pruebas obligatorias: `qa_ada_release_codes.py`, `qa_ada_excel_replacement.py`,
 `qa_ada_accounts.py`, `qa_bigquery_release_transform.py`,
 `qa_bigquery_sql_contract.py`. Repetirlas al cambiar esta lectura.
+
+### Futuras ingestas
+
+El boton Procesar de ADA ejecuta `ingest_standardized_ada.py` y despues
+`build_song_level_ada.py`; ambos forman parte del circuito publicado. El
+ingestor siempre aplica `lib/ada_release_codes.py` antes de guardar el mart.
+Estas reglas son por formato y columnas, no excepciones por ISRC, artista o
+statement historico. No se consulta Internet ni se exige un TXT retirado para
+procesar un Excel nuevo. La cuenta y el periodo se validan en cada archivo;
+las fees nuevas no conocidas y los codigos validos contradictorios detienen
+el procesamiento. Los campos sin evidencia quedan vacios y los originales se
+preservan. Las pruebas incluyen un archivo sintetico con catalogo A123, ajeno
+a los datos historicos, para comprobar el circuito de lectura y estandarizacion.
+Los identificadores del TXT se leen como texto aun cuando toda la columna sea
+numerica. Otra prueba sintetica confirma GPID 0085365665804 sin perder ceros,
+sin inventar ISRC y con consumo separado de statement.
 
 En el consolidado, ADA usa la taxonomia comun de Store/DSP. Caso testigo
 validado para Spotify:

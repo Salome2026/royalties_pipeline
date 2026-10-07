@@ -103,6 +103,7 @@ def read_statement(path: Path) -> pl.DataFrame | None:
         separator="\t",
         quote_char='"',
         infer_schema_length=10000,
+        schema_overrides={"GPID": pl.Utf8, "Catalog Number": pl.Utf8, "ISRC": pl.Utf8},
         encoding="utf8-lossy",
         truncate_ragged_lines=False,
     )
@@ -271,6 +272,12 @@ def standardize(
     gross = decimal_expr("Royalty Payable", columns)
     fees = decimal_expr("Deductible Fees", columns)
     net = decimal_expr("Net Royalty Payable", columns)
+    valid_amounts = pl.all_horizontal([value.is_not_null() & value.is_finite() for value in [gross, fees, net]])
+    if frame.select((~valid_amounts | ((gross - fees - net).abs() > 1e-8)).any()).item():
+        raise ValueError(f"ADA contiene importes invalidos o bruto menos fees distinto del neto: {path.name}")
+    consumption = text_expr("Repdate Month ID", columns)
+    if frame.select((consumption.is_null() | ~consumption.str.contains(r"^[0-9]{4}-(0[1-9]|1[0-2])$")).any()).item():
+        raise ValueError(f"ADA contiene un mes de consumo invalido: {path.name}")
     revenue_basis = str(policy_rule.get("revenue_basis") or "").strip()
     if not revenue_basis:
         raise ValueError(f"La policy ADA/{account}/{SOURCE_SHEET} no define revenue_basis.")

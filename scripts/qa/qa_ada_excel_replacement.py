@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT))
 
-from ingest_standardized_ada import read_statement, select_statement_files
+from ingest_standardized_ada import read_statement, select_statement_files, standardize, NO_ACTIVITY_MESSAGE
 from lib.ada_identity import ada_catalog_key_expr
 from lib.catalog_report_filter import row_catalog_key_expr
 from build_keyword_royalty_report import add_report_code, contains_expr
@@ -52,7 +52,7 @@ def fixture(path: Path, account: str = "99500", fee: float = 0) -> None:
         "Reported Month", "Territory", "Country Code", "Sales", "Receipts Value",
         "Distribution Fees", "Mechanical Fees", "Artist Royalties", "Parent Product ID",
     ])
-    sheet.append(["Artist & Guest", "Album", "A123", None, "Track", "202605", "Spotify", "AR", 2, 0.21, 0.021, fee, 0, "1234567890123"])
+    sheet.append(["Artist & Guest", "Album", "A123", None, "Track", "202605", "Spotify", "AR", 2, 0.21, 0.021, fee, 0, "8718521191726"])
     for label in ["Sub Totals:", "Previously Accounted Deductions:", "Totals:"]:
         sheet.append([None] * 10 + [label])
     workbook.save(path)
@@ -70,10 +70,52 @@ def main() -> None:
         assert frame.height == 1
         assert frame["Net Royalty Payable"][0] == 0.189
         assert frame["Repdate Month ID"][0] == "2026-05"
-        assert frame["parent_product_id"][0] == "1234567890123"
+        assert frame["parent_product_id"][0] == "8718521191726"
         assert frame["ada_explicit_upc"][0] is None
+        normalized = standardize(frame, excel, "indyana_records", "99500", {"revenue_basis": "generation", "cash_view": True, "catalog_view": True, "statement_view": True})
+        assert normalized["product_upc"][0] == "8718521191726"
+        assert normalized["product_upc_source"][0] == "Parent Product ID"
+        assert normalized["amount_usd"][0] == 0.189 and normalized["units"][0] == 2
+        assert normalized["transaction_month"][0] == "2026-05"
+        assert normalized["statement_period"][0] == "2026-07"
+        assert normalized.select(ada_catalog_key_expr(set(normalized.columns)).alias("key"))["key"][0] == "ADA:99500:CATALOG:A123"
+        wrong_period = root / "99500_202608_202608_99500_DTL.xlsx"
+        fixture(wrong_period)
+        try:
+            read_statement(wrong_period)
+            raise AssertionError("Wrong statement period was accepted")
+        except ValueError:
+            pass
+        wrong_period.unlink()
         txt = root / "Statement_99500_5779_99500_20260731.txt"
-        txt.touch()
+        txt.write_text(NO_ACTIVITY_MESSAGE, encoding="utf-8")
+        assert read_statement(txt) is None
+        pl.DataFrame({
+            "Account": ["99500"], "Start Period": ["2026-07"], "End Period": ["2026-07"],
+            "Repdate Month ID": ["2026-05"], "Recdate Month ID": ["2026-07"],
+            "ISRC": [None], "Catalog Number": ["A-FUTURE"], "GPID": ["0085365665804"],
+            "Product Title": ["New Album"], "Project Title": ["New Album"],
+            "Artist Name": ["New Artist"], "Digital Service Provider(DSP)": ["i-Tunes"],
+            "Sale Units": [2], "Royalty Payable": [2.1], "Deductible Fees": [0.21],
+            "Net Royalty Payable": [1.89],
+        }).write_csv(txt, separator="\t")
+        future_txt = read_statement(txt)
+        assert future_txt["GPID"][0] == "0085365665804", "Numeric-only TXT lost leading zeros"
+        future_normalized = standardize(future_txt, txt, "indyana_records", "99500", {"revenue_basis": "generation"})
+        assert future_normalized["product_upc"][0] == "0085365665804"
+        assert future_normalized["product_upc_source"][0] == "GPID"
+        assert future_normalized["asset_isrc"][0] is None and future_normalized["amount_usd"][0] == 1.89
+        assert future_normalized["transaction_month"][0] == "2026-05" and future_normalized["statement_period"][0] == "2026-07"
+        for broken in [
+            future_txt.with_columns(pl.lit(1.88).alias("Net Royalty Payable")),
+            future_txt.with_columns(pl.lit("not money").alias("Net Royalty Payable")),
+            future_txt.with_columns(pl.lit("2026-13").alias("Repdate Month ID")),
+        ]:
+            try:
+                standardize(broken, txt, "indyana_records", "99500", {"revenue_basis": "generation"})
+                raise AssertionError("Invalid future statement was accepted")
+            except ValueError:
+                pass
         assert select_statement_files(root) == [excel]
         duplicate = root / "Statement_99500_9999_99500_20260731.txt"
         duplicate.touch()
