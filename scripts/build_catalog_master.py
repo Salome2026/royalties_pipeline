@@ -337,7 +337,10 @@ def identity_with_canonical_key() -> pl.LazyFrame | None:
         all_identity
         .join(upc_isrc_map, on="identity_upc", how="left")
         .with_columns(
-            pl.coalesce(["identity_isrc", "_mapped_isrc"]).alias("effective_isrc")
+            pl.when(pl.col("_ada_catalog_key").is_not_null())
+            .then(pl.col("identity_isrc"))
+            .otherwise(pl.coalesce(["identity_isrc", "_mapped_isrc"]))
+            .alias("effective_isrc")
         )
         .with_columns(
             pl.coalesce([pl.col("_ada_catalog_key"), build_catalog_key_expr("effective_isrc", "identity_video_id", "_title_norm", "_artist_norm")])

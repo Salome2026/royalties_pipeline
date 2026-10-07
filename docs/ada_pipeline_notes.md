@@ -96,7 +96,7 @@ de distribuidora ni aplican splits.
 - identificador ADA: `GPID`, conservado en `gpid`;
 - catalog number: `Catalog Number` (TXT) / `Catalogue Number` (Excel),
   conservado en `catalog_number` y `source_asset_id`;
-- UPC canonico: vacio mientras ADA no entregue una columna UPC demostrable;
+- UPC canonico: codigo de lanzamiento valido de UPC, Parent Product ID o GPID;
 - store: `Digital Service Provider(DSP)` (TXT) / `Territory` (Excel);
 - territorio: `Country` (TXT) / `Country Code` (Excel);
 - unidades: `Sale Units` (TXT) / `Sales` (Excel);
@@ -105,10 +105,37 @@ de distribuidora ni aplican splits.
 
 Excel no informa GPID. `Parent Product ID` se conserva como contexto de release
 en `parent_product_id`: puede reunir varios ISRC. No usarlo como identidad de
-pista ni como UPC automatico. Solo una columna UPC explicita llena `product_upc`.
+pista. Se reconoce como UPC/EAN de lanzamiento solo si tiene longitud GTIN
+8, 12, 13 o 14 y digito verificador valido. Conservar ceros iniciales.
 
-`GPID` y `Catalog Number` no se reinterpretan como UPC. Los campos originales
-se preservan y no se infieren ISRC, UPC, artistas ni temas en el ingest.
+`Catalog Number` nunca se reinterpreta como UPC. `GPID` es mixto: los valores
+alfanumericos son identificadores nativos; los numericos con GTIN valido pueden
+ser UPC de lanzamiento. Prioridad: UPC explicito, Parent Product ID, GPID.
+Dos candidatos validos distintos detienen la ingesta. Los originales quedan
+intactos; `product_upc_source` y `product_upc_status` registran la procedencia.
+
+Una fila de album sin UPC puede recibir el codigo unico de las pistas del
+mismo statement, solo con Project Title y Artist Name identicos y Product Title
+igual a Project Title. Se marca `same_statement_release` / `derived_release`.
+Si hay varios codigos o falta evidencia, queda vacio. No se infiere ISRC ni se
+asigna el ingreso del album a sus pistas. No se enriquecen meses sin evidencia
+usando otros statements ni se depende de archivos TXT retirados.
+
+Validacion 2026-10-07: los Excel de julio/agosto traen Parent Product ID, aunque
+UPC este vacio; junio no trae Parent Product ID. Se verificaron contra Deezer
+los codigos 8718521191726, 8718521211820, 1200214346010 y 8721416311413.
+Meli Gimenez conserva ADA:99500:CATALOG:A10302B0013835580K como identidad del
+album, y 8718521191726 solo como contexto de lanzamiento.
+
+Control de reconstruccion 2026-10-07: 33 statements releidos, 622638 filas
+economicas, neto USD 365887.67805032 sin cambios. Se recuperaron 106 UPC/EAN en
+100470 filas. Los 42 ingresos sin ISRC conservan sus 10 identidades nativas y
+ahora tienen contexto UPC; ninguna venta de album hereda ISRC. Las filas de las
+otras distribuidoras, importes por clave, unidades y fechas permanecen iguales.
+Evidencia: `C:/royalties_pipeline/staging/ada_release_codes_20261007/validation.json`.
+Pruebas obligatorias: `qa_ada_release_codes.py`, `qa_ada_excel_replacement.py`,
+`qa_ada_accounts.py`, `qa_bigquery_release_transform.py`,
+`qa_bigquery_sql_contract.py`. Repetirlas al cambiar esta lectura.
 
 En el consolidado, ADA usa la taxonomia comun de Store/DSP. Caso testigo
 validado para Spotify:

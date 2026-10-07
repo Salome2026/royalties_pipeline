@@ -46,6 +46,8 @@ DETAIL_FIELDS = [
     "gpid",
     "parent_product_id",
     "release_title",
+    "product_upc_source",
+    "product_upc_status",
     "video_id",
     "channel_id",
     "label",
@@ -328,7 +330,7 @@ def build_detail(source: Path, target: Path, release_id: str) -> None:
                     .then(text_expr(columns, [field]))
                     .otherwise(pl.lit(None).cast(pl.Utf8))
                     .alias(target_field)
-                    for field, target_field in [("catalog_number", "catalog_number"), ("gpid", "gpid"), ("parent_product_id", "parent_product_id"), ("release_statement_style", "release_title")]
+                    for field, target_field in [("catalog_number", "catalog_number"), ("gpid", "gpid"), ("parent_product_id", "parent_product_id"), ("release_statement_style", "release_title"), ("product_upc_source", "product_upc_source"), ("product_upc_status", "product_upc_status")]
                 ],
                 text_expr(columns, ["video_id", "Video ID", "VideoId"]).alias("video_id"),
                 text_expr(columns, ["channel_id", "Channel ID", "ChannelId"]).alias("channel_id"),
@@ -686,8 +688,9 @@ def main() -> None:
     schema_sql = "\n".join(
         f"ALTER TABLE `{args.project}.{args.dataset}.{table}` ADD COLUMN IF NOT EXISTS {field} STRING;"
         for table in ["royalty_statement_fact", "royalty_transaction_fact"]
-        for field in ["catalog_number", "gpid", "parent_product_id", "release_title"]
+        for field in ["catalog_number", "gpid", "parent_product_id", "release_title", "product_upc_source", "product_upc_status"]
     )
+    schema_sql += f"\nCREATE OR REPLACE VIEW `{args.project}.{args.dataset}.royalty_report_detail` AS SELECT fact.* FROM `{args.project}.{args.dataset}.royalty_statement_fact` AS fact WHERE fact.release_id = (SELECT release_id FROM `{args.project}.{args.dataset}.current_release`);"
     run([bq, f"--project_id={args.project}", "query", f"--location={args.location}", "--use_legacy_sql=false"], input_text=schema_sql)
     for key, table in stages.items():
         bq_load(

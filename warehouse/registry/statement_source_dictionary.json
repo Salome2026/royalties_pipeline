@@ -61,8 +61,8 @@
       "default_statement_view": true,
       "default_cash_view": true,
       "decision_reason": "Net Royalty Payable is the real amount after ADA Deductible Fees. Royalty Payable and fees are retained separately for exact reconciliation.",
-      "known_risks": "Repdate Month ID is consumption/reporting activity and can precede the settlement month. Do not use it as statement_period. No-activity TXT files must not be treated as missing statements.",
-      "last_reviewed_at": "2026-10-06",
+      "known_risks": "GPID is mixed: only numeric GTIN-8/12/13/14 with valid check digit is a release UPC; alphanumeric values remain native IDs. UPC and Parent Product ID are validated likewise; preserve leading zeros and provenance. Repdate Month ID is consumption, not settlement. No-activity TXT files are valid statements.",
+      "last_reviewed_at": "2026-10-07",
       "reviewed_by": "ruben_codex"
     },
     {
@@ -82,8 +82,8 @@
       "default_statement_view": true,
       "default_cash_view": true,
       "decision_reason": "Net Royalty Payable is the real amount after ADA Deductible Fees. The original Account 99500 identifies Indyana Records and remains preserved in raw columns.",
-      "known_risks": "Repdate Month ID can precede the statement month. Account 99500 must not be merged with ADA Mawz account 99205.",
-      "last_reviewed_at": "2026-10-06",
+      "known_risks": "Excel UPC may be blank while Parent Product ID contains a validated release GTIN. June 2026 lacks Parent Product ID. Album rows keep account-scoped native identity; same-statement unique release/artist evidence may supply UPC context only, never ISRC or allocated money. Repdate Month ID is consumption, not settlement. Keep account 99500 separate from 99205.",
+      "last_reviewed_at": "2026-10-07",
       "reviewed_by": "ruben_codex"
     },
     {

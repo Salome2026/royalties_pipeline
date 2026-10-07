@@ -32,6 +32,9 @@ def main() -> None:
             "catalog_number",
             "ada_account_id",
             "parent_product_id",
+            "product_upc",
+            "product_upc_source",
+            "product_upc_status",
             "artist_statement_style",
             "transaction_month",
         ])

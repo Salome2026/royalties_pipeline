@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS `{project}.{dataset}.royalty_statement_fact` (
   gpid STRING,
   parent_product_id STRING,
   release_title STRING,
+  product_upc_source STRING,
+  product_upc_status STRING,
   video_id STRING,
   channel_id STRING,
   label STRING,

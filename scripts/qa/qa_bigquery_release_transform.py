@@ -47,6 +47,9 @@ def main() -> None:
                 "artist_best_available": ["Artist A", "Artist B"],
                 "asset_title_statement": ["Song A", "Song B"],
                 "asset_isrc": ["ARA", "ARB"],
+                "product_upc": ["0085365665804", None],
+                "product_upc_source": ["GPID", None],
+                "product_upc_status": ["reported", None],
                 "amount_usd": [12.5, -2.0],
                 "units": [100.0, 5.0],
                 "include_in_statement_view": [True, False],
@@ -58,6 +61,9 @@ def main() -> None:
         assert detail.get_column("statement_month").to_list() == [date(2026, 8, 1), date(2026, 8, 1)]
         assert detail.get_column("transaction_month").to_list() == [date(2026, 7, 1), None]
         assert abs(detail.get_column("amount_usd").sum() - 10.5) < 0.000001
+        assert detail["product_upc"].to_list() == ["0085365665804", None]
+        assert detail["product_upc_source"].to_list() == ["GPID", None]
+        assert detail["product_upc_status"].to_list() == ["reported", None]
 
         dashboard_source = root / "dashboard_source.parquet"
         pl.DataFrame(

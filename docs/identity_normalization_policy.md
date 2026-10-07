@@ -106,8 +106,18 @@ ADA identities are shared by ingestion, catalog and reports in
 - No ISRC: `ADA:<original account>:CATALOG:<Catalogue Number / Catalog Number>`.
 - Only when catalog number is absent: `ADA:<original account>:GPID:<GPID>`.
 - Missing both native identifiers on a non-ISRC row is an ingest error.
-- Native identifiers are not videos, UPCs or inferred ISRCs.
-- Excel `Parent Product ID` is release context, not a song-level alias.
+- Catalog Number remains a native asset identifier, not a UPC or video.
+- `product_upc` accepts explicit `UPC`, Excel `Parent Product ID`, or numeric
+  TXT `GPID`, in that order, only with a valid GTIN-8/12/13/14 check digit.
+  Alphanumeric GPID remains native context. Leading zeros are preserved.
+- Conflicting valid release codes stop ingestion; equivalent zero-padded
+  UPC/EAN representations are not conflicts.
+- `product_upc_source` and `product_upc_status` preserve the resolution method.
+- An album row with no release code can receive one from exactly one UPC for
+  the identical Project Title + Artist Name in that same statement, only when
+  its Product Title equals Project Title. This is marked `derived_release`.
+  No ISRC is inferred, and ambiguous/missing evidence stays blank.
+- Excel `Parent Product ID` identifies the release, never an individual track.
 - Product revenue remains separate; no allocation to tracks.
 - Richer titles or artist strings do not change the native identity.
 - Historical releases preserve the original raw identifiers.

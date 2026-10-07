@@ -15,6 +15,7 @@ sys.path.append(str(SCRIPT_DIR))
 from lib.statement_period import from_ada_filename
 from lib.distributor_policy_store import load_distributor_policy_document
 from lib.ada_identity import ada_isrc_expr, ada_native_code_expr
+from lib.ada_release_codes import add_ada_release_codes
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -220,6 +221,7 @@ def standardize(
     expected_original_account: str,
     policy_rule: dict,
 ) -> pl.DataFrame:
+    frame = add_ada_release_codes(frame)
     columns = set(frame.columns)
     required = {
         "Repdate Month ID",
@@ -295,7 +297,7 @@ def standardize(
         text_expr("Product Title", columns).alias("asset_title_statement"),
         text_expr("Project Title", columns).alias("release_statement_style"),
         text_expr("ISRC", columns).alias("asset_isrc"),
-        text_expr("ada_explicit_upc", columns).alias("product_upc"),
+        text_expr("product_upc", columns).alias("product_upc"),
         text_expr("GPID", columns).alias("gpid"),
         text_expr("Catalog Number", columns).alias("catalog_number"),
         ada_native_code_expr(columns).alias("source_asset_id"),
