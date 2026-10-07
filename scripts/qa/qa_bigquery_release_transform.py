@@ -23,6 +23,7 @@ from scripts.load_bigquery_release import (
     build_detail,
     build_digital,
     build_song,
+    detail_context_schema_sql,
 )
 
 
@@ -34,6 +35,10 @@ def assert_columns(path: Path, expected: list[str]) -> pl.DataFrame:
 
 
 def main() -> None:
+    schema_sql = detail_context_schema_sql("project", "dataset")
+    assert schema_sql.count("ALTER TABLE") == 2
+    assert schema_sql.count("ADD COLUMN IF NOT EXISTS") == 12
+    assert "CREATE OR REPLACE VIEW `project.dataset.royalty_report_detail`" in schema_sql
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
 

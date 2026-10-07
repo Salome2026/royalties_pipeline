@@ -618,6 +618,19 @@ def bq_query_json(bq: str, project: str, location: str, sql: str) -> list[dict[s
     return json.loads(result.stdout or "[]")
 
 
+def detail_context_schema_sql(project: str, dataset: str) -> str:
+    additions = ", ".join(
+        f"ADD COLUMN IF NOT EXISTS {field} STRING"
+        for field in ["catalog_number", "gpid", "parent_product_id", "release_title", "product_upc_source", "product_upc_status"]
+    )
+    statements = [
+        f"ALTER TABLE `{project}.{dataset}.{table}` {additions};"
+        for table in ["royalty_statement_fact", "royalty_transaction_fact"]
+    ]
+    statements.append(f"CREATE OR REPLACE VIEW `{project}.{dataset}.royalty_report_detail` AS SELECT fact.* FROM `{project}.{dataset}.royalty_statement_fact` AS fact WHERE fact.release_id = (SELECT release_id FROM `{project}.{dataset}.current_release`);")
+    return "\n".join(statements)
+
+
 def main() -> None:
     load_local_env(ENV_PATH)
     parser = argparse.ArgumentParser(description="Carga un release inmutable en BigQuery sombra.")
@@ -685,12 +698,7 @@ def main() -> None:
     suffix = re.sub(r"[^a-zA-Z0-9]", "", release_id)[-20:].lower()
     stages = {key: f"_stage_{key}_{suffix}" for key in prepared}
     bq = executable("bq")
-    schema_sql = "\n".join(
-        f"ALTER TABLE `{args.project}.{args.dataset}.{table}` ADD COLUMN IF NOT EXISTS {field} STRING;"
-        for table in ["royalty_statement_fact", "royalty_transaction_fact"]
-        for field in ["catalog_number", "gpid", "parent_product_id", "release_title", "product_upc_source", "product_upc_status"]
-    )
-    schema_sql += f"\nCREATE OR REPLACE VIEW `{args.project}.{args.dataset}.royalty_report_detail` AS SELECT fact.* FROM `{args.project}.{args.dataset}.royalty_statement_fact` AS fact WHERE fact.release_id = (SELECT release_id FROM `{args.project}.{args.dataset}.current_release`);"
+    schema_sql = detail_context_schema_sql(args.project, args.dataset)
     run([bq, f"--project_id={args.project}", "query", f"--location={args.location}", "--use_legacy_sql=false"], input_text=schema_sql)
     for key, table in stages.items():
         bq_load(
