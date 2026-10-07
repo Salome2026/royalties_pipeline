@@ -19,11 +19,11 @@ def main() -> None:
     for value in [None, "", "A10302B0014165109T", "1234567890123", "8718521191727", "0000000000000", "8718521191726.0", "871852119172", "\uff11" * 13]:
         assert not valid_gtin(value), value
     frame = pl.DataFrame({
-        "source": ["ada"] * 5, "Account": ["99500"] * 5,
+        "source": ["ada"] * 5, "ada_account_id": ["99500"] * 5,
         "ISRC": ["BK4DA2632806", "BK4DA2632807", None, None, "BK4DA2632808"],
-        "Catalog Number": ["T1", "T2", "P1", "P2", "T3"],
+        "Catalogue Number": ["T1", "T2", "P1", "P2", "T3"],
         "Project Title": ["Album", "Album", "Album", "Other", "Other"],
-        "Product Title": ["Song 1", "Song 2", "Album", "Other", "Song 3"],
+        "Catalogue Title": ["Song 1", "Song 2", "Album", "Other", "Song 3"],
         "Artist Name": ["Artist"] * 5,
         "parent_product_id": ["8718521191726", "8718521191726", None, None, None],
         "GPID": ["A10302B0014165109T", None, None, "0085365665804", None],
@@ -32,15 +32,16 @@ def main() -> None:
     after = add_ada_release_codes(frame)
     assert after.select(frame.columns).equals(frame), "Original values or order changed"
     assert after.select(ada_catalog_key_expr(set(after.columns)).alias("key")).equals(before)
-    assert after["product_upc"].to_list() == ["8718521191726", "8718521191726", "8718521191726", "0085365665804", None]
-    assert after["product_upc_source"].to_list() == ["Parent Product ID", "Parent Product ID", "same_statement_release", "GPID", None]
-    assert after["product_upc_status"].to_list() == ["reported", "reported", "derived_release", "reported", "unavailable"]
+    assert after["product_upc"].to_list() == ["8718521191726", "8718521191726", "8718521191726", None, None]
+    assert after["product_upc_source"].to_list() == ["Parent Product ID", "Parent Product ID", "same_statement_release", None, None]
+    assert after["product_upc_status"].to_list() == ["reported", "reported", "derived_release", "unavailable", "unavailable"]
     ambiguous = frame.with_columns(pl.Series("parent_product_id", ["8718521191726", "5026854257006", None, None, None]))
     assert add_ada_release_codes(ambiguous)["product_upc"][2] is None
     other_artist = frame.with_columns(pl.Series("Artist Name", ["Artist", "Artist", "Someone else", "Artist", "Artist"]))
     assert add_ada_release_codes(other_artist)["product_upc"][2] is None
     minimal = pl.DataFrame({"GPID": ["0085365665804", "A10302B0014165109T", "1234567890123"]})
-    assert add_ada_release_codes(minimal)["product_upc"].to_list() == ["0085365665804", None, None]
+    assert add_ada_release_codes(minimal)["product_upc"].to_list() == [None, None, None], "GPID must never supply Excel evidence"
+    assert minimal.with_columns(pl.lit("ada").alias("source"), pl.lit("99500").alias("ada_account_id")).select(ada_catalog_key_expr({"source", "ada_account_id", "GPID"}))[0, 0] is None
     assert add_ada_release_codes(pl.DataFrame({"UPC": ["0085365665804"]}))["product_upc"][0] == "0085365665804"
     equivalent = pl.DataFrame({"ada_explicit_upc": ["789556228853"], "parent_product_id": ["0789556228853"]})
     assert add_ada_release_codes(equivalent)["product_upc"][0] == "789556228853"
@@ -52,7 +53,7 @@ def main() -> None:
         pass
     with tempfile.TemporaryDirectory() as temporary:
         path = Path(temporary) / "ada.parquet"
-        after.filter(pl.col("Catalog Number").is_in(["T1", "P1"])).write_parquet(path)
+        after.filter(pl.col("Catalogue Number").is_in(["T1", "P1"])).write_parquet(path)
         with patch.object(catalog, "STANDARDIZED_PATHS", [path]):
             identities = catalog.identity_with_canonical_key().collect()
         product = identities.filter(pl.col("catalog_key") == "ADA:99500:CATALOG:P1")

@@ -23,8 +23,8 @@ CASES = [
     {
         "case": "ada_spotify_subscription",
         "source": "ada",
-        "Digital Service Provider(DSP)": "Spotify",
-        "Dist Chan Desc": "Subscription",
+        "Territory": "Spotify",
+        "Revenue Type Desc": "Subscription",
         "expected_dsp": "Spotify",
         "expected_monetization": "Premium",
         "expected_origin": "Audio / Master",
@@ -32,8 +32,8 @@ CASES = [
     {
         "case": "ada_youtube_ad",
         "source": "ada",
-        "Digital Service Provider(DSP)": "YouTube",
-        "Dist Chan Desc": "Ad Supported",
+        "Territory": "YouTube",
+        "Revenue Type Desc": "Ad Supported",
         "expected_dsp": "YouTube",
         "expected_monetization": "Ads",
         "expected_origin": NOT_REPORTED,
@@ -41,8 +41,8 @@ CASES = [
     {
         "case": "ada_youtube_music",
         "source": "ada",
-        "Digital Service Provider(DSP)": "YouTube Music",
-        "Dist Chan Desc": "Subscription",
+        "Territory": "YouTube Music",
+        "Revenue Type Desc": "Subscription",
         "expected_dsp": "YouTube",
         "expected_monetization": "Premium",
         "expected_origin": "Music / Art Track",
@@ -50,8 +50,8 @@ CASES = [
     {
         "case": "ada_audit_recovery",
         "source": "ada",
-        "Digital Service Provider(DSP)": "Spotify",
-        "Dist Chan Desc": "Audit Recovery",
+        "Territory": "Spotify",
+        "Revenue Type Desc": "Audit Recovery",
         "expected_dsp": "Spotify",
         "expected_monetization": "Adjustment",
         "expected_origin": "Audio / Master",

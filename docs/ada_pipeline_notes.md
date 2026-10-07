@@ -1,277 +1,123 @@
-# ADA pipeline notes
+# ADA: lectura obligatoria de Excel
 
-## Alcance
+## Alcance y fuente unica
 
-ADA es una distribuidora multi-cuenta del pipeline productivo vigente. Las
-cuentas productivas son:
+Regla vigente desde 2026-10-07: SOLO Excel .xlsx para Mawz e Indyana.
+No hay lector TXT, prioridad de formatos, fallback ni dependencia de GPID.
+Los archivos anteriores son respaldo historico fuera de ingesta, no una fuente.
 
-- `source = ada`
-- `account = mawz`
-- raw: `input_raw/ada/mawz`
-- `account = indyana_records`
-- raw: `input_raw/ada/Indyana Records`
-
-Cada cuenta conserva su carpeta, identificador interno y policy. El ingestor ADA
-recorre todas las cuentas declaradas y escribe un unico mart ADA con la columna
-`account` diferenciada. No se mezclan archivos ni se duplica un ingestor por
-cuenta.
-
-Identidad validada del origen:
-
-- Mawz: `Account = 99205` -> `account = mawz`;
-- Indyana Records: `Account = 99500`, `Account Name = INDYANA RECORDS LLC` ->
-  `account = indyana_records`.
-
-El ingestor rechaza un archivo ubicado en una carpeta cuyo `Account` original no
-coincida con el esperado. El nombre original, `Account Name` y `Payee` permanecen
-intactos en las columnas raw.
-
-## Formato original
-
-Se aceptan TXT tabulado `Statement_..._YYYYMMDD.txt` y Excel
-`<cuenta>_<YYYYMM>_<YYYYMM>_<cuenta>_DTL.xlsx`. Por cuenta/mes se lee un solo
-archivo: Excel tiene prioridad sobre TXT. Dos archivos del mismo formato para
-ese mes son un error. Nunca sumar las dos representaciones.
-
-El Excel se lee de `Distribution Statement`, localizando la cabecera por sus
-nombres. Se validan `Contract` y el periodo del encabezado contra el filename.
-Se excluyen los pies `Sub Totals`, `Previously Accounted Deductions` y `Totals`.
-Las columnas originales del archivo elegido quedan preservadas.
-
-Los TXT que contienen solamente:
-
-```text
-No Earning Activity for this Royalty Period
-```
-
-son statements validos sin movimientos. Cuentan para continuidad mensual, pero
-no crean filas de regalias de importe cero.
-
-### Mapa de lectura obligatorio
-
-| Dato | TXT | Excel |
+| Cuenta | Carpeta | Identificador original |
 | --- | --- | --- |
-| Artista informado | Artist Name | Artist Name |
-| Tema | Product Title | Catalogue Title |
-| Lanzamiento | Project Title | Project Title |
-| ISRC | ISRC | ISRC |
-| Identificador nativo | Catalog Number; fallback GPID | Catalogue Number |
-| UPC de lanzamiento validado | UPC si existe; GPID numerico validado | UPC; fallback Parent Product ID |
-| Mes de consumo | Repdate Month ID | Reported Month |
-| Mes de statement | Filename, validado con Start/End Period | Filename, validado con encabezado |
-| DSP / plataforma | Digital Service Provider(DSP) | Territory (no es el pais) |
-| Pais | Country | Country Code |
-| Unidades | Sale Units | Sales |
-| Bruto | Royalty Payable | Receipts Value |
-| Deduccion | Deductible Fees | Distribution Fees |
-| Neto | Net Royalty Payable | Receipts Value menos Distribution Fees |
+| mawz | input_raw/ada/mawz | 99205 |
+| indyana_records | input_raw/ada/Indyana Records | 99500 |
 
-El lector rechaza importes nulos/no numericos/no finitos, bruto menos fees que
-no concilie con el neto y meses de consumo invalidos. No elimina esas filas
-silenciosamente ni cambia un importe para hacerlo cerrar.
+Un solo ingestor produce standardized_raw_ada y song_level_ada para ambas cuentas.
+Se valida la cuenta de Contract contra filename y carpeta; no se mezclan cuentas.
 
-## Periodos
+## Validacion del archivo
 
-- `statement_period`: mes del filename, tanto TXT como Excel.
-- validacion: `Start Period` y `End Period` deben coincidir con ese mes.
-- `transaction_month`: `Repdate Month ID`.
-- `receipt_month`: `Recdate Month ID`.
+- Nombre: cuenta_YYYYMM_YYYYMM_cuenta_DTL.xlsx, meses validos e iguales.
+- Hoja Distribution Statement; localizar columnas por nombre, no por posicion.
+- Contract y Royalties Statement for Period deben coincidir con cuenta y mes.
+- Rechazar columnas duplicadas, campos obligatorios ausentes y dos archivos por mes.
+- Rechazar formatos distintos de .xlsx en la carpeta activa; no leerlos en silencio.
+- Omitir solo filas vacias y pies Sub Totals, Previously Accounted Deductions y Totals.
+- Preservar las columnas originales y duplicados economicos reales.
+- Conservar filename, ruta, hash y fecha de ingesta como trazabilidad.
 
-En Excel, `Reported Month` es consumo; el periodo mensual es el del filename,
-contrastado con el encabezado. No trasladar el ingreso al mes de consumo.
+## Mapa obligatorio
 
-Un statement puede liquidar consumos de meses anteriores. Esto no es error y no
-autoriza a trasladar el ingreso a otro `statement_period`.
+| Columna Excel | Significado y destino |
+| --- | --- |
+| Artist Name | Creditos originales; artist_statement_style |
+| Catalogue Title | Tema; track_statement_style y asset_title_statement |
+| Project Title | Lanzamiento; release_statement_style |
+| ISRC | ISRC valido normalizado; asset_isrc |
+| Catalogue Number | Identidad nativa; catalog_number y source_asset_id |
+| UPC | UPC explicito, solo con GTIN valido |
+| Parent Product ID | Contexto de lanzamiento; UPC alternativo validado |
+| Local Product Number | Contexto original, NO supuesto UPC |
+| Reported Month | Consumo; transaction_month, YYYYMM a YYYY-MM |
+| Filename y encabezado | Liquidacion; statement_period |
+| Territory | Plataforma / DSP; store_name. NO es el pais |
+| Country Code | Pais; territory |
+| Country Description | Descripcion original del pais |
+| Revenue Type Desc | Modalidad; use_type |
+| Price Name | Precio / producto; product_type |
+| Sales | Unidades, incluidas correcciones negativas; units |
+| Receipts Value | Bruto; gross_royalty_usd |
+| Distribution Fees | Deduccion ADA; deductible_fees_usd |
+| Bruto menos deduccion | amount_usd, net_amount y net_amount_usd |
+| Marketing Owner | Contexto original; NO prueba de contrato ni titularidad |
 
-## Importes
+ADA Excel no informa fecha de acreditacion bancaria: receipt_month queda vacio.
+Consumo sirve para tendencias; statement sirve para liquidar. Nunca intercambiarlos.
 
-- bruto informativo: `Royalty Payable` -> `gross_royalty_usd`;
-- comision/deducciones: `Deductible Fees` -> `deductible_fees_usd`;
-- neto real reportable: `Net Royalty Payable` -> `amount_usd`, `net_amount` y
-  `net_amount_usd`.
+## Dinero y policies
 
-Debe cumplirse, admitiendo solo precision decimal de origen:
+Calcular Receipts Value menos Distribution Fees con Decimal, sin redondear filas.
+Validar importes y unidades numericos, no vacios y finitos.
+Artist Royalties, Mechanical Fees, Admin Fees, Upload Fees y Other Fees fueron
+auditados en cero; si cambian o son invalidos, detener la ingesta para revisar.
+Nunca cambiar el dinero para que cierre ni descartar una fila invalida.
 
-```text
-Royalty Payable - Deductible Fees = Net Royalty Payable
-```
+Las flags y revenue_basis se leen de la policy vigente de Cloud SQL. Mantener
+sin cambios los ajustes de reportes de cada cuenta. El lector NO aplica splits,
+no convierte ingresos en cobros bancarios y no descuenta otra vez la policy.
 
-ADA/Mawz y ADA/Indyana Records entran como generacion y caja propia completa.
-Cada cuenta tiene su ajuste configurable independiente, gobernado por la policy
-operativa de Cloud SQL; no se modifica durante la ingesta. Los flags de
-statement, catalogo, caja y `revenue_basis` se leen de esa policy y la ingesta
-falla si una cuenta declarada no tiene policy.
+## Identidades y lanzamientos
 
-Excel auditado: bruto = `Receipts Value`; deduccion = `Distribution Fees`;
-neto = bruto menos deduccion, con Decimal sin redondear filas. `Artist Royalties`,
-`Mechanical Fees`, `Admin Fees`, `Upload Fees` y `Other Fees` son cero. Si en
-un futuro dejan de ser cero se detiene la ingesta para revisar su significado.
-Los aliases normalizados reutilizan el circuito vigente; no cambian ajustes
-de distribuidora ni aplican splits.
+1. ISRC valido: ISRC:<ISRC>. Distintos ISRC son distintos assets, aun con igual titulo.
+2. Sin ISRC: ADA:<cuenta original>:CATALOG:<Catalogue Number>.
+3. Sin ambos identificadores: detener ingesta. No inferir GPID, ISRC ni video.
+4. Venta de album/producto permanece independiente; no repartirla entre pistas.
+5. UPC relaciona lanzamientos con assets; NO reemplaza la identidad de pista.
+6. UPC primero, Parent Product ID despues: GTIN de 8/12/13/14 digitos con checksum
+   valido, distinto de cero. Preservar ceros iniciales. Contradiccion valida: error.
+7. Un album sin UPC puede recibir el codigo unico de sus pistas SOLO en el mismo
+   statement, con Project Title y Artist Name identicos, y Catalogue Title igual
+   a Project Title. Marcar same_statement_release / derived_release.
+8. Sin evidencia, queda vacio. No buscar en Internet ni usar archivos retirados.
 
-## Identidad y dimensiones
+## Participantes sin invenciones
 
-- artista: `Artist Name`;
-- tema TXT: `Product Title`, con fallback a `Project Title`;
-- tema Excel: `Catalogue Title`;
-- lanzamiento, separado del tema: `Project Title`;
-- ISRC: `ISRC`;
-- identificador ADA: `GPID`, conservado en `gpid`;
-- catalog number: `Catalog Number` (TXT) / `Catalogue Number` (Excel),
-  conservado en `catalog_number` y `source_asset_id`;
-- UPC canonico: codigo de lanzamiento valido de UPC, Parent Product ID o GPID;
-- store: `Digital Service Provider(DSP)` (TXT) / `Territory` (Excel);
-- territorio: `Country` (TXT) / `Country Code` (Excel);
-- unidades: `Sale Units` (TXT) / `Sales` (Excel);
-- modalidad: `Dist Chan Desc` y `Price Desc` (TXT) /
-  `Revenue Type Desc` y `Price Name` (Excel).
+Artist Name se conserva literal. No inferir invitados desde Project Title.
+Para un credito de 30 caracteres, usar una version mas larga SOLO cuando hay
+una unica coincidencia de prefijo en otro Excel del mismo ISRC. Conservarla en
+artist_catalog_style con estado confirmed_prefix y el archivo de evidencia.
+Conflictos quedan conflicting_prefix; sin evidencia possible_truncation.
+Tener 30 caracteres no demuestra por si solo que un nombre este mal.
+Creditos, orden principal y porcentajes contractuales son cosas distintas.
+No aplicar contratos a los reportes actuales.
 
-Excel no informa GPID. `Parent Product ID` se conserva como contexto de release
-en `parent_product_id`: puede reunir varios ISRC. No usarlo como identidad de
-pista. Se reconoce como UPC/EAN de lanzamiento solo si tiene longitud GTIN
-8, 12, 13 o 14 y digito verificador valido. Conservar ceros iniciales.
+## Circuito y controles de reemplazo
 
-`Catalog Number` nunca se reinterpreta como UPC. `GPID` es mixto: los valores
-alfanumericos son identificadores nativos; los numericos con GTIN valido pueden
-ser UPC de lanzamiento. Prioridad: UPC explicito, Parent Product ID, GPID.
-Dos candidatos validos distintos detienen la ingesta. Los originales quedan
-intactos; `product_upc_source` y `product_upc_status` registran la procedencia.
+Procesar ejecuta ingest_standardized_ada.py y build_song_level_ada.py, luego
+consolidado, statement summary, catalogo y summaries de ingresos/dashboard.
+Publicar activa un release inmutable de GCS y carga/conciliacion en BigQuery.
+Las columnas originales permanecen en Parquet; BigQuery conserva identidad,
+lanzamiento, participantes originales/evidencia, fechas, DSP/pais, unidades,
+bruto, fees, neto y trazabilidad. La columna historica gpid en BigQuery queda
+nula en nuevos releases ADA; no se utiliza para interpretar Excel.
 
-Una fila de album sin UPC puede recibir el codigo unico de las pistas del
-mismo statement, solo con Project Title y Artist Name identicos y Product Title
-igual a Project Title. Se marca `same_statement_release` / `derived_release`.
-Si hay varios codigos o falta evidencia, queda vacio. No se infiere ISRC ni se
-asigna el ingreso del album a sus pistas. No se enriquecen meses sin evidencia
-usando otros statements ni se depende de archivos TXT retirados.
+Antes de reemplazar, respaldar y conciliar por cuenta, statement, consumo,
+ISRC, Catalogue Number, DSP, pais, modalidad y precio: bruto, fees, neto y unidades.
+Los Excel pueden agrupar filas antes separadas sin alterar esas dimensiones.
+En el reemplazo revisado, Revenue Type Desc difiere de las modalidades del
+publicado anterior (incluye Bundle, Settlement y Unclassified). Cuatro grupos
+antes DSP Not Reported ahora informan WEA LATINA INC. Registrar estas diferencias
+de metadata, no copiar clasificaciones viejas ni alterar dinero para ocultarlas.
+Verificar tambien otras distribuidoras, dashboard, policies y catalog keys.
+No borrar releases historicos ni actualizar catalogo de otros proyectos.
 
-Validacion 2026-10-07: los Excel de julio/agosto traen Parent Product ID, aunque
-UPC este vacio; junio no trae Parent Product ID. Se verificaron contra Deezer
-los codigos 8718521191726, 8718521211820, 1200214346010 y 8721416311413.
-Meli Gimenez conserva ADA:99500:CATALOG:A10302B0013835580K como identidad del
-album, y 8718521191726 solo como contexto de lanzamiento.
+Inventario completo revisado: 28 Excel Mawz (2024-05 a 2026-08) y 3 Excel Indyana
+(2026-06 a 2026-08). Febrero-abril 2024 Mawz estaban confirmados sin actividad;
+son antecedentes de continuidad, no filas economicas inventadas ni archivos
+activos necesarios. Agosto Mawz es nuevo: neto USD 12633.68009634.
+Evidencia del reemplazo: C:/royalties_pipeline/staging/ada_excel_only_20261007.
 
-Control de reconstruccion 2026-10-07: 33 statements releidos, 622638 filas
-economicas, neto USD 365887.67805032 sin cambios. Se recuperaron 106 UPC/EAN en
-100470 filas. Los 42 ingresos sin ISRC conservan sus 10 identidades nativas y
-ahora tienen contexto UPC; ninguna venta de album hereda ISRC. Las filas de las
-otras distribuidoras, importes por clave, unidades y fechas permanecen iguales.
-Evidencia: `C:/royalties_pipeline/staging/ada_release_codes_20261007/validation.json`.
-Pruebas obligatorias: `qa_ada_release_codes.py`, `qa_ada_excel_replacement.py`,
-`qa_ada_accounts.py`, `qa_bigquery_release_transform.py`,
-`qa_bigquery_sql_contract.py`. Repetirlas al cambiar esta lectura.
-
-### Futuras ingestas
-
-El boton Procesar de ADA ejecuta `ingest_standardized_ada.py` y despues
-`build_song_level_ada.py`; ambos forman parte del circuito publicado. El
-ingestor siempre aplica `lib/ada_release_codes.py` antes de guardar el mart.
-Estas reglas son por formato y columnas, no excepciones por ISRC, artista o
-statement historico. No se consulta Internet ni se exige un TXT retirado para
-procesar un Excel nuevo. La cuenta y el periodo se validan en cada archivo;
-las fees nuevas no conocidas y los codigos validos contradictorios detienen
-el procesamiento. Los campos sin evidencia quedan vacios y los originales se
-preservan. Las pruebas incluyen un archivo sintetico con catalogo A123, ajeno
-a los datos historicos, para comprobar el circuito de lectura y estandarizacion.
-Los identificadores del TXT se leen como texto aun cuando toda la columna sea
-numerica. Otra prueba sintetica confirma GPID 0085365665804 sin perder ceros,
-sin inventar ISRC y con consumo separado de statement.
-
-En el consolidado, ADA usa la taxonomia comun de Store/DSP. Caso testigo
-validado para Spotify:
-
-- `Dist Chan Desc = Subscription` -> monetizacion `Premium`;
-- `Dist Chan Desc = Ad Supported` -> monetizacion `Ads`;
-- `Ad Channel` -> monetizacion `Ads`;
-- `Payment Top - Up` y `Audit Recovery` -> `Adjustment`;
-- el origen es `Audio / Master` para Spotify y DSP de audio;
-- `YouTube Music` -> origen `Music / Art Track`;
-- `YouTube` generico queda con origen `No informado` si no existe otra evidencia;
-- ADA no informa un plan comercial y ese dato no forma parte del resumen.
-
-Por lo tanto, ningun reporte debe agrupar ADA solamente bajo `Spotify`. Debe
-mostrar al menos la separacion Premium/Ads cuando el statement la demuestra,
-sin modificar `Dist Chan Desc`, `Price Desc` ni el resto de las columnas raw.
-
-El contrato completo y los valores visibles se definen en
-`docs/store_dsp_taxonomy_policy.md`.
-
-## Scripts y marts productivos
-
-- `scripts/ingest_standardized_ada.py`
-- `scripts/build_song_level_ada.py`
-- `warehouse/marts/standardized_raw_ada.parquet`
-- `warehouse/marts/song_level_ada.parquet`
-
-Luego se ejecuta el circuito compartido vigente:
-
-1. `build_consolidated_marts.py`
-2. `build_statement_summary_mart.py`
-3. `build_catalog_master.py`
-4. summaries de ingresos digitales y dashboard
-5. auditorias
-6. publicacion del paquete analitico
-
-No existe conector ADA hacia pipelines archivados ni hacia SQLite. No se agrega
-compatibilidad con esquemas anteriores.
-
-## Continuidad validada por cuenta
-
-### Mawz
-
-Se recibieron 30 statements consecutivos desde 2024-02 hasta 2026-07:
-
-- 27 con movimientos;
-- 3 sin actividad: 2024-02, 2024-03 y 2024-04;
-- sin meses faltantes;
-- sin meses duplicados.
-
-### Indyana Records
-
-Caso testigo historico de julio, actualmente reemplazado por su Excel equivalente:
-
-- archivo: `Statement_99500_5779_99500_20260731.txt`;
-- 30.505 filas;
-- 0 filas sin ISRC;
-- bruto USD 7.957,40619029;
-- deducciones USD 795,74062007;
-- neto USD 7.161,66557022;
-- `Royalty Payable - Deductible Fees = Net Royalty Payable` validado;
-- consumos informados: 2026-05 a 2026-06;
-- actualmente tambien estan cargados junio y agosto 2026.
-
-## Regla de lectura obligatoria (2026-10-06)
-
-Antes de modificar ADA, leer este documento, la policy vigente de Cloud SQL,
-`identity_normalization_policy.md` y el diccionario de statements. No extrapolar
-otra distribuidora ni otro formato de ADA.
-
-1. ISRC valido: `ISRC:<ISRC>`. Nunca unir ISRC distintos por titulo.
-2. Sin ISRC: `ADA:<cuenta original>:CATALOG:<numero de catalogo>`.
-3. Si falta catalog number: `ADA:<cuenta original>:GPID:<GPID>`. Sin ambos
-   identificadores en una fila sin ISRC, detener la ingesta.
-4. La fila sin ISRC es un producto. No inventar ISRC, video, participantes ni
-   distribuir ventas de album entre pistas.
-5. `Artist Name` es evidencia informada, no una lista contractual verificada.
-   Julio/agosto Excel traen nombres mas completos; junio aun tiene truncamientos.
-   Revisar las ambiguedades, no completar a ojo.
-6. Antes de reemplazar: comparar todas las filas economicas y duplicados por
-   cuenta, ISRC, catalog number, DSP, pais, modalidad, precio y meses; comprobar
-   bruto, fees, neto y unidades. Respaldar, verificar otras fuentes y conciliar BQ.
-
-Implementacion: `scripts/lib/ada_identity.py`.
-Prueba: `scripts/qa/qa_ada_excel_replacement.py`.
-
-Statements activos Indyana: junio, julio y agosto 2026 (Excel).
-
-| Statement | Filas | Unidades | Neto USD |
-| --- | ---: | ---: | ---: |
-| 2026-06 | 3.936 | 758.912 | 759,09047926 |
-| 2026-07 | 30.505 | 11.263.163 | 7.161,66557022 |
-| 2026-08 | 69.924 | 49.158.662 | 20.218,40138180 |
-| Total | 104.365 | 61.180.737 | 28.139,15743128 |
-
-Comparacion TXT/Excel completa: mismas transacciones economicas, sin duplicar.
-Fila sin ISRC de agosto: `A10302B0013835580K`, neto USD 1,89, unidades 1;
-queda como `ADA:99500:CATALOG:A10302B0013835580K`. GPID historico
-`8718521191726` se conserva en TXT y releases respaldados, no se fabrica para
-un Excel que no lo informa. Los tres TXT sustituidos se archivan fuera de ingesta.
+Pruebas obligatorias al cambiar estas reglas: qa_ada_excel_replacement.py,
+qa_ada_release_codes.py, qa_ada_accounts.py, qa_master_contracts_pilot.py,
+qa_store_reporting_dimensions.py, qa_bigquery_release_transform.py y conciliacion BigQuery.
+Leer tambien identity_normalization_policy.md, statement_period_policy.md,
+store_dsp_taxonomy_policy.md y statement_source_dictionary.json ANTES de editar.

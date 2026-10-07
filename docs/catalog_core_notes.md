@@ -44,7 +44,8 @@ La clave canonica se decide asi:
 Regla adicional:
 
 - ADA sin ISRC usa `ADA:<cuenta original>:CATALOG:<numero de catalogo>`;
-  solo si falta el numero se usa GPID. No clasificarlo como video por la forma
+  sin numero de catalogo se detiene la ingesta. ADA solo lee Excel, sin GPID.
+  No clasificarlo como video por la forma
   del ID ni vincularlo a pistas mediante `Parent Product ID`. Leer
   `ada_pipeline_notes.md` y `identity_normalization_policy.md`.
 

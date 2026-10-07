@@ -29,6 +29,17 @@ SOURCE_FILES = {
     "digital": "digital_income_statement_summary.parquet",
 }
 
+ADA_DETAIL_CONTEXT = {
+    "ada_account_id": "ada_account_id",
+    "local_product_number": "local_product_number",
+    "marketing_owner": "Marketing Owner",
+    "country_description": "Country Description",
+    "product_type": "product_type",
+    "artist_catalog_style": "artist_catalog_style",
+    "artist_credit_status": "artist_credit_status",
+    "artist_credit_evidence_file": "artist_credit_evidence_file",
+}
+
 DETAIL_FIELDS = [
     "release_id",
     "statement_month",
@@ -48,6 +59,9 @@ DETAIL_FIELDS = [
     "release_title",
     "product_upc_source",
     "product_upc_status",
+    *ADA_DETAIL_CONTEXT,
+    "gross_royalty_usd",
+    "deductible_fees_usd",
     "video_id",
     "channel_id",
     "label",
@@ -322,7 +336,7 @@ def build_detail(source: Path, target: Path, release_id: str) -> None:
                 text_expr(columns, ["asset_isrc", "Asset ISRC", "ISRC"]).alias("asset_isrc"),
                 text_expr(columns, ["product_upc", "UPC Code", "UPC"]).alias("product_upc"),
                 pl.when(text_expr(columns, ["source"]) == "ada")
-                .then(text_expr(columns, ["source_asset_id", "catalog_number", "gpid"]))
+                .then(text_expr(columns, ["source_asset_id", "catalog_number"]))
                 .otherwise(text_expr(columns, ["track_id", "Label Track ID", "Track ID", "gpid"]))
                 .alias("track_id"),
                 *[
@@ -330,8 +344,12 @@ def build_detail(source: Path, target: Path, release_id: str) -> None:
                     .then(text_expr(columns, [field]))
                     .otherwise(pl.lit(None).cast(pl.Utf8))
                     .alias(target_field)
-                    for field, target_field in [("catalog_number", "catalog_number"), ("gpid", "gpid"), ("parent_product_id", "parent_product_id"), ("release_statement_style", "release_title"), ("product_upc_source", "product_upc_source"), ("product_upc_status", "product_upc_status")]
+                    for field, target_field in [("catalog_number", "catalog_number"), ("parent_product_id", "parent_product_id"), ("release_statement_style", "release_title"), ("product_upc_source", "product_upc_source"), ("product_upc_status", "product_upc_status"), *[(field, target) for target, field in ADA_DETAIL_CONTEXT.items()]]
                 ],
+                pl.lit(None).cast(pl.Utf8).alias("gpid"),
+                *[pl.when(text_expr(columns, ["source"]) == "ada").then(float_expr(columns, name))
+                  .otherwise(pl.lit(None).cast(pl.Float64)).alias(name)
+                  for name in ["gross_royalty_usd", "deductible_fees_usd"]],
                 text_expr(columns, ["video_id", "Video ID", "VideoId"]).alias("video_id"),
                 text_expr(columns, ["channel_id", "Channel ID", "ChannelId"]).alias("channel_id"),
                 text_expr(
@@ -356,7 +374,7 @@ def build_detail(source: Path, target: Path, release_id: str) -> None:
                 text_expr(columns, ["statement_file_name"]).alias("statement_file_name"),
                 text_expr(columns, ["statement_file_hash"]).alias("statement_file_hash"),
             ]
-        ),
+        ).select(DETAIL_FIELDS),
         target,
     )
 
@@ -621,8 +639,9 @@ def bq_query_json(bq: str, project: str, location: str, sql: str) -> list[dict[s
 def detail_context_schema_sql(project: str, dataset: str) -> str:
     additions = ", ".join(
         f"ADD COLUMN IF NOT EXISTS {field} STRING"
-        for field in ["catalog_number", "gpid", "parent_product_id", "release_title", "product_upc_source", "product_upc_status"]
+        for field in ["catalog_number", "gpid", "parent_product_id", "release_title", "product_upc_source", "product_upc_status", *ADA_DETAIL_CONTEXT]
     )
+    additions += ", ADD COLUMN IF NOT EXISTS gross_royalty_usd FLOAT64, ADD COLUMN IF NOT EXISTS deductible_fees_usd FLOAT64"
     statements = [
         f"ALTER TABLE `{project}.{dataset}.{table}` {additions};"
         for table in ["royalty_statement_fact", "royalty_transaction_fact"]

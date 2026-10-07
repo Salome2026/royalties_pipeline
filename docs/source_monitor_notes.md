@@ -45,9 +45,10 @@ La pantalla no trata todos los archivos que no matchean contra el mart como erro
 
 Solo `pending_real` bloquea la publicacion a cloud.
 
-Para ADA, un TXT con el texto `No Earning Activity for this Royalty Period`
-es un statement mensual recibido y revisado. Se clasifica `ignored_empty`, no
-genera filas economicas y no bloquea la publicacion.
+ADA solo admite Excel .xlsx. Archivos de otros formatos se rechazan y bloquean
+la publicacion hasta retirarlos de la carpeta activa. Los meses historicos Mawz
+2024-02 a 2024-04 se confirmaron sin actividad; son antecedentes de continuidad,
+no filas economicas ni dependencias de los archivos retirados.
 
 ADA se monitorea por cuenta. `ADA / Mawz` y `ADA / Indyana Records` tienen
 carpetas y continuidad independientes, aunque `Procesar nuevos` reconstruye el

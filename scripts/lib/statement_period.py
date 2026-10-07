@@ -124,17 +124,10 @@ def from_ada_filename(file_name: str) -> StatementPeriodInfo:
         end = f"{excel.group(4)}-{excel.group(5)}"
         if start == end and 1 <= int(excel.group(3)) <= 12:
             return StatementPeriodInfo(start, "filename", "ADA Excel statement month validated against the workbook period and account.")
-    match = re.search(r"_(\d{4})(\d{2})\d{2}(?:\s*\(\d+\))?\.txt$", file_name, flags=re.IGNORECASE)
-    if not match:
-        return StatementPeriodInfo(
-            period="unknown",
-            source="filename",
-            note="ADA filename did not end with statement date YYYYMMDD.",
-        )
     return StatementPeriodInfo(
-        period=f"{match.group(1)}-{match.group(2)}",
+        period="unknown",
         source="filename",
-        note="ADA statement period inferred from filename ending YYYYMMDD and validated against Recdate Month ID.",
+        note="ADA requires an Excel filename account_YYYYMM_YYYYMM_account_DTL.xlsx with matching valid months.",
     )
 
 

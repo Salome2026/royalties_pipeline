@@ -259,6 +259,7 @@ def standardized_identity_frame(path: Path) -> pl.LazyFrame | None:
         "YouTube Video Title",
     ])
     artist = coalesce_text(schema, [
+        "artist_catalog_style",
         "artist_statement_style",
         "asset_artist_statement",
         "artist_best_available",
@@ -529,7 +530,7 @@ def build_catalog_master() -> pl.DataFrame:
     isrc_raw = coalesce_text(schema, ["asset_isrc", "ISRC"])
     track_id = coalesce_text(schema, ["track_id", "video_id", "label_track_id", "Label Track ID", "Track ID", "Video ID"])
     title = coalesce_text(schema, ["track_statement_style", "asset_title_statement", "Track Title", "Title", "Video Title"])
-    artist = coalesce_text(schema, ["artist_statement_style", "asset_artist_statement", "Artists", "Channel Name"])
+    artist = coalesce_text(schema, ["artist_catalog_style", "artist_statement_style", "asset_artist_statement", "Artists", "Channel Name"])
     content_type = coalesce_text(schema, ["content_type"])
     source_sheet = coalesce_text(schema, ["source_sheet"])
     revenue_basis = coalesce_text(schema, ["revenue_basis"])

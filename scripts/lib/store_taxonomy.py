@@ -84,7 +84,7 @@ def add_store_dimensions(frame: pl.LazyFrame, columns: set[str] | None = None) -
     source_sheet = _text(columns, "source_sheet").str.to_lowercase()
     statement_type = _text(columns, "statement_type").str.to_lowercase()
 
-    ada_store = _first_text(columns, ["Digital Service Provider(DSP)", "dsp", "DSP"])
+    ada_store = _first_text(columns, ["store_name", "Territory"])
     dashgo_store = _first_text(columns, ["store_name", "Store"])
     fuga_store = _first_text(columns, ["dsp_1", "dsp", "DSP", "Sale Store Name"])
     onerpm_store = _first_text(columns, ["Store", "store_name"])
@@ -147,7 +147,7 @@ def add_store_dimensions(frame: pl.LazyFrame, columns: set[str] | None = None) -
         .alias("dsp_normalized")
     )
 
-    ada_channel = _text(columns, "Dist Chan Desc").str.to_lowercase()
+    ada_channel = _first_text(columns, ["use_type", "Revenue Type Desc"]).str.to_lowercase()
     dashgo_use = _text(columns, "Use Type").str.to_uppercase()
     fuga_user = _first_text(columns, ["sale_user_type", "Sale User Type"]).str.to_lowercase()
     onerpm_store_lower = onerpm_store.str.to_lowercase()
@@ -155,7 +155,7 @@ def add_store_dimensions(frame: pl.LazyFrame, columns: set[str] | None = None) -
     soundon_subtype = _first_text(columns, ["sales_sub_type", "Sales Sub Type"]).str.to_uppercase()
 
     all_usage = _joined(columns, [
-        "Dist Chan Desc", "Price Desc", "sale_user_type", "Sale User Type",
+        "Dist Chan Desc", "Price Desc", "Revenue Type Desc", "Price Name", "sale_user_type", "Sale User Type",
         "sales_sub_type", "Sales Sub Type", "use_type", "Use Type",
         "sale_type", "Sale Type", "Sales Type", "TRANSACTION TYPE",
         "TRANSACTION SUBTYPE", "Product Type", "product_type", "Royalty Type",

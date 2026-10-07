@@ -30,9 +30,9 @@ Esto permite auditar por que un archivo o fila quedo asignado a un periodo de li
 | Orchard moderno | Columna `STATEMENT PERIOD` | `column` |
 | Altafonte legacy | Encabezados mensuales del Excel historico | `legacy_manual` |
 | SoundOn | Columna `Reporting Period` | `column` |
-| ADA | Fecha final `YYYYMMDD` del TXT, validada con `Start Period` y `End Period` | `filename` |
+| ADA | Mes `YYYYMM` del Excel, validado con el encabezado y la cuenta | `filename` |
 
-En ADA, `Repdate Month ID` se conserva como `transaction_month`: puede ser
+En ADA, `Reported Month` se conserva como `transaction_month`: puede ser
 anterior al mes liquidado y no debe reemplazar `statement_period`.
 
 ## FUGA correction

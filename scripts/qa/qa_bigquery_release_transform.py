@@ -37,7 +37,7 @@ def assert_columns(path: Path, expected: list[str]) -> pl.DataFrame:
 def main() -> None:
     schema_sql = detail_context_schema_sql("project", "dataset")
     assert schema_sql.count("ALTER TABLE") == 2
-    assert schema_sql.count("ADD COLUMN IF NOT EXISTS") == 12
+    assert schema_sql.count("ADD COLUMN IF NOT EXISTS") == 32
     assert "CREATE OR REPLACE VIEW `project.dataset.royalty_report_detail`" in schema_sql
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
@@ -53,7 +53,11 @@ def main() -> None:
                 "asset_title_statement": ["Song A", "Song B"],
                 "asset_isrc": ["ARA", "ARB"],
                 "product_upc": ["0085365665804", None],
-                "product_upc_source": ["GPID", None],
+                "product_upc_source": ["Parent Product ID", None],
+                "gross_royalty_usd": [15.0, None],
+                "deductible_fees_usd": [2.5, None],
+                "artist_catalog_style": ["Artist A & Guest", None],
+                "artist_credit_status": ["confirmed_prefix", None],
                 "product_upc_status": ["reported", None],
                 "amount_usd": [12.5, -2.0],
                 "units": [100.0, 5.0],
@@ -67,7 +71,11 @@ def main() -> None:
         assert detail.get_column("transaction_month").to_list() == [date(2026, 7, 1), None]
         assert abs(detail.get_column("amount_usd").sum() - 10.5) < 0.000001
         assert detail["product_upc"].to_list() == ["0085365665804", None]
-        assert detail["product_upc_source"].to_list() == ["GPID", None]
+        assert detail["product_upc_source"].to_list() == ["Parent Product ID", None]
+        assert detail["gpid"].null_count() == 2
+        assert detail["gross_royalty_usd"].to_list() == [15.0, None]
+        assert detail["deductible_fees_usd"].to_list() == [2.5, None]
+        assert detail["artist_catalog_style"].to_list() == ["Artist A & Guest", None]
         assert detail["product_upc_status"].to_list() == ["reported", None]
 
         dashboard_source = root / "dashboard_source.parquet"

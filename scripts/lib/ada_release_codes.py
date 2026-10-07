@@ -17,7 +17,7 @@ def valid_gtin(value: str | None) -> bool:
 
 
 def add_ada_release_codes(frame: pl.DataFrame) -> pl.DataFrame:
-    fields = [("ada_explicit_upc", "UPC"), ("parent_product_id", "Parent Product ID"), ("GPID", "GPID")]
+    fields = [("ada_explicit_upc", "UPC"), ("parent_product_id", "Parent Product ID")]
     candidates = []
     for name, label in fields:
         raw = text_field(set(frame.columns), [name] if name == label else [name, label])
@@ -32,7 +32,7 @@ def add_ada_release_codes(frame: pl.DataFrame) -> pl.DataFrame:
         for left in range(len(names)) for right in range(left + 1, len(names))
     ])
     if result.select(conflict.any()).item():
-        raise ValueError("ADA contiene UPC, Parent Product ID o GPID validos pero contradictorios; revisar antes de publicar.")
+        raise ValueError("ADA contiene UPC y Parent Product ID validos pero contradictorios; revisar antes de publicar.")
     result = result.with_columns([
         pl.coalesce(names).alias("product_upc"),
         pl.coalesce([
@@ -47,7 +47,7 @@ def add_ada_release_codes(frame: pl.DataFrame) -> pl.DataFrame:
     # An Excel album row can omit the parent code carried by its tracks. Only
     # complete it from one exact release/artist pair in this same statement.
     context = ["Project Title", "Artist Name"]
-    if set(context + ["Product Title"]).issubset(result.columns):
+    if set(context + ["Catalogue Title"]).issubset(result.columns):
         evidence = (
             result.filter(ada_isrc_expr(set(result.columns)).is_not_null() & pl.col("product_upc").is_not_null())
             .group_by(context).agg(
@@ -58,7 +58,7 @@ def add_ada_release_codes(frame: pl.DataFrame) -> pl.DataFrame:
         result = result.join(evidence, on=context, how="left", maintain_order="left")
         eligible = (
             ada_isrc_expr(set(result.columns)).is_null() & pl.col("product_upc").is_null()
-            & (pl.col("Product Title") == pl.col("Project Title"))
+            & (pl.col("Catalogue Title") == pl.col("Project Title"))
             & pl.col("Project Title").is_not_null() & (pl.col("Project Title").str.strip_chars() != "")
             & pl.col("Artist Name").is_not_null() & (pl.col("Artist Name").str.strip_chars() != "")
             & pl.col("_release_upc").is_not_null()

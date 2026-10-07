@@ -103,19 +103,18 @@ ADA identities are shared by ingestion, catalog and reports in
 `scripts/lib/ada_identity.py`. Read `ada_pipeline_notes.md` before changing ADA.
 
 - Valid ISRC: `ISRC:<ISRC>` as before.
-- No ISRC: `ADA:<original account>:CATALOG:<Catalogue Number / Catalog Number>`.
-- Only when catalog number is absent: `ADA:<original account>:GPID:<GPID>`.
-- Missing both native identifiers on a non-ISRC row is an ingest error.
+- No ISRC: `ADA:<original account>:CATALOG:<Catalogue Number>`.
+- Missing Catalogue Number on a non-ISRC row is an ingest error; no GPID fallback.
 - Catalog Number remains a native asset identifier, not a UPC or video.
-- `product_upc` accepts explicit `UPC`, Excel `Parent Product ID`, or numeric
-  TXT `GPID`, in that order, only with a valid GTIN-8/12/13/14 check digit.
-  Alphanumeric GPID remains native context. Leading zeros are preserved.
+- ADA accepts only Excel. `product_upc` accepts explicit `UPC` then
+  `Parent Product ID`, only with a valid GTIN-8/12/13/14 check digit.
+  Leading zeros are preserved; historical TXT identifiers are not input evidence.
 - Conflicting valid release codes stop ingestion; equivalent zero-padded
   UPC/EAN representations are not conflicts.
 - `product_upc_source` and `product_upc_status` preserve the resolution method.
 - An album row with no release code can receive one from exactly one UPC for
   the identical Project Title + Artist Name in that same statement, only when
-  its Product Title equals Project Title. This is marked `derived_release`.
+  its Catalogue Title equals Project Title. This is marked `derived_release`.
   No ISRC is inferred, and ambiguous/missing evidence stays blank.
 - Excel `Parent Product ID` identifies the release, never an individual track.
 - Product revenue remains separate; no allocation to tracks.

@@ -93,9 +93,9 @@ def main() -> None:
     raw_accounts = set(
         pl.scan_parquet(ada_path)
         .filter((pl.col("source") == SOURCE) & (pl.col("account") == ACCOUNT))
-        .select(pl.col("Account").cast(pl.Utf8).unique())
+        .select(pl.col("ada_account_id").cast(pl.Utf8).unique())
         .collect()
-        .get_column("Account")
+        .get_column("ada_account_id")
         .to_list()
     )
     if raw_accounts != {RAW_ACCOUNT}:
@@ -107,7 +107,7 @@ def main() -> None:
         pl.scan_parquet(ada_path)
         .filter(
             pl.col("track_statement_style").fill_null("").str.strip_chars()
-            != pl.col("Product Title").fill_null("").str.strip_chars()
+            != pl.col("Catalogue Title").fill_null("").str.strip_chars()
         )
         .select(pl.len())
         .collect()
@@ -125,7 +125,7 @@ def main() -> None:
     )
     if title_semantic_violations or release_semantic_violations:
         raise AssertionError(
-            "ADA no conserva Product Title como tema y Project Title como lanzamiento: "
+            "ADA no conserva Catalogue Title como tema y Project Title como lanzamiento: "
             f"title={title_semantic_violations}, release={release_semantic_violations}"
         )
 
@@ -133,7 +133,8 @@ def main() -> None:
     required_song_columns = {
         "asset_title_statement",
         "release_statement_style",
-        "gpid",
+        "artist_catalog_style",
+        "artist_credit_status",
         "catalog_number",
         "source_asset_id",
         "track_id",

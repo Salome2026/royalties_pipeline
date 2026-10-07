@@ -28,7 +28,6 @@ def main() -> None:
             "track_statement_style",
             "asset_title_statement",
             "release_statement_style",
-            "gpid",
             "catalog_number",
             "ada_account_id",
             "parent_product_id",
@@ -36,6 +35,9 @@ def main() -> None:
             "product_upc_source",
             "product_upc_status",
             "artist_statement_style",
+            "artist_catalog_style",
+            "artist_credit_status",
+            "artist_credit_evidence_file",
             "transaction_month",
         ])
         .agg([
@@ -47,8 +49,8 @@ def main() -> None:
         ])
         .with_columns(
             [
-                ada_native_code_expr({"catalog_number", "gpid"}).alias("source_asset_id"),
-                ada_native_code_expr({"catalog_number", "gpid"}).alias("track_id"),
+                ada_native_code_expr({"catalog_number"}).alias("source_asset_id"),
+                ada_native_code_expr({"catalog_number"}).alias("track_id"),
                 pl.when(pl.col("asset_isrc").is_null() | (pl.col("asset_isrc").str.strip_chars() == ""))
                 .then(pl.lit("product"))
                 .otherwise(pl.lit("catalog"))

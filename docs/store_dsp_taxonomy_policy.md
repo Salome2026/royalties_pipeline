@@ -106,13 +106,13 @@ por artista, tema, cuenta o reporte.
 
 ### ADA
 
-Evidencia: `Digital Service Provider(DSP)`, `Dist Chan Desc`, `Price Desc` y
-`Config Type`.
+Evidencia exclusiva del Excel: `Territory` (DSP, no pais), `Revenue Type Desc`
+y `Price Name`. Pais: `Country Code`. No hay fallback TXT.
 
 | Evidencia original | Monetizacion | Origen |
 | --- | --- | --- |
-| `Dist Chan Desc = Subscription` | Premium | Segun DSP; Spotify y DSP de audio: Audio / Master |
-| `Dist Chan Desc = Ad Supported` o `Ad Channel` | Ads | Segun evidencia de DSP/origen |
+| `Revenue Type Desc = Subscription` | Premium | Segun DSP; Spotify y DSP de audio: Audio / Master |
+| `Revenue Type Desc = Ad Supported` o `Ad Channel` | Ads | Segun evidencia de DSP/origen |
 | `Payment Top - Up` o `Audit Recovery` | Adjustment | Segun evidencia de DSP/origen |
 | DSP `YouTube Music` | Segun canal | Music / Art Track |
 | DSP `YouTube` sin mayor detalle | Segun canal | No informado |

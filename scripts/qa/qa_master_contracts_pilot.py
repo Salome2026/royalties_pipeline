@@ -187,6 +187,9 @@ class MasterContractsPilotTests(unittest.TestCase):
             pl.DataFrame([
                 {"asset_isrc": "BK4DA2634549", "source": "ada",
                  "Artist Name": "LA JUNTADA DE LOS ARTISTAS & S",
+                 "artist_catalog_style": "LA JUNTADA DE LOS ARTISTAS & SOFI B",
+                 "artist_credit_status": "confirmed_prefix",
+                 "artist_credit_evidence_file": "99500_202607_202607_99500_DTL.xlsx",
                  "Project Title": "SOFI B / Enganchado En Vivo en LA JUNTADA DE LOS ARTISTAS"},
                 {"asset_isrc": "BK4DA2634548", "source": "ada",
                  "Artist Name": "LA JUNTADA DE LOS ARTISTAS & S",

@@ -1505,7 +1505,7 @@ def default_source_monitor_config() -> list[dict]:
             "monitoring_active": True,
             "alert_silenced": False,
             "portal_url": "",
-            "notes": "TXT o Excel mensual. Excel reemplaza al TXT del mismo periodo; statements sin actividad son validos.",
+            "notes": "Solo Excel ADA mensual de cuenta 99205. Neto: Receipts Value menos Distribution Fees.",
         },
         {
             "id": "ada_indyana_records",
@@ -1518,7 +1518,7 @@ def default_source_monitor_config() -> list[dict]:
             "monitoring_active": True,
             "alert_silenced": False,
             "portal_url": "",
-            "notes": "TXT mensual de la cuenta 99500 / Indyana Records LLC. Net Royalty Payable es el neto reportable.",
+            "notes": "Solo Excel ADA mensual de cuenta 99500. Neto: Receipts Value menos Distribution Fees.",
         },
         {
             "id": "dashgo_mawzrecords",
@@ -1793,18 +1793,9 @@ def classify_raw_file(source: str, path: Path, mart_names: set[str]) -> dict:
                 "rows": row_count,
             }
 
-    if source == "ada" and path.suffix.lower() == ".txt":
-        try:
-            content = path.read_text(encoding="utf-8-sig").strip()
-        except UnicodeDecodeError:
-            content = path.read_text(encoding="cp1252").strip()
-        if content == "No Earning Activity for this Royalty Period":
-            return {
-                "file_name": name,
-                "status": "ignored_empty",
-                "reason": "Statement ADA valido sin actividad de regalias.",
-                "rows": 0,
-            }
+    if source == "ada" and path.suffix.lower() != ".xlsx":
+        return {"file_name": name, "status": "pending_real",
+                "reason": "Formato ADA no admitido: cargar solamente Excel .xlsx y retirar este archivo."}
 
     if source == "fuga" and path.suffix.lower() == ".csv":
         row_count = count_csv_rows(path)

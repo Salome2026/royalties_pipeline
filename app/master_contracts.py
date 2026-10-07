@@ -20,11 +20,11 @@ ARTIST_FIELDS = {
     "fuga": ("Asset Artist",),
     "onerpm": ("artists_raw",),
     "orchard": ("TRACK ARTIST",),
-    "ada": ("Artist Name",),
+    "ada": ("artist_catalog_style", "Artist Name"),
     "dashgo": ("Track Artist",),
 }
 CONTEXT_FIELDS = {
-    "ada": ("Project Title", "Product Title"),
+    "ada": ("Project Title", "Catalogue Title", "artist_credit_status", "artist_credit_evidence_file"),
     "fuga": ("Product Artist",),
     "orchard": ("PRODUCT ARTIST",),
     "dashgo": ("Artist Name",),
@@ -73,22 +73,11 @@ def parse_artists(raw: str, source: str) -> list[str]:
 
 
 def _ada_artists(raw: str, project_title: str) -> tuple[list[str], str | None]:
-    if len(raw) != 30:
-        return parse_artists(raw, "ada"), None
+    del project_title
     parts = parse_artists(raw, "ada")
-    if len(parts) < 2:
-        return [], "ADA limita Artist Name a 30 caracteres; confirmar el artista en la fuente."
-    complete = parts[:-1]
-    fragment = parts[-1]
-    guest = re.match(r"^(.+?)\s*/\s*(?:Enganchado\b|LA JUNTADA\b)", project_title, re.I)
-    if (len(complete) == 1 and artist_key(complete[0]) == artist_key("La Juntada de los Artistas")
-            and guest and "LA JUNTADA DE LOS ARTISTAS" in project_title.upper()):
-        candidate = canonical_artist(guest.group(1))
-        if (not re.search(r"\s+[xX&]\s+|,", candidate)
-                and artist_key(candidate).startswith(artist_key(fragment))
-                and len(candidate) > len(fragment)):
-            return [*complete, candidate], None
-    return complete, "ADA recortó el último artista; el título del proyecto no permite identificarlo con certeza."
+    if len(raw) == 30 and parts and (len(parts[-1]) <= 2 or raw.endswith(("&", ","))):
+        return parts[:-1] if len(parts[-1]) <= 2 else parts, "Credito ADA posiblemente recortado; no se infieren participantes desde el titulo."
+    return parts, None
 
 
 @lru_cache(maxsize=512)
@@ -138,30 +127,32 @@ def _artist_suggestions(isrc: str, raw_path: str, file_mtime_ns: int) -> dict[st
     evidence_seen: set[tuple[str, str, str]] = set()
     for row in rows:
         source = str(row.get("source") or "").lower()
-        derived_from_project = False
         for field in ARTIST_FIELDS.get(source, ()):
             raw = str(row.get(field) or "").strip()
             if not raw:
                 continue
             if source == "ada":
                 artists, warning = _ada_artists(raw, str(row.get("Project Title") or ""))
-                derived_from_project = len(raw) == 30 and warning is None
+                used = field == "artist_catalog_style" or not row.get("artist_catalog_style")
+                if row.get("artist_credit_status") in {"possible_truncation", "conflicting_prefix"}:
+                    warning = warning or "Credito ADA posiblemente incompleto; se conserva la evidencia original."
             else:
                 artists, warning = parse_artists(raw, source), None
-            if warning:
+                used = True
+            if warning and used:
                 warnings.append(warning)
-            if artists:
+            if artists and used:
                 candidates.append((artists, warning is None))
             evidence_key = (source, field, raw)
             if evidence_key not in evidence_seen:
-                evidence.append({"source": source, "field": field, "raw": raw, "artists": artists, "used": True})
+                evidence.append({"source": source, "field": field, "raw": raw, "artists": artists, "used": used})
                 evidence_seen.add(evidence_key)
         for field in CONTEXT_FIELDS.get(source, ()):
             raw = str(row.get(field) or "").strip()
             evidence_key = (source, field, raw)
             if raw and evidence_key not in evidence_seen:
                 evidence.append({"source": source, "field": field, "raw": raw, "artists": [],
-                                 "used": source == "ada" and derived_from_project})
+                                 "used": False})
                 evidence_seen.add(evidence_key)
     complete = [names for names, reliable in candidates if reliable]
     comparable = complete or [names for names, _ in candidates]
@@ -193,8 +184,6 @@ def artist_suggestions(isrc: str, raw_path: Path | None, fallback: str | None) -
             pass
     fallback = fallback or ""
     artists = parse_artists(fallback, "catalog")
-    if len(fallback) == 30 and len(artists) > 1:
-        artists = artists[:-1]
     return {
         "artists": artists,
         "evidence": [{"source": "catalog", "field": "artist_statement", "raw": fallback, "artists": artists, "used": True}],
