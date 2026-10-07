@@ -181,6 +181,10 @@ After changing identity rules:
 
 1. Total `amount_usd` must remain unchanged.
 2. Totals by `source + account + artist_statement_style + transaction_month` must remain unchanged.
+   For ADA, audit this invariant with `artist_statement_original` (or raw `Artist Name`)
+   instead: the operational credit can merge a confirmed truncated label with its
+   complete label. Preserve original rows, money, units and asset identities;
+   display regrouping is not an economic change. See `ada_pipeline_notes.md`.
 3. Totals by `source + account + source_sheet + content_type + transaction_month` must remain unchanged.
 4. Expected movement is allowed only between identity keys, for example `TEXT` to `VIDEO` or non-canonical ISRC to canonical ISRC.
 

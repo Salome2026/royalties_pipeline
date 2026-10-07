@@ -108,12 +108,16 @@ def main() -> None:
                              "Artist Name": [cut, full, cut], "statement_file_name": ["old.xlsx", "new.xlsx", "other.xlsx"]})
     resolved = add_ada_artist_evidence(evidence)
     assert resolved["Artist Name"].to_list() == [cut, full, cut]
+    assert resolved["artist_statement_original"].to_list() == [cut, full, cut]
+    assert resolved["artist_statement_style"].to_list() == [full, full, cut]
+    assert add_ada_artist_evidence(resolved).select(resolved.columns).equals(resolved), "Reprocessing changed the original credit"
     assert resolved["artist_catalog_style"][0] == full
     assert resolved["artist_credit_evidence_file"][0] == "new.xlsx"
     assert resolved["artist_catalog_style"][2] == cut, "Different ISRC completed a participant"
     ambiguous = pl.concat([evidence, pl.DataFrame({"asset_isrc": ["BK4DA2634549"], "Artist Name": ["LA JUNTADA DE LOS ARTISTAS & SILVIA"], "statement_file_name": ["conflict.xlsx"]})])
     conflict = add_ada_artist_evidence(ambiguous)
     assert conflict["artist_catalog_style"][0] == cut and conflict["artist_credit_status"][0] == "conflicting_prefix"
+    assert conflict["artist_statement_style"][0] == cut
     for raw in ["La Juntada De Los Artistas & Cumbia rocha", full, "La Juntada De Los Artistas, Candu Dominguez & G Sony", "LIT KILLAH, PAULO LONDRA, KHEA"]:
         artists, warning = _ada_artists(raw, "Not evidence")
         assert len(artists) >= 2 and warning is None

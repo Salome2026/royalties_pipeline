@@ -35,6 +35,7 @@ def main() -> None:
             "product_upc_source",
             "product_upc_status",
             "artist_statement_style",
+            "artist_statement_original",
             "artist_catalog_style",
             "artist_credit_status",
             "artist_credit_evidence_file",

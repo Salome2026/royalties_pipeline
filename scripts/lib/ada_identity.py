@@ -30,7 +30,15 @@ def add_ada_artist_evidence(frame: pl.DataFrame) -> pl.DataFrame:
         "asset_isrc": pl.String, "Artist Name": pl.String, "artist_catalog_style": pl.String,
         "artist_credit_status": pl.String, "artist_credit_evidence_file": pl.String,
     })
-    return frame.join(evidence_frame, on=["asset_isrc", "Artist Name"], how="left", nulls_equal=True, maintain_order="left")
+    original = text_field(set(frame.columns), ["artist_statement_original", "Artist Name", "artist_statement_style"])
+    frame = frame.with_columns(original.alias("artist_statement_original")).drop(
+        [name for name in ("artist_catalog_style", "artist_credit_status", "artist_credit_evidence_file") if name in frame.columns]
+    )
+    return frame.join(
+        evidence_frame, on=["asset_isrc", "Artist Name"], how="left", nulls_equal=True, maintain_order="left"
+    ).with_columns(
+        pl.coalesce([pl.col("artist_catalog_style"), pl.col("artist_statement_original")]).alias("artist_statement_style")
+    )
 
 
 def text_field(schema: set[str], names: list[str]) -> pl.Expr:

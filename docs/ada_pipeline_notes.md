@@ -29,7 +29,7 @@ Se valida la cuenta de Contract contra filename y carpeta; no se mezclan cuentas
 
 | Columna Excel | Significado y destino |
 | --- | --- |
-| Artist Name | Creditos originales; artist_statement_style |
+| Artist Name | Credito original literal; artist_statement_original para auditoria |
 | Catalogue Title | Tema; track_statement_style y asset_title_statement |
 | Project Title | Lanzamiento; release_statement_style |
 | ISRC | ISRC valido normalizado; asset_isrc |
@@ -85,6 +85,10 @@ Artist Name se conserva literal. No inferir invitados desde Project Title.
 Para un credito de 30 caracteres, usar una version mas larga SOLO cuando hay
 una unica coincidencia de prefijo en otro Excel del mismo ISRC. Conservarla en
 artist_catalog_style con estado confirmed_prefix y el archivo de evidencia.
+artist_statement_style expone ese mismo credito resuelto a dashboard, ingresos,
+busquedas y reportes; no dejar el nombre corto en las vistas operativas.
+Artist Name y artist_statement_original conservan el credito recibido para auditar.
+Al reprocesar, conservar el original y recalcular la evidencia desde los Excel.
 Conflictos quedan conflicting_prefix; sin evidencia possible_truncation.
 Tener 30 caracteres no demuestra por si solo que un nombre este mal.
 Creditos, orden principal y porcentajes contractuales son cosas distintas.
@@ -117,6 +121,7 @@ activos necesarios. Agosto Mawz es nuevo: neto USD 12633.68009634.
 Evidencia del reemplazo: C:/royalties_pipeline/staging/ada_excel_only_20261007.
 
 Pruebas obligatorias al cambiar estas reglas: qa_ada_excel_replacement.py,
+qa_ada_artist_display.py,
 qa_ada_release_codes.py, qa_ada_accounts.py, qa_master_contracts_pilot.py,
 qa_store_reporting_dimensions.py, qa_bigquery_release_transform.py y conciliacion BigQuery.
 Leer tambien identity_normalization_policy.md, statement_period_policy.md,

@@ -30,6 +30,7 @@ SOURCE_FILES = {
 }
 
 ADA_DETAIL_CONTEXT = {
+    "artist_statement_original": "artist_statement_original",
     "ada_account_id": "ada_account_id",
     "local_product_number": "local_product_number",
     "marketing_owner": "Marketing Owner",

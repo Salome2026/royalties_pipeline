@@ -37,7 +37,7 @@ def assert_columns(path: Path, expected: list[str]) -> pl.DataFrame:
 def main() -> None:
     schema_sql = detail_context_schema_sql("project", "dataset")
     assert schema_sql.count("ALTER TABLE") == 2
-    assert schema_sql.count("ADD COLUMN IF NOT EXISTS") == 32
+    assert schema_sql.count("ADD COLUMN IF NOT EXISTS") == 34
     assert "CREATE OR REPLACE VIEW `project.dataset.royalty_report_detail`" in schema_sql
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
