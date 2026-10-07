@@ -103,7 +103,10 @@ def read_statement(path: Path) -> pl.DataFrame | None:
         separator="\t",
         quote_char='"',
         infer_schema_length=10000,
-        schema_overrides={"GPID": pl.Utf8, "Catalog Number": pl.Utf8, "ISRC": pl.Utf8},
+        schema_overrides={
+            name: pl.Utf8
+            for name in ["GPID", "Catalog Number", "ISRC", "UPC", "Parent Product ID"]
+        },
         encoding="utf8-lossy",
         truncate_ragged_lines=False,
     )

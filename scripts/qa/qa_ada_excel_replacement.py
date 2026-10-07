@@ -106,6 +106,16 @@ def main() -> None:
         assert future_normalized["product_upc_source"][0] == "GPID"
         assert future_normalized["asset_isrc"][0] is None and future_normalized["amount_usd"][0] == 1.89
         assert future_normalized["transaction_month"][0] == "2026-05" and future_normalized["statement_period"][0] == "2026-07"
+        for field in ["UPC", "Parent Product ID"]:
+            future_txt.with_columns(
+                pl.lit("NATIVE-ID").alias("GPID"),
+                pl.lit("0085365665804").alias(field),
+            ).write_csv(txt, separator="\t")
+            future_code = read_statement(txt)
+            assert future_code[field][0] == "0085365665804"
+            checked = standardize(future_code, txt, "indyana_records", "99500", {"revenue_basis": "generation"})
+            assert checked["product_upc"][0] == "0085365665804"
+            assert checked["product_upc_source"][0] == field
         for broken in [
             future_txt.with_columns(pl.lit(1.88).alias("Net Royalty Payable")),
             future_txt.with_columns(pl.lit("not money").alias("Net Royalty Payable")),
