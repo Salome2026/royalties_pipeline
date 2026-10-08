@@ -81,6 +81,30 @@ class MasterContractsPilotTests(unittest.TestCase):
             self.assertEqual(result["first_statement_date"], "2026-08-01")
             self.assertEqual(result["statement_income"], [])
 
+    def test_statement_income_parquet_fallback_keeps_statement_basis_and_discount(self) -> None:
+        frame = pl.DataFrame([
+            {"isrc": "ARDL12600006", "source": "fuga", "account": "indyana_records",
+             "statement_period": "2026-03", "transaction_month": "2026-01", "amount_usd": 100.0},
+            {"isrc": "ARDL12600006", "source": "ada", "account": "indyana_records",
+             "statement_period": "2026-03", "transaction_month": "2026-02", "amount_usd": 20.0},
+            {"isrc": "ARDL12600006", "source": "fuga", "account": "indyana_records",
+             "statement_period": "2026-08", "transaction_month": "2026-06", "amount_usd": 50.0},
+            {"isrc": "ARDL12600007", "source": "fuga", "account": "indyana_records",
+             "statement_period": "2026-03", "transaction_month": "2026-01", "amount_usd": 999.0},
+        ])
+        policy = {"schema_version": 1, "policy_version": 1, "report_personalization": {"enabled": True},
+                  "entries": [{"source": "fuga", "account": "indyana_records", "report_net_adjustment_pct": 10}]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "summary.parquet"
+            frame.write_parquet(path)
+            with patch.object(vpo_corp_api, "VPO_ROYALTIES_DASHBOARD_BACKEND", "parquet"), \
+                    patch.object(vpo_corp_api, "VPO_LOCAL_MARTS_DIR", None), \
+                    patch.object(vpo_corp_api, "ensure_marts", return_value={vpo_corp_api.ROYALTIES_DASHBOARD_SUMMARY_FILE: path}), \
+                    patch("lib.catalog_report_filter.load_distributor_policy_document", return_value=policy):
+                rows = vpo_corp_api.master_contract_statement_income("ARDL12600006")
+            self.assertEqual(rows, [{"statement_month": "2026-03", "amount_usd": 110.0},
+                                    {"statement_month": "2026-08", "amount_usd": 45.0}])
+
     def test_combined_totals_and_nonoverlapping_periods_even_for_drafts(self) -> None:
         allocation = {"principal": "Aneley", "principal_percent": 30, "indyana_percent": 70,
                       "participants": [], "apply_guest_contracts": False}
@@ -273,8 +297,9 @@ class MasterContractsPilotTests(unittest.TestCase):
             self.assertEqual(onerpm["artists"], ["Gusty DJ", "SALASTKBRON"])
             self.assertEqual((fuga["first_sale_date"], fuga["first_sale_precision"]), ("2026-02-27", "day"))
             self.assertEqual((onerpm["first_sale_date"], onerpm["first_sale_precision"]), ("2026-03", "month"))
-            self.assertEqual(suggested_split(fuga["artists"], first_sale_date=fuga["first_sale_date"])["effective_from"], "2026-02-27")
-            self.assertEqual(suggested_split(fuga["artists"], first_sale_date=fuga["first_sale_date"])["agreements"][0]["effective_from"], "2026-02-27")
+            proposal = suggested_split(fuga["artists"], first_statement_date="2026-04-01")
+            self.assertEqual(proposal["effective_from"], "2026-04-01")
+            self.assertEqual(proposal["agreements"][0]["effective_from"], "2026-04-01")
 
     def test_distributor_field_rules_do_not_promote_release_artists(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

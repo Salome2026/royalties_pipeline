@@ -244,7 +244,7 @@ def contract_analysis_catalog(current: pl.DataFrame, baseline_net: pl.DataFrame)
 
 def suggested_split(
     artists: list[str], contracts: dict[str, dict[str, Any]] | None = None,
-    first_sale_date: str | None = None,
+    first_statement_date: str | None = None,
 ) -> dict[str, Any]:
     contracts = contracts or {}
     principal = artists[0] if artists else ""
@@ -257,14 +257,14 @@ def suggested_split(
             "label": "Contrato principal",
             "commercialization": "pending",
             "owners": [],
-            "effective_from": first_sale_date,
+            "effective_from": first_statement_date,
             "effective_until": None,
         }],
         "master_type": "pending",
         "other_master_artist": None,
         "has_contract": main_contract["has_contract"] if main_contract else None,
         "agreement_confirmed": False,
-        "effective_from": first_sale_date,
+        "effective_from": first_statement_date,
         "principal": principal,
         "indyana_percent": base,
         "principal_percent": 100 - base if base is not None and len(artists) == 1 else None,

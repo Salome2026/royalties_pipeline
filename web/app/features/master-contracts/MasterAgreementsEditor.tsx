@@ -98,10 +98,10 @@ export function MasterAgreementsEditor({ agreements, canEdit, artistOptions, fir
                   </select>
                 </label>
                 <label>Vigente desde
-                  <input type="date" disabled={!canEdit} value={periodBoundary(agreement.effective_from) || ""} onChange={(event) => update(index, { effective_from: event.target.value || null })} />
+                  <input type="date" disabled={!canEdit} value={periodBoundary(agreement.effective_from) || ""} onInput={(event) => update(index, { effective_from: event.currentTarget.value || null })} />
                 </label>
                 <label>Vigente hasta
-                  <input type="date" disabled={!canEdit} value={periodBoundary(agreement.effective_until, true) || ""} onChange={(event) => update(index, { effective_until: event.target.value || null })} />
+                  <input type="date" disabled={!canEdit} value={periodBoundary(agreement.effective_until, true) || ""} onInput={(event) => update(index, { effective_until: event.currentTarget.value || null })} />
                   {!agreement.effective_until && <span className={styles.fieldHint}>Actual</span>}
                 </label>
               </div>
