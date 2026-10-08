@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { AlertCircle, CheckCircle2, Clock3, Download, ExternalLink, FileSpreadsheet, FileText, Globe2, LoaderCircle, Rows3, Search, SlidersHorizontal } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock3, Download, ExternalLink, FileSpreadsheet, FileText, Globe2, LoaderCircle, Plus, Rows3, Search, SlidersHorizontal, X } from "lucide-react";
 import { PeriodControl } from "../../components/PeriodControl";
 import { isResolvedPeriodInvalid, resolvePeriod, type PeriodSelection } from "../../lib/period";
 import {
@@ -9,6 +9,7 @@ import {
   requestRecentRoyaltyReportJobs,
   requestRoyaltyDetailCount,
   requestRoyaltyReportOptions,
+  requestContractReportArtists,
   requestRoyaltyReportJob,
   royaltyReportJobDownloadUrl,
   type RoyaltyMatchMode,
@@ -29,6 +30,12 @@ type Props = {
 
 export function RoyaltyReportModule({ onMessage }: Props) {
   const [output, setOutput] = useState<RoyaltyReportOutput>("excel");
+  const [executiveMode, setExecutiveMode] = useState<"income" | "contractual">("income");
+  const [contractArtists, setContractArtists] = useState<string[]>([]);
+  const [artistOptions, setArtistOptions] = useState<string[]>([]);
+  const [artistSearch, setArtistSearch] = useState("");
+  const [artistError, setArtistError] = useState("");
+  const contractual = output === "executive_pdf" && executiveMode === "contractual";
   const [keywords, setKeywords] = useState("");
   const [period, setPeriod] = useState<PeriodSelection>({ mode: "all" });
   const [periodBasis, setPeriodBasis] = useState<RoyaltyPeriodBasis>("transaction_month");
@@ -50,6 +57,18 @@ export function RoyaltyReportModule({ onMessage }: Props) {
   const [lastFile, setLastFile] = useState("");
   const [lastSheetUrl, setLastSheetUrl] = useState("");
   const downloadedJobs = useRef(new Set<number>());
+
+  useEffect(() => {
+    if (!contractual) return;
+    let active = true;
+    requestContractReportArtists().then((names) => {
+      if (!active) return;
+      setArtistOptions(names);
+      setArtistError("");
+      setContractArtists((selected) => selected.length ? selected : names.includes("La Juntada de los Artistas") ? ["La Juntada de los Artistas"] : []);
+    }).catch((error) => { if (active) setArtistError(error.message); });
+    return () => { active = false; };
+  }, [contractual]);
 
   useEffect(() => {
     let active = true;
@@ -148,6 +167,10 @@ export function RoyaltyReportModule({ onMessage }: Props) {
       return null;
     }
     const terms = keywords.split(/[;,]/).map((item) => item.trim()).filter(Boolean);
+    if (contractual && (!contractArtists.length || artistError)) {
+      onMessage({ type: "error", text: artistError || "Elegí al menos un artista o proyecto." });
+      return null;
+    }
     if (output === "excel" && terms.length === 0) {
       onMessage({ type: "error", text: "Ingresá al menos una palabra clave para el Excel detallado." });
       return null;
@@ -165,7 +188,8 @@ export function RoyaltyReportModule({ onMessage }: Props) {
       keywords: terms,
       start_month: resolved.startMonth,
       end_month: resolved.endMonth,
-      period_basis: periodBasis,
+      period_basis: contractual ? "statement_period" : periodBasis,
+      ...(contractual ? { executive_mode: "contractual" as const, contract_artists: contractArtists } : {}),
       mode: matchMode,
       raw_limit: Number.isFinite(parsedRawLimit) ? parsedRawLimit : 0,
       detail_mode: output === "excel" ? detailMode : "limited",
@@ -277,7 +301,6 @@ export function RoyaltyReportModule({ onMessage }: Props) {
         <div className={styles.formatBand}>
           <div>
             <strong>Formato de salida</strong>
-            <span>El alcance económico es el mismo; cambia la presentación.</span>
           </div>
           <div className={styles.segmented} role="group" aria-label="Formato del reporte">
             <button type="button" className={output === "excel" ? styles.active : ""} onClick={() => setOutput("excel")}>
@@ -296,13 +319,38 @@ export function RoyaltyReportModule({ onMessage }: Props) {
               <div><strong>Qué querés informar</strong><span>La búsqueda acepta artista, tema, ISRC u otros identificadores reconocidos.</span></div>
             </div>
 
+            {output === "executive_pdf" && (
+              <div className={styles.field}>
+                <label htmlFor="royalty_pdf_type">Tipo de PDF</label>
+                <select id="royalty_pdf_type" value={executiveMode} onChange={(event) => setExecutiveMode(event.target.value as "income" | "contractual")}>
+                  <option value="income">Resumen de ingresos</option>
+                  <option value="contractual">Ingresos y reparto contractual</option>
+                </select>
+              </div>
+            )}
+
+            {contractual && (
+              <div className={styles.field}>
+                <label htmlFor="royalty_contract_artist">Artistas / proyectos</label>
+                <div className={styles.artistEntry}>
+                  <input id="royalty_contract_artist" list="royalty_contract_artists" value={artistSearch} onChange={(event) => setArtistSearch(event.target.value)} placeholder="Buscar artista o proyecto" />
+                  <datalist id="royalty_contract_artists">{artistOptions.filter((name) => !contractArtists.includes(name)).map((name) => <option key={name} value={name} />)}</datalist>
+                  <button type="button" title="Agregar artista" aria-label="Agregar artista" disabled={!artistOptions.includes(artistSearch) || contractArtists.includes(artistSearch) || contractArtists.length >= 20} onClick={() => { setContractArtists((names) => [...names, artistSearch]); setArtistSearch(""); }}><Plus size={18} /></button>
+                </div>
+                <div className={styles.artistSelection}>
+                  {contractArtists.map((name) => <span key={name}>{name}<button type="button" title={`Quitar ${name}`} aria-label={`Quitar ${name}`} onClick={() => setContractArtists((names) => names.filter((item) => item !== name))}><X size={14} /></button></span>)}
+                </div>
+                {artistError && <small role="alert">{artistError}</small>}
+              </div>
+            )}
+
             <div className={styles.field}>
-              <label htmlFor="royalty_keywords">Palabras clave {output === "executive_pdf" && <em>Opcional</em>}</label>
+              <label htmlFor="royalty_keywords">{contractual ? "Tema / ISRC" : "Palabras clave"} {output === "executive_pdf" && <em>Opcional</em>}</label>
               <input
                 id="royalty_keywords"
                 value={keywords}
                 onChange={(event) => setKeywords(event.target.value)}
-                placeholder={output === "executive_pdf" ? "Todo el alcance o una búsqueda puntual" : "Ej. Gusty DJ, ISRC, nombre del tema"}
+                placeholder={contractual ? "Todos los temas o un ISRC puntual" : output === "executive_pdf" ? "Todo el alcance o una búsqueda puntual" : "Ej. Gusty DJ, ISRC, nombre del tema"}
                 required={output === "excel"}
               />
               <small>Separá varias búsquedas con coma o punto y coma.</small>
@@ -321,11 +369,11 @@ export function RoyaltyReportModule({ onMessage }: Props) {
 
             <div className={styles.field}>
               <label htmlFor="royalty_period_basis">Leer el período por</label>
-              <select id="royalty_period_basis" value={periodBasis} onChange={(event) => setPeriodBasis(event.target.value as RoyaltyPeriodBasis)}>
-                <option value="transaction_month">Mes de consumo / performance</option>
+              <select id="royalty_period_basis" value={contractual ? "statement_period" : periodBasis} disabled={contractual} onChange={(event) => setPeriodBasis(event.target.value as RoyaltyPeriodBasis)}>
+                {!contractual && <option value="transaction_month">Mes de consumo / performance</option>}
                 <option value="statement_period">Mes de statement / liquidación</option>
               </select>
-              <small>Statement sirve para liquidaciones; consumo sirve para analizar cuándo ocurrió la actividad.</small>
+              {!contractual && <small>Statement sirve para liquidaciones; consumo sirve para analizar cuándo ocurrió la actividad.</small>}
             </div>
           </div>
 
@@ -437,7 +485,7 @@ export function RoyaltyReportModule({ onMessage }: Props) {
             {lastSheetUrl ? (
               <a href={lastSheetUrl} target="_blank" rel="noreferrer">Abrir Google Sheet <ExternalLink size={14} aria-hidden="true" /></a>
             ) : (
-              <span>{lastFile || (output === "excel" ? "Excel detallado" : "PDF ejecutivo de una página")}</span>
+              <span>{lastFile || (output === "excel" ? "Excel detallado" : contractual ? "Ingresos y reparto contractual" : "PDF ejecutivo de una página")}</span>
             )}
           </div>
           <div className={styles.actionButtons}>
@@ -462,8 +510,8 @@ export function RoyaltyReportModule({ onMessage }: Props) {
               <div className={styles.recentRow} key={job.id}>
                 <span className={`${styles.statusDot} ${styles[job.status]}`} aria-hidden="true" />
                 <div>
-                  <strong>{job.output_format === "executive_pdf" ? "PDF ejecutivo" : job.output_format === "google_sheet" ? "Google Sheet" : "Excel detallado"}</strong>
-                  <span>{job.params.keywords?.join(", ") || "Todas las regalías"} · #{job.id}</span>
+                  <strong>{job.report_key === "royalty_contractual" ? "PDF de reparto contractual" : job.output_format === "executive_pdf" ? "PDF ejecutivo" : job.output_format === "google_sheet" ? "Google Sheet" : "Excel detallado"}</strong>
+                  <span>{job.params.contract_artists?.join(", ") || job.params.keywords?.join(", ") || "Todas las regalías"} · #{job.id}</span>
                 </div>
                 <span className={styles.recentState}>{job.status === "completed" ? "Listo" : job.status === "failed" ? "Error" : job.status === "running" ? "Procesando" : "En cola"}</span>
                 {job.status === "completed" && job.output_format !== "google_sheet" && <a href={royaltyReportJobDownloadUrl(job.id)} aria-label={`Descargar reporte ${job.id}`}><Download size={16} /></a>}

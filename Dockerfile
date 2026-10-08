@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY app ./app
 COPY scripts ./scripts
+COPY web/public/vpo-logo.png ./web/public/vpo-logo.png
 RUN mkdir -p warehouse/registry
 COPY warehouse/registry/*.json ./warehouse/registry/
 

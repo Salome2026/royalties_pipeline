@@ -21,6 +21,8 @@ nueva.
 
 ## Reglas rectoras por area
 
+- [PDF ejecutivo contractual](contractual_executive_report.md)
+
 ### Finanzas, caja y cuenta corriente
 
 - [Modelo financiero operativo VPO v2](finance_operational_model_v2.md)

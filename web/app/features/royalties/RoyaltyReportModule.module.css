@@ -204,6 +204,16 @@
   opacity: 0.48;
 }
 
+.artistEntry { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 8px; }
+.artistEntry button, .artistSelection button {
+  display: grid; place-items: center; padding: 0; margin: 0; border: 1px solid rgba(164, 188, 199, 0.23);
+  border-radius: 6px; background: rgba(29, 158, 140, 0.12); color: #69dfcd; cursor: pointer; box-shadow: none;
+}
+.artistEntry button:disabled { opacity: 0.4; cursor: default; }
+.artistSelection { display: flex; flex-wrap: wrap; gap: 8px 14px; }
+.artistSelection > span { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; color: #dfe8eb; font-size: 0.78rem; overflow-wrap: anywhere; }
+.artistSelection button { width: 24px; height: 24px; flex: 0 0 24px; background: transparent; border: 0; }
+
 .field input:disabled {
   cursor: not-allowed;
   opacity: 0.48;

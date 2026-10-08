@@ -259,6 +259,8 @@ MART_RELEASE_CACHE_CONFIG: tuple[str, str, str] | None = None
 
 class RoyaltyReportJobRequest(BaseModel):
     output: Literal["excel", "executive_pdf", "google_sheet"] = "excel"
+    executive_mode: Literal["income", "contractual"] = "income"
+    contract_artists: list[str] = Field(default_factory=list, max_length=20)
     keywords: list[str] = Field(default_factory=list, max_length=100)
     start_month: str | None = None
     end_month: str | None = None
@@ -7227,12 +7229,22 @@ def canonical_royalty_report_params(
     request: RoyaltyReportJobRequest,
     policy_snapshot: dict[str, Any],
 ) -> dict[str, Any]:
-    params = request.model_dump(exclude={"output"})
+    params = request.model_dump(exclude={"output", "executive_mode", "contract_artists"})
     params["keywords"] = normalize_keywords(params.get("keywords") or [])
     if request.output in {"excel", "google_sheet"} and not params["keywords"]:
         raise HTTPException(status_code=400, detail="Ingresa al menos una palabra clave.")
     if request.start_month and request.end_month and request.start_month > request.end_month:
         raise HTTPException(status_code=400, detail="El periodo desde no puede ser mayor que hasta.")
+    if request.executive_mode == "contractual":
+        if request.output != "executive_pdf":
+            raise HTTPException(status_code=400, detail="El reparto contractual solo está disponible en PDF.")
+        artists = list(dict.fromkeys(name.strip() for name in request.contract_artists if name.strip()))
+        if not artists or any(len(name) > 200 for name in artists):
+            raise HTTPException(status_code=400, detail="Elegí al menos un artista o proyecto del catálogo.")
+        params.update(executive_mode="contractual", contract_artists=artists, period_basis="statement_period")
+        for month in [request.start_month, request.end_month]:
+            if month and not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+                raise HTTPException(status_code=400, detail="El período debe contener meses válidos.")
 
     source = str(params.get("source") or "").strip().lower() or None
     account = str(params.get("account") or "").strip().lower() or None
@@ -7263,9 +7275,20 @@ def canonical_royalty_report_params(
 def require_report_job_access(username: str, job: dict[str, Any], action: Literal["access", "create"] = "access") -> dict:
     with operational_connect() as conn:
         permission = require_module_permission(conn, username, "royalty_reports", action)
+        if job.get("report_key") == "royalty_contractual":
+            require_contract_report_permission(conn, username, action)
     if not permission.get("is_admin") and str(job.get("requested_by") or "").casefold() != username.casefold():
         raise HTTPException(status_code=403, detail="No tenes permiso para ver este reporte.")
     return permission
+
+
+def require_contract_report_permission(conn, username: str, action: str = "create") -> None:
+    if not username:
+        raise HTTPException(status_code=401, detail="Usuario requerido.")
+    reports = require_module_permission(conn, username, "royalty_reports", action)
+    contracts = require_module_permission(conn, username, "master_contracts", "access")
+    if reports.get("scope") is not None or contracts.get("scope") is not None:
+        raise HTTPException(status_code=403, detail="El reparto completo requiere acceso de backoffice a regalías y contratos.")
 
 
 @app.post("/reports/royalty/detail-count")
@@ -7310,6 +7333,23 @@ def royalty_report_detail_count(
     }
 
 
+@app.get("/reports/royalty/contract-options")
+def royalty_contract_options(
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+) -> dict:
+    require_api_key(x_vpo_api_key)
+    username = clean_username(x_vpo_username or "")
+    with operational_connect() as conn:
+        require_contract_report_permission(conn, username)
+        from app.royalty_reports.contract_snapshot import stored_contracts, contract_artist_names, published_contract_catalog
+        contracts = stored_contracts(conn)
+    client = gcs_client()
+    manifest = build_gcs_input_manifest(client=client, bucket_name=GCS_BUCKET, prefix=GCS_PREFIX, filenames=[CATALOG_MASTER_FILE])
+    catalog = published_contract_catalog(client, manifest)
+    return {"artists": contract_artist_names(contracts, catalog)}
+
+
 @app.post("/reports/jobs", status_code=202)
 def create_royalty_report_job(
     request: RoyaltyReportJobRequest,
@@ -7322,6 +7362,8 @@ def create_royalty_report_job(
         raise HTTPException(status_code=401, detail="Usuario requerido.")
     with operational_connect() as conn:
         require_module_permission(conn, username, "royalty_reports", "create")
+        if request.executive_mode == "contractual":
+            require_contract_report_permission(conn, username)
 
     policy_snapshot = load_distributor_policy_document()
     policy_version = int(policy_snapshot.get("policy_version") or 0)
@@ -7337,11 +7379,24 @@ def create_royalty_report_job(
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Los datos publicados no estan disponibles.") from exc
 
+    if request.executive_mode == "contractual":
+        from app.royalty_reports.contract_snapshot import freeze_contract_snapshot, published_contract_catalog, stored_contracts
+        catalog = published_contract_catalog(gcs_client(), input_manifest)
+        with operational_connect() as conn:
+            conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            contracts = stored_contracts(conn)
+        try:
+            input_manifest["contract_snapshot"] = freeze_contract_snapshot(params["contract_artists"], catalog, contracts)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     report_key = {
         "excel": "royalty_keyword",
         "executive_pdf": "royalty_executive",
         "google_sheet": "royalty_google_sheet",
     }[request.output]
+    if request.executive_mode == "contractual":
+        report_key = "royalty_contractual"
     job, created = create_or_reuse_report_job(
         requested_by=username,
         report_key=report_key,
@@ -7373,11 +7428,14 @@ def recent_royalty_report_jobs(
         raise HTTPException(status_code=401, detail="Usuario requerido.")
     with operational_connect() as conn:
         permission = require_module_permission(conn, username, "royalty_reports", "access")
+        contract_permission = user_module_permission(conn, username, "master_contracts")
+        can_read_contracts = contract_permission.get("can_access") and contract_permission.get("scope") is None and permission.get("scope") is None
     requested_by = None if permission.get("is_admin") else username
     return {
         "items": [
             reconcile_report_job_if_stale(job)
             for job in list_report_jobs(requested_by, limit=limit)
+            if job.get("report_key") != "royalty_contractual" or permission.get("is_admin") or can_read_contracts
         ]
     }
 

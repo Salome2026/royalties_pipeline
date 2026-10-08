@@ -7,6 +7,7 @@ from typing import Callable
 from app.royalty_reports.builders import GoogleSheetBuilder, build_registered_report
 from app.royalty_reports.contracts import (
     ReportBuildResult,
+    BuiltReport,
     ReportInputs,
     ReportRequest,
     StoredArtifact,
@@ -44,6 +45,11 @@ class ReportEngine:
         request = ReportRequest.from_job(job, keywords=normalized_keywords)
 
         self.runtime.report_stage(request.job_id, "reading_data")
+        if request.report_key == "royalty_contractual":
+            from app.royalty_reports.contract_pdf import build_contractual_pdf
+            self.runtime.report_stage(request.job_id, "building")
+            built = build_contractual_pdf(request, job, self.runtime.output_dir)
+            return self.store(request, built)
         marts = self.runtime.resolve_marts(
             dict(job.get("input_manifest") or {}),
             [
@@ -72,6 +78,9 @@ class ReportEngine:
                 inputs,
                 create_google_sheet=self.runtime.create_google_sheet,
             )
+        return self.store(request, built)
+
+    def store(self, request: ReportRequest, built: BuiltReport) -> ReportBuildResult:
         if built.result_url:
             return ReportBuildResult(None, None, None, built.result_url)
         if built.output_path is None or not built.content_type:

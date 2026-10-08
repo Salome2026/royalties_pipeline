@@ -17,6 +17,8 @@ export type RoyaltyReportOptions = {
 };
 
 export type RoyaltyReportPayload = {
+  executive_mode?: "income" | "contractual";
+  contract_artists?: string[];
   keywords: string[];
   start_month: string | null;
   end_month: string | null;
@@ -64,6 +66,12 @@ export async function requestRoyaltyReportOptions(): Promise<RoyaltyReportOption
   const response = await fetch("/api/report-options", { cache: "no-store" });
   if (!response.ok) throw await responseError(response, "No se pudieron cargar las distribuidoras.");
   return response.json();
+}
+
+export async function requestContractReportArtists(): Promise<string[]> {
+  const response = await fetch("/api/report-contract-options", { cache: "no-store" });
+  if (!response.ok) throw await responseError(response, "No se pudieron cargar los artistas de contratos.");
+  return (await response.json()).artists || [];
 }
 
 export async function createRoyaltyReportJob(payload: RoyaltyReportPayload, output: RoyaltyReportJobOutput) {

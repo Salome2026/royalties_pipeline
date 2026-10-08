@@ -11,6 +11,7 @@ DetailMode = Literal["limited", "top_countries", "full"]
 REPORT_FORMAT_BY_KEY: dict[str, ReportOutputFormat] = {
     "royalty_keyword": "excel",
     "royalty_executive": "executive_pdf",
+    "royalty_contractual": "executive_pdf",
     "royalty_google_sheet": "google_sheet",
 }
 
@@ -49,6 +50,8 @@ class ReportRequest:
             raise ValueError("El periodo desde no puede ser mayor que hasta.")
         if output_format in {"excel", "google_sheet"} and not keywords:
             raise ValueError("El reporte requiere al menos una palabra clave.")
+        if report_key == "royalty_contractual" and params.get("period_basis") != "statement_period":
+            raise ValueError("El reparto contractual usa exclusivamente fecha de statement.")
 
         detail_mode_value = str(params.get("detail_mode") or "limited")
         if detail_mode_value not in {"limited", "top_countries", "full"}:
