@@ -8284,6 +8284,7 @@ def list_master_contracts(
         "limit": safe_limit,
         "offset": safe_offset,
         "amount_basis": "dashboard_net_statement_usd",
+        "pool_contracts_supported": True,
         "reports_effective": False,
     }
 
@@ -8342,6 +8343,7 @@ def get_master_contract(
         "updated_by": saved["updated_by"] if saved else None,
         "updated_at": saved["updated_at"] if saved else None,
         "amount_basis": "dashboard_net_statement_usd",
+        "pool_contracts_supported": True,
         "reports_effective": False,
     }
 

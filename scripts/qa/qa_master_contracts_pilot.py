@@ -145,6 +145,7 @@ class MasterContractsPilotTests(unittest.TestCase):
             self.assertEqual(result["split"]["agreements"][0]["effective_from"], "2026-03-01")
             self.assertEqual(result["statement_income"], monthly[:1])
             self.assertFalse(result["reports_effective"])
+            self.assertTrue(result["pool_contracts_supported"])
             stored = {"agreements": [{"id": "principal", "effective_from": "2026-05-14"}]}
             saved.return_value = {"split": stored, "closed": False, "future_reports_selected": False,
                                  "version": 2, "updated_by": "tester", "updated_at": None}

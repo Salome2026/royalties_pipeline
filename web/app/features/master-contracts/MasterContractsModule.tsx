@@ -54,6 +54,7 @@ type ContractDetail = ContractItem & {
   updated_by: string | null;
   updated_at: string | null;
   reports_effective: false;
+  pool_contracts_supported?: boolean;
 };
 
 type Message = { type: "ok" | "error"; text: string };
@@ -193,6 +194,11 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
     if (errors.length) { onMessage({ type: "error", text: errors[0] }); return; }
     setSaving(true);
     try {
+      if (agreements.some((item) => item.allocation_model === "pools") && !detail.pool_contracts_supported) {
+        const current = await requestJson<ContractDetail>(`/api/master-contracts/${encodeURIComponent(detail.isrc)}`);
+        if (!current.pool_contracts_supported) throw new Error("El servicio de contratos se está actualizando. Tu borrador no se guardó; volvé a intentar en unos minutos.");
+        setDetail((value) => value ? { ...value, pool_contracts_supported: true } : value);
+      }
       const saved = await requestJson<{
         split: Split; closed: boolean; future_reports_selected: boolean; version: number;
         updated_by: string; updated_at: string;
