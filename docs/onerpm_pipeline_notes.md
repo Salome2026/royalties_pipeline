@@ -69,6 +69,15 @@ Cada archivo suele tener hojas:
 - `net_amount_usd`: `Net * FX`
 - `amount_usd`: `COALESCE(net_amount_usd, net_amount)`
 
+Unidades:
+
+- ONErpm informa la cantidad original en `Quantity`, que se conserva en el raw.
+- El detalle de BigQuery usa `units` cuando esta informado. Solo para ONErpm,
+  si falta ese valor, toma `Quantity`; un cero informado sigue siendo cero.
+- Este mapeo no cambia importes, fechas, reglas contractuales ni flags de
+  caja/catalogo/statement. Los shares mantienen su tratamiento independiente.
+- El dashboard y song-level ya leen `Quantity`; sus resultados no cambian.
+
 FX:
 
 - Se usa `scripts\lib\fx.py`

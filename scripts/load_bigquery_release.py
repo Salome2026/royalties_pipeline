@@ -314,6 +314,18 @@ def write_lazy(frame: pl.LazyFrame, path: Path) -> None:
 def build_detail(source: Path, target: Path, release_id: str) -> None:
     frame = pl.scan_parquet(source)
     columns = set(frame.collect_schema().names())
+    units = (
+        pl.col("units").cast(pl.Float64, strict=False)
+        if "units" in columns
+        else pl.lit(None, dtype=pl.Float64)
+    )
+    if "Quantity" in columns:
+        # ONErpm keeps its original quantity independently of business-view flags.
+        units = (
+            pl.when(text_expr(columns, ["source"]) == "onerpm")
+            .then(pl.coalesce(units, pl.col("Quantity").cast(pl.Float64, strict=False)))
+            .otherwise(units)
+        )
     write_lazy(
         frame.select(
             [
@@ -381,7 +393,7 @@ def build_detail(source: Path, target: Path, release_id: str) -> None:
                 text_expr(columns, ["classification_status"]).alias("classification_status"),
                 text_expr(columns, ["content_type", "Product Type", "Config Type"]).alias("content_type"),
                 float_expr(columns, "amount_usd").alias("amount_usd"),
-                float_expr(columns, "units").alias("units"),
+                units.fill_null(0.0).alias("units"),
                 bool_expr(columns, "include_in_statement_view", True).alias("include_in_statement_view"),
                 bool_expr(columns, "include_in_cash_view", True).alias("include_in_cash_view"),
                 bool_expr(columns, "include_in_catalog_view", True).alias("include_in_catalog_view"),

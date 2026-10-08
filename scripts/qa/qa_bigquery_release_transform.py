@@ -78,6 +78,34 @@ def main() -> None:
         assert detail["artist_catalog_style"].to_list() == ["Artist A & Guest", None]
         assert detail["product_upc_status"].to_list() == ["reported", None]
 
+        onerpm_source = root / "onerpm_source.parquet"
+        onerpm_input = pl.DataFrame(
+            {
+                "source": ["onerpm"] * 5 + ["ada", "fuga"],
+                "account": ["henry_remix", "gusty_dj", "la_nueva_sangre", "mawzrecords", "henry_remix", "mawz", "indyana_records"],
+                "source_sheet": ["Masters", "Masters", "Youtube Channels", "Shares In & Out", "Masters", "royalty_detail", "standard_statement_csv"],
+                "Quantity": [9499.0, 100.0, 5.0, -34.0, 200.0, 999.0, 888.0],
+                "units": [None, None, None, None, 0.0, None, 12.0],
+                "amount_usd": [45.863822, 10.0, 2.0, -1.25, 0.0, 9.0, 8.0],
+                "revenue_basis": ["generation"] * 3 + ["transfer"] + ["generation"] * 3,
+                "include_in_statement_view": [True, False, False, False, True, True, True],
+                "include_in_cash_view": [True, False, False, True, True, True, True],
+                "include_in_catalog_view": [True, True, True, False, True, True, True],
+                "possible_internal_transfer": [False, False, False, True, False, False, False],
+                "has_share_in_out": [False, True, True, True, False, False, False],
+            }
+        )
+        onerpm_input.write_parquet(onerpm_source)
+        onerpm_target = root / "onerpm_detail.parquet"
+        build_detail(onerpm_source, onerpm_target, "release-test")
+        onerpm_detail = assert_columns(onerpm_target, DETAIL_FIELDS)
+        assert onerpm_detail["units"].to_list() == [9499.0, 100.0, 5.0, -34.0, 0.0, 0.0, 12.0]
+        for field in ["source", "account", "source_sheet", "amount_usd", "revenue_basis", "include_in_statement_view", "include_in_cash_view", "include_in_catalog_view", "possible_internal_transfer"]:
+            assert onerpm_detail[field].to_list() == onerpm_input[field].to_list(), field
+        onerpm_input.head(4).drop("units").write_parquet(onerpm_source)
+        build_detail(onerpm_source, onerpm_target, "release-test")
+        assert pl.read_parquet(onerpm_target)["units"].to_list() == [9499.0, 100.0, 5.0, -34.0]
+
         dashboard_source = root / "dashboard_source.parquet"
         pl.DataFrame(
             {
