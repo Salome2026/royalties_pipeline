@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { ArrowLeft, Check, ChevronLeft, ChevronRight, FilePenLine, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, ChevronLeft, ChevronRight, FilePenLine, RefreshCw, Search } from "lucide-react";
 import styles from "./MasterContractsModule.module.css";
 import { ArtistContractsPanel, type ArtistContract } from "./ArtistContractsPanel";
 import { MasterAgreementsEditor, visibleAgreements, type MasterAgreement } from "./MasterAgreementsEditor";
-import { agreementAllocation, agreementIncome, allocationTotals, contractErrors, previewAllocation, type Allocation, type Participant, type StatementIncome } from "./contractLogic";
+import { PoolsAllocationEditor } from "./PoolsAllocationEditor";
+import { agreementAllocation, agreementIncome, allocationTotals, contractErrors, previewAllocation, type Allocation, type StatementIncome } from "./contractLogic";
 
 type Split = Allocation & {
   agreements?: MasterAgreement[];
@@ -65,7 +66,6 @@ type Props = {
 const PAGE_SIZE = 50;
 const money = (value: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value || 0);
 const percent = (value: number) => new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(value);
-const numberOrNull = (value: string) => value.trim() === "" ? null : Number(value);
 const artistKey = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -89,6 +89,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   const [futureSelected, setFutureSelected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [editingArtist, setEditingArtist] = useState<string | null>(null);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -104,6 +105,26 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   }, [appliedKeyword, offset, onMessage, status]);
 
   useEffect(() => { void loadList(); }, [loadList]);
+  useEffect(() => {
+    if (!editingArtist) return;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const frame = requestAnimationFrame(() => document.querySelector<HTMLElement>('[role="dialog"] button')?.focus());
+    function trapFocus(event: KeyboardEvent) {
+      if (event.key !== "Tab") return;
+      const controls = [...(document.querySelector('[role="dialog"]')?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)') || [])].filter((item) => item.offsetParent !== null);
+      const first = controls[0], last = controls.at(-1);
+      if ((event.shiftKey && document.activeElement === first) || (!event.shiftKey && document.activeElement === last)) {
+        event.preventDefault(); (event.shiftKey ? last : first)?.focus();
+      }
+    }
+    document.addEventListener("keydown", trapFocus);
+    return () => {
+      cancelAnimationFrame(frame); document.removeEventListener("keydown", trapFocus);
+      document.body.style.overflow = overflow; previousFocus?.focus();
+    };
+  }, [editingArtist]);
 
   async function openDetail(isrc: string) {
     setLoading(true);
@@ -147,16 +168,6 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
     setDraft((current) => current ? { ...current, ...patch } : current);
   }
 
-  function updateParticipant(index: number, patch: Partial<Participant>) {
-    if (allocation) updateAllocation({ participants: allocation.participants.map((item, position) => position === index ? { ...item, ...patch } : item) });
-  }
-
-  function updateAllocation(patch: Partial<Allocation>) {
-    if (!activeAgreement || !allocation) return;
-    updateDraft({ agreements: agreements.map((item) => item.id === activeAgreement.id
-      ? { ...item, allocation: { ...allocation, ...patch } } : item) });
-  }
-
   function contractFor(artist: string): ArtistContract | undefined {
     return detail?.artist_contracts.find((item) => artistKey(item.artist_name) === artistKey(artist));
   }
@@ -167,14 +178,13 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
       ...allocation, indyana_percent: contract.indyana_percent,
       principal_percent: allocation.participants.length === 0 ? 100 - contract.indyana_percent : allocation.principal_percent,
       apply_guest_contracts: contract.is_project,
+      principal_rule: { treatment: contract.is_project && activeAgreement.commercialization !== "distribution" ? "project_owners" as const : "direct" as const },
     };
-    const owners = activeAgreement.owners.some((owner) => artistKey(owner.name) === "indyana")
-      ? activeAgreement.owners.map((owner) => artistKey(owner.name) === "indyana" ? { ...owner, percent: contract.indyana_percent } : owner)
-      : [...activeAgreement.owners.filter((owner) => owner.name.trim()), { name: "Indyana", percent: contract.indyana_percent }];
     updateDraft({
       has_contract: contract.has_contract,
       agreements: agreements.map((item) => item.id === activeAgreement.id
-        ? { ...item, allocation: nextAllocation, owners: item.commercialization === "master" ? owners : item.owners } : item),
+        ? { ...item, allocation: nextAllocation, master_pool_percent: contract.indyana_percent,
+          contract_kind: contract.is_project && item.commercialization !== "distribution" ? "project" : "simple" } : item),
     });
   }
 
@@ -246,6 +256,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
           <div className={styles.formColumn}>
             <MasterAgreementsEditor
               agreements={agreements}
+              fallbackAllocation={draft}
               canEdit={canEditCurrent}
               artistOptions={artistOptions}
               firstStatementDate={detail.first_statement_date}
@@ -256,42 +267,18 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
             {errors.length > 0 && <div className={styles.validationErrors} role="alert">{errors.map((error) => <p key={error}>{error}</p>)}</div>}
 
             {openAgreementId && <>
-            <section className={styles.band}>
-              <div className={styles.sectionHeading}><h2>Reparto económico</h2><span>Participaciones del ingreso base</span></div>
-              {contractFor(allocation.principal) && <div className={styles.contractReference}>
+              {activeAgreement?.allocation_model === "pools" && contractFor(allocation.principal) && <div className={styles.contractReference}>
                 <span>Contrato de {contractFor(allocation.principal)?.artist_name}: Indyana {percent(contractFor(allocation.principal)!.indyana_percent)}% · artista {percent(100 - contractFor(allocation.principal)!.indyana_percent)}%</span>
                 {canEditCurrent && <button type="button" className={styles.secondaryButton} onClick={() => applyPrincipalContract(contractFor(allocation.principal)!)}>Usar propuesta</button>}
               </div>}
-              <div className={styles.splitRows}>
-                {activeAgreement?.commercialization !== "master" && <div className={styles.splitRow}>
-                  <label>Indyana<input type="text" value="Indyana" readOnly /></label>
-                  <label>Porcentaje<input inputMode="decimal" type="number" min="0" max="100" step="0.01" disabled={!canEditCurrent} value={allocation.indyana_percent ?? ""} onChange={(event) => updateAllocation({ indyana_percent: numberOrNull(event.target.value) })} /></label>
-                </div>}
-                <div className={styles.splitRow}>
-                  <label>Artista principal<input disabled={!canEditCurrent} value={allocation.principal} onChange={(event) => updateAllocation({ principal: event.target.value })} /></label>
-                  <label>Porcentaje<input inputMode="decimal" type="number" min="0" max="100" step="0.01" disabled={!canEditCurrent} value={allocation.principal_percent ?? ""} onChange={(event) => updateAllocation({ principal_percent: numberOrNull(event.target.value) })} /></label>
-                </div>
-                {allocation.participants.map((item, index) => (
-                  <div className={styles.splitRow} key={index}>
-                    <label>Participante {index + 1}<input disabled={!canEditCurrent} value={item.artist} onChange={(event) => updateParticipant(index, { artist: event.target.value })} /></label>
-                    <label>Porcentaje<input inputMode="decimal" type="number" min="0" max="100" step="0.01" disabled={!canEditCurrent} value={item.percent ?? ""} onChange={(event) => updateParticipant(index, { percent: numberOrNull(event.target.value) })} /></label>
-                    {canEditCurrent && <button type="button" className={styles.iconButton} title={`Quitar participante ${index + 1}`} aria-label={`Quitar participante ${index + 1}`} onClick={() => updateAllocation({ participants: allocation.participants.filter((_, position) => position !== index) })}><Trash2 size={16} /></button>}
-                    {allocation.apply_guest_contracts && <label className={styles.nestedField}>Indyana del contrato del invitado %<input inputMode="decimal" type="number" min="0" max="100" step="0.01" disabled={!canEditCurrent} value={item.internal_contract_indyana_percent ?? ""} onChange={(event) => updateParticipant(index, { internal_contract_indyana_percent: numberOrNull(event.target.value) })} placeholder="Externo: vacío" /></label>}
-                    {allocation.apply_guest_contracts && contractFor(item.artist) && <div className={styles.guestReference}><span>Contrato de {contractFor(item.artist)?.artist_name}: {percent(contractFor(item.artist)!.indyana_percent)}% para Indyana</span>{canEditCurrent && <button type="button" className={styles.secondaryButton} onClick={() => updateParticipant(index, { internal_contract_indyana_percent: contractFor(item.artist)!.indyana_percent })}>Usar propuesta</button>}</div>}
-                  </div>
-                ))}
-              </div>
-              {canEditCurrent && <button type="button" className={styles.addButton} disabled={allocation.participants.length >= 10} onClick={() => updateAllocation({ participants: [...allocation.participants, { artist: "", percent: null, internal_contract_indyana_percent: null }] })}><Plus size={16} /> Agregar participante</button>}
-              <label className={styles.checkboxLine}>
-                <input type="checkbox" disabled={!canEditCurrent} checked={allocation.apply_guest_contracts} onChange={(event) => updateAllocation({ apply_guest_contracts: event.target.checked })} />
-                <span>Aplicar contrato de invitados internos sobre su parte</span>
-              </label>
+              {activeAgreement && <PoolsAllocationEditor agreement={activeAgreement} allocation={allocation} canEdit={canEditCurrent}
+                artistOptions={artistOptions} artistContracts={detail.artist_contracts} onEditArtist={setEditingArtist}
+                onChange={(next) => updateDraft({ agreements: agreements.map((item) => item.id === next.id ? next : item) })} />}
               <div className={styles.totalsGrid}>
-                <div><span>Total master</span><strong>{percent(totals.master)}%</strong></div>
+                <div><span>{activeAgreement?.allocation_model === "pools" && activeAgreement.commercialization === "distribution" ? "Total comercialización" : "Total master"}</span><strong>{percent(totals.master)}%</strong></div>
                 <div><span>Total participaciones</span><strong>{percent(totals.participation)}%</strong></div>
                 <div className={Math.abs(totals.general - 100) < .0001 ? styles.totalOk : totals.general > 100 ? styles.totalError : styles.totalPending}><span>Total general</span><strong>{percent(totals.general)}%</strong><small>{Math.abs(totals.general - 100) < .0001 ? "Cuadra" : totals.general < 100 ? `Faltan ${percent(100 - totals.general)} puntos` : `Excede ${percent(totals.general - 100)} puntos`}</small></div>
               </div>
-            </section>
 
             <section className={styles.band}>
               <div className={styles.sectionHeading}><h2>Estado y seguimiento</h2></div>
@@ -319,7 +306,10 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
               <div className={styles.sectionHeading}><h2>Simulación en USD</h2></div>
               <div className={styles.periodBase}><span>Ingreso en vigencia</span><strong>{periodIncome === null ? "-" : money(periodIncome)}</strong><small>{activeAgreement?.effective_from || "Desde sin definir"} a {activeAgreement?.effective_until || "Actual"}</small></div>
               {preview ? <div className={styles.previewRows}>
-                {preview.map((item, index) => <div key={index}><span>{item.artist}</span><strong>{money(item.amount)}</strong><small>{percent(item.percent)}%</small></div>)}
+                {preview.map((item, index) => <div key={index}><span>{item.artist}</span><strong>{money(item.amount)}</strong><small>{percent(item.percent)}%</small>
+                  <details className={styles.previewOrigins}><summary>Composición</summary>{item.origins.map((origin, position) => <p key={position}>{origin.label}: {percent(origin.percent)}%</p>)}</details>
+                </div>)}
+                <div className={styles.previewTotal}><span>Total distribuido</span><strong>{money(preview.reduce((sum, item) => sum + item.amount, 0))}</strong><small>100%</small></div>
               </div> : <p className={styles.previewEmpty}>Completá todos los participantes y un reparto que sume 100% para ver la simulación.</p>}
             </section>
             <section className={styles.evidenceBand}>
@@ -332,6 +322,12 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
             </section>
           </aside>}
         </div>
+        {editingArtist && <div className={styles.modalBackdrop}>
+          <div className={styles.artistModal} role="dialog" aria-modal="true" aria-label={`Contrato de ${editingArtist}`}>
+            <ArtistContractsPanel canEdit={canEditCurrent} initialArtist={editingArtist} onBack={() => setEditingArtist(null)} onMessage={onMessage}
+              onSaved={(items) => setDetail((current) => current ? { ...current, artist_contracts: items.filter((item) => item.is_active) } : current)} />
+          </div>
+        </div>}
       </section>
     );
   }

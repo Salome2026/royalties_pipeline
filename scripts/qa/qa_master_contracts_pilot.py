@@ -4,7 +4,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import polars as pl
 
@@ -27,6 +27,81 @@ from app import vpo_corp_api
 
 
 class MasterContractsPilotTests(unittest.TestCase):
+    def test_pool_model_ownership_is_independent_of_participation_and_rules_survive_api(self) -> None:
+        allocation = {"principal": "Gusty DJ", "principal_percent": 30, "participants": [],
+                      "principal_rule": {"treatment": "direct"}}
+        agreement = {"id": "principal", "label": "Principal", "commercialization": "master",
+                     "allocation_model": "pools", "contract_kind": "simple", "master_pool_percent": 70,
+                     "owners": [{"name": "Indyana", "percent": 50}, {"name": "Gusty DJ", "percent": 50}],
+                     "effective_from": "2026-01-01", "allocation": allocation}
+        split = {"agreement_confirmed": True, "agreements": [agreement]}
+        request = vpo_corp_api.MasterContractSaveRequest(split=split, closed=True)
+        validate_split(request.split.model_dump(), True, False)
+        self.assertEqual(request.split.agreements[0].owners[1].percent, 50)
+        self.assertEqual(request.split.agreements[0].allocation.principal_rule.treatment, "direct")
+        with self.assertRaisesRegex(ValueError, "titulares.*100%"):
+            validate_split({**split, "agreements": [{**agreement, "owners": [{"name": "Indyana", "percent": 70}]}]}, True, False)
+        with self.assertRaisesRegex(ValueError, "superan el 100%"):
+            validate_split({**split, "agreements": [{**agreement, "master_pool_percent": 80}]}, False, False)
+        with sqlite3.connect(":memory:") as conn, self.assertRaisesRegex(ValueError, "exclusivamente Cloud SQL Postgres"):
+            save_split(conn, "ARDL12600006", split, closed=True, future_reports_selected=False, expected_version=0, actor="tester")
+
+    def test_project_equal_partners_and_explicit_nested_contracts(self) -> None:
+        allocation = {"principal": "La Juntada", "principal_percent": 10,
+                      "principal_rule": {"treatment": "project_owners"}, "participants": [
+                          {"artist": "Sasha", "percent": 10, "rule": {"treatment": "direct"}},
+                          {"artist": "Sofi B", "percent": 10, "rule": {"treatment": "artist_contract",
+                           "retained_percent": 70, "retained_recipient": "Indyana", "contract_artist": "Sofi B", "contract_version": 2}},
+                      ]}
+        agreement = {"id": "principal", "commercialization": "master", "allocation_model": "pools",
+                     "contract_kind": "project", "owner_split_mode": "equal", "master_pool_percent": 70,
+                     "effective_from": "2026-01-01", "owners": [{"name": name, "percent": None} for name in ["Indyana", "Hernan", "Claudio"]],
+                     "allocation": allocation}
+        split = {"agreement_confirmed": True, "agreements": [agreement]}
+        request = vpo_corp_api.MasterContractSaveRequest(split=split, closed=True)
+        data = request.split.model_dump()
+        validate_split(data, True, False)
+        self.assertEqual(data["agreements"][0]["allocation"]["participants"][1]["rule"]["contract_version"], 2)
+        with self.assertRaisesRegex(ValueError, "proyecto"):
+            validate_split({**split, "agreements": [{**agreement, "contract_kind": "simple"}]}, False, False)
+        missing = {**allocation, "participants": [allocation["participants"][0],
+                    {"artist": "Sofi B", "percent": 10, "rule": {"treatment": "artist_contract"}}]}
+        validate_split({**split, "agreements": [{**agreement, "allocation": missing}]}, False, False)
+        with self.assertRaisesRegex(ValueError, "destinatario"):
+            validate_split({**split, "agreements": [{**agreement, "allocation": missing}]}, True, False)
+        duplicate = {**agreement, "owners": [{"name": "Indyana", "percent": None}, {"name": "INDYANA", "percent": None}]}
+        with self.assertRaisesRegex(ValueError, "únicos"):
+            validate_split({**split, "agreements": [duplicate]}, False, False)
+
+    def test_pool_rules_are_written_to_postgres_history_and_remain_versioned(self) -> None:
+        from app import master_contracts
+        import json
+        split = vpo_corp_api.MasterContractSaveRequest(split={
+            "agreements": [{"id": "principal", "commercialization": "master", "allocation_model": "pools",
+                "master_pool_percent": 70, "effective_from": "2026-01-01", "owners": [{"name": "Indyana", "percent": 100}],
+                "allocation": {"principal": "Aneley", "principal_percent": 30,
+                    "principal_rule": {"treatment": "artist_contract", "retained_percent": 50,
+                        "retained_recipient": "Indyana", "contract_artist": "Aneley", "contract_version": 3}}}]
+        }).split.model_dump()
+        conn, cursor = MagicMock(), MagicMock()
+        conn.execute.return_value = cursor
+        cursor.fetchone.return_value = {"isrc": "ARDL12600041"}
+        with patch.object(master_contracts, "is_postgres_connection", return_value=True), \
+                patch("app.operational_db.is_postgres_connection", return_value=True):
+            saved = save_split(conn, "ARDL12600041", split, closed=False,
+                               future_reports_selected=False, expected_version=0, actor="tester")
+            self.assertEqual(saved["version"], 1)
+            calls = conn.execute.call_args_list
+            self.assertIn("master_contract_split_history", calls[-1].args[0])
+            self.assertEqual(json.loads(calls[-1].args[1][2]), split)
+            cursor.fetchone.return_value = {"payload_json": calls[0].args[1][0], "is_closed": False,
+                "future_reports_selected": False, "version": 1, "updated_by": "tester", "updated_at": "now"}
+            self.assertEqual(read_split(conn, "ARDL12600041")["split"], split)
+            cursor.fetchone.return_value = None
+            with self.assertRaisesRegex(ValueError, "cambió"):
+                save_split(conn, "ARDL12600041", split, closed=False,
+                           future_reports_selected=False, expected_version=0, actor="tester")
+
     def test_statement_income_is_parameterized_and_uses_dashboard_discounts(self) -> None:
         class Client:
             def query(self, sql, *, job_config, location):
@@ -263,7 +338,8 @@ class MasterContractsPilotTests(unittest.TestCase):
             self.assertTrue(group["apply_guest_contracts"])
             self.assertEqual(group["participants"][0]["internal_contract_indyana_percent"], 50)
             self.assertIsNone(suggested_split(["Candu Dominguez"])["indyana_percent"])
-            saved = save_split(conn, "ARDL12600041", group, closed=False,
+            legacy = {**group, "agreements": [{"id": "principal", "commercialization": "pending", "owners": []}]}
+            saved = save_split(conn, "ARDL12600041", legacy, closed=False,
                                future_reports_selected=False, expected_version=0, actor="ruben")
             self.assertEqual(saved["split"]["indyana_percent"], 70)
             save_artist_contract(conn, {**juntada, "indyana_percent": 65}, expected_version=1, actor="alejandrop")

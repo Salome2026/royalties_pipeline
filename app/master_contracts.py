@@ -256,7 +256,12 @@ def suggested_split(
             "id": "principal",
             "label": "Contrato principal",
             "commercialization": "pending",
-            "owners": [],
+            "allocation_model": "pools",
+            "contract_kind": "project" if is_project else "simple",
+            "master_pool_percent": base,
+            "company_name": "Indyana",
+            "owner_split_mode": "percent",
+            "owners": [{"name": "Indyana", "percent": 100}],
             "effective_from": first_statement_date,
             "effective_until": None,
         }],
@@ -269,11 +274,19 @@ def suggested_split(
         "indyana_percent": base,
         "principal_percent": 100 - base if base is not None and len(artists) == 1 else None,
         "apply_guest_contracts": is_project,
+        "principal_rule": {"treatment": "project_owners" if is_project else "direct"},
         "participants": [
             {
                 "artist": artist,
                 "percent": None,
                 "internal_contract_indyana_percent": contracts.get(artist_key(artist), {}).get("indyana_percent"),
+                "rule": {
+                    "treatment": "artist_contract" if is_project and artist_key(artist) in contracts else "direct",
+                    "retained_percent": contracts.get(artist_key(artist), {}).get("indyana_percent"),
+                    "retained_recipient": "Indyana",
+                    "contract_artist": contracts.get(artist_key(artist), {}).get("artist_name"),
+                    "contract_version": contracts.get(artist_key(artist), {}).get("version"),
+                },
             }
             for artist in artists[1:11]
         ],
@@ -499,7 +512,10 @@ def validate_split(split: dict[str, Any], closed: bool, future_reports_selected:
                 named_owners = [key for key in owner_keys if key]
                 if (closed and any(not key for key in owner_keys)) or len(set(named_owners)) != len(named_owners):
                     raise ValueError(f"{label}: los titulares deben tener nombres únicos.")
-            _validate_allocation(agreement.get("allocation") or split, owners, commercialization, closed, label)
+            if agreement.get("allocation_model") == "pools":
+                _validate_pool_allocation(agreement, agreement.get("allocation") or split, closed, label)
+            else:
+                _validate_allocation(agreement.get("allocation") or split, owners, commercialization, closed, label)
         intervals.sort(key=lambda interval: interval[0])
         for previous, current in zip(intervals, intervals[1:]):
             # End dates include the whole day; an open end reserves every subsequent day.
@@ -511,6 +527,60 @@ def validate_split(split: dict[str, Any], closed: bool, future_reports_selected:
         if closed and split.get("master_type") in {"indyana_and_other", "mawz_and_other"} and not str(split.get("other_master_artist") or "").strip():
             raise ValueError("Para cerrar, elegí el otro artista titular del master.")
         _validate_allocation(split, [], "distribution", closed, "Reparto")
+
+
+def _validate_pool_allocation(agreement: dict[str, Any], allocation: dict[str, Any], closed: bool, label: str) -> None:
+    def check_percent(value: Any) -> None:
+        if value is not None and (not math.isfinite(float(value)) or not 0 <= float(value) <= 100):
+            raise ValueError(f"{label}: los porcentajes deben estar entre 0 y 100.")
+
+    pool = agreement.get("master_pool_percent")
+    check_percent(pool)
+    if closed and agreement.get("commercialization") == "distribution" and not str(agreement.get("company_name", "Indyana")).strip():
+        raise ValueError(f"{label}: completá el destinatario de la comercialización.")
+    owners = agreement.get("owners") or []
+    if len(owners) > 12:
+        raise ValueError(f"{label}: se admiten hasta doce titulares.")
+    equal = agreement.get("owner_split_mode") == "equal"
+    for owner in owners:
+        check_percent(owner.get("percent"))
+    ownership = 100 if equal and owners else sum(float(owner.get("percent") or 0) for owner in owners)
+    if agreement.get("commercialization") == "master":
+        if ownership > 100.0001:
+            raise ValueError(f"{label}: los titulares de la bolsa master superan el 100%.")
+        if closed and (abs(ownership - 100) > 0.0001 or (not equal and any(owner.get("percent") is None for owner in owners))):
+            raise ValueError(f"{label}: los titulares de la bolsa master deben sumar 100%.")
+
+    rows = [{"artist": allocation.get("principal"), "percent": allocation.get("principal_percent"),
+             "rule": allocation.get("principal_rule")}, *(allocation.get("participants") or [])]
+    if len(rows) > 11:
+        raise ValueError(f"{label}: se admiten hasta diez participantes adicionales.")
+    seen: set[str] = set()
+    for row in rows:
+        key = artist_key(str(row.get("artist") or ""))
+        if (closed and not key) or (key and key in seen):
+            raise ValueError(f"{label}: cada participante debe tener un nombre único.")
+        if key:
+            seen.add(key)
+        check_percent(row.get("percent"))
+        rule = row.get("rule") or {}
+        treatment = rule.get("treatment", "direct")
+        if treatment not in {"direct", "artist_contract", "project_owners"}:
+            raise ValueError(f"{label}: tratamiento de participación inválido.")
+        if treatment == "project_owners":
+            if agreement.get("commercialization") == "distribution" or agreement.get("contract_kind") != "project":
+                raise ValueError(f"{label}: repartir entre socios requiere un proyecto con titulares de master.")
+        if treatment == "artist_contract":
+            retained = rule.get("retained_percent")
+            check_percent(retained)
+            if closed and (retained is None or not str(rule.get("retained_recipient") or "").strip()):
+                raise ValueError(f"{label}: completá el contrato y destinatario de la retención de {row.get('artist') or 'cada artista'}.")
+    participation = sum(float(row.get("percent") or 0) for row in rows)
+    total = float(pool or 0) + participation
+    if total > 100.0001:
+        raise ValueError(f"{label}: bolsa master/comercialización y participaciones superan el 100%.")
+    if closed and (pool is None or any(row.get("percent") is None for row in rows) or abs(total - 100) > 0.0001):
+        raise ValueError(f"{label}: completá las dos bolsas; master/comercialización y participaciones deben sumar 100%.")
 
 
 def _validate_allocation(allocation: dict[str, Any], owners: list[dict[str, Any]], commercialization: str | None, closed: bool, label: str) -> None:
@@ -574,6 +644,8 @@ def save_split(
     expected_version: int,
     actor: str,
 ) -> dict[str, Any]:
+    if any(agreement.get("allocation_model") == "pools" for agreement in split.get("agreements") or []) and not is_postgres_connection(conn):
+        raise ValueError("Los contratos con bolsas usan exclusivamente Cloud SQL Postgres.")
     ensure_sqlite_tables(conn)
     validate_split(split, closed, future_reports_selected)
     payload = json.dumps(split, ensure_ascii=False, sort_keys=True)

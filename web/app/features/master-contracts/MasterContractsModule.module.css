@@ -8,6 +8,36 @@
 }
 
 .workspace * { letter-spacing: 0; }
+.poolFields, .ruleFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.poolFields label, .ruleFields label, .participantRows label { display: grid; gap: 6px; min-width: 0; color: #bad0d3; font-size: .72rem; font-weight: 700; }
+.poolFields input, .ruleFields input, .participantRows input, .participantRows select, .ownerRows output {
+  width: 100%; min-width: 0; height: 39px; margin: 0; padding: 8px 10px; box-sizing: border-box;
+  border: 1px solid rgba(164, 188, 199, .27); border-radius: 6px; outline: none;
+  color: #f7fbfb; background: var(--contract-control); font: inherit; font-size: .81rem;
+}
+.participantRows select option { background: #102824; color: #f7fbfb; }
+.poolFields input:focus, .ruleFields input:focus, .participantRows input:focus, .participantRows select:focus { border-color: #65d9c8; box-shadow: 0 0 0 2px rgba(101, 217, 200, .13); }
+.ownerRows { display: grid; gap: 10px; margin-top: 14px; }
+.ownerRows output { display: flex; align-items: center; color: #83daca; }
+.counterOk { color: #77e4c9 !important; }
+.counterPending { color: #f5c47a !important; }
+.participantRows { display: grid; }
+.participantRow { padding: 15px 0; border-bottom: 1px solid rgba(164, 188, 199, .16); }
+.participantRow:first-child { padding-top: 0; }
+.participantIdentity { display: grid; grid-template-columns: minmax(0, 1fr) minmax(90px, 115px) 38px; gap: 9px; align-items: end; }
+.treatmentRow { display: flex; align-items: end; gap: 10px; margin-top: 10px; }
+.treatmentRow > label { flex: 1; }
+.ruleFields { border-left: 2px solid rgba(101, 217, 200, .28); padding: 0 0 0 12px; margin-top: 12px; }
+.ruleReference { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: #aed0c9; font-size: .76rem; }
+.legacyRows > div { display: flex; justify-content: space-between; gap: 15px; padding: 8px 0; font-size: .8rem; }
+.previewOrigins { grid-column: 1 / -1; color: #9dc6bf; font-size: .7rem; }
+.previewOrigins summary { cursor: pointer; }
+.previewOrigins p { margin: 6px 0 0; font-size: .7rem; }
+.previewRows > .previewTotal { margin-top: 5px; border-top: 1px solid rgba(119, 228, 201, .32); padding-top: 15px; }
+.modalBackdrop { position: fixed; inset: 0; z-index: 150; display: grid; place-items: center; padding: 24px; background: rgba(0, 0, 0, .45); backdrop-filter: blur(7px); }
+.artistModal { width: min(1080px, 100%); max-height: 88dvh; overflow-y: auto; border: 1px solid rgba(183, 215, 213, .32); border-radius: 8px; background: rgba(9, 26, 24, .91); box-shadow: 0 24px 80px rgba(0, 0, 0, .45); }
+.artistModal .workspace { box-sizing: border-box; }
+.band .actions .addButton { margin-top: 0; }
 :global(.vpo-view-master-contracts::before) { top: 40%; right: 5vw; opacity: .045; }
 
 .listHeader,
@@ -277,6 +307,11 @@
 }
 
 @media (max-width: 720px) {
+  .poolFields, .ruleFields { grid-template-columns: 1fr; }
+  .modalBackdrop { padding: 10px; }
+  .artistModal { max-height: 94dvh; }
+  .participantIdentity { grid-template-columns: minmax(0, 1fr) 87px 32px; gap: 6px; }
+  .participantIdentity > .iconButton { width: 32px; height: 39px; }
   .workspace { padding: 20px 15px 36px; }
   .heading h1 { font-size: 1.45rem; }
   .toolbar { align-items: stretch; }

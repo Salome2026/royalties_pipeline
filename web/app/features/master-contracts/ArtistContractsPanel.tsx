@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, FilePenLine, Plus, RefreshCw, Search } from "lucide-react";
 import styles from "./MasterContractsModule.module.css";
+import { beneficiaryKey } from "./contractLogic";
 
 export type ArtistContract = {
   artist_key: string;
@@ -30,17 +31,21 @@ const blankDraft = (): Draft => ({
   effective_from: null, is_project: false, is_active: true, notes: "", version: 0,
 });
 
-export function ArtistContractsPanel({ canEdit, onBack, onMessage }: {
+export function ArtistContractsPanel({ canEdit, onBack, onMessage, initialArtist, onSaved }: {
   canEdit: boolean;
   onBack: () => void;
   onMessage: (message: Message | null) => void;
+  initialArtist?: string;
+  onSaved?: (items: ArtistContract[]) => void;
 }) {
   const [items, setItems] = useState<ArtistContract[]>([]);
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState<Draft>(blankDraft);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
+  const initialized = useRef(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -49,6 +54,8 @@ export function ArtistContractsPanel({ canEdit, onBack, onMessage }: {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "No se pudieron cargar los contratos.");
       setItems(data.items);
+      setLoaded(true);
+      return data.items as ArtistContract[];
     } catch (error) {
       onMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudieron cargar los contratos." });
     } finally {
@@ -57,6 +64,14 @@ export function ArtistContractsPanel({ canEdit, onBack, onMessage }: {
   }, [onMessage]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (!initialArtist || !loaded || loading || initialized.current) return;
+    initialized.current = true;
+    const item = items.find((row) => beneficiaryKey(row.artist_name) === beneficiaryKey(initialArtist));
+    setQuery(initialArtist);
+    setSelectedKey(item?.artist_key || null);
+    setDraft(item ? { ...item } : { ...blankDraft(), artist_name: initialArtist });
+  }, [initialArtist, items, loaded, loading]);
 
   const filtered = useMemo(() => items.filter((item) => item.artist_name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())), [items, query]);
   const selected = items.find((item) => item.artist_key === selectedKey);
@@ -102,7 +117,8 @@ export function ArtistContractsPanel({ canEdit, onBack, onMessage }: {
         is_project: data.is_project, is_active: data.is_active, notes: data.notes, version: data.version,
       });
       onMessage({ type: "ok", text: "Contrato guardado. Solo se sugerirá en fichas nuevas; los repartos guardados no cambiaron." });
-      await load();
+      const updated = await load();
+      if (updated) onSaved?.(updated);
     } catch (error) {
       onMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo guardar el contrato." });
     } finally {
@@ -111,12 +127,17 @@ export function ArtistContractsPanel({ canEdit, onBack, onMessage }: {
   }
 
   return (
-    <section className={styles.workspace}>
+    <section className={styles.workspace} onKeyDown={(event) => {
+      if (initialArtist && event.key === "Escape") {
+        event.preventDefault(); event.stopPropagation();
+        if (!changed || window.confirm("Hay cambios sin guardar. ¿Cerrar el contrato?")) onBack();
+      }
+    }}>
       <header className={styles.detailHeader}>
         <button type="button" className={styles.iconButton} title="Volver a repartos por ISRC" aria-label="Volver a repartos por ISRC" onClick={() => {
           if (!changed || window.confirm("Hay cambios sin guardar. ¿Volver al catálogo?")) onBack();
         }}><ArrowLeft size={19} /></button>
-        <div className={styles.heading}><span>Contratos</span><h1>Contratos de artistas</h1><p>Condiciones generales del master, independientes de cada ISRC.</p></div>
+        <div className={styles.heading}><span>Contratos</span><h1>Contratos de artistas</h1></div>
         <button type="button" className={styles.iconButton} title="Actualizar contratos" aria-label="Actualizar contratos" disabled={loading} onClick={() => void load()}><RefreshCw size={18} /></button>
       </header>
       <div className={styles.artistLayout}>

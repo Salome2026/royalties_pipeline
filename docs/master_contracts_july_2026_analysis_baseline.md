@@ -34,9 +34,11 @@ repartos guardados, el dashboard ni los reportes actuales.
 - Cada contrato puede guardar su propio reparto. Los registros antiguos sin
   reparto por contrato conservan el reparto global como respaldo de lectura.
   No se hace ninguna migracion automatica de acuerdos o porcentajes guardados.
-- En Master, titulares + principal + invitados suman un unico 100%. La parte
-  empresarial se carga en titulares y no vuelve a sumarse como Indyana en el
-  reparto. En Distribucion, la comision de Indyana integra el reparto economico.
+- Los registros anteriores con reparto plano mantienen su significado original:
+  titulares + principal + invitados suman un unico 100%. No se convierten al
+  nuevo modelo al leerlos ni al desplegar. "Editar con bolsas" convierte la
+  estructura solo en el borrador del operador, conservando el resultado economico;
+  la escritura requiere Guardar y mantiene el historial anterior.
 - Total master, Total participaciones y Total general son valores del contrato
   seleccionado. El total general nunca puede superar 100%, aun en borrador;
   para cerrar deben estar completos y sumar exactamente 100% (tolerancia 0.0001).
@@ -44,6 +46,44 @@ repartos guardados, el dashboard ni los reportes actuales.
   incrementar el total base. La retencion pasa a Indyana en la simulacion.
 - Versiones, historial, permisos y bloqueo ante ediciones simultaneas se
   conservan. `reports_effective` sigue siendo falso.
+
+## Dos bolsas y proyectos (2026-10-08)
+
+- Nuevas fichas: `allocation_model=pools`. La bolsa master/comercializacion y
+  las participaciones del ingreso suman 100%. Los porcentajes de participantes
+  son puntos del ingreso total: tres participaciones de 10 completan una bolsa
+  de 30, no son tres veces el 10% de esa bolsa.
+- Los titulares distribuyen exclusivamente la bolsa master. Su propia suma es
+  100%, independiente del 70/30 inicial. `owner_split_mode=equal` guarda la regla
+  de partes iguales y calcula 1/N, sin cargar tres porcentajes truncados a 33.33.
+- Contrato simple y Proyecto con socios son configuraciones por acuerdo/ISRC.
+  No se fijan socios ni porcentajes finales en el codigo. Se admiten doce
+  titulares y diez participantes adicionales al principal.
+- Cada fila, incluso el principal, elige un tratamiento explicito: `direct`,
+  `artist_contract` o `project_owners`. Ser artista interno no aplica por si solo
+  una segunda retencion. En proyectos, el reparto entre socios utiliza los
+  mismos titulares del master, sin volver a aplicar el 70/30 ni recursividad.
+- La retencion de un contrato interno tiene destinatario editable. Una propuesta
+  de la biblioteca guarda porcentaje, artista y version como foto en la ficha;
+  editar la biblioteca no cambia contratos de ISRC existentes. Los contratos
+  generales pueden editarse desde la ficha sin perder su borrador.
+- Gusty: bolsa master 70%, titulares Indyana/Gusty 50/50, participacion Gusty
+  30% directa. El resultado consolidado es Indyana 35%, Gusty 65%.
+- Ejemplo La Juntada: 70% master con tres socios iguales; participaciones de
+  10% para La Juntada (socios), Sasha (directo en este ejemplo) y Sofi B
+  (70% de retencion para Indyana). Sobre USD 100, se distribuyen 33.67, 26.67,
+  26.66, 10 y 3. Este ejemplo de prueba no crea ni modifica acuerdos reales.
+- La simulacion consolida destinatarios por nombre normalizado y muestra los
+  origenes. Redondea solo despues de consolidar; los centavos restantes se
+  asignan por mayor resto, con desempate estable por orden de destinatarios.
+  Ajustes negativos usan la misma distribucion con signo invertido.
+- La persistencia del modelo nuevo es exclusivamente Cloud SQL Postgres,
+  usando el JSON e historial ya existentes, sin nuevas tablas ni columnas.
+  Un intento de guardarlo en SQLite falla explicitamente.
+- Se conservan fecha de statement, limite de julio para la prueba, descuentos,
+  vigencias inclusivas y bloqueo de solapamientos. No se modifican catalogo,
+  marts, BigQuery, dashboard ni lectores de reportes. Ningun contrato entra
+  automaticamente en una liquidacion actual.
 
 Validacion: `python -m unittest scripts.qa.qa_master_contracts_pilot` y
 `node web/scripts/qa_contract_logic.mjs`, incluyendo limites de mes, ano

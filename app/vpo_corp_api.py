@@ -290,10 +290,19 @@ class CatalogStatusRequest(BaseModel):
     label_normalized_override: str | None = Field(default=None, max_length=300)
 
 
+class MasterParticipationRule(BaseModel):
+    treatment: Literal["direct", "artist_contract", "project_owners"] = "direct"
+    retained_percent: float | None = Field(default=None, ge=0, le=100)
+    retained_recipient: str = Field(default="Indyana", max_length=200)
+    contract_artist: str | None = Field(default=None, max_length=200)
+    contract_version: int | None = Field(default=None, ge=1)
+
+
 class MasterContractParticipant(BaseModel):
-    artist: str = Field(..., min_length=1, max_length=200)
+    artist: str = Field(..., max_length=200)
     percent: float | None = Field(default=None, ge=0, le=100)
     internal_contract_indyana_percent: float | None = Field(default=None, ge=0, le=100)
+    rule: MasterParticipationRule | None = None
 
 
 class MasterAgreementOwner(BaseModel):
@@ -306,6 +315,7 @@ class MasterContractAllocation(BaseModel):
     indyana_percent: float | None = Field(default=None, ge=0, le=100)
     principal_percent: float | None = Field(default=None, ge=0, le=100)
     apply_guest_contracts: bool = False
+    principal_rule: MasterParticipationRule | None = None
     participants: list[MasterContractParticipant] = Field(default_factory=list, max_length=10)
 
 
@@ -313,6 +323,11 @@ class MasterAgreement(BaseModel):
     id: str = Field(..., min_length=1, max_length=100)
     label: str = Field(default="", max_length=120)
     commercialization: Literal["pending", "distribution", "master"] = "pending"
+    allocation_model: Literal["flat", "pools"] = "flat"
+    contract_kind: Literal["simple", "project"] = "simple"
+    master_pool_percent: float | None = Field(default=None, ge=0, le=100)
+    company_name: str = Field(default="Indyana", max_length=200)
+    owner_split_mode: Literal["percent", "equal"] = "percent"
     owners: list[MasterAgreementOwner] = Field(default_factory=list, max_length=12)
     effective_from: str | None = None
     effective_until: str | None = None

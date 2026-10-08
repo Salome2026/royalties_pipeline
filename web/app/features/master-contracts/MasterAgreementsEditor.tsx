@@ -2,7 +2,7 @@
 
 import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import styles from "./MasterContractsModule.module.css";
-import { nextAgreementStart, periodBoundary, type MasterAgreement } from "./contractLogic";
+import { agreementAllocation, nextAgreementStart, periodBoundary, poolAgreement, type Allocation, type MasterAgreement } from "./contractLogic";
 export type { MasterAgreement } from "./contractLogic";
 
 export type MasterOwner = { name: string; percent: number | null };
@@ -34,8 +34,9 @@ export function visibleAgreements(agreements: MasterAgreement[] | undefined, spl
   }];
 }
 
-export function MasterAgreementsEditor({ agreements, canEdit, artistOptions, firstStatementDate, openId, onOpenChange, onChange }: {
+export function MasterAgreementsEditor({ agreements, fallbackAllocation, canEdit, artistOptions, firstStatementDate, openId, onOpenChange, onChange }: {
   agreements: MasterAgreement[];
+  fallbackAllocation: Allocation;
   canEdit: boolean;
   artistOptions: string[];
   firstStatementDate: string | null;
@@ -55,8 +56,11 @@ export function MasterAgreementsEditor({ agreements, canEdit, artistOptions, fir
   function addAgreement() {
     if (agreements.length >= 20) return;
     const id = `contract-${crypto.randomUUID()}`;
+    const previous = agreements.at(-1);
+    const template = previous ? structuredClone(poolAgreement(previous, agreementAllocation(previous, fallbackAllocation))) : undefined;
     onChange([...agreements, {
-      id, label: `Contrato ${agreements.length + 1}`, commercialization: "pending", owners: [],
+      ...template,
+      id, label: `Contrato ${agreements.length + 1}`, commercialization: template?.commercialization || "pending", owners: template?.owners || [],
       effective_from: nextAgreementStart(agreements), effective_until: null,
     }]);
     onOpenChange(id);
@@ -90,7 +94,15 @@ export function MasterAgreementsEditor({ agreements, canEdit, artistOptions, fir
                 <label>Comercialización
                   <select disabled={!canEdit} value={agreement.commercialization} onChange={(event) => {
                     const commercialization = event.target.value as MasterAgreement["commercialization"];
-                    update(index, { commercialization, owners: commercialization === "master" ? agreement.owners.length ? agreement.owners : [{ name: "", percent: null }] : [] });
+                    const allocation = agreementAllocation(agreement, fallbackAllocation);
+                    const resetProject = commercialization === "distribution" && (allocation.principal_rule?.treatment === "project_owners" || allocation.participants.some((row) => row.rule?.treatment === "project_owners"));
+                    if (resetProject && !window.confirm("En distribución, las participaciones entre socios pasarán a cobro directo. ¿Continuar?")) return;
+                    update(index, { commercialization,
+                      ...(resetProject ? { contract_kind: "simple", allocation: { ...allocation,
+                        principal_rule: allocation.principal_rule?.treatment === "project_owners" ? { treatment: "direct" } : allocation.principal_rule,
+                        participants: allocation.participants.map((row) => row.rule?.treatment === "project_owners" ? { ...row, rule: { treatment: "direct" } } : row),
+                      } } : {}),
+                      owners: commercialization === "master" ? agreement.owners.length ? agreement.owners : [{ name: agreement.company_name || "Indyana", percent: agreement.allocation_model === "pools" ? 100 : null }] : [] });
                   }}>
                     <option value="pending">Por definir</option>
                     <option value="distribution">Distribución</option>
@@ -106,7 +118,7 @@ export function MasterAgreementsEditor({ agreements, canEdit, artistOptions, fir
                 </label>
               </div>
               {index === 0 && firstStatementDate && <p className={styles.fieldHint}>Primer statement registrado: {firstStatementDate}</p>}
-              {agreement.commercialization === "master" && <div className={styles.ownerSection}>
+              {agreement.commercialization === "master" && agreement.allocation_model !== "pools" && <div className={styles.ownerSection}>
                 <div className={styles.sectionHeading}><h3>Titulares del master</h3><span>Total master {ownerTotal.toLocaleString("es-AR", { maximumFractionDigits: 2 })}%</span></div>
                 {agreement.owners.map((owner, ownerIndex) => <div className={styles.ownerRow} key={ownerIndex}>
                   <label>Titular<input list={`master-owner-options-${agreement.id}`} disabled={!canEdit} value={owner.name} onChange={(event) => updateOwner(index, ownerIndex, { name: event.target.value })} placeholder="Indyana, Mawz u otro" /></label>
