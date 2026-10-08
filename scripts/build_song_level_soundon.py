@@ -36,6 +36,8 @@ def main():
             "track_id",
             "track_statement_style",
             "artist_statement_style",
+            "artist_catalog_style",
+            "statement_period",
             "transaction_month",
         ])
         .agg([

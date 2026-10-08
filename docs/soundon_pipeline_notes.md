@@ -50,18 +50,55 @@ la publicacion cuando la auditoria cierra.
 ## Reglas de fechas
 
 - `statement_period`: `Reporting Period`
-- `transaction_month`: `Reporting Period`
+- `transaction_month`: mes de consumo obtenido de `Sales Period`, nunca de `Reporting Period`.
 - `sales_period`: `Sales Period`
+- `sale_start_date` / `sale_end_date`: extremos originales de `Sales Period`.
+- Los periodos invalidos o que abarcan varios meses detienen la ingesta: no se reparte consumo sin evidencia.
+- `Reporting Period` debe coincidir con YYYY_MM del archivo. Las liquidaciones siguen usando statement; las tendencias usan consumo.
 
 ## Reglas de artista/tema
 
-- `artist_statement_style`: `Track Artists`
+- `artist_statement_original`: `Track Artists`, sin reemplazar el credito original.
+- `artist_statement_style`: credito original de `Track Artists` para conservar agrupaciones y redondeos de los informes actuales.
+- `artist_catalog_style`: referencia verificada del ISRC cuando el conjunto de participantes coincide; usada por Catalogo y Contratos, sin reescribir el credito economico.
 - `track_statement_style`: `Track Title`
 - `asset_isrc`: `ISRC`
 - `track_id`: `Track ID`
 - `product_upc`: `UPC Code`
 - `store_name`: `Store Name`
 - `territory`: `Sales Region`
+
+## Regla obligatoria de lectura y referencias
+
+El primer artista de la referencia de pista del ISRC es el principal. El UPC
+identifica un lanzamiento y nunca sustituye ese principal. Dos UPC asociados al
+mismo ISRC conservan todas sus ventas; no se deduplican filas economicas.
+
+Las referencias aprobadas viven en `warehouse/registry/soundon_isrc_references.json`,
+versionadas con codigo y evidencia de OGS. La foto inicial resuelve Tu Falta De
+Querer y Devuelvete contra las filas de pista SoundOn 621 y 620 de OGS. No se
+importa automaticamente el resto de la hoja ni se modifica la hoja de Pablo.
+Una nueva referencia se incorpora por ISRC y evidencia, no mediante excepciones
+en reportes. Ediciones futuras de OGS deben contrastarse antes de aprobarlas.
+
+Sin referencia, un cambio del primer artista se marca `principal_unresolved`.
+Un cambio del conjunto de participantes se marca `conflicting_participants`.
+No se inventan invitados ni se unen listas contradictorias; Contratos muestra
+la advertencia y no precarga un principal incierto. Nuevos ISRC con creditos
+consistentes siguen entrando normalmente. Ningun split guardado cambia.
+
+`PUBLISHING` se incluye en el circuito economico actual de recordings. Se
+conserva `Royalty Type` para auditoria; no se excluye ni se suma dos veces.
+
+UPC e identificadores se leen como texto para conservar ceros iniciales.
+Monedas distintas de USD, importes invalidos o archivos desconocidos detienen
+la ingesta. Un fallo de cualquier archivo no reemplaza el mart vigente.
+Antes de reemplazarlo se concilian filas, dinero y unidades por statement y
+tienda contra los CSV; Summary y Discovery Mode siguen siendo controles.
+
+QA obligatorio: `scripts/qa/qa_soundon_reading.py`, `audit_soundon.py`,
+equivalencia economica por statement/ISRC y conciliacion de BigQuery. El cambio
+de mes de consumo no habilita splits nuevos ni cambia formatos o descuentos.
 
 ## Share in / Share out
 

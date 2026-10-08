@@ -41,6 +41,15 @@ ADA_DETAIL_CONTEXT = {
     "artist_credit_evidence_file": "artist_credit_evidence_file",
 }
 
+SOUNDON_DETAIL_CONTEXT = {
+    "sales_period": "sales_period",
+    "sale_start_date": "sale_start_date",
+    "sale_end_date": "sale_end_date",
+    "royalty_type": "royalty_type",
+    "soundon_artist_credit_status": "soundon_artist_credit_status",
+    "soundon_artist_credit_reference": "soundon_artist_credit_reference",
+}
+
 DETAIL_FIELDS = [
     "release_id",
     "statement_month",
@@ -61,6 +70,7 @@ DETAIL_FIELDS = [
     "product_upc_source",
     "product_upc_status",
     *ADA_DETAIL_CONTEXT,
+    *SOUNDON_DETAIL_CONTEXT,
     "gross_royalty_usd",
     "deductible_fees_usd",
     "video_id",
@@ -345,8 +355,12 @@ def build_detail(source: Path, target: Path, release_id: str) -> None:
                     .then(text_expr(columns, [field]))
                     .otherwise(pl.lit(None).cast(pl.Utf8))
                     .alias(target_field)
-                    for field, target_field in [("catalog_number", "catalog_number"), ("parent_product_id", "parent_product_id"), ("release_statement_style", "release_title"), ("product_upc_source", "product_upc_source"), ("product_upc_status", "product_upc_status"), *[(field, target) for target, field in ADA_DETAIL_CONTEXT.items()]]
+                    for field, target_field in [("catalog_number", "catalog_number"), ("parent_product_id", "parent_product_id"), ("release_statement_style", "release_title"), ("product_upc_source", "product_upc_source"), ("product_upc_status", "product_upc_status"), *[(field, target) for target, field in ADA_DETAIL_CONTEXT.items() if target not in {"artist_statement_original", "artist_catalog_style"}]]
                 ],
+                *[text_expr(columns, [name]).alias(name) for name in ["artist_statement_original", "artist_catalog_style"]],
+                *[pl.when(text_expr(columns, ["source"]) == "soundon").then(text_expr(columns, [field]))
+                  .otherwise(pl.lit(None, dtype=pl.Utf8)).alias(target)
+                  for target, field in SOUNDON_DETAIL_CONTEXT.items()],
                 pl.lit(None).cast(pl.Utf8).alias("gpid"),
                 *[pl.when(text_expr(columns, ["source"]) == "ada").then(float_expr(columns, name))
                   .otherwise(pl.lit(None).cast(pl.Float64)).alias(name)
@@ -640,7 +654,7 @@ def bq_query_json(bq: str, project: str, location: str, sql: str) -> list[dict[s
 def detail_context_schema_sql(project: str, dataset: str) -> str:
     additions = ", ".join(
         f"ADD COLUMN IF NOT EXISTS {field} STRING"
-        for field in ["catalog_number", "gpid", "parent_product_id", "release_title", "product_upc_source", "product_upc_status", *ADA_DETAIL_CONTEXT]
+        for field in ["catalog_number", "gpid", "parent_product_id", "release_title", "product_upc_source", "product_upc_status", *ADA_DETAIL_CONTEXT, *SOUNDON_DETAIL_CONTEXT]
     )
     additions += ", ADD COLUMN IF NOT EXISTS gross_royalty_usd FLOAT64, ADD COLUMN IF NOT EXISTS deductible_fees_usd FLOAT64"
     statements = [

@@ -16,7 +16,7 @@ from app.operational_db import db_sql, is_postgres_connection
 
 ISRC_PATTERN = re.compile(r"^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$")
 ARTIST_FIELDS = {
-    "soundon": ("Track Artists",),
+    "soundon": ("artist_catalog_style", "Track Artists"),
     "fuga": ("Asset Artist",),
     "onerpm": ("artists_raw",),
     "orchard": ("TRACK ARTIST",),
@@ -24,6 +24,7 @@ ARTIST_FIELDS = {
     "dashgo": ("Track Artist",),
 }
 CONTEXT_FIELDS = {
+    "soundon": ("soundon_artist_credit_status", "soundon_artist_credit_reference"),
     "ada": ("Project Title", "Catalogue Title", "artist_credit_status", "artist_credit_evidence_file"),
     "fuga": ("Product Artist",),
     "orchard": ("PRODUCT ARTIST",),
@@ -136,6 +137,11 @@ def _artist_suggestions(isrc: str, raw_path: str, file_mtime_ns: int) -> dict[st
                 used = field == "artist_catalog_style" or not row.get("artist_catalog_style")
                 if row.get("artist_credit_status") in {"possible_truncation", "conflicting_prefix"}:
                     warning = warning or "Credito ADA posiblemente incompleto; se conserva la evidencia original."
+            elif source == "soundon":
+                artists, warning = parse_artists(raw, source), None
+                used = field == "artist_catalog_style" or not row.get("artist_catalog_style")
+                if row.get("soundon_artist_credit_status") in {"conflicting_participants", "principal_unresolved"}:
+                    warning = "Credito SoundOn sin referencia ISRC univoca; no se decide el principal por UPC."
             else:
                 artists, warning = parse_artists(raw, source), None
                 used = True
@@ -158,6 +164,8 @@ def _artist_suggestions(isrc: str, raw_path: str, file_mtime_ns: int) -> dict[st
     comparable = complete or [names for names, _ in candidates]
     artists = max(comparable, key=len, default=[])
     principal_uncertain = False
+    if any(row.get("soundon_artist_credit_status") in {"conflicting_participants", "principal_unresolved"} for row in rows):
+        principal_uncertain = True
     if comparable:
         common = set.intersection(*(set(map(artist_key, names)) for names in comparable))
         if any(set(map(artist_key, names)) != common for names in comparable):

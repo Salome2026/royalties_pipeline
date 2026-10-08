@@ -1,4 +1,7 @@
 from pathlib import Path
+import csv
+from collections import defaultdict
+from decimal import Decimal
 import re
 
 import polars as pl
@@ -9,6 +12,49 @@ BASE = Path(r"C:\royalties_pipeline")
 STD_PATH = BASE / "warehouse" / "marts" / "standardized_raw_soundon.parquet"
 SONG_PATH = BASE / "warehouse" / "marts" / "song_level_soundon.parquet"
 INPUT_DIR = BASE / "input_raw" / "soundon"
+
+
+def validate_raw_totals(standardized: pl.DataFrame, input_dir: Path) -> None:
+    def records(path):
+        with path.open(encoding="utf-8-sig", newline="") as stream:
+            return list(csv.DictReader(stream))
+
+    def amount(row, field):
+        return Decimal(str(row[field]).strip().replace(",", "."))
+
+    expected = defaultdict(lambda: [0, Decimal(0), Decimal(0)])
+    commissions = defaultdict(Decimal)
+    summary = defaultdict(Decimal)
+    for path in sorted(input_dir.glob("*_My Royalty.csv")):
+        for row in records(path):
+            key = (row["Reporting Period"], row["Store Name"])
+            expected[key][0] += 1
+            expected[key][1] += amount(row, "Final Royalty")
+            expected[key][2] += amount(row, "Units of Sold")
+            commissions[row["Reporting Period"]] += Decimal(row.get("Discovery Mode Commission Amount") or "0")
+    for path in sorted(input_dir.glob("*_Summary.csv")):
+        for row in records(path):
+            summary[(row["Reporting Period"], row["Store Name"])] += amount(row, "Final Royalty")
+    if not expected or set(expected) != set(summary):
+        raise RuntimeError("SoundOn: faltan My Royalty o Summary para conciliar por mes y tienda.")
+    actual = standardized.filter(pl.col("source_sheet") == "my_royalty").group_by("statement_period", "store_name").agg(
+        pl.len().alias("rows"), pl.sum("amount_usd"), pl.sum("units")
+    )
+    observed = {(row["statement_period"], row["store_name"]): row for row in actual.to_dicts()}
+    if set(observed) != set(expected):
+        raise RuntimeError("SoundOn: faltan grupos del crudo en el mart.")
+    for key, (rows, net, units) in expected.items():
+        result = observed[key]
+        if rows != result["rows"] or abs(float(net) - result["amount_usd"]) > 1e-6 or float(units) != result["units"] or abs(net - summary[key]) > Decimal("0.000001"):
+            raise RuntimeError(f"SoundOn: filas, dinero o unidades no concilian para {key}.")
+    for path in sorted(input_dir.glob("*_Discovery Mode.csv")):
+        match = re.search(r"_(\d{4})_(\d{2})_Discovery Mode\.csv$", path.name)
+        if not match:
+            raise RuntimeError(f"Discovery Mode no reconocido: {path.name}")
+        month = f"{match[1]}-{match[2]}"
+        deduction = sum((amount(row, "Deduction for this period") for row in records(path)), Decimal(0))
+        if abs(deduction - commissions[month]) > Decimal("0.000001"):
+            raise RuntimeError(f"SoundOn: Discovery Mode no concilia para {month}.")
 
 
 def print_df(df: pl.DataFrame):
@@ -73,6 +119,7 @@ def main():
 
     std = pl.read_parquet(STD_PATH)
     song = pl.read_parquet(SONG_PATH)
+    validate_raw_totals(std, INPUT_DIR)
 
     print("\n=== STANDARDIZED TOTALS ===")
     print("Rows:", std.height)
@@ -139,6 +186,8 @@ def main():
     print("Song amount_usd:", song["amount_usd"].sum())
     print("Catalog standardized amount_usd:", catalog_total)
     print("Diff:", song["amount_usd"].sum() - catalog_total)
+    if abs(song["amount_usd"].sum() - catalog_total) > 1e-6:
+        raise RuntimeError("SoundOn: song-level y standardized no concilian.")
 
     print("\n=== CONTENT TYPE ===")
     print_df(

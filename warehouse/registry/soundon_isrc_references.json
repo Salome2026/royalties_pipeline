@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "approved_on": "2026-10-07",
+  "rule": "Principal from the ISRC track reference; release UPC order never replaces it. Only equal participant sets may inherit the verified credit.",
+  "entries": {
+    "QT5M22664077": {
+      "artists": ["La Juntada de los Artistas", "Candu Dominguez"],
+      "reference_upc": "046081037238",
+      "evidence": "https://docs.google.com/spreadsheets/d/1HI1Thde6Xq0B_OIMLvyLwGm6M2ItZksgJwPY60Gt9bU/edit#gid=428933130&range=C620:F620"
+    },
+    "QT5M22692699": {
+      "artists": ["La Juntada de los Artistas", "Candu Dominguez"],
+      "reference_upc": "046081037160",
+      "evidence": "https://docs.google.com/spreadsheets/d/1HI1Thde6Xq0B_OIMLvyLwGm6M2ItZksgJwPY60Gt9bU/edit#gid=428933130&range=C621:F621"
+    }
+  }
+}

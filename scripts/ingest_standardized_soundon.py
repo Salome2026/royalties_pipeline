@@ -7,6 +7,7 @@ from pathlib import Path
 import polars as pl
 
 from lib.statement_period import from_column
+from lib.soundon_identity import ISRC_PATTERN, add_artist_reference, add_consumption_dates
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -66,13 +67,34 @@ def read_soundon_csv(file_path: Path) -> pl.DataFrame:
     return pl.read_csv(
         file_path,
         infer_schema_length=10000,
-        ignore_errors=True,
-        encoding="utf8-lossy",
+        ignore_errors=False,
+        encoding="utf8",
+        schema_overrides={"ISRC": pl.Utf8, "UPC Code": pl.Utf8, "Track ID": pl.Utf8},
     )
 
 
 def standardize_detail_file(df: pl.DataFrame, file_path: Path, statement_type: str) -> pl.DataFrame:
     statement_period, _ = parse_file_info(file_path)
+    if statement_period == "unknown" or statement_type not in {"my_royalty", "share_in", "share_out"}:
+        raise ValueError(f"Tipo o nombre de archivo SoundOn no reconocido: {file_path.name}")
+    required = {"Reporting Period", "Sales Period", "Final Royalty", "Units of Sold", "ISRC", "UPC Code", "Track Artists", "Track Title"}
+    if required - set(df.columns):
+        raise ValueError(f"SoundOn: faltan columnas {sorted(required - set(df.columns))} en {file_path.name}")
+    if df.filter(pl.col("Reporting Period").cast(pl.Utf8).str.strip_chars() != statement_period).height or df["Reporting Period"].null_count():
+        raise ValueError(f"SoundOn: Reporting Period no coincide con el nombre de {file_path.name}")
+    for column in ("Final Royalty", "Units of Sold"):
+        if df.select((decimal_expr(column).is_null() | ~decimal_expr(column).is_finite()).any()).item():
+            raise ValueError(f"SoundOn: valores invalidos en {column}, archivo {file_path.name}")
+    currency = "Currency" if "Currency" in df.columns else "Final Royalty Currency"
+    if currency not in df.columns or df.select((pl.col(currency).cast(pl.Utf8).str.to_uppercase().str.strip_chars().fill_null("") != "USD").any()).item():
+        raise ValueError(f"SoundOn: moneda no soportada en {file_path.name}; se esperaba USD")
+    if statement_type == "my_royalty":
+        if df.filter(~pl.col("ISRC").fill_null("").str.contains(ISRC_PATTERN.pattern)).height:
+            raise ValueError(f"SoundOn: ISRC ausente o invalido en {file_path.name}")
+        for column in ("Track Artists", "Track Title"):
+            if df.filter(pl.col(column).cast(pl.Utf8).fill_null("").str.strip_chars() == "").height:
+                raise ValueError(f"SoundOn: {column} vacio en {file_path.name}")
+    df = add_consumption_dates(df)
     file_hash = sha256_file(file_path)
     ingested_at = datetime.now().isoformat(timespec="seconds")
     statement_period_source, statement_period_note = from_column(
@@ -113,7 +135,6 @@ def standardize_detail_file(df: pl.DataFrame, file_path: Path, statement_type: s
         pl.lit(statement_period).alias("fx_rate_date"),
 
         pl.col("Reporting Period").cast(pl.Utf8).str.strip_chars().alias("statement_period"),
-        pl.col("Reporting Period").cast(pl.Utf8).str.strip_chars().alias("transaction_month"),
         pl.col("Sales Period").alias("sales_period"),
 
         pl.col("Track Artists").cast(pl.Utf8).str.strip_chars().alias("artist_statement_style"),
@@ -227,6 +248,14 @@ def main():
                 print("  Discovery Mode se omite: detalla una deduccion ya incluida en My Royalty.")
                 continue
 
+            if statement_type not in {"my_royalty", "share_in", "share_out"}:
+                raise ValueError(f"Archivo SoundOn no reconocido: {file_path.name}")
+            if df.is_empty() and statement_type in {"share_in", "share_out"}:
+                part_path = TEMP_DIR / f"{file_path.stem}.parquet"
+                df.write_parquet(part_path)
+                parts.append(part_path)
+                continue
+
             df_std = standardize_detail_file(df, file_path, statement_type)
 
             part_path = TEMP_DIR / f"{file_path.stem}.parquet"
@@ -236,16 +265,20 @@ def main():
             print(f"  OK filas: {df_std.height}")
 
         except Exception as e:
-            print(f"  ERROR: {e}")
+            raise RuntimeError(f"No se publica SoundOn: fallo {file_path.name}: {e}") from e
 
     if not parts:
-        print("\nNo se generaron datos.")
-        return
+        raise RuntimeError("No se generaron datos SoundOn; se conserva el mart anterior.")
 
     print("\nConsolidando...")
 
     final = pl.concat([pl.read_parquet(part) for part in parts], how="diagonal_relaxed")
-    final.write_parquet(OUTPUT_PATH)
+    final = add_artist_reference(final)
+    from audit_soundon import validate_raw_totals
+    validate_raw_totals(final, INPUT_DIR)
+    temporary = OUTPUT_PATH.with_suffix(".tmp.parquet")
+    final.write_parquet(temporary)
+    temporary.replace(OUTPUT_PATH)
 
     print("\nListo.")
     print(f"Archivo: {OUTPUT_PATH}")
