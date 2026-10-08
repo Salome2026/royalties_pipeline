@@ -340,6 +340,28 @@ GROUP BY isrc
     return [dict(row.items()) for row in query_client.query(sql, job_config=config, location=location).result()]
 
 
+def royalty_isrc_statement_income_bigquery(
+    *, isrc: str, policy_document: dict[str, Any],
+    project: str, dataset: str, location: str, maximum_bytes_billed: int | None,
+    client: bigquery.Client | None = None,
+) -> list[dict[str, Any]]:
+    sql = f"""
+SELECT
+  FORMAT_DATE('%Y-%m', statement_month) AS statement_month,
+  SUM(COALESCE(amount_usd, 0) * ({personalization_factor_sql(policy_document)})) AS amount_usd
+FROM `{project}.{dataset}.royalty_dashboard_current`
+WHERE isrc = @isrc AND statement_month IS NOT NULL
+GROUP BY statement_month
+ORDER BY statement_month
+"""
+    config = bigquery.QueryJobConfig(
+        maximum_bytes_billed=maximum_bytes_billed,
+        query_parameters=[bigquery.ScalarQueryParameter("isrc", "STRING", isrc)],
+    )
+    query_client = client or dashboard_client(project, location)
+    return [dict(row.items()) for row in query_client.query(sql, job_config=config, location=location).result()]
+
+
 def query_rows(
     *,
     sql: str,

@@ -58,6 +58,7 @@ from app.bigquery_dashboard import (
     royalties_dashboard_bigquery as query_royalties_dashboard_bigquery,
     royalty_detail_count_bigquery as query_royalty_detail_count_bigquery,
     royalty_isrc_income_bigquery,
+    royalty_isrc_statement_income_bigquery,
 )
 from app.report_jobs import (
     create_or_reuse_report_job,
@@ -300,6 +301,14 @@ class MasterAgreementOwner(BaseModel):
     percent: float | None = Field(default=None, ge=0, le=100)
 
 
+class MasterContractAllocation(BaseModel):
+    principal: str = Field(default="", max_length=200)
+    indyana_percent: float | None = Field(default=None, ge=0, le=100)
+    principal_percent: float | None = Field(default=None, ge=0, le=100)
+    apply_guest_contracts: bool = False
+    participants: list[MasterContractParticipant] = Field(default_factory=list, max_length=10)
+
+
 class MasterAgreement(BaseModel):
     id: str = Field(..., min_length=1, max_length=100)
     label: str = Field(default="", max_length=120)
@@ -307,9 +316,10 @@ class MasterAgreement(BaseModel):
     owners: list[MasterAgreementOwner] = Field(default_factory=list, max_length=12)
     effective_from: str | None = None
     effective_until: str | None = None
+    allocation: MasterContractAllocation | None = None
 
 
-class MasterContractSplit(BaseModel):
+class MasterContractSplit(MasterContractAllocation):
     agreements: list[MasterAgreement] = Field(default_factory=list, max_length=20)
     master_type: Literal[
         "pending", "indyana_master", "distribution", "mawz_master",
@@ -319,11 +329,6 @@ class MasterContractSplit(BaseModel):
     has_contract: bool | None = None
     agreement_confirmed: bool = False
     effective_from: str | None = None
-    principal: str = Field(default="", max_length=200)
-    indyana_percent: float | None = Field(default=None, ge=0, le=100)
-    principal_percent: float | None = Field(default=None, ge=0, le=100)
-    apply_guest_contracts: bool = False
-    participants: list[MasterContractParticipant] = Field(default_factory=list, max_length=10)
     notes: str = Field(default="", max_length=3000)
 
 
@@ -8134,6 +8139,28 @@ def master_contract_income_baseline() -> pl.DataFrame:
     ]).collect()
 
 
+def master_contract_statement_income(isrc: str) -> list[dict[str, Any]]:
+    if VPO_ROYALTIES_DASHBOARD_BACKEND == "bigquery":
+        try:
+            return royalty_isrc_statement_income_bigquery(
+                isrc=isrc, policy_document=load_distributor_policy_document(),
+                project=VPO_BIGQUERY_PROJECT, dataset=VPO_BIGQUERY_DATASET,
+                location=VPO_BIGQUERY_LOCATION, maximum_bytes_billed=VPO_BIGQUERY_MAX_BYTES_BILLED,
+            )
+        except Exception:
+            if not VPO_ROYALTIES_DASHBOARD_BIGQUERY_FALLBACK:
+                raise
+    if VPO_LOCAL_MARTS_DIR is not None and VPO_LOCAL_MARTS_DIR.exists():
+        path = build_royalties_dashboard_summary_mart(ensure_marts(filenames=[STANDARDIZED_FILE])[STANDARDIZED_FILE])
+    else:
+        path = ensure_marts(filenames=[ROYALTIES_DASHBOARD_SUMMARY_FILE])[ROYALTIES_DASHBOARD_SUMMARY_FILE]
+    scoped = pl.scan_parquet(path).filter((pl.col("isrc") == isrc) & pl.col("statement_period").is_not_null())
+    adjusted = apply_report_net_personalization(scoped, set(scoped.collect_schema().names()), amount_col="amount_usd")
+    return adjusted.group_by("statement_period").agg(pl.sum("amount_usd")).rename(
+        {"statement_period": "statement_month"}
+    ).sort("statement_month").collect().to_dicts()
+
+
 def master_contract_catalog() -> pl.DataFrame:
     marts = ensure_marts(filenames=[CATALOG_MASTER_FILE])
     catalog = pl.read_parquet(marts[CATALOG_MASTER_FILE])
@@ -8273,6 +8300,8 @@ def get_master_contract(
     suggestions = artist_suggestions(clean, raw_path, catalog_row.get("artist_statement"))
     first_sale_date = suggestions.get("first_sale_date") or catalog_row.get("first_transaction_month")
     first_sale_precision = suggestions.get("first_sale_precision") or ("month" if first_sale_date else None)
+    statement_income = master_contract_statement_income(clean)
+    first_statement_date = f"{statement_income[0]['statement_month']}-01" if statement_income else None
     return {
         "isrc": clean,
         "title": catalog_row.get("track_title"),
@@ -8281,6 +8310,8 @@ def get_master_contract(
         "artist_contracts": list(contracts.values()),
         "first_sale_date": first_sale_date,
         "first_sale_precision": first_sale_precision,
+        "first_statement_date": first_statement_date,
+        "statement_income": [row for row in statement_income if row["statement_month"] <= CONTRACT_ANALYSIS_CUTOFF_MONTH],
         "amount_usd": float(catalog_row.get("amount_usd") or 0),
         "first_month": catalog_row.get("_contract_first_statement_month"),
         "last_month": catalog_row.get("_contract_last_statement_month"),
@@ -8288,7 +8319,7 @@ def get_master_contract(
         "accounts": catalog_row.get("accounts"),
         "split": saved["split"] if saved else suggested_split(
             [] if suggestions.get("principal_uncertain") else suggestions["artists"],
-            contracts, first_sale_date,
+            contracts, first_statement_date,
         ),
         "closed": saved["closed"] if saved else False,
         "future_reports_selected": saved["future_reports_selected"] if saved else False,

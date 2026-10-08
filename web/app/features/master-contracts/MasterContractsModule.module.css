@@ -1,9 +1,14 @@
 .workspace {
+  --contract-control: rgba(3, 10, 16, .34);
   width: 100%;
   min-width: 0;
   padding: 30px clamp(18px, 3vw, 44px) 48px;
   color: #edf4f5;
+  background: transparent;
 }
+
+.workspace * { letter-spacing: 0; }
+:global(.vpo-view-master-contracts::before) { top: 40%; right: 5vw; opacity: .045; }
 
 .listHeader,
 .detailHeader {
@@ -39,7 +44,7 @@
   border: 1px solid rgba(163, 190, 200, .25);
   border-radius: 7px;
   color: #d5e5e7;
-  background: rgba(9, 24, 35, .65);
+  background: rgba(255, 255, 255, .045);
 }
 
 .iconButton:hover:not(:disabled) { border-color: rgba(101, 217, 200, .6); color: #fff; background: rgba(22, 78, 76, .55); }
@@ -77,7 +82,7 @@
   border-radius: 6px;
   outline: none;
   color: #f7fbfb;
-  background: rgba(3, 13, 21, .62);
+  background: var(--contract-control);
   font: inherit;
   font-size: .81rem;
 }
@@ -116,14 +121,14 @@
   padding: 3px;
   border: 1px solid rgba(164, 188, 199, .23);
   border-radius: 7px;
-  background: rgba(3, 13, 21, .5);
+  background: rgba(255, 255, 255, .025);
 }
 .segmented button { min-height: 31px; padding: 0 12px; border: 0; border-radius: 4px; color: #aebfc7; background: transparent; font-size: .78rem; font-weight: 700; }
 .segmented button.selected { color: #edfffa; background: rgba(38, 150, 133, .42); }
 .segmented button:hover { color: #fff; transform: none; }
 
 .listMeta { display: flex; justify-content: space-between; gap: 14px; padding: 17px 0 10px; color: #a9bec6; font-size: .78rem; }
-.tableWrap { width: 100%; overflow-x: auto; border-top: 1px solid rgba(164, 188, 199, .2); border-bottom: 1px solid rgba(164, 188, 199, .2); background: rgba(8, 21, 31, .48); backdrop-filter: blur(16px); }
+.tableWrap { width: 100%; overflow-x: auto; border-top: 1px solid rgba(255, 255, 255, .2); border-bottom: 1px solid rgba(255, 255, 255, .12); background: linear-gradient(155deg, rgba(255, 255, 255, .07), rgba(255, 255, 255, .008)); }
 .table { width: 100%; min-width: 800px; border-collapse: collapse; table-layout: fixed; }
 .table th { padding: 12px 14px; color: #91a8b2; font-size: .7rem; font-weight: 800; text-align: left; text-transform: uppercase; border-bottom: 1px solid rgba(164, 188, 199, .2); }
 .table td { padding: 12px 14px; vertical-align: middle; border-bottom: 1px solid rgba(164, 188, 199, .1); font-size: .79rem; }
@@ -181,6 +186,18 @@
 .totalLine small { min-width: 82px; font-size: .73rem; text-align: right; }
 .totalOk strong, .totalOk small { color: #77e4c9; }
 .totalPending strong, .totalPending small { color: #f5c47a; }
+.totalError strong, .totalError small { color: #ecaaa0; }
+.totalsGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 18px; border-top: 1px solid rgba(255, 255, 255, .2); border-bottom: 1px solid rgba(255, 255, 255, .12); }
+.totalsGrid > div { display: grid; align-content: start; gap: 6px; padding: 14px 12px; min-width: 0; border-left: 1px solid rgba(255, 255, 255, .12); }
+.totalsGrid > div:first-child { padding-left: 0; border-left: 0; }
+.totalsGrid span { color: #b6c9cb; font-size: .73rem; overflow-wrap: anywhere; }
+.totalsGrid strong { font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.totalsGrid small { font-size: .71rem; overflow-wrap: anywhere; }
+.validationErrors { padding: 8px 12px; margin-top: 12px; border-left: 2px solid #ecaaa0; color: #ecaaa0; background: rgba(236, 170, 160, .065); font-size: .79rem; line-height: 1.5; }
+.validationErrors p { margin: 5px 0; }
+.periodBase { display: grid; gap: 6px; padding-bottom: 14px; border-bottom: 1px solid rgba(255, 255, 255, .14); }
+.periodBase span, .periodBase small { color: #a9bec4; font-size: .75rem; }
+.periodBase strong { font-size: 1.3rem; font-variant-numeric: tabular-nums; }
 .notesLabel textarea { min-height: 82px; resize: vertical; }
 .safetyNote, .auditLine, .previewBand p, .evidenceBand p { color: #a9bec4; font-size: .78rem; line-height: 1.5; }
 .safetyNote { margin: 7px 0 0 25px; }
@@ -217,7 +234,7 @@
 .artistForm { border-left: 1px solid rgba(164, 188, 199, .17); padding-left: clamp(24px, 3vw, 46px); }
 .artistFormFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .artistFormFields label { display: grid; align-content: start; gap: 6px; min-width: 0; color: #bad0d3; font-size: .72rem; font-weight: 700; }
-.artistFormFields input, .artistFormFields select { width: 100%; min-width: 0; min-height: 39px; padding: 8px 11px; border: 1px solid rgba(164, 188, 199, .27); border-radius: 6px; outline: none; color: #f7fbfb; background: rgba(3, 13, 21, .62); font: inherit; font-size: .81rem; }
+.artistFormFields input, .artistFormFields select { width: 100%; min-width: 0; min-height: 39px; padding: 8px 11px; border: 1px solid rgba(164, 188, 199, .27); border-radius: 6px; outline: none; color: #f7fbfb; background: var(--contract-control); font: inherit; font-size: .81rem; }
 .artistFormFields input:focus, .artistFormFields select:focus { border-color: #65d9c8; box-shadow: 0 0 0 2px rgba(101, 217, 200, .13); }
 .artistFormFields select option { color: #162b38; }
 .artistForm .notesLabel { margin-top: 18px; }
@@ -239,7 +256,7 @@
 .agreementBody { padding: 6px 0 20px 28px; }
 .agreementFields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .agreementFields label, .ownerRow label { display: grid; gap: 6px; min-width: 0; color: #bad0d3; font-size: .72rem; font-weight: 700; }
-.agreementFields input, .agreementFields select, .ownerRow input { width: 100%; min-width: 0; min-height: 39px; margin: 0; padding: 8px 11px; border: 1px solid rgba(164, 188, 199, .27); border-radius: 6px; outline: none; color: #f7fbfb; background: rgba(3, 13, 21, .62); font: inherit; font-size: .81rem; }
+.agreementFields input, .agreementFields select, .ownerRow input { width: 100%; min-width: 0; min-height: 39px; margin: 0; padding: 8px 11px; border: 1px solid rgba(164, 188, 199, .27); border-radius: 6px; outline: none; color: #f7fbfb; background: var(--contract-control); font: inherit; font-size: .81rem; color-scheme: dark; }
 .agreementFields input:focus, .agreementFields select:focus, .ownerRow input:focus { border-color: #65d9c8; box-shadow: 0 0 0 2px rgba(101, 217, 200, .13); }
 .agreementFields select option { color: #162b38; }
 .agreementBody > .fieldHint { margin: 9px 0 0; }

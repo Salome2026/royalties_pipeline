@@ -1,29 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ArrowLeft, Check, ChevronLeft, ChevronRight, FilePenLine, Plus, RefreshCw, Search, Trash2 } from "lucide-react";
 import styles from "./MasterContractsModule.module.css";
 import { ArtistContractsPanel, type ArtistContract } from "./ArtistContractsPanel";
 import { MasterAgreementsEditor, visibleAgreements, type MasterAgreement } from "./MasterAgreementsEditor";
+import { agreementAllocation, agreementIncome, allocationTotals, contractErrors, previewAllocation, type Allocation, type Participant, type StatementIncome } from "./contractLogic";
 
-type Participant = {
-  artist: string;
-  percent: number | null;
-  internal_contract_indyana_percent: number | null;
-};
-
-type Split = {
+type Split = Allocation & {
   agreements?: MasterAgreement[];
   master_type: "pending" | "indyana_master" | "distribution" | "mawz_master" | "distribution_mawz" | "indyana_and_other" | "mawz_and_other";
   other_master_artist?: string | null;
   has_contract: boolean | null;
   agreement_confirmed: boolean;
   effective_from: string | null;
-  principal: string;
-  indyana_percent: number | null;
-  principal_percent: number | null;
-  apply_guest_contracts: boolean;
-  participants: Participant[];
   notes: string;
 };
 
@@ -57,6 +47,8 @@ type ContractDetail = ContractItem & {
   artist_contracts: ArtistContract[];
   first_sale_date: string | null;
   first_sale_precision: "day" | "month" | null;
+  first_statement_date: string | null;
+  statement_income: StatementIncome[];
   split: Split;
   updated_by: string | null;
   updated_at: string | null;
@@ -135,6 +127,13 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
     || futureSelected !== detail.future_reports_selected
   );
   const canEditCurrent = canEdit && (!closed || canApprove);
+  const agreements = draft ? visibleAgreements(draft.agreements, draft, detail?.first_statement_date || null) : [];
+  const activeAgreement = agreements.find((item) => item.id === openAgreementId);
+  const allocation = draft ? agreementAllocation(activeAgreement, draft) : null;
+  const totals = allocation ? allocationTotals(activeAgreement, allocation) : { master: 0, participation: 0, general: 0 };
+  const errors = draft ? contractErrors(agreements, draft) : [];
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  const periodIncome = detail ? agreementIncome(activeAgreement, detail.statement_income || [], today) : null;
 
   function returnToList() {
     if (dirty && !window.confirm("Hay cambios sin guardar. ¿Volver al catálogo?")) return;
@@ -149,10 +148,13 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   }
 
   function updateParticipant(index: number, patch: Partial<Participant>) {
-    setDraft((current) => current ? {
-      ...current,
-      participants: current.participants.map((item, position) => position === index ? { ...item, ...patch } : item),
-    } : current);
+    if (allocation) updateAllocation({ participants: allocation.participants.map((item, position) => position === index ? { ...item, ...patch } : item) });
+  }
+
+  function updateAllocation(patch: Partial<Allocation>) {
+    if (!activeAgreement || !allocation) return;
+    updateDraft({ agreements: agreements.map((item) => item.id === activeAgreement.id
+      ? { ...item, allocation: { ...allocation, ...patch } } : item) });
   }
 
   function contractFor(artist: string): ArtistContract | undefined {
@@ -160,17 +162,25 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   }
 
   function applyPrincipalContract(contract: ArtistContract) {
-    if (!draft) return;
-    updateDraft({
-      indyana_percent: contract.indyana_percent,
-      principal_percent: draft.participants.length === 0 ? 100 - contract.indyana_percent : draft.principal_percent,
-      has_contract: contract.has_contract,
+    if (!draft || !activeAgreement || !allocation) return;
+    const nextAllocation = {
+      ...allocation, indyana_percent: contract.indyana_percent,
+      principal_percent: allocation.participants.length === 0 ? 100 - contract.indyana_percent : allocation.principal_percent,
       apply_guest_contracts: contract.is_project,
+    };
+    const owners = activeAgreement.owners.some((owner) => artistKey(owner.name) === "indyana")
+      ? activeAgreement.owners.map((owner) => artistKey(owner.name) === "indyana" ? { ...owner, percent: contract.indyana_percent } : owner)
+      : [...activeAgreement.owners.filter((owner) => owner.name.trim()), { name: "Indyana", percent: contract.indyana_percent }];
+    updateDraft({
+      has_contract: contract.has_contract,
+      agreements: agreements.map((item) => item.id === activeAgreement.id
+        ? { ...item, allocation: nextAllocation, owners: item.commercialization === "master" ? owners : item.owners } : item),
     });
   }
 
   async function save(nextClosed = closed, nextSelected = futureSelected) {
     if (!detail || !draft || !canEditCurrent) return;
+    if (errors.length) { onMessage({ type: "error", text: errors[0] }); return; }
     setSaving(true);
     try {
       const saved = await requestJson<{
@@ -180,7 +190,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          split: draft,
+          split: { ...draft, agreements },
           closed: nextClosed,
           future_reports_selected: nextSelected,
           expected_version: detail.version,
@@ -199,29 +209,8 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
     }
   }
 
-  const total = useMemo(() => {
-    if (!draft) return 0;
-    return (draft.indyana_percent || 0) + (draft.principal_percent || 0)
-      + draft.participants.reduce((sum, item) => sum + (item.percent || 0), 0);
-  }, [draft]);
-
-  const preview = useMemo(() => {
-    if (!detail || !draft || Math.abs(total - 100) > 0.0001
-      || !draft.principal.trim() || draft.indyana_percent === null || draft.principal_percent === null
-      || draft.participants.some((item) => !item.artist.trim() || item.percent === null)) return null;
-    const guestRows = draft.participants.map((item) => {
-      const base = item.percent || 0;
-      const retained = draft.apply_guest_contracts ? (item.internal_contract_indyana_percent || 0) : 0;
-      return { artist: item.artist, percent: base * (1 - retained / 100), amount: detail.amount_usd * base * (1 - retained / 100) / 100 };
-    });
-    const indyanaPercent = 100 - (draft.principal_percent || 0) - guestRows.reduce((sum, item) => sum + item.percent, 0);
-    return {
-      indyanaPercent,
-      indyanaAmount: detail.amount_usd * indyanaPercent / 100,
-      principalAmount: detail.amount_usd * (draft.principal_percent || 0) / 100,
-      guestRows,
-    };
-  }, [detail, draft, total]);
+  const preview = activeAgreement && allocation && periodIncome !== null && errors.length === 0
+    ? previewAllocation(activeAgreement, allocation, periodIncome) : null;
 
   function submitSearch(event: FormEvent) {
     event.preventDefault();
@@ -232,9 +221,8 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
 
   if (mode === "artists") return <ArtistContractsPanel canEdit={canEdit} onBack={() => setMode("isrc")} onMessage={onMessage} />;
 
-  if (detail && draft) {
+  if (detail && draft && allocation) {
     const artistOptions = [...new Set([...detail.artist_suggestions.artists, ...detail.artist_contracts.map((item) => item.artist_name)])];
-    const agreements = visibleAgreements(draft.agreements, draft, detail.first_sale_date);
     return (
       <section className={styles.workspace}>
         <header className={styles.detailHeader}>
@@ -260,45 +248,49 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
               agreements={agreements}
               canEdit={canEditCurrent}
               artistOptions={artistOptions}
-              firstSaleDate={detail.first_sale_date}
-              firstSalePrecision={detail.first_sale_precision}
+              firstStatementDate={detail.first_statement_date}
               openId={openAgreementId}
               onOpenChange={setOpenAgreementId}
               onChange={(next) => updateDraft({ agreements: next })}
             />
+            {errors.length > 0 && <div className={styles.validationErrors} role="alert">{errors.map((error) => <p key={error}>{error}</p>)}</div>}
 
             {openAgreementId && <>
             <section className={styles.band}>
               <div className={styles.sectionHeading}><h2>Reparto económico</h2><span>Participaciones del ingreso base</span></div>
-              {contractFor(draft.principal) && <div className={styles.contractReference}>
-                <span>Contrato de {contractFor(draft.principal)?.artist_name}: Indyana {percent(contractFor(draft.principal)!.indyana_percent)}% · artista {percent(100 - contractFor(draft.principal)!.indyana_percent)}%</span>
-                {canEditCurrent && <button type="button" className={styles.secondaryButton} onClick={() => applyPrincipalContract(contractFor(draft.principal)!)}>Usar propuesta</button>}
+              {contractFor(allocation.principal) && <div className={styles.contractReference}>
+                <span>Contrato de {contractFor(allocation.principal)?.artist_name}: Indyana {percent(contractFor(allocation.principal)!.indyana_percent)}% · artista {percent(100 - contractFor(allocation.principal)!.indyana_percent)}%</span>
+                {canEditCurrent && <button type="button" className={styles.secondaryButton} onClick={() => applyPrincipalContract(contractFor(allocation.principal)!)}>Usar propuesta</button>}
               </div>}
               <div className={styles.splitRows}>
-                <div className={styles.splitRow}>
+                {activeAgreement?.commercialization !== "master" && <div className={styles.splitRow}>
                   <label>Indyana<input type="text" value="Indyana" readOnly /></label>
-                  <label>Porcentaje<input inputMode="decimal" type="number" min="0" max="100" step="0.01" disabled={!canEditCurrent} value={draft.indyana_percent ?? ""} onChange={(event) => updateDraft({ indyana_percent: numberOrNull(event.target.value) })} /></label>
-                </div>
+                  <label>Porcentaje<input inputMode="decimal" type="number" min="0" max="100" step="0.01" disabled={!canEditCurrent} value={allocation.indyana_percent ?? ""} onChange={(event) => updateAllocation({ indyana_percent: numberOrNull(event.target.value) })} /></label>
+                </div>}
                 <div className={styles.splitRow}>
-                  <label>Artista principal<input disabled={!canEditCurrent} value={draft.principal} onChange={(event) => updateDraft({ principal: event.target.value })} /></label>
-                  <label>Porcentaje<input inputMode="decimal" type="number" min="0" max="100" step="0.01" disabled={!canEditCurrent} value={draft.principal_percent ?? ""} onChange={(event) => updateDraft({ principal_percent: numberOrNull(event.target.value) })} /></label>
+                  <label>Artista principal<input disabled={!canEditCurrent} value={allocation.principal} onChange={(event) => updateAllocation({ principal: event.target.value })} /></label>
+                  <label>Porcentaje<input inputMode="decimal" type="number" min="0" max="100" step="0.01" disabled={!canEditCurrent} value={allocation.principal_percent ?? ""} onChange={(event) => updateAllocation({ principal_percent: numberOrNull(event.target.value) })} /></label>
                 </div>
-                {draft.participants.map((item, index) => (
+                {allocation.participants.map((item, index) => (
                   <div className={styles.splitRow} key={index}>
                     <label>Participante {index + 1}<input disabled={!canEditCurrent} value={item.artist} onChange={(event) => updateParticipant(index, { artist: event.target.value })} /></label>
                     <label>Porcentaje<input inputMode="decimal" type="number" min="0" max="100" step="0.01" disabled={!canEditCurrent} value={item.percent ?? ""} onChange={(event) => updateParticipant(index, { percent: numberOrNull(event.target.value) })} /></label>
-                    {canEditCurrent && <button type="button" className={styles.iconButton} title={`Quitar participante ${index + 1}`} aria-label={`Quitar participante ${index + 1}`} onClick={() => updateDraft({ participants: draft.participants.filter((_, position) => position !== index) })}><Trash2 size={16} /></button>}
-                    {draft.apply_guest_contracts && <label className={styles.nestedField}>Indyana del contrato del invitado %<input inputMode="decimal" type="number" min="0" max="100" step="0.01" disabled={!canEditCurrent} value={item.internal_contract_indyana_percent ?? ""} onChange={(event) => updateParticipant(index, { internal_contract_indyana_percent: numberOrNull(event.target.value) })} placeholder="Externo: vacío" /></label>}
-                    {draft.apply_guest_contracts && contractFor(item.artist) && <div className={styles.guestReference}><span>Contrato de {contractFor(item.artist)?.artist_name}: {percent(contractFor(item.artist)!.indyana_percent)}% para Indyana</span>{canEditCurrent && <button type="button" className={styles.secondaryButton} onClick={() => updateParticipant(index, { internal_contract_indyana_percent: contractFor(item.artist)!.indyana_percent })}>Usar propuesta</button>}</div>}
+                    {canEditCurrent && <button type="button" className={styles.iconButton} title={`Quitar participante ${index + 1}`} aria-label={`Quitar participante ${index + 1}`} onClick={() => updateAllocation({ participants: allocation.participants.filter((_, position) => position !== index) })}><Trash2 size={16} /></button>}
+                    {allocation.apply_guest_contracts && <label className={styles.nestedField}>Indyana del contrato del invitado %<input inputMode="decimal" type="number" min="0" max="100" step="0.01" disabled={!canEditCurrent} value={item.internal_contract_indyana_percent ?? ""} onChange={(event) => updateParticipant(index, { internal_contract_indyana_percent: numberOrNull(event.target.value) })} placeholder="Externo: vacío" /></label>}
+                    {allocation.apply_guest_contracts && contractFor(item.artist) && <div className={styles.guestReference}><span>Contrato de {contractFor(item.artist)?.artist_name}: {percent(contractFor(item.artist)!.indyana_percent)}% para Indyana</span>{canEditCurrent && <button type="button" className={styles.secondaryButton} onClick={() => updateParticipant(index, { internal_contract_indyana_percent: contractFor(item.artist)!.indyana_percent })}>Usar propuesta</button>}</div>}
                   </div>
                 ))}
               </div>
-              {canEditCurrent && <button type="button" className={styles.addButton} disabled={draft.participants.length >= 10} onClick={() => updateDraft({ participants: [...draft.participants, { artist: "", percent: null, internal_contract_indyana_percent: null }] })}><Plus size={16} /> Agregar participante</button>}
+              {canEditCurrent && <button type="button" className={styles.addButton} disabled={allocation.participants.length >= 10} onClick={() => updateAllocation({ participants: [...allocation.participants, { artist: "", percent: null, internal_contract_indyana_percent: null }] })}><Plus size={16} /> Agregar participante</button>}
               <label className={styles.checkboxLine}>
-                <input type="checkbox" disabled={!canEditCurrent} checked={draft.apply_guest_contracts} onChange={(event) => updateDraft({ apply_guest_contracts: event.target.checked })} />
+                <input type="checkbox" disabled={!canEditCurrent} checked={allocation.apply_guest_contracts} onChange={(event) => updateAllocation({ apply_guest_contracts: event.target.checked })} />
                 <span>Aplicar contrato de invitados internos sobre su parte</span>
               </label>
-              <div className={`${styles.totalLine} ${Math.abs(total - 100) < 0.0001 ? styles.totalOk : styles.totalPending}`}><span>Total asignado</span><strong>{percent(total)}%</strong><small>{Math.abs(total - 100) < 0.0001 ? "Cuadra" : total < 100 ? `Faltan ${percent(100 - total)} puntos` : `Excede ${percent(total - 100)} puntos`}</small></div>
+              <div className={styles.totalsGrid}>
+                <div><span>Total master</span><strong>{percent(totals.master)}%</strong></div>
+                <div><span>Total participaciones</span><strong>{percent(totals.participation)}%</strong></div>
+                <div className={Math.abs(totals.general - 100) < .0001 ? styles.totalOk : totals.general > 100 ? styles.totalError : styles.totalPending}><span>Total general</span><strong>{percent(totals.general)}%</strong><small>{Math.abs(totals.general - 100) < .0001 ? "Cuadra" : totals.general < 100 ? `Faltan ${percent(100 - totals.general)} puntos` : `Excede ${percent(totals.general - 100)} puntos`}</small></div>
+              </div>
             </section>
 
             <section className={styles.band}>
@@ -315,8 +307,8 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
               <p className={styles.safetyNote}>Esta selección no modifica ningún reporte ni dashboard actual.</p>
               {detail.updated_at && <p className={styles.auditLine}>Último guardado: {detail.updated_at} por {detail.updated_by || "-"}.</p>}
               <div className={styles.actions}>
-                {canEditCurrent && <button type="button" className={styles.secondaryButton} disabled={saving || (!dirty && detail.version > 0)} onClick={() => void save()}><FilePenLine size={16} />{saving ? "Guardando..." : "Guardar"}</button>}
-                {canApprove && canEdit && <button type="button" className={styles.primaryButton} disabled={saving} onClick={() => void save(!closed, closed ? false : futureSelected)}><Check size={16} />{closed ? "Reabrir" : "Cerrar reparto"}</button>}
+                {canEditCurrent && <button type="button" className={styles.secondaryButton} disabled={saving || errors.length > 0 || (!dirty && detail.version > 0)} onClick={() => void save()}><FilePenLine size={16} />{saving ? "Guardando..." : "Guardar"}</button>}
+                {canApprove && canEdit && <button type="button" className={styles.primaryButton} disabled={saving || errors.length > 0} onClick={() => void save(!closed, closed ? false : futureSelected)}><Check size={16} />{closed ? "Reabrir" : "Cerrar reparto"}</button>}
               </div>
             </section>
             </>}
@@ -325,11 +317,9 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
           {openAgreementId && <aside className={styles.previewColumn}>
             <section className={styles.previewBand}>
               <div className={styles.sectionHeading}><h2>Simulación en USD</h2></div>
-              <p>Base para simulación: {money(detail.amount_usd)}. No es una liquidación ni afecta reportes.</p>
+              <div className={styles.periodBase}><span>Ingreso en vigencia</span><strong>{periodIncome === null ? "-" : money(periodIncome)}</strong><small>{activeAgreement?.effective_from || "Desde sin definir"} a {activeAgreement?.effective_until || "Actual"}</small></div>
               {preview ? <div className={styles.previewRows}>
-                <div><span>Indyana</span><strong>{money(preview.indyanaAmount)}</strong><small>{percent(preview.indyanaPercent)}%</small></div>
-                <div><span>{draft.principal || "Principal"}</span><strong>{money(preview.principalAmount)}</strong><small>{percent(draft.principal_percent || 0)}%</small></div>
-                {preview.guestRows.map((item, index) => <div key={index}><span>{item.artist}</span><strong>{money(item.amount)}</strong><small>{percent(item.percent)}%</small></div>)}
+                {preview.map((item, index) => <div key={index}><span>{item.artist}</span><strong>{money(item.amount)}</strong><small>{percent(item.percent)}%</small></div>)}
               </div> : <p className={styles.previewEmpty}>Completá todos los participantes y un reparto que sume 100% para ver la simulación.</p>}
             </section>
             <section className={styles.evidenceBand}>

@@ -2,16 +2,10 @@
 
 import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import styles from "./MasterContractsModule.module.css";
+import { nextAgreementStart, periodBoundary, type MasterAgreement } from "./contractLogic";
+export type { MasterAgreement } from "./contractLogic";
 
 export type MasterOwner = { name: string; percent: number | null };
-export type MasterAgreement = {
-  id: string;
-  label: string;
-  commercialization: "pending" | "distribution" | "master";
-  owners: MasterOwner[];
-  effective_from: string | null;
-  effective_until: string | null;
-};
 
 type LegacySplit = {
   master_type: string;
@@ -19,10 +13,9 @@ type LegacySplit = {
   effective_from: string | null;
 };
 
-const isMonth = (value: string | null) => /^\d{4}-\d{2}$/.test(value || "");
 const numberOrNull = (value: string) => value.trim() === "" ? null : Number(value);
 
-export function visibleAgreements(agreements: MasterAgreement[] | undefined, split: LegacySplit, firstSaleDate: string | null): MasterAgreement[] {
+export function visibleAgreements(agreements: MasterAgreement[] | undefined, split: LegacySplit, firstStatementDate: string | null): MasterAgreement[] {
   if (agreements?.length) return agreements;
   const kind = split.master_type;
   const isDistribution = kind === "distribution" || kind === "distribution_mawz";
@@ -36,17 +29,16 @@ export function visibleAgreements(agreements: MasterAgreement[] | undefined, spl
       ...((kind === "indyana_and_other" || kind === "mawz_and_other") && split.other_master_artist
         ? [{ name: split.other_master_artist, percent: null }] : []),
     ] : [],
-    effective_from: split.effective_from || firstSaleDate,
+    effective_from: split.effective_from || firstStatementDate,
     effective_until: null,
   }];
 }
 
-export function MasterAgreementsEditor({ agreements, canEdit, artistOptions, firstSaleDate, firstSalePrecision, openId, onOpenChange, onChange }: {
+export function MasterAgreementsEditor({ agreements, canEdit, artistOptions, firstStatementDate, openId, onOpenChange, onChange }: {
   agreements: MasterAgreement[];
   canEdit: boolean;
   artistOptions: string[];
-  firstSaleDate: string | null;
-  firstSalePrecision: "day" | "month" | null;
+  firstStatementDate: string | null;
   openId: string | null;
   onOpenChange: (id: string | null) => void;
   onChange: (agreements: MasterAgreement[]) => void;
@@ -65,7 +57,7 @@ export function MasterAgreementsEditor({ agreements, canEdit, artistOptions, fir
     const id = `contract-${crypto.randomUUID()}`;
     onChange([...agreements, {
       id, label: `Contrato ${agreements.length + 1}`, commercialization: "pending", owners: [],
-      effective_from: firstSaleDate, effective_until: null,
+      effective_from: nextAgreementStart(agreements), effective_until: null,
     }]);
     onOpenChange(id);
   }
@@ -106,15 +98,16 @@ export function MasterAgreementsEditor({ agreements, canEdit, artistOptions, fir
                   </select>
                 </label>
                 <label>Vigente desde
-                  <input type={isMonth(agreement.effective_from) ? "month" : "date"} disabled={!canEdit} value={agreement.effective_from || ""} onChange={(event) => update(index, { effective_from: event.target.value || null })} />
+                  <input type="date" disabled={!canEdit} value={periodBoundary(agreement.effective_from) || ""} onChange={(event) => update(index, { effective_from: event.target.value || null })} />
                 </label>
                 <label>Vigente hasta
-                  <input type={isMonth(agreement.effective_until) || (!agreement.effective_until && isMonth(agreement.effective_from)) ? "month" : "date"} disabled={!canEdit} value={agreement.effective_until || ""} onChange={(event) => update(index, { effective_until: event.target.value || null })} />
+                  <input type="date" disabled={!canEdit} value={periodBoundary(agreement.effective_until, true) || ""} onChange={(event) => update(index, { effective_until: event.target.value || null })} />
+                  {!agreement.effective_until && <span className={styles.fieldHint}>Actual</span>}
                 </label>
               </div>
-              {index === 0 && firstSaleDate && <p className={styles.fieldHint}>Primera venta registrada: {firstSaleDate}{firstSalePrecision === "month" ? " (solo mes informado)" : ""}</p>}
+              {index === 0 && firstStatementDate && <p className={styles.fieldHint}>Primer statement registrado: {firstStatementDate}</p>}
               {agreement.commercialization === "master" && <div className={styles.ownerSection}>
-                <div className={styles.sectionHeading}><h3>Titulares del master</h3><span className={Math.abs(ownerTotal - 100) < .0001 ? styles.ownerTotalOk : styles.ownerTotalPending}>Total {ownerTotal.toLocaleString("es-AR", { maximumFractionDigits: 2 })}%</span></div>
+                <div className={styles.sectionHeading}><h3>Titulares del master</h3><span>Total master {ownerTotal.toLocaleString("es-AR", { maximumFractionDigits: 2 })}%</span></div>
                 {agreement.owners.map((owner, ownerIndex) => <div className={styles.ownerRow} key={ownerIndex}>
                   <label>Titular<input list={`master-owner-options-${agreement.id}`} disabled={!canEdit} value={owner.name} onChange={(event) => updateOwner(index, ownerIndex, { name: event.target.value })} placeholder="Indyana, Mawz u otro" /></label>
                   <label>Porcentaje<input type="number" min="0" max="100" step="0.01" inputMode="decimal" disabled={!canEdit} value={owner.percent ?? ""} onChange={(event) => updateOwner(index, ownerIndex, { percent: numberOrNull(event.target.value) })} /></label>

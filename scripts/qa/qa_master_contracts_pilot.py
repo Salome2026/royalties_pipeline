@@ -20,13 +20,108 @@ from app.master_contracts import (
     suggested_split,
     validate_split,
 )
-from app.bigquery_dashboard import royalty_isrc_income_bigquery
+from app.bigquery_dashboard import royalty_isrc_income_bigquery, royalty_isrc_statement_income_bigquery
 from scripts.lib.catalog_report_filter import apply_report_net_personalization
 from scripts.lib.distributor_policy_store import use_distributor_policy_snapshot
 from app import vpo_corp_api
 
 
 class MasterContractsPilotTests(unittest.TestCase):
+    def test_statement_income_is_parameterized_and_uses_dashboard_discounts(self) -> None:
+        class Client:
+            def query(self, sql, *, job_config, location):
+                self.sql, self.config = sql, job_config
+                return self
+
+            def result(self):
+                return [{"statement_month": "2026-03", "amount_usd": 90.0},
+                        {"statement_month": "2026-08", "amount_usd": 45.0}]
+
+        client = Client()
+        rows = royalty_isrc_statement_income_bigquery(
+            isrc="ARDL12600006", policy_document={"report_personalization": {"enabled": True}, "entries": [
+                {"source": "fuga", "account": "indyana_records", "report_net_adjustment_pct": 10},
+            ]}, project="project", dataset="dataset", location="US", maximum_bytes_billed=5000000000, client=client,
+        )
+        self.assertEqual(len(rows), 2)
+        self.assertIn("royalty_dashboard_current", client.sql)
+        self.assertIn("source = 'fuga' AND account = 'indyana_records'", client.sql)
+        self.assertNotIn("transaction_month", client.sql)
+        self.assertEqual(client.config.query_parameters[0].value, "ARDL12600006")
+
+    def test_default_from_is_first_statement_not_consumption_and_saved_dates_are_preserved(self) -> None:
+        catalog = pl.DataFrame([{"asset_isrc": "ARDL12600006", "track_title": "Tema",
+                                 "amount_usd": 90.0, "first_transaction_month": "2026-01"}])
+        monthly = [{"statement_month": "2026-03", "amount_usd": 90.0},
+                   {"statement_month": "2026-08", "amount_usd": 45.0}]
+        with sqlite3.connect(":memory:") as conn, \
+                patch.object(vpo_corp_api, "require_api_key"), \
+                patch.object(vpo_corp_api, "operational_connect", return_value=conn), \
+                patch.object(vpo_corp_api, "require_master_contract_user"), \
+                patch.object(vpo_corp_api, "read_split", return_value=None) as saved, \
+                patch.object(vpo_corp_api, "active_artist_contracts", return_value={}), \
+                patch.object(vpo_corp_api, "master_contract_catalog", return_value=catalog), \
+                patch.object(vpo_corp_api, "ensure_marts", return_value={vpo_corp_api.STANDARDIZED_FILE: None}), \
+                patch.object(vpo_corp_api, "artist_suggestions", return_value={
+                    "artists": ["Aneley"], "first_sale_date": "2026-01-02", "first_sale_precision": "day"}), \
+                patch.object(vpo_corp_api, "master_contract_statement_income", return_value=monthly) as income:
+            result = vpo_corp_api.get_master_contract("ARDL12600006", x_vpo_username="tester")
+            self.assertEqual(result["first_statement_date"], "2026-03-01")
+            self.assertEqual(result["split"]["agreements"][0]["effective_from"], "2026-03-01")
+            self.assertEqual(result["statement_income"], monthly[:1])
+            self.assertFalse(result["reports_effective"])
+            stored = {"agreements": [{"id": "principal", "effective_from": "2026-05-14"}]}
+            saved.return_value = {"split": stored, "closed": False, "future_reports_selected": False,
+                                 "version": 2, "updated_by": "tester", "updated_at": None}
+            result = vpo_corp_api.get_master_contract("ARDL12600006", x_vpo_username="tester")
+            self.assertEqual(result["split"], stored)
+            saved.return_value = None
+            income.return_value = monthly[1:]
+            result = vpo_corp_api.get_master_contract("ARDL12600006", x_vpo_username="tester")
+            self.assertEqual(result["first_statement_date"], "2026-08-01")
+            self.assertEqual(result["statement_income"], [])
+
+    def test_combined_totals_and_nonoverlapping_periods_even_for_drafts(self) -> None:
+        allocation = {"principal": "Aneley", "principal_percent": 30, "indyana_percent": 70,
+                      "participants": [], "apply_guest_contracts": False}
+        first = {"id": "principal", "label": "Principal", "commercialization": "master",
+                 "owners": [{"name": "Indyana", "percent": 70}],
+                 "effective_from": "2026-01-01", "effective_until": "2026-10-31"}
+        second = {"id": "second", "label": "Segundo", "commercialization": "distribution", "owners": [],
+                  "effective_from": "2026-11-01", "effective_until": None,
+                  "allocation": {**allocation, "indyana_percent": 20, "principal_percent": 80}}
+        split = {**allocation, "agreement_confirmed": True, "agreements": [second, first]}
+        validate_split(split, True, False)
+        for closed in (False, True):
+            for patch in ({"effective_from": "2026-10-31"}, {"effective_from": "2026-10"}):
+                with self.subTest(closed=closed, patch=patch), self.assertRaisesRegex(ValueError, "superponen"):
+                    validate_split({**split, "agreements": [first, {**second, **patch}]}, closed, False)
+            with self.assertRaisesRegex(ValueError, "superponen"):
+                validate_split({**split, "agreements": [{**first, "effective_until": None}, second]}, closed, False)
+            with self.assertRaisesRegex(ValueError, "supera el 100%"):
+                validate_split({**split, "agreements": [{**first, "owners": [{"name": "Indyana", "percent": 100}]}]}, closed, False)
+        validate_split({**split, "agreements": [{**first, "effective_until": "2026-10"}, second]}, True, False)
+        validate_split({**split, "agreements": [{**first, "owners": [{"name": "Indyana", "percent": None}]}]}, False, False)
+        with self.assertRaisesRegex(ValueError, "completá todos los porcentajes"):
+            validate_split({**split, "agreements": [{**first, "owners": [{"name": "Indyana", "percent": None}]}]}, True, False)
+        for value in (float("nan"), float("inf"), -1):
+            with self.assertRaisesRegex(ValueError, "entre 0 y 100"):
+                validate_split({**split, "agreements": [{**first, "allocation": {**allocation, "principal_percent": value}}]}, False, False)
+
+    def test_allocations_per_contract_are_saved_without_rewriting_legacy_allocation(self) -> None:
+        split = {"principal": "Aneley", "principal_percent": 50, "indyana_percent": 50, "participants": [],
+                 "agreements": [{"id": "principal", "commercialization": "distribution", "owners": [],
+                                 "effective_from": "2026-03-01", "effective_until": None,
+                                 "allocation": {"principal": "Aneley", "principal_percent": 80,
+                                                "indyana_percent": 20, "participants": []}}]}
+        request = vpo_corp_api.MasterContractSaveRequest(split=split)
+        with sqlite3.connect(":memory:") as conn:
+            conn.row_factory = sqlite3.Row
+            saved = save_split(conn, "ARDL12600006", request.split.model_dump(), closed=False,
+                               future_reports_selected=False, expected_version=0, actor="tester")
+            self.assertEqual(saved["split"]["principal_percent"], 50)
+            self.assertEqual(saved["split"]["agreements"][0]["allocation"]["principal_percent"], 80)
+
     def test_contract_income_queries_current_dashboard_with_policy_and_july_cutoff(self) -> None:
         class Client:
             def query(self, sql, *, job_config, location):
@@ -254,7 +349,7 @@ class MasterContractsPilotTests(unittest.TestCase):
             "indyana_percent": 50, "principal_percent": 50, "participants": [],
             "agreements": [
                 {"id": "principal", "label": "Contrato principal", "commercialization": "master",
-                 "owners": [{"name": "Indyana", "percent": 60}, {"name": "Mawz", "percent": 40}],
+                 "owners": [{"name": "Indyana", "percent": 30}, {"name": "Mawz", "percent": 20}],
                  "effective_from": "2026-02-27", "effective_until": "2026-06-30"},
                 {"id": "second", "label": "Contrato 2", "commercialization": "distribution",
                  "owners": [], "effective_from": "2026-07", "effective_until": None},

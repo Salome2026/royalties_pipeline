@@ -451,36 +451,22 @@ def read_split_statuses(conn: Any) -> dict[str, dict[str, Any]]:
 
 
 def validate_split(split: dict[str, Any], closed: bool, future_reports_selected: bool) -> None:
-    principal = str(split.get("principal") or "").strip()
     effective_from = split.get("effective_from")
-    if effective_from and not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])(?:-(0[1-9]|[12][0-9]|3[01]))?", str(effective_from)):
-        raise ValueError("La vigencia debe tener formato AAAA-MM o AAAA-MM-DD.")
-    if effective_from and len(str(effective_from)) == 10:
+    if effective_from:
         try:
-            date.fromisoformat(str(effective_from))
+            _period_start(str(effective_from))
         except ValueError as exc:
             raise ValueError("La fecha de vigencia no es válida.") from exc
-    participants = split.get("participants") or []
-    if len(participants) > 10:
-        raise ValueError("El piloto admite hasta diez participantes por ISRC.")
-    seen = {artist_key(principal)} if principal else set()
-    for item in participants:
-        artist = str(item.get("artist") or "").strip()
-        key = artist_key(artist)
-        if not key or key in seen:
-            raise ValueError("Cada participante debe tener un nombre único y distinto del principal.")
-        seen.add(key)
     if future_reports_selected and not closed:
         raise ValueError("Solo un ISRC cerrado puede quedar seleccionado para una futura aplicación.")
-    if not closed:
-        return
-    if not principal or not split.get("agreement_confirmed"):
+    if closed and not split.get("agreement_confirmed"):
         raise ValueError("Para cerrar, confirmá el acuerdo y el artista principal.")
     agreements = split.get("agreements")
     if agreements:
         if len(agreements) > 20:
             raise ValueError("Se admiten hasta veinte contratos por ISRC.")
         ids: set[str] = set()
+        intervals: list[tuple[date, date, str]] = []
         for index, agreement in enumerate(agreements, start=1):
             agreement_id = str(agreement.get("id") or "").strip()
             if not agreement_id or agreement_id in ids:
@@ -488,11 +474,11 @@ def validate_split(split: dict[str, Any], closed: bool, future_reports_selected:
             ids.add(agreement_id)
             label = str(agreement.get("label") or f"Contrato {index}").strip()
             commercialization = agreement.get("commercialization")
-            if commercialization not in {"distribution", "master"}:
+            if closed and commercialization not in {"distribution", "master"}:
                 raise ValueError(f"{label}: elegí Distribución o Master.")
             start = agreement.get("effective_from")
             end = agreement.get("effective_until")
-            if not start:
+            if closed and not start:
                 raise ValueError(f"{label}: completá Vigente desde.")
             try:
                 start_date = _period_start(str(start)) if start else None
@@ -501,29 +487,64 @@ def validate_split(split: dict[str, Any], closed: bool, future_reports_selected:
                 raise ValueError(f"{label}: la vigencia debe ser una fecha o un mes válido.") from exc
             if start_date and end_date and start_date > end_date:
                 raise ValueError(f"{label}: la vigencia hasta es anterior a la vigencia desde.")
+            if start_date:
+                intervals.append((start_date, end_date or date.max, label))
             owners = agreement.get("owners") or []
             if commercialization == "distribution" and owners:
                 raise ValueError(f"{label}: una distribución no lleva titulares de master.")
             if commercialization == "master":
-                if not owners:
+                if closed and not owners:
                     raise ValueError(f"{label}: agregá al menos un titular del master.")
                 owner_keys = [artist_key(str(owner.get("name") or "")) for owner in owners]
-                if any(not key for key in owner_keys) or len(set(owner_keys)) != len(owner_keys):
+                named_owners = [key for key in owner_keys if key]
+                if (closed and any(not key for key in owner_keys)) or len(set(named_owners)) != len(named_owners):
                     raise ValueError(f"{label}: los titulares deben tener nombres únicos.")
-                percentages = [owner.get("percent") for owner in owners]
-                if any(value is None or not math.isfinite(float(value)) or not 0 <= float(value) <= 100 for value in percentages) or abs(sum(float(value) for value in percentages) - 100) > 0.0001:
-                    raise ValueError(f"{label}: los titulares del master deben sumar 100%.")
+            _validate_allocation(agreement.get("allocation") or split, owners, commercialization, closed, label)
+        intervals.sort(key=lambda interval: interval[0])
+        for previous, current in zip(intervals, intervals[1:]):
+            # End dates include the whole day; an open end reserves every subsequent day.
+            if current[0] <= previous[1]:
+                raise ValueError(f"{previous[2]} y {current[2]}: las vigencias se superponen. El siguiente contrato debe comenzar después del último día del anterior.")
     else:
-        if split.get("master_type") == "pending" or split.get("has_contract") is None:
+        if closed and (split.get("master_type") == "pending" or split.get("has_contract") is None):
             raise ValueError("Para cerrar, indicá el tipo de master y si existe contrato.")
-        if split.get("master_type") in {"indyana_and_other", "mawz_and_other"} and not str(split.get("other_master_artist") or "").strip():
+        if closed and split.get("master_type") in {"indyana_and_other", "mawz_and_other"} and not str(split.get("other_master_artist") or "").strip():
             raise ValueError("Para cerrar, elegí el otro artista titular del master.")
-    percentages = [split.get("indyana_percent"), split.get("principal_percent")]
+        _validate_allocation(split, [], "distribution", closed, "Reparto")
+
+
+def _validate_allocation(allocation: dict[str, Any], owners: list[dict[str, Any]], commercialization: str | None, closed: bool, label: str) -> None:
+    principal = str(allocation.get("principal") or "").strip()
+    if closed and not principal:
+        raise ValueError(f"{label}: completá el artista principal.")
+    participants = allocation.get("participants") or []
+    if len(participants) > 10:
+        raise ValueError("El piloto admite hasta diez participantes por ISRC.")
+    seen = {artist_key(principal)} if principal else set()
+    for item in participants:
+        key = artist_key(str(item.get("artist") or ""))
+        if not key or key in seen:
+            raise ValueError(f"{label}: cada participante debe tener un nombre único y distinto del principal.")
+        seen.add(key)
+        retained = item.get("internal_contract_indyana_percent")
+        if retained is not None and (not math.isfinite(float(retained)) or not 0 <= float(retained) <= 100):
+            raise ValueError(f"{label}: los porcentajes deben estar entre 0 y 100.")
+    percentages = [allocation.get("principal_percent")]
     percentages.extend(item.get("percent") for item in participants)
-    if any(value is None for value in percentages):
-        raise ValueError("Para cerrar, completá todos los porcentajes.")
-    if abs(sum(float(value) for value in percentages) - 100.0) > 0.0001:
-        raise ValueError("Para cerrar, Indyana y los artistas deben sumar 100%.")
+    # For a master, company shares belong to owners, not a second economic pool.
+    if commercialization == "master":
+        percentages.extend(owner.get("percent") for owner in owners)
+    else:
+        percentages.append(allocation.get("indyana_percent"))
+    if any(value is not None and (not math.isfinite(float(value)) or not 0 <= float(value) <= 100) for value in percentages):
+        raise ValueError(f"{label}: los porcentajes deben estar entre 0 y 100.")
+    total = sum(float(value or 0) for value in percentages)
+    if total > 100.0001:
+        raise ValueError(f"{label}: el total general de master y participaciones ({total:g}%) supera el 100%.")
+    if closed and any(value is None for value in percentages):
+        raise ValueError(f"{label}: para cerrar, completá todos los porcentajes.")
+    if closed and abs(total - 100) > 0.0001:
+        raise ValueError(f"{label}: para cerrar, el total general de master y participaciones debe sumar 100%.")
 
 
 def _period_start(value: str) -> date:
