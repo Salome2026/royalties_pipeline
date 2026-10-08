@@ -14,7 +14,7 @@ async function apiError(response: Response) {
 }
 
 export async function GET() {
-  const config = await apiConfig();
+  const config = await apiConfig("viewer", true);
   if ("error" in config) return config.error;
 
   const response = await fetch(`${config.apiUrl}/me/permissions`, {

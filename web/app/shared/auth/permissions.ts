@@ -33,3 +33,10 @@ export function permissionArtistNames(permission: ModulePermission) {
     .filter((item) => item.scope_type === "artist" && item.scope_ref)
     .map((item) => item.scope_ref);
 }
+
+export function isArtistPortalOnly(permissions: ModulePermission[]) {
+  const accessible = permissions.filter((permission) => permission.can_access);
+  return accessible.length === 1
+    && accessible[0].module_key === "royalties_dashboard"
+    && permissionArtistNames(accessible[0]).length > 0;
+}

@@ -48,6 +48,20 @@ crean pools independientes por modulo.
 
 El menu web se define por permisos de usuario/modulo. No hay modo temporal paralelo.
 
+#### Portal de artistas
+
+- Un usuario con acceso exclusivo a `royalties_dashboard` y alcance por artista
+  ingresa a `/portal-artista`, en lectura. Usuarios y permisos viven en Cloud SQL.
+- La API del dashboard aplica el alcance del usuario antes de buscar, sumar o
+  construir las opciones; incluye sus colaboraciones, no temas ajenos.
+- `apiConfig` consulta los permisos vivos y bloquea las otras rutas web para
+  estos usuarios, aunque intenten llamarlas directamente. Solo el dashboard y
+  la consulta de sus propios permisos habilitan la excepcion del portal.
+- Login, validacion de sesion, cambio de clave y logout siguen disponibles.
+- No alcanza con ocultar el menu. La prueba de alta debe comprobar login,
+  filtrado del dashboard y rechazo del catalogo general y de los otros modulos.
+- Si no se pueden validar permisos, no se permite consultar otros modulos.
+
 ### Google Cloud Run
 
 Backend FastAPI:

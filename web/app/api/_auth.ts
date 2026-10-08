@@ -1,6 +1,8 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
+import { isArtistPortalOnly } from "../shared/auth/permissions";
+import type { ModulePermission } from "../shared/auth/types";
 
 export const SESSION_COOKIE = "vpo_web_session";
 
@@ -87,7 +89,7 @@ export async function requireUser(minRole: VpoRole = "viewer") {
   return { user };
 }
 
-export async function apiConfig(minRole: VpoRole = "viewer") {
+export async function apiConfig(minRole: VpoRole = "viewer", allowArtistPortal = false) {
   const auth = await requireUser(minRole);
   if ("error" in auth) return { error: auth.error };
 
@@ -98,5 +100,27 @@ export async function apiConfig(minRole: VpoRole = "viewer") {
     return { error: NextResponse.json({ error: "VPO_API_URL o VPO_API_KEY no estan configurados." }, { status: 500 }) };
   }
 
-  return { apiUrl: apiUrl.replace(/\/$/, ""), apiKey, user: auth.user };
+  const normalizedApiUrl = apiUrl.replace(/\/$/, "");
+  if (!allowArtistPortal && auth.user.role !== "admin") {
+    try {
+      const response = await fetch(`${normalizedApiUrl}/me/permissions`, {
+        headers: { "X-VPO-API-Key": apiKey, "X-VPO-Username": auth.user.username },
+        cache: "no-store",
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!response.ok) {
+        return { error: NextResponse.json({ error: "No se pudo validar el acceso." }, {
+          status: response.status === 401 || response.status === 403 ? response.status : 503,
+        }) };
+      }
+      const profile = await response.json() as { permissions: ModulePermission[] };
+      if (isArtistPortalOnly(profile.permissions)) {
+        return { error: NextResponse.json({ error: "Este usuario solo tiene acceso al portal de artistas." }, { status: 403 }) };
+      }
+    } catch {
+      return { error: NextResponse.json({ error: "No se pudo validar el acceso. Intenta nuevamente." }, { status: 503 }) };
+    }
+  }
+
+  return { apiUrl: normalizedApiUrl, apiKey, user: auth.user };
 }
