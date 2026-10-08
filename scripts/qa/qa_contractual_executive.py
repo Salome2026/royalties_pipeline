@@ -149,8 +149,11 @@ def check_isolated_engine():
         artifact = output / "contractual.pdf"
         artifact.write_bytes(b"pdf-test")
         with patch("app.royalty_reports.contract_pdf.build_contractual_pdf", return_value=BuiltReport(output_path=artifact, content_type="application/pdf")), patch("app.royalty_reports.engine.build_registered_report", prohibited):
-            result = ReportEngine(runtime).build(job_payload("royalty_contractual", "executive_pdf"))
+            job = job_payload("royalty_executive", "executive_pdf")
+            job["params"]["executive_mode"] = "contractual"
+            result = ReportEngine(runtime).build(job)
         assert result.content_type == "application/pdf" and result.filename == "contractual.pdf"
+        assert job["report_key"] == "royalty_executive", "Preserve the existing database registry"
 
 
 def main():

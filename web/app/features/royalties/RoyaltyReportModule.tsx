@@ -510,7 +510,7 @@ export function RoyaltyReportModule({ onMessage }: Props) {
               <div className={styles.recentRow} key={job.id}>
                 <span className={`${styles.statusDot} ${styles[job.status]}`} aria-hidden="true" />
                 <div>
-                  <strong>{job.report_key === "royalty_contractual" ? "PDF de reparto contractual" : job.output_format === "executive_pdf" ? "PDF ejecutivo" : job.output_format === "google_sheet" ? "Google Sheet" : "Excel detallado"}</strong>
+                  <strong>{job.params.executive_mode === "contractual" ? "PDF de reparto contractual" : job.output_format === "executive_pdf" ? "PDF ejecutivo" : job.output_format === "google_sheet" ? "Google Sheet" : "Excel detallado"}</strong>
                   <span>{job.params.contract_artists?.join(", ") || job.params.keywords?.join(", ") || "Todas las regalías"} · #{job.id}</span>
                 </div>
                 <span className={styles.recentState}>{job.status === "completed" ? "Listo" : job.status === "failed" ? "Error" : job.status === "running" ? "Procesando" : "En cola"}</span>

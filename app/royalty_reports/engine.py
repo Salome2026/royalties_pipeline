@@ -45,7 +45,7 @@ class ReportEngine:
         request = ReportRequest.from_job(job, keywords=normalized_keywords)
 
         self.runtime.report_stage(request.job_id, "reading_data")
-        if request.report_key == "royalty_contractual":
+        if request.executive_mode == "contractual":
             from app.royalty_reports.contract_pdf import build_contractual_pdf
             self.runtime.report_stage(request.job_id, "building")
             built = build_contractual_pdf(request, job, self.runtime.output_dir)

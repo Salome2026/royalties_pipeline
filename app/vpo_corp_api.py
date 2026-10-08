@@ -7275,7 +7275,7 @@ def canonical_royalty_report_params(
 def require_report_job_access(username: str, job: dict[str, Any], action: Literal["access", "create"] = "access") -> dict:
     with operational_connect() as conn:
         permission = require_module_permission(conn, username, "royalty_reports", action)
-        if job.get("report_key") == "royalty_contractual":
+        if (job.get("params") or {}).get("executive_mode") == "contractual":
             require_contract_report_permission(conn, username, action)
     if not permission.get("is_admin") and str(job.get("requested_by") or "").casefold() != username.casefold():
         raise HTTPException(status_code=403, detail="No tenes permiso para ver este reporte.")
@@ -7395,8 +7395,6 @@ def create_royalty_report_job(
         "executive_pdf": "royalty_executive",
         "google_sheet": "royalty_google_sheet",
     }[request.output]
-    if request.executive_mode == "contractual":
-        report_key = "royalty_contractual"
     job, created = create_or_reuse_report_job(
         requested_by=username,
         report_key=report_key,
@@ -7435,7 +7433,7 @@ def recent_royalty_report_jobs(
         "items": [
             reconcile_report_job_if_stale(job)
             for job in list_report_jobs(requested_by, limit=limit)
-            if job.get("report_key") != "royalty_contractual" or permission.get("is_admin") or can_read_contracts
+            if (job.get("params") or {}).get("executive_mode") != "contractual" or permission.get("is_admin") or can_read_contracts
         ]
     }
 

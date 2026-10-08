@@ -11,7 +11,6 @@ DetailMode = Literal["limited", "top_countries", "full"]
 REPORT_FORMAT_BY_KEY: dict[str, ReportOutputFormat] = {
     "royalty_keyword": "excel",
     "royalty_executive": "executive_pdf",
-    "royalty_contractual": "executive_pdf",
     "royalty_google_sheet": "google_sheet",
 }
 
@@ -30,6 +29,7 @@ class ReportRequest:
     detail_mode: DetailMode
     source: str | None
     account: str | None
+    executive_mode: str = "income"
 
     @classmethod
     def from_job(cls, job: dict[str, Any], *, keywords: list[str]) -> "ReportRequest":
@@ -50,8 +50,12 @@ class ReportRequest:
             raise ValueError("El periodo desde no puede ser mayor que hasta.")
         if output_format in {"excel", "google_sheet"} and not keywords:
             raise ValueError("El reporte requiere al menos una palabra clave.")
-        if report_key == "royalty_contractual" and params.get("period_basis") != "statement_period":
-            raise ValueError("El reparto contractual usa exclusivamente fecha de statement.")
+        executive_mode = str(params.get("executive_mode") or "income")
+        if executive_mode not in {"income", "contractual"}:
+            raise ValueError("Tipo de PDF no soportado.")
+        if executive_mode == "contractual":
+            if output_format != "executive_pdf" or params.get("period_basis") != "statement_period":
+                raise ValueError("El reparto contractual usa PDF y exclusivamente fecha de statement.")
 
         detail_mode_value = str(params.get("detail_mode") or "limited")
         if detail_mode_value not in {"limited", "top_countries", "full"}:
@@ -71,6 +75,7 @@ class ReportRequest:
             detail_mode=detail_mode,
             source=(str(params.get("source") or "").strip().lower() or None),
             account=(str(params.get("account") or "").strip().lower() or None),
+            executive_mode=executive_mode,
         )
 
 

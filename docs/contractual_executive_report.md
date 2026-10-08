@@ -23,6 +23,8 @@ Postgres REPEATABLE READ READ ONLY; futuras ediciones no alteran ese pedido.
 El Cloud Run Job lee royalty_dashboard_rankings por release_id congelado en
 BigQuery. No descarga los Parquet de detalle. Se exige la copia de contratos;
 no hay fallback a contratos actuales ni a un release diferente.
+Usa el report_key existente royalty_executive con params.executive_mode=contractual,
+compatible con las restricciones vigentes de report_runs; no cambia su esquema.
 
 Vigencias inclusivas, statement representado por su primer dia. Hasta vacio usa
 la fecha del pedido en America/New_York. Solo se distribuyen contratos cerrados
