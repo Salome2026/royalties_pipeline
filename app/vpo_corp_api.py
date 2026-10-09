@@ -58,6 +58,7 @@ from app.bigquery_dashboard import (
     royalties_dashboard_bigquery as query_royalties_dashboard_bigquery,
     royalty_detail_count_bigquery as query_royalty_detail_count_bigquery,
     royalty_isrc_income_bigquery,
+    royalty_isrc_source_accounts_bigquery,
     royalty_isrc_statement_income_bigquery,
 )
 from app.report_jobs import (
@@ -8210,6 +8211,26 @@ def master_contract_income_baseline() -> pl.DataFrame:
     ]).collect()
 
 
+def master_contract_source_accounts() -> pl.DataFrame:
+    if VPO_ROYALTIES_DASHBOARD_BACKEND == "bigquery":
+        try:
+            rows = royalty_isrc_source_accounts_bigquery(
+                project=VPO_BIGQUERY_PROJECT, dataset=VPO_BIGQUERY_DATASET,
+                location=VPO_BIGQUERY_LOCATION, maximum_bytes_billed=VPO_BIGQUERY_MAX_BYTES_BILLED,
+            )
+            return pl.DataFrame(rows, schema={"asset_isrc": pl.Utf8, "source": pl.Utf8, "account": pl.Utf8})
+        except Exception:
+            if not VPO_ROYALTIES_DASHBOARD_BIGQUERY_FALLBACK:
+                raise
+    if VPO_LOCAL_MARTS_DIR is not None and VPO_LOCAL_MARTS_DIR.exists():
+        path = build_royalties_dashboard_summary_mart(ensure_marts(filenames=[STANDARDIZED_FILE])[STANDARDIZED_FILE])
+    else:
+        path = ensure_marts(filenames=[ROYALTIES_DASHBOARD_SUMMARY_FILE])[ROYALTIES_DASHBOARD_SUMMARY_FILE]
+    return pl.scan_parquet(path).select(
+        pl.col("isrc").alias("asset_isrc"), "source", "account",
+    ).unique().collect()
+
+
 def master_contract_statement_income(isrc: str) -> list[dict[str, Any]]:
     if VPO_ROYALTIES_DASHBOARD_BACKEND == "bigquery":
         try:
@@ -8289,6 +8310,8 @@ def list_master_contracts(
     status: Literal["all", "open", "closed"] = "all",
     limit: int = 50,
     offset: int = 0,
+    source: str | None = None,
+    account: str | None = None,
     x_vpo_api_key: str | None = Header(default=None),
     x_vpo_username: str | None = Header(default=None),
 ):
@@ -8297,6 +8320,14 @@ def list_master_contracts(
         require_master_contract_user(conn, x_vpo_username, "access")
         states = read_split_statuses(conn)
     catalog = master_contract_catalog()
+    memberships = master_contract_source_accounts().join(catalog.select("asset_isrc"), on="asset_isrc", how="semi")
+    source_accounts = memberships.select("source", "account").drop_nulls().unique().sort(["source", "account"]).to_dicts()
+    if source or account:
+        if source:
+            memberships = memberships.filter(pl.col("source") == source)
+        if account:
+            memberships = memberships.filter(pl.col("account") == account)
+        catalog = catalog.filter(pl.col("asset_isrc").is_in(memberships["asset_isrc"].unique().implode()))
     search = normalize_search_text(keyword or "")
     if search:
         for token in search.split():
@@ -8339,6 +8370,7 @@ def list_master_contracts(
         "summary": summary,
         "limit": safe_limit,
         "offset": safe_offset,
+        "source_accounts": source_accounts,
         "amount_basis": "dashboard_net_statement_usd",
         "pool_contracts_supported": True,
         "reports_effective": False,

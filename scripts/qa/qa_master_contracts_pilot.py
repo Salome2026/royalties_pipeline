@@ -20,7 +20,7 @@ from app.master_contracts import (
     suggested_split,
     validate_split,
 )
-from app.bigquery_dashboard import royalty_isrc_income_bigquery, royalty_isrc_statement_income_bigquery
+from app.bigquery_dashboard import royalty_isrc_income_bigquery, royalty_isrc_source_accounts_bigquery, royalty_isrc_statement_income_bigquery
 from scripts.lib.catalog_report_filter import apply_report_net_personalization
 from scripts.lib.distributor_policy_store import use_distributor_policy_snapshot
 from app import vpo_corp_api
@@ -263,11 +263,102 @@ class MasterContractsPilotTests(unittest.TestCase):
                 patch.object(vpo_corp_api, "operational_connect", return_value=conn), \
                 patch.object(vpo_corp_api, "require_master_contract_user"), \
                 patch.object(vpo_corp_api, "read_split_statuses", return_value={}), \
-                patch.object(vpo_corp_api, "master_contract_catalog", return_value=catalog):
+                patch.object(vpo_corp_api, "master_contract_catalog", return_value=catalog), \
+                patch.object(vpo_corp_api, "master_contract_source_accounts", return_value=pl.DataFrame({
+                    "asset_isrc": ["ARDL12600006"], "source": ["fuga"], "account": ["indyana_records"],
+                })):
             result = vpo_corp_api.list_master_contracts(x_vpo_username="tester")
         self.assertEqual(result["items"][0]["amount_usd"], 11646.10)
         self.assertEqual(result["items"][0]["first_month"], "2026-01")
         self.assertEqual(result["items"][0]["last_month"], "2026-07")
+
+    def test_distributor_filter_uses_exact_pairs_and_preserves_income_and_options(self) -> None:
+        codes = ["ARDL12600006", "ARDL12600007", "ARDL12600008", "ARDL12600009"]
+        catalog = pl.DataFrame({
+            "asset_isrc": codes, "track_title": ["Tema"] * 4,
+            "artist_statement": ["Aneley"] * 4, "artist_variants": ["Aneley"] * 4,
+            "amount_usd": [180.0, 100.0, 50.0, 0.0],
+            "_contract_first_statement_month": ["2026-01"] * 3 + [None],
+            "_contract_last_statement_month": ["2026-07"] * 3 + [None],
+            "sources": ["fuga | onerpm", "ada | onerpm", "ada", "onerpm"],
+        })
+        memberships = pl.DataFrame([
+            {"asset_isrc": codes[0], "source": "fuga", "account": "indyana_records"},
+            {"asset_isrc": codes[0], "source": "onerpm", "account": "henry_remix"},
+            {"asset_isrc": codes[1], "source": "onerpm", "account": "indyana_records"},
+            {"asset_isrc": codes[1], "source": "ada", "account": "mawzrecords"},
+            {"asset_isrc": codes[2], "source": "ada", "account": "indyana_records"},
+            {"asset_isrc": codes[2], "source": "ada", "account": "indyana_records"},
+            {"asset_isrc": codes[3], "source": "onerpm", "account": "gusty_dj"},
+            {"asset_isrc": "NOT-IN-CATALOG", "source": "fake", "account": "fake"},
+        ])
+        with sqlite3.connect(":memory:") as conn, \
+                patch.object(vpo_corp_api, "require_api_key"), \
+                patch.object(vpo_corp_api, "operational_connect", return_value=conn), \
+                patch.object(vpo_corp_api, "require_master_contract_user"), \
+                patch.object(vpo_corp_api, "read_split_statuses", return_value={codes[0]: {"closed": True}}), \
+                patch.object(vpo_corp_api, "master_contract_catalog", return_value=catalog), \
+                patch.object(vpo_corp_api, "master_contract_source_accounts", return_value=memberships):
+            all_rows = vpo_corp_api.list_master_contracts(x_vpo_username="tester")
+            self.assertEqual([item["isrc"] for item in all_rows["items"]], codes)
+            self.assertEqual(all_rows["summary"], {"open": 3, "closed": 1})
+            self.assertEqual(len(all_rows["source_accounts"]), 6)
+            for source, account, expected in [
+                ("ada", "indyana_records", codes[2]), ("onerpm", "indyana_records", codes[1]),
+                ("fuga", "indyana_records", codes[0]), ("onerpm", "henry_remix", codes[0]),
+                ("onerpm", "gusty_dj", codes[3]),
+            ]:
+                result = vpo_corp_api.list_master_contracts(source=source, account=account, x_vpo_username="tester")
+                self.assertEqual([item["isrc"] for item in result["items"]], [expected])
+                original = next(item for item in all_rows["items"] if item["isrc"] == expected)
+                self.assertEqual(result["items"][0], original)
+                self.assertEqual(result["source_accounts"], all_rows["source_accounts"])
+            searched = vpo_corp_api.list_master_contracts(keyword="No match", source="ada", status="closed", x_vpo_username="tester")
+            self.assertEqual(searched["total"], 0)
+            self.assertEqual(searched["source_accounts"], all_rows["source_accounts"])
+            page = vpo_corp_api.list_master_contracts(source="onerpm", status="open", limit=1, offset=1, x_vpo_username="tester")
+            self.assertEqual([item["isrc"] for item in page["items"]], [codes[3]])
+            self.assertEqual(page["total"], 2)
+            self.assertEqual(page["summary"], {"open": 2, "closed": 1})
+            unknown = vpo_corp_api.list_master_contracts(source="ada", account="henry_remix", x_vpo_username="tester")
+            self.assertEqual(unknown["total"], 0)
+
+    def test_distributor_memberships_query_keeps_all_statement_periods(self) -> None:
+        class Client:
+            def query(self, sql, *, job_config, location):
+                self.sql, self.config = sql, job_config
+                return self
+
+            def result(self):
+                return [{"asset_isrc": "ARDL12600006", "source": "ada", "account": "indyana_records"}]
+
+        client = Client()
+        rows = royalty_isrc_source_accounts_bigquery(
+            project="project", dataset="dataset", location="US", maximum_bytes_billed=5000000000, client=client,
+        )
+        self.assertEqual(rows[0]["account"], "indyana_records")
+        self.assertIn("SELECT DISTINCT isrc AS asset_isrc, source, account", client.sql)
+        self.assertIn("project.dataset.royalty_dashboard_current", client.sql)
+        self.assertNotIn("statement_month", client.sql)
+        self.assertEqual(client.config.maximum_bytes_billed, 5000000000)
+
+    def test_distributor_memberships_parquet_fallback_keeps_exact_pairs(self) -> None:
+        frame = pl.DataFrame([
+            {"isrc": "ARDL12600006", "source": "fuga", "account": "indyana_records", "statement_period": "2026-07"},
+            {"isrc": "ARDL12600006", "source": "onerpm", "account": "henry_remix", "statement_period": "2026-08"},
+            {"isrc": "ARDL12600006", "source": "onerpm", "account": "henry_remix", "statement_period": "2026-09"},
+        ])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "summary.parquet"
+            frame.write_parquet(path)
+            with patch.object(vpo_corp_api, "VPO_ROYALTIES_DASHBOARD_BACKEND", "parquet"), \
+                    patch.object(vpo_corp_api, "VPO_LOCAL_MARTS_DIR", None), \
+                    patch.object(vpo_corp_api, "ensure_marts", return_value={vpo_corp_api.ROYALTIES_DASHBOARD_SUMMARY_FILE: path}):
+                pairs = vpo_corp_api.master_contract_source_accounts().sort(["source", "account"]).to_dicts()
+            self.assertEqual(pairs, [
+                {"asset_isrc": "ARDL12600006", "source": "fuga", "account": "indyana_records"},
+                {"asset_isrc": "ARDL12600006", "source": "onerpm", "account": "henry_remix"},
+            ])
 
     def test_contract_income_matches_dashboard_statement_cutoff_and_net_policy(self) -> None:
         current = pl.DataFrame({

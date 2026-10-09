@@ -98,6 +98,24 @@
 .searchBox svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #7d99a1; pointer-events: none; }
 .searchBox input { padding-left: 39px; }
 
+.sourceFilter {
+  flex: 0 1 190px;
+  width: 190px;
+  max-width: 100%;
+  height: 39px;
+  margin: 0;
+  padding: 0 9px;
+  border: 1px solid rgba(164, 188, 199, .27);
+  border-radius: 6px;
+  color: #f7fbfb;
+  background: var(--contract-control);
+  font: inherit;
+  font-size: .78rem;
+}
+.sourceFilter option { background: #102824; color: #f7fbfb; }
+.sourceFilter:focus { outline: none; border-color: #65d9c8; box-shadow: 0 0 0 2px rgba(101, 217, 200, .13); }
+.sourceFilter:disabled { opacity: .6; }
+
 .searchBox input,
 .fieldGrid input,
 .fieldGrid select,

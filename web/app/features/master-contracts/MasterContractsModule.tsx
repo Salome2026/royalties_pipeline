@@ -36,6 +36,7 @@ type ContractList = {
   total: number;
   summary: { open: number; closed: number };
   offset: number;
+  source_accounts: Array<{ source: string; account: string }>;
 };
 
 type ContractDetail = ContractItem & {
@@ -65,6 +66,8 @@ type Props = {
 };
 
 const PAGE_SIZE = 50;
+const ACCOUNT_LABELS: Record<string, string> = { indyana_records: "INDYANA", mawzrecords: "MAWZ", gusty_dj: "GUSTY", henry_remix: "HENRY" };
+const accountLabel = (account: string) => ACCOUNT_LABELS[account] || account.replace(/_/g, " ").toUpperCase();
 const money = (value: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value || 0);
 const percent = (value: number) => new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(value);
 const artistKey = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
@@ -81,6 +84,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   const [keyword, setKeyword] = useState("");
   const [appliedKeyword, setAppliedKeyword] = useState("");
   const [status, setStatus] = useState<"all" | "open" | "closed">("all");
+  const [sourceAccount, setSourceAccount] = useState("");
   const [offset, setOffset] = useState(0);
   const [list, setList] = useState<ContractList | null>(null);
   const [detail, setDetail] = useState<ContractDetail | null>(null);
@@ -97,13 +101,18 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
     try {
       const params = new URLSearchParams({ status, limit: String(PAGE_SIZE), offset: String(offset) });
       if (appliedKeyword) params.set("keyword", appliedKeyword);
+      if (sourceAccount) {
+        const [source, account] = sourceAccount.split("/");
+        params.set("source", source);
+        params.set("account", account);
+      }
       setList(await requestJson<ContractList>(`/api/master-contracts?${params}`));
     } catch (error) {
       onMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo cargar Contratos." });
     } finally {
       setLoading(false);
     }
-  }, [appliedKeyword, offset, onMessage, status]);
+  }, [appliedKeyword, offset, onMessage, sourceAccount, status]);
 
   useEffect(() => { void loadList(); }, [loadList]);
   useEffect(() => {
@@ -348,6 +357,10 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
       <form className={styles.toolbar} onSubmit={submitSearch}>
         <div className={styles.searchBox}><Search size={18} /><input aria-label="Buscar tema, artista o ISRC" value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="Buscar tema, artista o ISRC" /></div>
         <button type="submit" className={styles.secondaryButton}>Buscar</button>
+        <select className={styles.sourceFilter} aria-label="Distribuidora y cuenta" title="Distribuidora y cuenta" value={sourceAccount} disabled={loading} onChange={(event) => { setSourceAccount(event.target.value); setOffset(0); }}>
+          <option value="">Distribuidoras: todas</option>
+          {(list?.source_accounts || []).map(({ source, account }) => <option key={`${source}/${account}`} value={`${source}/${account}`}>{source.toUpperCase()} / {accountLabel(account)}</option>)}
+        </select>
         <div className={styles.segmented} aria-label="Estado del reparto">
           {(["all", "open", "closed"] as const).map((value) => <button type="button" key={value} aria-pressed={status === value} className={status === value ? styles.selected : ""} onClick={() => { setStatus(value); setOffset(0); }}>{value === "all" ? "Todos" : value === "open" ? "Abiertos" : "Cerrados"}</button>)}
         </div>

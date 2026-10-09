@@ -340,6 +340,20 @@ GROUP BY isrc
     return [dict(row.items()) for row in query_client.query(sql, job_config=config, location=location).result()]
 
 
+def royalty_isrc_source_accounts_bigquery(
+    *, project: str, dataset: str, location: str, maximum_bytes_billed: int | None,
+    client: bigquery.Client | None = None,
+) -> list[dict[str, Any]]:
+    sql = f"""
+SELECT DISTINCT isrc AS asset_isrc, source, account
+FROM `{project}.{dataset}.royalty_dashboard_current`
+WHERE isrc IS NOT NULL AND isrc != '' AND source IS NOT NULL AND account IS NOT NULL
+"""
+    config = bigquery.QueryJobConfig(maximum_bytes_billed=maximum_bytes_billed)
+    query_client = client or dashboard_client(project, location)
+    return [dict(row.items()) for row in query_client.query(sql, job_config=config, location=location).result()]
+
+
 def royalty_isrc_statement_income_bigquery(
     *, isrc: str, policy_document: dict[str, Any],
     project: str, dataset: str, location: str, maximum_bytes_billed: int | None,
