@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { ArrowLeft, Check, ChevronLeft, ChevronRight, FilePenLine, RefreshCw, Search } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, ChevronLeft, ChevronRight, FilePenLine, Link2, RefreshCw, Search } from "lucide-react";
 import styles from "./MasterContractsModule.module.css";
 import { ArtistContractsPanel, type ArtistContract } from "./ArtistContractsPanel";
 import { MasterAgreementsEditor, visibleAgreements, type MasterAgreement } from "./MasterAgreementsEditor";
@@ -25,6 +25,8 @@ type ContractItem = {
   title: string;
   artists_informed: string | null;
   amount_usd: number;
+  isrc_amount_usd: number;
+  associated_amount_usd: number;
   first_month: string | null;
   last_month: string | null;
   sources: string | null;
@@ -42,6 +44,7 @@ type ContractList = {
 };
 
 type ContractDetail = ContractItem & {
+  associated_income_groups: Array<{ codes: Array<{ kind: string; code: string; source: string; account: string }>; amount_usd: number }>;
   accounts: string | null;
   artist_suggestions: {
     artists: string[];
@@ -97,6 +100,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingArtist, setEditingArtist] = useState<string | null>(null);
+  const [incomeOpen, setIncomeOpen] = useState(false);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -138,13 +142,17 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
     };
   }, [editingArtist]);
 
-  async function openDetail(isrc: string) {
+  async function openDetail(isrc: string, showIncome = false) {
     setLoading(true);
     try {
       const loaded = await requestJson<ContractDetail>(`/api/master-contracts/${encodeURIComponent(isrc)}`);
+      loaded.isrc_amount_usd ??= loaded.amount_usd;
+      loaded.associated_amount_usd ??= 0;
+      loaded.associated_income_groups ??= [];
       setDetail(loaded);
       setDraft(structuredClone(loaded.split));
       setOpenAgreementId(null);
+      setIncomeOpen(showIncome);
       setClosed(loaded.closed);
       setFutureSelected(loaded.future_reports_selected);
     } catch (error) {
@@ -228,6 +236,13 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
       setClosed(saved.closed);
       setFutureSelected(saved.future_reports_selected);
       onMessage({ type: "ok", text: saved.closed ? "Reparto guardado y cerrado. Los reportes actuales no cambiaron." : "Borrador guardado. Los reportes actuales no cambiaron." });
+      if (JSON.stringify(draft.code_association_overrides || []) !== JSON.stringify(detail.split.code_association_overrides || [])) try {
+        const refreshed = await requestJson<{ version: number; income: Pick<ContractDetail, "amount_usd" | "isrc_amount_usd" | "associated_amount_usd" | "associated_income_groups" | "statement_income"> }>(`/api/master-contracts/${encodeURIComponent(detail.isrc)}/associations`);
+        if (refreshed.version !== saved.version) throw new Error("La ficha volvió a cambiar. Volvé a abrirla.");
+        setDetail((current) => current?.isrc === detail.isrc && current.version === saved.version ? { ...current, ...refreshed.income } : current);
+      } catch {
+        onMessage({ type: "error", text: "El reparto quedó guardado, pero no se pudo actualizar su ingreso. Volvé a abrir la ficha." });
+      }
       void loadList();
     } catch (error) {
       onMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo guardar el reparto." });
@@ -265,10 +280,25 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
 
         <div className={styles.identityLine}>
           <div><span>ISRC</span><strong>{detail.isrc}</strong></div>
-          <div><span>Ingreso base</span><strong>{money(detail.amount_usd)}</strong></div>
+          <div><span>Ingreso acumulado</span><strong>{money(detail.amount_usd)}</strong><small>ISRC + asociados</small></div>
           <div><span>Actividad</span><strong>{detail.first_month || "-"} a {detail.last_month || "-"}</strong></div>
           <div><span>Distribuidoras</span><strong>{detail.sources || "-"}</strong></div>
         </div>
+
+        <details className={styles.incomeBreakdown} open={incomeOpen} onToggle={(event) => setIncomeOpen(event.currentTarget.open)}>
+          <summary>Desglose de ingresos<ChevronDown size={14} /></summary>
+          <div className={styles.incomeRows}>
+            <div><span><strong>ISRC {detail.isrc}</strong></span><strong>{money(detail.isrc_amount_usd)}</strong></div>
+            {detail.associated_income_groups.map((group, index) => <div key={index}>
+              <span>{group.codes.map((code) => <span key={`${code.kind}/${code.code}/${code.source}/${code.account}`}>
+                {code.kind === "VIDEO" ? "Video / UGC" : code.kind === "TRACK" ? "ID de plataforma" : code.kind} {code.code}<small>{code.source.toUpperCase()} / {accountLabel(code.account)}</small>
+              </span>)}</span><strong>{money(group.amount_usd)}</strong>
+            </div>)}
+            {detail.associated_income_groups.length === 0 && <div><span>Asociados · sin ingresos adicionales</span><strong>{money(0)}</strong></div>}
+          </div>
+          <div className={styles.incomeTotal}><span>Total ISRC + asociados</span><strong>{money(detail.amount_usd)}</strong></div>
+          {JSON.stringify(draft.code_association_overrides || []) !== JSON.stringify(detail.split.code_association_overrides || []) && <p className={styles.auditLine}>Asociaciones sin guardar</p>}
+        </details>
 
         <ContractAssociationsPanel key={detail.isrc} isrc={detail.isrc} version={detail.version} canEdit={canEditCurrent && !saving}
           choices={draft.code_association_overrides || []} onChange={(choices) => updateDraft({ code_association_overrides: choices })} />
@@ -380,7 +410,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
             <td><button type="button" className={styles.titleButton} onClick={() => void openDetail(item.isrc)}>{item.title || "Sin título"}</button></td>
             <td><button type="button" className={styles.isrcButton} onClick={() => void openDetail(item.isrc)}>{item.isrc}</button></td>
             <td className={styles.artistCell} title={item.artists_informed || ""}>{item.artists_informed || "-"}</td>
-            <td className={styles.amountCell}>{money(item.amount_usd)}</td>
+            <td className={styles.amountCell}><button type="button" className={styles.incomeButton} title="Ver ingreso del ISRC y asociados" aria-label={`Ingreso de ${item.isrc} y asociados`} onClick={() => void openDetail(item.isrc, true)}>{money(item.amount_usd)}<Link2 size={13} /></button>{Boolean(item.associated_amount_usd) && <small className={styles.incomeExtra}>Asociados: {money(item.associated_amount_usd)}</small>}</td>
             <td><span className={`${styles.status} ${item.closed ? styles.closed : styles.open}`}>{item.closed ? "Cerrado" : "Abierto"}</span>{item.future_reports_selected && <small className={styles.futureNote}>Futura aplicación</small>}</td>
           </tr>)}
         </tbody>

@@ -8,6 +8,19 @@
 }
 
 .workspace * { letter-spacing: 0; }
+.amountCell .incomeButton { display: inline-flex; align-items: center; justify-content: flex-end; gap: 7px; width: auto; margin: 0; padding: 4px 0; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; font-variant-numeric: tabular-nums; box-shadow: none; transform: none; }
+.amountCell .incomeButton:hover { background: transparent; color: #77e4c9; transform: none; }
+.incomeExtra { display: block; color: #a6bebc; font-size: .7rem; white-space: nowrap; }
+.incomeBreakdown { margin-bottom: 6px; background: transparent; }
+.incomeBreakdown summary { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: #cde4df; font-size: .78rem; list-style: none; }
+.incomeBreakdown summary::-webkit-details-marker { display: none; }
+.incomeRows { max-height: 340px; overflow-y: auto; margin-top: 12px; }
+.incomeRows > div, .incomeTotal { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; padding: 9px 0; border-bottom: 1px solid rgba(164, 188, 199, .12); font-size: .78rem; }
+.incomeRows > div > span { min-width: 0; overflow-wrap: anywhere; }
+.incomeRows > div > span > span { display: block; margin-bottom: 4px; }
+.incomeRows strong, .incomeTotal strong { flex: 0 0 auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.incomeRows small, .identityLine small { display: block; color: #a6bebc; font-size: .7rem; margin-top: 3px; }
+.incomeTotal { color: #77e4c9; border-bottom: 0; }
 .associationsBand { margin: 0 0 24px; padding: 10px 0; border-bottom: 1px solid rgba(164, 188, 199, .18); background: transparent; }
 .associationsHeading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; min-height: 36px; }
 .associationsHeading .associationsToggle { display: inline-flex; align-items: center; justify-content: flex-start; gap: 8px; width: auto; max-width: 100%; min-height: 34px; margin: 0; padding: 6px 0; border: 0; border-radius: 0; background: transparent; color: #cde4df; font: inherit; font-size: .8rem; box-shadow: none; transform: none; cursor: pointer; }

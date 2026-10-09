@@ -61,6 +61,12 @@ from app.master_contract_associations import (
     read_claims as read_contract_association_claims,
     validate_choices as validate_contract_associations,
 )
+from app.master_contract_income import (
+    combined_income as combined_contract_income,
+    consolidate_associated_income,
+    published_unassigned_income,
+    read_choices as read_contract_association_choices,
+)
 from app.bigquery_dashboard import (
     royalties_dashboard_bigquery as query_royalties_dashboard_bigquery,
     royalty_detail_count_bigquery as query_royalty_detail_count_bigquery,
@@ -8267,7 +8273,32 @@ def master_contract_statement_income(isrc: str) -> list[dict[str, Any]]:
     ).sort("statement_month").collect().to_dicts()
 
 
-def master_contract_catalog() -> pl.DataFrame:
+def master_contract_associated_income(choices: dict[str, list[dict]]) -> dict[str, dict]:
+    try:
+        marts = ensure_marts(filenames=[CATALOG_MASTER_FILE])
+        load_catalog_status()
+        configure_catalog_report_env(marts)
+        release_id = mart_release_cache().status().get("active_release_id")
+        if not release_id:
+            raise ValueError("No hay una versión publicada disponible.")
+        rows, evidence = published_unassigned_income(release_id)
+        if not rows:
+            return {}
+        aliases = {row["alias_catalog_key"]: row["catalog_key"]
+                   for row in catalog_alias_lookup(marts[CATALOG_MASTER_FILE]).to_dicts()}
+        claims = {choice["key"]: root for root, values in choices.items()
+                  for choice in values if choice.get("included")}
+        schema = {key: pl.Utf8 for key in rows[0] if key != "amount_usd"}
+        frame = pl.DataFrame(rows, schema_overrides=schema).lazy()
+        eligible = filter_reportable_generation(frame, set(schema) | {"amount_usd"})
+        adjusted = apply_report_net_personalization(eligible, set(eligible.collect_schema().names()))
+        return consolidate_associated_income(adjusted.collect().to_dicts(), evidence, aliases,
+                                             choices, claims, CONTRACT_ANALYSIS_CUTOFF_MONTH)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="No se pudo calcular el ingreso de los códigos asociados. Volvé a intentar.") from exc
+
+
+def master_contract_catalog(associated_income: dict[str, dict] | None = None) -> pl.DataFrame:
     marts = ensure_marts(filenames=[CATALOG_MASTER_FILE])
     catalog = pl.read_parquet(marts[CATALOG_MASTER_FILE])
     current = (
@@ -8276,7 +8307,21 @@ def master_contract_catalog() -> pl.DataFrame:
         .sort(["amount_usd", "asset_isrc"], descending=[True, False])
         .unique(subset=["asset_isrc"], keep="first", maintain_order=True)
     )
-    return contract_analysis_catalog(current, master_contract_income_baseline())
+    result = contract_analysis_catalog(current, master_contract_income_baseline()).with_columns(
+        pl.col("amount_usd").alias("isrc_amount_usd"),
+    )
+    extra = pl.DataFrame([
+        {"asset_isrc": root, "associated_amount_usd": item["amount_usd"],
+         "_associated_first": min((row["statement_month"] for row in item["statement_income"] if row["statement_month"] <= CONTRACT_ANALYSIS_CUTOFF_MONTH), default=None),
+         "_associated_last": max((row["statement_month"] for row in item["statement_income"] if row["statement_month"] <= CONTRACT_ANALYSIS_CUTOFF_MONTH), default=None)}
+        for root, item in (associated_income or {}).items()
+    ], schema={"asset_isrc": pl.Utf8, "associated_amount_usd": pl.Float64, "_associated_first": pl.Utf8, "_associated_last": pl.Utf8})
+    return result.join(extra, on="asset_isrc", how="left").with_columns(
+        pl.col("associated_amount_usd").fill_null(0.0),
+        (pl.col("amount_usd") + pl.col("associated_amount_usd").fill_null(0.0)).alias("amount_usd"),
+        pl.min_horizontal("_contract_first_statement_month", "_associated_first").alias("_contract_first_statement_month"),
+        pl.max_horizontal("_contract_last_statement_month", "_associated_last").alias("_contract_last_statement_month"),
+    ).drop("_associated_first", "_associated_last").sort(["amount_usd", "asset_isrc"], descending=[True, False])
 
 
 def require_master_contract_user(conn: Any, username: str | None, action: Literal["access", "edit", "approve"]) -> str:
@@ -8333,7 +8378,8 @@ def list_master_contracts(
     with operational_connect() as conn:
         require_master_contract_user(conn, x_vpo_username, "access")
         states = read_split_statuses(conn)
-    catalog = master_contract_catalog()
+        choices = read_contract_association_choices(conn)
+    catalog = master_contract_catalog(master_contract_associated_income(choices))
     memberships = master_contract_source_accounts().join(catalog.select("asset_isrc"), on="asset_isrc", how="semi")
     source_accounts = memberships.select("source", "account").drop_nulls().unique().sort(["source", "account"]).to_dicts()
     if source or account:
@@ -8352,7 +8398,7 @@ def list_master_contracts(
                 | contains_search_expr(pl.col("artist_variants"), token)
             )
     all_rows = catalog.select([
-        "asset_isrc", "track_title", "artist_statement", "amount_usd",
+        "asset_isrc", "track_title", "artist_statement", "amount_usd", "isrc_amount_usd", "associated_amount_usd",
         "_contract_first_statement_month", "_contract_last_statement_month", "sources",
     ]).to_dicts()
     summary = {
@@ -8371,6 +8417,8 @@ def list_master_contracts(
             "title": row["track_title"],
             "artists_informed": row["artist_statement"],
             "amount_usd": float(row["amount_usd"] or 0),
+            "isrc_amount_usd": float(row["isrc_amount_usd"] or 0),
+            "associated_amount_usd": float(row["associated_amount_usd"] or 0),
             "first_month": row["_contract_first_statement_month"],
             "last_month": row["_contract_last_statement_month"],
             "sources": row["sources"],
@@ -8420,9 +8468,15 @@ def get_master_contract_associations(
         require_master_contract_user(conn, x_vpo_username, "access")
         saved = read_split(conn, clean)
         claims = read_contract_association_claims(conn)
+        all_choices = read_contract_association_choices(conn)
     choices = ((saved or {}).get("split") or {}).get("code_association_overrides") or []
     items = master_contract_associations(clean, choices, claims)
-    return {"isrc": clean, "items": items, "version": (saved or {}).get("version", 0), "reports_effective": False}
+    extras = master_contract_associated_income(all_choices)
+    baseline = master_contract_income_baseline().filter(pl.col("asset_isrc") == clean)
+    base_amount = float(baseline["amount_usd"][0] or 0) if not baseline.is_empty() else 0.0
+    income = combined_contract_income(base_amount, extras.get(clean), master_contract_statement_income(clean))
+    income["statement_income"] = [row for row in income["statement_income"] if row["statement_month"] <= CONTRACT_ANALYSIS_CUTOFF_MONTH]
+    return {"isrc": clean, "items": items, "income": income, "version": (saved or {}).get("version", 0), "reports_effective": False}
 
 
 @app.get("/master-contracts/{isrc}")
@@ -8440,7 +8494,9 @@ def get_master_contract(
         require_master_contract_user(conn, x_vpo_username, "access")
         saved = read_split(conn, clean)
         contracts = active_artist_contracts(conn)
-    matches = master_contract_catalog().filter(pl.col("asset_isrc") == clean)
+        choices = read_contract_association_choices(conn)
+    extras = master_contract_associated_income(choices)
+    matches = master_contract_catalog(extras).filter(pl.col("asset_isrc") == clean)
     if matches.is_empty():
         raise HTTPException(status_code=404, detail="El ISRC no figura en el catálogo publicado.")
     catalog_row = matches.row(0, named=True)
@@ -8452,7 +8508,8 @@ def get_master_contract(
     suggestions = artist_suggestions(clean, raw_path, catalog_row.get("artist_statement"))
     first_sale_date = suggestions.get("first_sale_date") or catalog_row.get("first_transaction_month")
     first_sale_precision = suggestions.get("first_sale_precision") or ("month" if first_sale_date else None)
-    statement_income = master_contract_statement_income(clean)
+    income = combined_contract_income(float(catalog_row.get("isrc_amount_usd") or 0), extras.get(clean), master_contract_statement_income(clean))
+    statement_income = income["statement_income"]
     first_statement_date = f"{statement_income[0]['statement_month']}-01" if statement_income else None
     return {
         "isrc": clean,
@@ -8465,6 +8522,9 @@ def get_master_contract(
         "first_statement_date": first_statement_date,
         "statement_income": [row for row in statement_income if row["statement_month"] <= CONTRACT_ANALYSIS_CUTOFF_MONTH],
         "amount_usd": float(catalog_row.get("amount_usd") or 0),
+        "isrc_amount_usd": income["isrc_amount_usd"],
+        "associated_amount_usd": income["associated_amount_usd"],
+        "associated_income_groups": income["associated_income_groups"],
         "first_month": catalog_row.get("_contract_first_statement_month"),
         "last_month": catalog_row.get("_contract_last_statement_month"),
         "sources": catalog_row.get("sources"),

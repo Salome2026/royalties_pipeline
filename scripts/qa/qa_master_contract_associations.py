@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from unittest.mock import MagicMock, patch
+import polars as pl
 
 # Initialize the existing test policy context before the API adds scripts/ to sys.path.
 from scripts.lib.catalog_report_filter import apply_report_net_personalization  # noqa: F401
@@ -133,6 +134,10 @@ class ContractAssociationTests(unittest.TestCase):
         with patch.object(api, "require_api_key"), patch.object(api, "operational_connect") as connect, \
              patch.object(api, "require_master_contract_user") as auth, patch.object(api, "read_split", return_value=None), \
              patch.object(api, "read_contract_association_claims", return_value={}), \
+             patch.object(api, "read_contract_association_choices", return_value={}), \
+             patch.object(api, "master_contract_associated_income", return_value={}), \
+             patch.object(api, "master_contract_income_baseline", return_value=pl.DataFrame({"asset_isrc": [ISRC], "amount_usd": [100.0]})), \
+             patch.object(api, "master_contract_statement_income", return_value=[]), \
              patch.object(api, "master_contract_associations", return_value=self.items()):
             connect.return_value.__enter__.return_value = conn
             result = api.get_master_contract_associations(ISRC, "key", "reader")

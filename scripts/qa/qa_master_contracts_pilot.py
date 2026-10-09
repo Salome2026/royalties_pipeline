@@ -126,7 +126,7 @@ class MasterContractsPilotTests(unittest.TestCase):
 
     def test_default_from_is_first_statement_not_consumption_and_saved_dates_are_preserved(self) -> None:
         catalog = pl.DataFrame([{"asset_isrc": "ARDL12600006", "track_title": "Tema",
-                                 "amount_usd": 90.0, "first_transaction_month": "2026-01"}])
+                                 "amount_usd": 90.0, "isrc_amount_usd": 90.0, "first_transaction_month": "2026-01"}])
         monthly = [{"statement_month": "2026-03", "amount_usd": 90.0},
                    {"statement_month": "2026-08", "amount_usd": 45.0}]
         with sqlite3.connect(":memory:") as conn, \
@@ -134,6 +134,8 @@ class MasterContractsPilotTests(unittest.TestCase):
                 patch.object(vpo_corp_api, "operational_connect", return_value=conn), \
                 patch.object(vpo_corp_api, "require_master_contract_user"), \
                 patch.object(vpo_corp_api, "read_split", return_value=None) as saved, \
+                patch.object(vpo_corp_api, "read_contract_association_choices", return_value={}), \
+                patch.object(vpo_corp_api, "master_contract_associated_income", return_value={}), \
                 patch.object(vpo_corp_api, "active_artist_contracts", return_value={}), \
                 patch.object(vpo_corp_api, "master_contract_catalog", return_value=catalog), \
                 patch.object(vpo_corp_api, "ensure_marts", return_value={vpo_corp_api.STANDARDIZED_FILE: None}), \
@@ -254,6 +256,7 @@ class MasterContractsPilotTests(unittest.TestCase):
             "artist_statement": ["Artista"],
             "artist_variants": ["Artista"],
             "amount_usd": [11646.10],
+            "isrc_amount_usd": [11646.10], "associated_amount_usd": [0.0],
             "_contract_first_statement_month": ["2026-01"],
             "_contract_last_statement_month": ["2026-07"],
             "sources": ["fuga"],
@@ -263,6 +266,8 @@ class MasterContractsPilotTests(unittest.TestCase):
                 patch.object(vpo_corp_api, "operational_connect", return_value=conn), \
                 patch.object(vpo_corp_api, "require_master_contract_user"), \
                 patch.object(vpo_corp_api, "read_split_statuses", return_value={}), \
+                patch.object(vpo_corp_api, "read_contract_association_choices", return_value={}), \
+                patch.object(vpo_corp_api, "master_contract_associated_income", return_value={}), \
                 patch.object(vpo_corp_api, "master_contract_catalog", return_value=catalog), \
                 patch.object(vpo_corp_api, "master_contract_source_accounts", return_value=pl.DataFrame({
                     "asset_isrc": ["ARDL12600006"], "source": ["fuga"], "account": ["indyana_records"],
@@ -278,6 +283,7 @@ class MasterContractsPilotTests(unittest.TestCase):
             "asset_isrc": codes, "track_title": ["Tema"] * 4,
             "artist_statement": ["Aneley"] * 4, "artist_variants": ["Aneley"] * 4,
             "amount_usd": [180.0, 100.0, 50.0, 0.0],
+            "isrc_amount_usd": [180.0, 100.0, 50.0, 0.0], "associated_amount_usd": [0.0] * 4,
             "_contract_first_statement_month": ["2026-01"] * 3 + [None],
             "_contract_last_statement_month": ["2026-07"] * 3 + [None],
             "sources": ["fuga | onerpm", "ada | onerpm", "ada", "onerpm"],
@@ -297,6 +303,8 @@ class MasterContractsPilotTests(unittest.TestCase):
                 patch.object(vpo_corp_api, "operational_connect", return_value=conn), \
                 patch.object(vpo_corp_api, "require_master_contract_user"), \
                 patch.object(vpo_corp_api, "read_split_statuses", return_value={codes[0]: {"closed": True}}), \
+                patch.object(vpo_corp_api, "read_contract_association_choices", return_value={}), \
+                patch.object(vpo_corp_api, "master_contract_associated_income", return_value={}), \
                 patch.object(vpo_corp_api, "master_contract_catalog", return_value=catalog), \
                 patch.object(vpo_corp_api, "master_contract_source_accounts", return_value=memberships):
             all_rows = vpo_corp_api.list_master_contracts(x_vpo_username="tester")

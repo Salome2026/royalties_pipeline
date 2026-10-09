@@ -92,8 +92,8 @@ bisiesto, distintas zonas horarias, superposiciones y conservacion de importes.
 ## Codigos asociados en Contratos (2026-10-09)
 
 - La ficha incorpora "Ver codigos asociados", cerrado por defecto. Consulta
-  exclusivamente la version publicada de BigQuery al abrirlo, sin sumar
-  lecturas al listado ni modificar el catalogo, ingestas o importes.
+  exclusivamente la version publicada de BigQuery al abrirlo, sin modificar
+  el catalogo ni las ingestas.
 - UPC y video/UGC se incluyen automaticamente solo si el resolvedor vigente
   del catalogo los relaciona de forma exacta y unica con el ISRC, y ningun
   statement publicado los vincula a otro ISRC. No se comparan nombres.
@@ -113,9 +113,40 @@ bisiesto, distintas zonas horarias, superposiciones y conservacion de importes.
 - Se mantienen permisos y versionado. Un bloqueo transaccional en PostgreSQL
   impide que dos guardados simultaneos reclamen el mismo codigo. El backend
   vuelve a comprobar cualquier nueva inclusion y rechaza evidencia desactualizada.
-- Esta etapa registra y muestra las asociaciones solo en Contratos. No agrega
-  ingresos a la simulacion ni cambia los lectores de dashboard o reportes,
-  incluido el ejecutivo contractual. Su aplicacion economica sera otra etapa
-  con conciliacion y autorizacion explicita.
+- Las asociaciones siguen limitadas a Contratos. No cambian los lectores de
+  dashboard o reportes, incluido el ejecutivo contractual. Llevarlas a esos
+  lectores requiere otra etapa con conciliacion y autorizacion explicita.
+
+### Ingreso acumulado del ISRC y sus asociados
+
+- Por pedido de Ruben, el listado, la ficha y la simulacion de Contratos usan
+  ISRC + asociados incluidos, con desglose accesible desde el importe.
+  Se conserva el corte de statements hasta julio 2026 incluido y los mismos
+  filtros de generacion/catalogo y descuentos netos vigentes del dashboard.
+- La base ISRC sigue saliendo del dashboard actual, sin recalcularla ni alterar
+  sus cifras. Solo se agrega ingreso adicional de filas sin ISRC, resuelto por
+  identificadores exactos con las mismas decisiones y huellas del panel.
+- Una fila con ISRC ya pertenece a la base: su UPC, video o ID no suman de nuevo.
+  Una fila sin ISRC puede tener varios identificadores incluidos; se cuenta una
+  sola vez y el desglose muestra esos codigos juntos, no importes duplicados.
+- Si distintos identificadores asignarian una fila a dos contratos, no se suma.
+  Una exclusion explicita veta esa fila para ese contrato, incluso si otro ID
+  de la misma fila esta incluido. No resta ventas que ya tienen el ISRC.
+  Los productos ADA sin ISRC mantienen ingreso e identidad independientes.
+- Se leen agrupaciones de BigQuery en bloque, no una consulta por cada tema.
+  Solo las lecturas crudas se cachean por release inmutable; policies y
+  decisiones guardadas se aplican nuevamente en cada lectura. Guardar una
+  asociacion actualiza el acumulado y los meses usados por la simulacion.
+- No se escriben ni reconstruyen marts, tablas analiticas o contratos para
+  calcular este total. Los reportes existentes mantienen su comportamiento.
 
 Validacion adicional: `python -m unittest scripts.qa.qa_master_contract_associations`.
+
+Validacion del acumulado: `python -m unittest scripts.qa.qa_master_contract_income
+scripts.qa.qa_master_contract_associations scripts.qa.qa_master_contracts_pilot`
+(55 pruebas). Conciliacion de solo lectura sobre release
+`20261008T030559Z-0a3041226a8c`: sin diferencias por fuente/cuenta/statement entre
+la generacion sin ISRC filtrada y el dashboard. Los adicionales asignables
+hasta julio suman USD 14.00731366; `ARDL12600006` conserva USD 11646.10167091.
+Se verificaron totales mensuales y desglose en `US7VG2313714` y `ARDL12600027`.
+QA del ejecutivo contractual y controles Postgres tambien aprobados.
