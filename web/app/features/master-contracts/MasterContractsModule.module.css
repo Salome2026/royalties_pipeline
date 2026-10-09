@@ -98,7 +98,7 @@
 .searchBox svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #7d99a1; pointer-events: none; }
 .searchBox input { padding-left: 39px; }
 
-.sourceFilter {
+.toolbar .sourceFilter {
   flex: 0 1 190px;
   width: 190px;
   max-width: 100%;
