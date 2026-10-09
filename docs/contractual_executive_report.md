@@ -9,6 +9,10 @@ aplicacion automatica de contratos en los reportes existentes.
 
 Seleccion de uno o varios artistas/proyectos, periodo completo o mensual/rango,
 busqueda opcional por tema/ISRC y filtros de distribuidora/cuenta.
+La seleccion comienza vacia. Los nombres completos se reconocen sin distinguir
+mayusculas, acentos o espacios repetidos; + o Enter los agregan y Generar tambien
+incluye un nombre valido pendiente. No se aceptan coincidencias parciales ni se
+ignora un nombre pendiente invalido al generar con otros artistas seleccionados.
 El reporte usa exclusivamente fecha de statement y los mismos descuentos netos
 del dashboard. Los filtros seleccionan ingresos completos de los temas; el PDF
 muestra todos sus beneficiarios, no solo el artista usado como filtro.

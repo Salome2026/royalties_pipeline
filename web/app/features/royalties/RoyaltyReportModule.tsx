@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { AlertCircle, CheckCircle2, Clock3, Download, ExternalLink, FileSpreadsheet, FileText, Globe2, LoaderCircle, Plus, Rows3, Search, SlidersHorizontal, X } from "lucide-react";
 import { PeriodControl } from "../../components/PeriodControl";
 import { isResolvedPeriodInvalid, resolvePeriod, type PeriodSelection } from "../../lib/period";
+import { prepareContractArtists, resolveContractArtist } from "./contractArtistSelection";
 import {
   createRoyaltyReportJob,
   requestRecentRoyaltyReportJobs,
@@ -65,7 +66,6 @@ export function RoyaltyReportModule({ onMessage }: Props) {
       if (!active) return;
       setArtistOptions(names);
       setArtistError("");
-      setContractArtists((selected) => selected.length ? selected : names.includes("La Juntada de los Artistas") ? ["La Juntada de los Artistas"] : []);
     }).catch((error) => { if (active) setArtistError(error.message); });
     return () => { active = false; };
   }, [contractual]);
@@ -160,6 +160,19 @@ export function RoyaltyReportModule({ onMessage }: Props) {
     return options.source_accounts.filter((item) => item.source === source);
   }, [options, source]);
 
+  const pendingArtist = resolveContractArtist(artistSearch, artistOptions);
+
+  function addContractArtist() {
+    const selection = prepareContractArtists(contractArtists, artistSearch, artistOptions);
+    if (selection.error) {
+      onMessage({ type: "error", text: selection.error });
+      return;
+    }
+    setContractArtists(selection.artists);
+    setArtistSearch("");
+    onMessage(null);
+  }
+
   function buildPayload(): RoyaltyReportPayload | null {
     const resolved = resolvePeriod(period, "monthly_report");
     if (isResolvedPeriodInvalid(resolved)) {
@@ -167,9 +180,14 @@ export function RoyaltyReportModule({ onMessage }: Props) {
       return null;
     }
     const terms = keywords.split(/[;,]/).map((item) => item.trim()).filter(Boolean);
-    if (contractual && (!contractArtists.length || artistError)) {
-      onMessage({ type: "error", text: artistError || "Elegí al menos un artista o proyecto." });
-      return null;
+    let artists = contractArtists;
+    if (contractual) {
+      const selection = prepareContractArtists(contractArtists, artistSearch, artistOptions);
+      if (artistError || selection.error || !selection.artists.length) {
+        onMessage({ type: "error", text: artistError || selection.error || "Elegí al menos un artista o proyecto." });
+        return null;
+      }
+      artists = selection.artists;
     }
     if (output === "excel" && terms.length === 0) {
       onMessage({ type: "error", text: "Ingresá al menos una palabra clave para el Excel detallado." });
@@ -184,12 +202,16 @@ export function RoyaltyReportModule({ onMessage }: Props) {
       onMessage({ type: "error", text: "La cantidad máxima debe ser un número entero entre 0 y 50.000." });
       return null;
     }
+    if (contractual) {
+      setContractArtists(artists);
+      setArtistSearch("");
+    }
     return {
       keywords: terms,
       start_month: resolved.startMonth,
       end_month: resolved.endMonth,
       period_basis: contractual ? "statement_period" : periodBasis,
-      ...(contractual ? { executive_mode: "contractual" as const, contract_artists: contractArtists } : {}),
+      ...(contractual ? { executive_mode: "contractual" as const, contract_artists: artists } : {}),
       mode: matchMode,
       raw_limit: Number.isFinite(parsedRawLimit) ? parsedRawLimit : 0,
       detail_mode: output === "excel" ? detailMode : "limited",
@@ -333,9 +355,9 @@ export function RoyaltyReportModule({ onMessage }: Props) {
               <div className={styles.field}>
                 <label htmlFor="royalty_contract_artist">Artistas / proyectos</label>
                 <div className={styles.artistEntry}>
-                  <input id="royalty_contract_artist" list="royalty_contract_artists" value={artistSearch} onChange={(event) => setArtistSearch(event.target.value)} placeholder="Buscar artista o proyecto" />
+                  <input id="royalty_contract_artist" list="royalty_contract_artists" value={artistSearch} onChange={(event) => setArtistSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && artistSearch.trim()) { event.preventDefault(); addContractArtist(); } }} placeholder="Buscar artista o proyecto" />
                   <datalist id="royalty_contract_artists">{artistOptions.filter((name) => !contractArtists.includes(name)).map((name) => <option key={name} value={name} />)}</datalist>
-                  <button type="button" title="Agregar artista" aria-label="Agregar artista" disabled={!artistOptions.includes(artistSearch) || contractArtists.includes(artistSearch) || contractArtists.length >= 20} onClick={() => { setContractArtists((names) => [...names, artistSearch]); setArtistSearch(""); }}><Plus size={18} /></button>
+                  <button type="button" title="Agregar artista" aria-label="Agregar artista" disabled={!pendingArtist || contractArtists.includes(pendingArtist) || contractArtists.length >= 20} onClick={addContractArtist}><Plus size={18} /></button>
                 </div>
                 <div className={styles.artistSelection}>
                   {contractArtists.map((name) => <span key={name}>{name}<button type="button" title={`Quitar ${name}`} aria-label={`Quitar ${name}`} onClick={() => setContractArtists((names) => names.filter((item) => item !== name))}><X size={14} /></button></span>)}
