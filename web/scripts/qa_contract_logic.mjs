@@ -5,6 +5,25 @@ import ts from "typescript";
 const source = readFileSync(new URL("../app/features/master-contracts/contractLogic.ts", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
 const logic = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+const associationSource = readFileSync(new URL("../app/features/master-contracts/associationLogic.ts", import.meta.url), "utf8");
+const associationCompiled = ts.transpileModule(associationSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+const associations = await import(`data:text/javascript;base64,${Buffer.from(associationCompiled).toString("base64")}`);
+const video = { key: JSON.stringify(["VIDEO", "uqY-3RS-V0Y", "fuga", "indyana_records"]), code: "uqY-3RS-V0Y",
+  automatic: true, selectable: true, evidence_signature: "current", requires_review: true };
+const selected = { key: video.key, included: true, evidence_signature: "current" };
+assert.equal(associations.associationState(video, []).status, "automatic");
+assert.deepEqual(associations.pendingAssociationCodes([video], []), []);
+const pendingVideo = { ...video, automatic: false };
+assert.deepEqual(associations.pendingAssociationCodes([pendingVideo], []), [video.code]);
+assert.deepEqual(associations.pendingAssociationCodes([pendingVideo], [selected]), []);
+assert.deepEqual(associations.pendingAssociationCodes([pendingVideo], [{ ...selected, included: false }]), []);
+assert.equal(associations.associationState({ ...video, evidence_signature: "changed" }, [selected]).pending, true);
+const anotherAccount = { ...video, key: JSON.stringify(["VIDEO", video.code, "onerpm", "la_nueva_sangre"]) };
+assert.equal(associations.associationState(anotherAccount, [{ ...selected, included: false }]).status, "excluded");
+assert.deepEqual(associations.pendingAssociationCodes([], [selected]), [video.code]);
+assert.equal(associations.associationState({ ...video, automatic: false, selectable: false }, []).pending, true);
+assert.equal(associations.associationState({ ...video, automatic: false, selectable: false, requires_review: false }, []).pending, false);
+console.log("Associated-code automatic validation, explicit discard, changed evidence and close gate: PASS");
 const allocation = { principal: "La Juntada", indyana_percent: 70, principal_percent: 10,
   apply_guest_contracts: true, participants: [
     { artist: "Aneley", percent: 10, internal_contract_indyana_percent: 50 },

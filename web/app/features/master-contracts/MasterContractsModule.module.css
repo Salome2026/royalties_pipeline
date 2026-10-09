@@ -40,7 +40,7 @@
 .associationsTable { width: 100%; min-width: 760px; border-collapse: collapse; table-layout: fixed; text-align: left; font-size: .76rem; background: transparent; }
 .associationsTable th { padding: 8px 10px; color: #a6bebc; font-size: .7rem; font-weight: 600; border-bottom: 1px solid rgba(164, 188, 199, .2); }
 .associationsTable td { padding: 11px 10px; vertical-align: top; overflow-wrap: anywhere; border-bottom: 1px solid rgba(164, 188, 199, .12); background: transparent; }
-.associationsTable th:nth-child(1) { width: 48px; }
+.associationsTable th:nth-child(1) { width: 125px; }
 .associationsTable th:nth-child(2) { width: 150px; }
 .associationsTable th:nth-child(3) { width: 150px; }
 .associationsTable th:nth-child(5) { width: 235px; }
@@ -48,6 +48,8 @@
 .associationsTable small { color: #9cb8b4; font-size: .69rem; line-height: 1.45; }
 .associationsTable input[type="checkbox"] { width: 16px; height: 16px; min-height: 16px; margin: 4px 0 0; padding: 0; accent-color: #65d9c8; cursor: pointer; }
 .associationsTable input:disabled { cursor: default; }
+.associationsTable .associationDecision { width: 120px; min-height: 30px; margin: 0; padding: 4px 7px; border: 1px solid rgba(164, 188, 199, .25); border-radius: 6px; background: var(--contract-control); color: #cde4df; font: inherit; font-size: .72rem; }
+.associationDecision option { background: #102824; }
 .associationValid { color: #77e4c9; }
 .associationPending { color: #f5c47a; }
 .poolFields, .ruleFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }

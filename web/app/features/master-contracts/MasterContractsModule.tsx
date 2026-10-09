@@ -6,7 +6,7 @@ import styles from "./MasterContractsModule.module.css";
 import { ArtistContractsPanel, type ArtistContract } from "./ArtistContractsPanel";
 import { MasterAgreementsEditor, visibleAgreements, type MasterAgreement } from "./MasterAgreementsEditor";
 import { PoolsAllocationEditor } from "./PoolsAllocationEditor";
-import { ContractAssociationsPanel, type AssociationChoice } from "./ContractAssociationsPanel";
+import { ContractAssociationsPanel, type AssociationChoice, type AssociationValidation } from "./ContractAssociationsPanel";
 import { agreementAllocation, agreementIncome, allocationTotals, contractErrors, previewAllocation, type Allocation, type StatementIncome } from "./contractLogic";
 
 type Split = Allocation & {
@@ -101,6 +101,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   const [saving, setSaving] = useState(false);
   const [editingArtist, setEditingArtist] = useState<string | null>(null);
   const [incomeOpen, setIncomeOpen] = useState(false);
+  const [associationValidation, setAssociationValidation] = useState<AssociationValidation>({ loading: true, pending: 0, error: "" });
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -155,6 +156,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
       setIncomeOpen(showIncome);
       setClosed(loaded.closed);
       setFutureSelected(loaded.future_reports_selected);
+      setAssociationValidation({ loading: true, pending: 0, error: "" });
     } catch (error) {
       onMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo abrir el ISRC." });
     } finally {
@@ -173,6 +175,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   const allocation = draft ? agreementAllocation(activeAgreement, draft) : null;
   const totals = allocation ? allocationTotals(activeAgreement, allocation) : { master: 0, participation: 0, general: 0 };
   const errors = draft ? contractErrors(agreements, draft) : [];
+  const associationsIncomplete = associationValidation.loading || !!associationValidation.error || associationValidation.pending > 0;
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
   const periodIncome = detail ? agreementIncome(activeAgreement, detail.statement_income || [], today) : null;
 
@@ -211,6 +214,12 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   async function save(nextClosed = closed, nextSelected = futureSelected) {
     if (!detail || !draft || !canEditCurrent) return;
     if (errors.length) { onMessage({ type: "error", text: errors[0] }); return; }
+    if (nextClosed && associationsIncomplete) {
+      onMessage({ type: "error", text: associationValidation.error || (associationValidation.loading
+        ? "Esperá a que termine la validación de códigos asociados."
+        : `Hay ${associationValidation.pending} códigos por validar. Incluí o descartá las propuestas antes de cerrar.`) });
+      return;
+    }
     setSaving(true);
     try {
       if (agreements.some((item) => item.allocation_model === "pools") && !detail.pool_contracts_supported) {
@@ -301,7 +310,8 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
         </details>
 
         <ContractAssociationsPanel key={detail.isrc} isrc={detail.isrc} version={detail.version} canEdit={canEditCurrent && !saving}
-          choices={draft.code_association_overrides || []} onChange={(choices) => updateDraft({ code_association_overrides: choices })} />
+          choices={draft.code_association_overrides || []} onChange={(choices) => updateDraft({ code_association_overrides: choices })}
+          onValidationChange={setAssociationValidation} />
 
         <div className={`${styles.detailColumns} ${openAgreementId ? "" : styles.detailColumnsSolo}`}>
           <div className={styles.formColumn}>
@@ -346,7 +356,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
               {detail.updated_at && <p className={styles.auditLine}>Último guardado: {detail.updated_at} por {detail.updated_by || "-"}.</p>}
               <div className={styles.actions}>
                 {canEditCurrent && <button type="button" className={styles.secondaryButton} disabled={saving || errors.length > 0 || (!dirty && detail.version > 0)} onClick={() => void save()}><FilePenLine size={16} />{saving ? "Guardando..." : "Guardar"}</button>}
-                {canApprove && canEdit && <button type="button" className={styles.primaryButton} disabled={saving || errors.length > 0} onClick={() => void save(!closed, closed ? false : futureSelected)}><Check size={16} />{closed ? "Reabrir" : "Cerrar reparto"}</button>}
+                {canApprove && canEdit && <button type="button" className={styles.primaryButton} disabled={saving || errors.length > 0 || (!closed && associationsIncomplete)} onClick={() => void save(!closed, closed ? false : futureSelected)}><Check size={16} />{closed ? "Reabrir" : "Cerrar reparto"}</button>}
               </div>
             </section>
             </>}

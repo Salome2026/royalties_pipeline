@@ -55,12 +55,16 @@ from app.master_contracts import (
     suggested_split,
 )
 from app.master_contract_associations import (
+    append_missing_choices,
     candidates as contract_association_candidates,
     identity_evidence as contract_identity_evidence,
     preserve_choices as preserve_contract_associations,
     read_claims as read_contract_association_claims,
+    unresolved_associations,
     validate_choices as validate_contract_associations,
+    validate_closure as validate_contract_association_closure,
 )
+from app.master_contract_metadata import infer_video_evidence
 from app.master_contract_income import (
     combined_income as combined_contract_income,
     consolidate_associated_income,
@@ -8286,6 +8290,7 @@ def master_contract_associated_income(choices: dict[str, list[dict]]) -> dict[st
             return {}
         aliases = {row["alias_catalog_key"]: row["catalog_key"]
                    for row in catalog_alias_lookup(marts[CATALOG_MASTER_FILE]).to_dicts()}
+        evidence = infer_video_evidence(pl.read_parquet(marts[CATALOG_MASTER_FILE]).to_dicts(), evidence)
         claims = {choice["key"]: root for root, values in choices.items()
                   for choice in values if choice.get("included")}
         schema = {key: pl.Utf8 for key in rows[0] if key != "amount_usd"}
@@ -8446,11 +8451,24 @@ def master_contract_associations(isrc: str, choices: list[dict[str, Any]], claim
     if matches.is_empty():
         raise HTTPException(status_code=404, detail="El ISRC no figura en el catálogo publicado.")
     try:
-        evidence = contract_identity_evidence(isrc, matches.row(0, named=True))
+        release_id = mart_release_cache().status().get("active_release_id")
+        if not release_id:
+            raise ValueError("No hay una version publicada disponible.")
+        _, published = published_unassigned_income(release_id)
+        inferred = infer_video_evidence(catalog.to_dicts(), published)
+        evidence = contract_identity_evidence(isrc, matches.row(0, named=True), release_id=release_id)
+        by_key = {json.dumps([row["kind"], row["code"], row["source"], row["account"]], separators=(",", ":")): row
+                  for row in evidence}
+        chosen_keys = {choice["key"] for choice in choices}
+        for row in inferred:
+            key = json.dumps([row["kind"], row["code"], row["source"], row["account"]], separators=(",", ":"))
+            if isrc in (row.get("inferred_isrcs") or []) or key in chosen_keys or claims.get(key) == isrc:
+                by_key[key] = row
+        evidence = list(by_key.values())
     except Exception as exc:
         raise HTTPException(status_code=503, detail="No se pudo verificar los códigos asociados. Volvé a intentar; no se guardó ningún cambio.") from exc
     aliases = {row["alias_catalog_key"]: row["catalog_key"] for row in catalog_alias_lookup(path).to_dicts()}
-    return contract_association_candidates(isrc, evidence, aliases, choices, claims)
+    return append_missing_choices(contract_association_candidates(isrc, evidence, aliases, choices, claims), choices)
 
 
 @app.get("/master-contracts/{isrc}/associations")
@@ -8476,7 +8494,8 @@ def get_master_contract_associations(
     base_amount = float(baseline["amount_usd"][0] or 0) if not baseline.is_empty() else 0.0
     income = combined_contract_income(base_amount, extras.get(clean), master_contract_statement_income(clean))
     income["statement_income"] = [row for row in income["statement_income"] if row["statement_month"] <= CONTRACT_ANALYSIS_CUTOFF_MONTH]
-    return {"isrc": clean, "items": items, "income": income, "version": (saved or {}).get("version", 0), "reports_effective": False}
+    return {"isrc": clean, "items": items, "income": income, "version": (saved or {}).get("version", 0),
+            "pending_codes": unresolved_associations(items, choices), "reports_effective": False}
 
 
 @app.get("/master-contracts/{isrc}")
@@ -8569,7 +8588,7 @@ def put_master_contract(
                 raise ValueError("La ficha cambió desde que la abriste. Actualizala antes de guardar.")
             old_choices = ((previous or {}).get("split") or {}).get("code_association_overrides") or []
             choices = split.get("code_association_overrides") or []
-            if choices != old_choices:
+            if choices != old_choices or request.closed:
                 if not is_postgres_connection(conn):
                     raise ValueError("Los códigos asociados usan exclusivamente Cloud SQL Postgres.")
                 # Serialize explicit claims across different contracts, not just each ISRC's version.
@@ -8577,6 +8596,8 @@ def put_master_contract(
                 claims = read_contract_association_claims(conn)
                 items = master_contract_associations(clean, old_choices, claims)
                 validate_contract_associations(choices, old_choices, items)
+                if request.closed:
+                    validate_contract_association_closure(items, choices)
             saved = save_split(
                 conn, clean, split,
                 closed=request.closed,

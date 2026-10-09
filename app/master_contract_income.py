@@ -39,7 +39,7 @@ def published_unassigned_income(release_id: str) -> tuple[list[dict], list[dict]
     rows = [dict(row) for row in client.query(sql, job_config=config, location=DEFAULT_LOCATION).result(timeout=60)]
     sql = f"""
     WITH facts AS (
-      SELECT source, account, asset_isrc, product_upc, video_id, track_id, catalog_number
+      SELECT source, account, asset_isrc, product_upc, video_id, track_id, catalog_number, title, artist
       FROM `{prefix}.royalty_statement_fact` WHERE release_id = @release_id
     ), codes AS (
       SELECT f.*, c.kind, c.value,
@@ -56,6 +56,8 @@ def published_unassigned_income(release_id: str) -> tuple[list[dict], list[dict]
     )
     SELECT c.kind, c.value AS code, c.source, c.account,
       ARRAY_AGG(DISTINCT NULLIF(c.asset_isrc, '') IGNORE NULLS) AS isrcs,
+      ARRAY_AGG(DISTINCT NULLIF(c.title, '') IGNORE NULLS) AS titles,
+      ARRAY_AGG(DISTINCT NULLIF(c.artist, '') IGNORE NULLS) AS artists,
       LOGICAL_OR(c.source = 'ada' AND COALESCE(c.asset_isrc, '') = ''
         AND COALESCE(c.catalog_number, '') != '') AS native_ada_product
     FROM codes c JOIN seeds s USING (kind, value, scope_source, scope_account)
@@ -85,6 +87,7 @@ def consolidate_associated_income(
     target_evidence: dict[str, dict[str, dict]] = defaultdict(dict)
     for scope, items in scopes.items():
         roots = {value for item in items for value in item.get("isrcs") or []}
+        roots.update(value for item in items for value in item.get("inferred_isrcs") or [])
         canonical = aliases.get(f"{scope[0]}:{scope[1]}")
         if canonical and canonical.startswith("ISRC:"):
             roots.add(canonical[5:])

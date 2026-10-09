@@ -186,6 +186,7 @@ class ContractIncomeTests(unittest.TestCase):
              patch.object(api, "load_catalog_status"), patch.object(api, "configure_catalog_report_env"), \
              patch.object(api, "mart_release_cache") as cache, \
              patch.object(api, "published_unassigned_income", return_value=(rows, [evidence()])), \
+             patch.object(api.pl, "read_parquet", return_value=pl.DataFrame()), \
              patch.object(api, "catalog_alias_lookup", return_value=aliases), \
              patch(f"{module}.catalog_alias_lookup", return_value=pl.DataFrame()), \
              patch(f"{module}.catalog_status_for_reports", return_value=pl.DataFrame()), \

@@ -190,6 +190,15 @@ After changing identity rules:
 
 ## Current implementation
 
+### Contract-only associated codes
+
+Contracts additionally evaluates unique video title + complete-performer
+coincidences as a derived relationship, without changing any identity rule in
+this document, raw files, catalog or ordinary royalty reports. Read
+`master_contract_association_rules.md` before changing that behavior. Ambiguous
+proposals require an explicit decision before closing; strong consistent matches
+are validated automatically for each published generation.
+
 - Shared identity expressions live in `scripts/lib/identity.py`.
 - ONErpm canonical identifiers are populated during
   `scripts/ingest_standardized_onerpm.py`, before consolidated marts and reports.
