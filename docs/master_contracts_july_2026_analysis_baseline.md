@@ -88,3 +88,34 @@ repartos guardados, el dashboard ni los reportes actuales.
 Validacion: `python -m unittest scripts.qa.qa_master_contracts_pilot` y
 `node web/scripts/qa_contract_logic.mjs`, incluyendo limites de mes, ano
 bisiesto, distintas zonas horarias, superposiciones y conservacion de importes.
+
+## Codigos asociados en Contratos (2026-10-09)
+
+- La ficha incorpora "Ver codigos asociados", cerrado por defecto. Consulta
+  exclusivamente la version publicada de BigQuery al abrirlo, sin sumar
+  lecturas al listado ni modificar el catalogo, ingestas o importes.
+- UPC y video/UGC se incluyen automaticamente solo si el resolvedor vigente
+  del catalogo los relaciona de forma exacta y unica con el ISRC, y ningun
+  statement publicado los vincula a otro ISRC. No se comparan nombres.
+- Los IDs de plataforma requieren una coincidencia exacta y unica dentro
+  de su distribuidora/cuenta; no se asume que sean globales.
+- Una referencia exacta sin alias unico queda pendiente, desmarcada. El
+  operador debe confirmar su inclusion. UPC compartidos por varios ISRC,
+  referencias a otro asset y productos ADA sin ISRC no son asignables a
+  un contrato de tema. No se atribuye a un tema el ingreso de un album.
+- Las inclusiones y exclusiones explicitas se guardan en
+  `split.code_association_overrides`, dentro de la ficha e historial de Cloud
+  SQL existentes. Hay un solo contrato, no copias por codigo. Un cliente
+  anterior que omita el campo conserva las decisiones ya guardadas.
+- La confirmacion manual guarda una huella de los identificadores y su
+  relacion, no de importes, meses ni nombres. Una nueva contradiccion invalida
+  esa confirmacion y vuelve a requerir revision; la exclusion se conserva.
+- Se mantienen permisos y versionado. Un bloqueo transaccional en PostgreSQL
+  impide que dos guardados simultaneos reclamen el mismo codigo. El backend
+  vuelve a comprobar cualquier nueva inclusion y rechaza evidencia desactualizada.
+- Esta etapa registra y muestra las asociaciones solo en Contratos. No agrega
+  ingresos a la simulacion ni cambia los lectores de dashboard o reportes,
+  incluido el ejecutivo contractual. Su aplicacion economica sera otra etapa
+  con conciliacion y autorizacion explicita.
+
+Validacion adicional: `python -m unittest scripts.qa.qa_master_contract_associations`.

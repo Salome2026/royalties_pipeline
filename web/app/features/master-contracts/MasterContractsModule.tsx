@@ -6,9 +6,11 @@ import styles from "./MasterContractsModule.module.css";
 import { ArtistContractsPanel, type ArtistContract } from "./ArtistContractsPanel";
 import { MasterAgreementsEditor, visibleAgreements, type MasterAgreement } from "./MasterAgreementsEditor";
 import { PoolsAllocationEditor } from "./PoolsAllocationEditor";
+import { ContractAssociationsPanel, type AssociationChoice } from "./ContractAssociationsPanel";
 import { agreementAllocation, agreementIncome, allocationTotals, contractErrors, previewAllocation, type Allocation, type StatementIncome } from "./contractLogic";
 
 type Split = Allocation & {
+  code_association_overrides?: AssociationChoice[] | null;
   agreements?: MasterAgreement[];
   master_type: "pending" | "indyana_master" | "distribution" | "mawz_master" | "distribution_mawz" | "indyana_and_other" | "mawz_and_other";
   other_master_artist?: string | null;
@@ -258,6 +260,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
             <p>{detail.artist_suggestions.artists.join(", ") || "Participantes por confirmar"}</p>
           </div>
           <span className={`${styles.status} ${closed ? styles.closed : styles.open}`}>{closed ? "Cerrado" : "Abierto"}</span>
+          {canEditCurrent && !openAgreementId && dirty && <button type="button" className={styles.secondaryButton} disabled={saving || errors.length > 0} onClick={() => void save()}><FilePenLine size={16} />{saving ? "Guardando..." : "Guardar"}</button>}
         </header>
 
         <div className={styles.identityLine}>
@@ -266,6 +269,9 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
           <div><span>Actividad</span><strong>{detail.first_month || "-"} a {detail.last_month || "-"}</strong></div>
           <div><span>Distribuidoras</span><strong>{detail.sources || "-"}</strong></div>
         </div>
+
+        <ContractAssociationsPanel key={detail.isrc} isrc={detail.isrc} version={detail.version} canEdit={canEditCurrent && !saving}
+          choices={draft.code_association_overrides || []} onChange={(choices) => updateDraft({ code_association_overrides: choices })} />
 
         <div className={`${styles.detailColumns} ${openAgreementId ? "" : styles.detailColumnsSolo}`}>
           <div className={styles.formColumn}>

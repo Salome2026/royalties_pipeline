@@ -54,6 +54,13 @@ from app.master_contracts import (
     save_split,
     suggested_split,
 )
+from app.master_contract_associations import (
+    candidates as contract_association_candidates,
+    identity_evidence as contract_identity_evidence,
+    preserve_choices as preserve_contract_associations,
+    read_claims as read_contract_association_claims,
+    validate_choices as validate_contract_associations,
+)
 from app.bigquery_dashboard import (
     royalties_dashboard_bigquery as query_royalties_dashboard_bigquery,
     royalty_detail_count_bigquery as query_royalty_detail_count_bigquery,
@@ -91,7 +98,7 @@ from build_custom_title_royalty_report import (  # noqa: E402
     DEFAULT_LOS_ANORMALES_TERMS,
     build_custom_title_report,
 )
-from lib.catalog_report_filter import apply_report_net_personalization, filter_reportable_generation  # noqa: E402
+from lib.catalog_report_filter import apply_report_net_personalization, catalog_alias_lookup, filter_reportable_generation  # noqa: E402
 from lib.text_search import contains_search_expr, normalize_search_text  # noqa: E402
 from lib.distributor_policy_store import (  # noqa: E402
     load_distributor_policy_document,
@@ -337,7 +344,14 @@ class MasterAgreement(BaseModel):
     allocation: MasterContractAllocation | None = None
 
 
+class MasterCodeAssociationChoice(BaseModel):
+    key: str = Field(..., min_length=1, max_length=1000)
+    included: bool
+    evidence_signature: str = Field(..., pattern=r"^[a-f0-9]{64}$")
+
+
 class MasterContractSplit(MasterContractAllocation):
+    code_association_overrides: list[MasterCodeAssociationChoice] | None = Field(default=None, max_length=2000)
     agreements: list[MasterAgreement] = Field(default_factory=list, max_length=20)
     master_type: Literal[
         "pending", "indyana_master", "distribution", "mawz_master",
@@ -8377,6 +8391,40 @@ def list_master_contracts(
     }
 
 
+def master_contract_associations(isrc: str, choices: list[dict[str, Any]], claims: dict[str, str]) -> list[dict[str, Any]]:
+    path = ensure_marts(filenames=[CATALOG_MASTER_FILE])[CATALOG_MASTER_FILE]
+    catalog = pl.read_parquet(path)
+    matches = catalog.filter(pl.col("asset_isrc") == isrc)
+    if matches.is_empty():
+        raise HTTPException(status_code=404, detail="El ISRC no figura en el catálogo publicado.")
+    try:
+        evidence = contract_identity_evidence(isrc, matches.row(0, named=True))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="No se pudo verificar los códigos asociados. Volvé a intentar; no se guardó ningún cambio.") from exc
+    aliases = {row["alias_catalog_key"]: row["catalog_key"] for row in catalog_alias_lookup(path).to_dicts()}
+    return contract_association_candidates(isrc, evidence, aliases, choices, claims)
+
+
+@app.get("/master-contracts/{isrc}/associations")
+def get_master_contract_associations(
+    isrc: str,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+):
+    require_api_key(x_vpo_api_key)
+    try:
+        clean = clean_isrc(isrc)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    with operational_connect() as conn:
+        require_master_contract_user(conn, x_vpo_username, "access")
+        saved = read_split(conn, clean)
+        claims = read_contract_association_claims(conn)
+    choices = ((saved or {}).get("split") or {}).get("code_association_overrides") or []
+    items = master_contract_associations(clean, choices, claims)
+    return {"isrc": clean, "items": items, "version": (saved or {}).get("version", 0), "reports_effective": False}
+
+
 @app.get("/master-contracts/{isrc}")
 def get_master_contract(
     isrc: str,
@@ -8456,8 +8504,21 @@ def put_master_contract(
         if bool(previous and previous["closed"]) or request.closed or request.future_reports_selected != bool(previous and previous["future_reports_selected"]):
             require_master_contract_user(conn, actor, "approve")
         try:
+            split = preserve_contract_associations(request.split.model_dump(), previous)
+            if request.expected_version != (previous or {}).get("version", 0):
+                raise ValueError("La ficha cambió desde que la abriste. Actualizala antes de guardar.")
+            old_choices = ((previous or {}).get("split") or {}).get("code_association_overrides") or []
+            choices = split.get("code_association_overrides") or []
+            if choices != old_choices:
+                if not is_postgres_connection(conn):
+                    raise ValueError("Los códigos asociados usan exclusivamente Cloud SQL Postgres.")
+                # Serialize explicit claims across different contracts, not just each ISRC's version.
+                conn.execute(db_sql(conn, "SELECT pg_advisory_xact_lock(?, ?)"), (20261009, 1)).fetchone()
+                claims = read_contract_association_claims(conn)
+                items = master_contract_associations(clean, old_choices, claims)
+                validate_contract_associations(choices, old_choices, items)
             saved = save_split(
-                conn, clean, request.split.model_dump(),
+                conn, clean, split,
                 closed=request.closed,
                 future_reports_selected=request.future_reports_selected,
                 expected_version=request.expected_version,

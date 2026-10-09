@@ -644,6 +644,8 @@ def save_split(
     expected_version: int,
     actor: str,
 ) -> dict[str, Any]:
+    if split.get("code_association_overrides") and not is_postgres_connection(conn):
+        raise ValueError("Los códigos asociados usan exclusivamente Cloud SQL Postgres.")
     if any(agreement.get("allocation_model") == "pools" for agreement in split.get("agreements") or []) and not is_postgres_connection(conn):
         raise ValueError("Los contratos con bolsas usan exclusivamente Cloud SQL Postgres.")
     ensure_sqlite_tables(conn)
