@@ -118,6 +118,46 @@ class ContractIncomeTests(unittest.TestCase):
         self.assertEqual(result["isrc_amount_usd"].to_list(), [90., 100.])
         self.assertEqual(result["_contract_first_statement_month"].to_list(), ["2025-12", "2026-01"])
 
+    def test_validation_baseline_uses_june_statement_cutoff(self):
+        with patch.object(api, "VPO_ROYALTIES_DASHBOARD_BACKEND", "bigquery"), \
+             patch.object(api, "load_distributor_policy_document", return_value={}), \
+             patch.object(api, "royalty_isrc_income_bigquery", return_value=[]) as query:
+            api.master_contract_income_baseline()
+        self.assertEqual(query.call_args.kwargs["end_month"], "2026-06")
+
+    def test_june_cutoff_includes_primary_and_associated_income_in_detail_and_panel(self):
+        extra = consolidate_associated_income(
+            [sale(statement_period="2026-06", transaction_month="2026-08"),
+             sale(statement_period="2026-07", transaction_month="2026-01", amount_usd=100)],
+            [evidence()], {"UPC:8721466047355": f"ISRC:{ISRC}"}, {}, {}, api.CONTRACT_ANALYSIS_CUTOFF_MONTH)
+        self.assertEqual(extra[ISRC]["amount_usd"], 25)
+        self.assertEqual(sum(item["amount_usd"] for item in extra[ISRC]["groups"]), 25)
+        baseline = pl.DataFrame([{"asset_isrc": ISRC, "amount_usd": 100.}])
+        catalog = baseline.with_columns(pl.lit(100.).alias("isrc_amount_usd"),
+                                       pl.lit(125.).alias("amount_usd"))
+        with patch.object(api, "require_api_key"), patch.object(api, "operational_connect"), \
+             patch.object(api, "require_master_contract_user"), \
+             patch.object(api, "read_split", return_value=None), \
+             patch.object(api, "read_contract_association_choices", return_value={}), \
+             patch.object(api, "read_contract_association_claims", return_value={}), \
+             patch.object(api, "master_contract_associations", return_value=[]), \
+             patch.object(api, "master_contract_associated_income", return_value=extra), \
+             patch.object(api, "master_contract_income_baseline", return_value=baseline), \
+             patch.object(api, "master_contract_catalog", return_value=catalog), \
+             patch.object(api, "active_artist_contracts", return_value={}), \
+             patch.object(api, "ensure_marts", return_value={api.STANDARDIZED_FILE: None}), \
+             patch.object(api, "artist_suggestions", return_value={"artists": ["Aneley"]}), \
+             patch.object(api, "master_contract_statement_income", return_value=[
+                 {"statement_month": "2026-06", "amount_usd": 100.},
+                 {"statement_month": "2026-07", "amount_usd": 200.}]):
+            detail = api.get_master_contract(ISRC, x_vpo_username="tester")
+            panel = api.get_master_contract_associations(ISRC, x_vpo_username="tester")["income"]
+        for result in (detail, panel):
+            self.assertEqual(result["amount_usd"], 125)
+            self.assertEqual(result["statement_income"], [{"statement_month": "2026-06", "amount_usd": 125.}])
+        self.assertEqual(detail["first_statement_date"], "2026-06-01")
+        self.assertFalse(detail["reports_effective"])
+
     def test_release_mismatch_and_sqlite_rejected_without_reading_economics(self):
         published_unassigned_income.cache_clear()
         client = MagicMock()
@@ -132,7 +172,8 @@ class ContractIncomeTests(unittest.TestCase):
         published_unassigned_income.cache_clear()
 
     def test_existing_generation_filters_discount_and_live_policy_changes(self):
-        rows = [sale(source_sheet="recording", revenue_basis="generation"),
+        rows = [sale(statement_period="2026-06", source_sheet="recording", revenue_basis="generation"),
+                sale(source_sheet="recording", revenue_basis="generation", amount_usd=100),
                 sale(source_sheet="share", revenue_basis="transfer", amount_usd=1000)]
         aliases = pl.DataFrame({"alias_catalog_key": ["UPC:8721466047355"], "catalog_key": [f"ISRC:{ISRC}"]})
         policy = {"policy_version": 1, "report_personalization": {"enabled": True}, "entries": [{

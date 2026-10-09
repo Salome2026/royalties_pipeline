@@ -1,9 +1,9 @@
-# Contratos: ingresos de prueba hasta julio de 2026
+# Contratos: ingresos de prueba hasta junio de 2026
 
 Contratos consulta la misma vista vigente de BigQuery que el dashboard de
 regalias (`royalty_dashboard_current`) y aplica la misma politica de descuento
 por fuente y cuenta. El unico limite temporal de esta prueba es el mes de
-statement: se incluyen statements hasta julio de 2026 inclusive. No se fija
+statement: se incluyen statements hasta junio de 2026 inclusive. No se fija
 una publicacion anterior ni se mantiene un importe alternativo.
 
 Si el dashboard usa su respaldo Parquet, Contratos consulta el mismo resumen
@@ -11,8 +11,8 @@ vigente y aplica `apply_report_net_personalization`. La lista y la ficha
 conservan los ISRC, titulos y creditos del catalogo activo; un ISRC sin
 ingresos en el periodo figura con cero. La vigencia sugerida comienza en el
 primer statement del ISRC, nunca en su primera fecha de consumo. Esta fecha
-se busca en toda la publicacion vigente, incluso si es posterior a julio;
-el limite de julio sigue aplicandose a los importes de las simulaciones.
+se busca en toda la publicacion vigente, incluso si es posterior a junio;
+el limite de junio sigue aplicandose a los importes de las simulaciones.
 
 Esta vista es solo para validar contratos. No modifica el catalogo, los
 repartos guardados, el dashboard ni los reportes actuales.
@@ -80,7 +80,7 @@ repartos guardados, el dashboard ni los reportes actuales.
 - La persistencia del modelo nuevo es exclusivamente Cloud SQL Postgres,
   usando el JSON e historial ya existentes, sin nuevas tablas ni columnas.
   Un intento de guardarlo en SQLite falla explicitamente.
-- Se conservan fecha de statement, limite de julio para la prueba, descuentos,
+- Se conservan fecha de statement, limite de junio para la prueba, descuentos,
   vigencias inclusivas y bloqueo de solapamientos. No se modifican catalogo,
   marts, BigQuery, dashboard ni lectores de reportes. Ningun contrato entra
   automaticamente en una liquidacion actual.
@@ -121,7 +121,7 @@ bisiesto, distintas zonas horarias, superposiciones y conservacion de importes.
 
 - Por pedido de Ruben, el listado, la ficha y la simulacion de Contratos usan
   ISRC + asociados incluidos, con desglose accesible desde el importe.
-  Se conserva el corte de statements hasta julio 2026 incluido y los mismos
+  Se usa el corte de statements hasta junio 2026 incluido y los mismos
   filtros de generacion/catalogo y descuentos netos vigentes del dashboard.
 - La base ISRC sigue saliendo del dashboard actual, sin recalcularla ni alterar
   sus cifras. Solo se agrega ingreso adicional de filas sin ISRC, resuelto por
@@ -150,3 +150,14 @@ la generacion sin ISRC filtrada y el dashboard. Los adicionales asignables
 hasta julio suman USD 14.00731366; `ARDL12600006` conserva USD 11646.10167091.
 Se verificaron totales mensuales y desglose en `US7VG2313714` y `ARDL12600027`.
 QA del ejecutivo contractual y controles Postgres tambien aprobados.
+
+## Corte de validacion actualizado (2026-10-09)
+
+Por pedido de Ruben, `CONTRACT_ANALYSIS_CUTOFF_MONTH` pasa a `2026-06`.
+El limite incluye junio y excluye julio y meses posteriores en la base ISRC,
+los asociados, el acumulado y la simulacion de Contratos. No se agrega una
+aclaracion visible ni se cambian contratos guardados, dashboard o reportes.
+Las cifras hasta julio consignadas arriba quedan como evidencia historica.
+La fecha sugerida de vigencia sigue tomando el primer statement real.
+Validacion: 57 pruebas de Contratos aprobadas, incluyendo junio y exclusion
+de julio en la base, asociados y meses devueltos para simular el reparto.
