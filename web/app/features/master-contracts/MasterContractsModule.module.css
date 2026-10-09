@@ -10,9 +10,9 @@
 .workspace * { letter-spacing: 0; }
 .associationsBand { margin: 0 0 24px; padding: 10px 0; border-bottom: 1px solid rgba(164, 188, 199, .18); background: transparent; }
 .associationsHeading { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; min-height: 36px; }
-.associationsToggle { display: inline-flex; align-items: center; gap: 8px; min-height: 34px; padding: 6px 0; border: 0; background: transparent; color: #cde4df; font: inherit; font-size: .8rem; cursor: pointer; }
-.associationsToggle:hover { color: #77e4c9; }
-.associationsToggle:focus-visible { outline: 2px solid #65d9c8; outline-offset: 4px; }
+.associationsHeading .associationsToggle { display: inline-flex; align-items: center; justify-content: flex-start; gap: 8px; width: auto; max-width: 100%; min-height: 34px; margin: 0; padding: 6px 0; border: 0; border-radius: 0; background: transparent; color: #cde4df; font: inherit; font-size: .8rem; box-shadow: none; transform: none; cursor: pointer; }
+.associationsHeading .associationsToggle:hover { color: #77e4c9; background: transparent; box-shadow: none; transform: none; }
+.associationsHeading .associationsToggle:focus-visible { outline: 2px solid #65d9c8; outline-offset: 4px; }
 .associationsCount { color: #a6bebc; font-size: .73rem; }
 .associationsHeading .iconButton { margin-left: auto; width: 32px; height: 32px; }
 .associationsScroll { overflow: auto; max-height: 440px; margin-top: 12px; }
