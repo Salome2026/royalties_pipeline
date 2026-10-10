@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import copy
+import ast
 import json
 from datetime import date
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, Literal
 import unittest
 from unittest.mock import MagicMock, patch
 
 import polars as pl
+from fastapi import HTTPException
+from pydantic import BaseModel, Field
 
 from app.master_contract_associations import association_key
 from app.royalty_reports.contract_query import (
@@ -46,6 +51,28 @@ def request(**changes):
 
 
 class ContractualAssociationTests(unittest.TestCase):
+    def test_api_contractual_month_validation_has_actual_module_dependencies(self):
+        tree = ast.parse((Path(__file__).resolve().parents[2] / "app/vpo_corp_api.py").read_text(encoding="utf-8"))
+        nodes = [node for node in tree.body if (
+            isinstance(node, ast.Import) and any(alias.name == "re" for alias in node.names)
+        ) or (isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name in {
+            "canonical_royalty_report_params", "RoyaltyReportJobRequest"})]
+        namespace = {"BaseModel": BaseModel, "Field": Field, "Any": Any, "Literal": Literal,
+                     "HTTPException": HTTPException, "normalize_keywords": lambda values: values}
+        exec(compile(ast.Module(body=nodes, type_ignores=[]), "api-month-validation", "exec"), namespace)
+        canonical, model = namespace["canonical_royalty_report_params"], namespace["RoyaltyReportJobRequest"]
+        model.model_rebuild(_types_namespace=namespace)
+        base = {"output": "executive_pdf", "executive_mode": "contractual", "contract_artists": ["Mc Tota"]}
+        for dates in [{}, {"end_month": "2026-06"}, {"start_month": "2026-05", "end_month": "2026-06"}]:
+            params = canonical(model(**base, **dates), {})
+            self.assertEqual(params["end_month"], dates.get("end_month"))
+            self.assertEqual(params["period_basis"], "statement_period")
+        for dates in [{"end_month": "2026-13"}, {"start_month": "2026-99"},
+                      {"start_month": "2026-07", "end_month": "2026-06"}]:
+            with self.assertRaises(HTTPException) as caught:
+                canonical(model(**base, **dates), {})
+            self.assertEqual(caught.exception.status_code, 400)
+
     def test_association_without_channel_artist_and_once_only_conservation(self):
         state = snapshot()
         rows = select_associated_rankings([row()], request(), state)
