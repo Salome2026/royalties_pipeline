@@ -50,8 +50,8 @@ def identity_evidence(isrc: str, catalog_row: dict[str, Any], *, client: Any = N
     )
     SELECT c.kind, c.value AS code, c.source, c.account,
       ARRAY_AGG(DISTINCT NULLIF(c.asset_isrc, '') IGNORE NULLS) AS isrcs,
-      ARRAY_AGG(DISTINCT NULLIF(c.title, '') IGNORE NULLS LIMIT 3) AS titles,
-      ARRAY_AGG(DISTINCT NULLIF(c.artist, '') IGNORE NULLS LIMIT 3) AS artists,
+      ARRAY_AGG(DISTINCT NULLIF(c.title, '') IGNORE NULLS ORDER BY NULLIF(c.title, '')) AS titles,
+      ARRAY_AGG(DISTINCT NULLIF(c.artist, '') IGNORE NULLS ORDER BY NULLIF(c.artist, '')) AS artists,
       ARRAY_AGG(DISTINCT NULLIF(c.content_origin, '') IGNORE NULLS) AS content_origins,
       LOGICAL_AND(COALESCE(c.content_origin, '') = 'UGC / Content ID') AS only_ugc_rows,
       LOGICAL_OR(COALESCE(c.asset_isrc, '') != '') AS has_identified_rows,

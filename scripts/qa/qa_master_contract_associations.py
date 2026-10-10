@@ -176,6 +176,9 @@ class ContractAssociationTests(unittest.TestCase):
         self.assertIn("content_origin", sql)
         self.assertIn("only_ugc_rows", sql)
         self.assertIn("has_unassigned_rows", sql)
+        self.assertNotIn("LIMIT 3", sql)
+        self.assertIn("ORDER BY NULLIF(c.title, '')", sql)
+        self.assertIn("ORDER BY NULLIF(c.artist, '')", sql)
         config = client.query.call_args.kwargs["job_config"]
         self.assertEqual(config.maximum_bytes_billed, 5_000_000_000)
         self.assertEqual(config.query_parameters[0].value, "published")
