@@ -163,15 +163,16 @@ def row_catalog_key_expr(schema: set[str]) -> pl.Expr:
     return pl.coalesce([ada_catalog_key_expr(schema), legacy_key])
 
 
-def catalog_alias_lookup(catalog_path: Path | None = None) -> pl.DataFrame:
+def catalog_alias_lookup(catalog_path: Path | None = None, *, catalog: pl.DataFrame | None = None) -> pl.DataFrame:
     catalog_path = catalog_path or current_catalog_master_path()
-    if not catalog_path.exists():
+    if catalog is None and not catalog_path.exists():
         return pl.DataFrame({
             "alias_catalog_key": pl.Series([], dtype=pl.Utf8),
             "catalog_key": pl.Series([], dtype=pl.Utf8),
         })
 
-    catalog = pl.read_parquet(catalog_path)
+    if catalog is None:
+        catalog = pl.read_parquet(catalog_path)
     rows: list[pl.DataFrame] = []
 
     if "catalog_key" in catalog.columns:

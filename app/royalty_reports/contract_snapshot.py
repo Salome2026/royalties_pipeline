@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from copy import deepcopy
 from datetime import datetime, timezone
 from io import BytesIO
@@ -12,13 +13,75 @@ from app.master_contracts import artist_key, parse_artists
 from app.royalty_reports.manifests import require_manifest_object
 
 
-def published_contract_catalog(client, manifest: dict) -> list[dict]:
+def published_catalog_frame(client, manifest: dict) -> pl.DataFrame:
     entry = require_manifest_object(manifest, "catalog_master.parquet")
     payload = client.bucket(manifest["bucket"]).blob(entry["object"], generation=int(entry["generation"])).download_as_bytes()
-    frame = pl.read_parquet(BytesIO(payload)).filter(pl.col("asset_isrc").str.contains(r"^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$"))
+    return pl.read_parquet(BytesIO(payload))
+
+
+def contract_catalog_rows(frame: pl.DataFrame) -> list[dict]:
+    frame = frame.filter(pl.col("asset_isrc").str.contains(r"^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$"))
     frame = frame.sort(["amount_usd", "asset_isrc"], descending=[True, False]).unique(subset=["asset_isrc"], keep="first", maintain_order=True)
     return [{"isrc": row["asset_isrc"], "title": row.get("track_title") or "Sin título",
              "artists_informed": row.get("artist_statement") or "", "artist_variants": row.get("artist_variants") or ""} for row in frame.to_dicts()]
+
+
+def published_contract_catalog(client, manifest: dict) -> list[dict]:
+    return contract_catalog_rows(published_catalog_frame(client, manifest))
+
+
+def freeze_contract_associations(snapshot: dict, frame: pl.DataFrame, contracts: list[dict], release_id: str,
+                                *, input_manifest: dict) -> dict:
+    from app.master_contract_income import associated_income_isrc, income_association_index, published_unassigned_income
+    from app.master_contract_metadata import infer_video_evidence
+    from scripts.lib.catalog_report_filter import catalog_alias_lookup
+    from app.royalty_reports.contract_identity import unsafe_ranking_slot_keys
+
+    if not release_id:
+        raise ValueError("Falta la version publicada para validar los codigos asociados.")
+    if input_manifest.get("release_id") != release_id:
+        raise ValueError("El detalle de identidades y el catalogo deben tener la misma version.")
+    entry = require_manifest_object(input_manifest, "standardized_raw_all_sources.parquet")
+    rows, evidence = published_unassigned_income(release_id)
+    aliases = {row["alias_catalog_key"]: row["catalog_key"]
+               for row in catalog_alias_lookup(catalog=frame).to_dicts()}
+    choices = {row["isrc"]: row["split"].get("code_association_overrides") or [] for row in contracts}
+    claims = {choice["key"]: root for root, values in choices.items() for choice in values if choice.get("included")}
+    index = income_association_index(infer_video_evidence(frame.to_dicts(), evidence), aliases, choices, claims)
+    codes: dict[str, set[tuple[str, str]]] = {}
+    for row in evidence:
+        if row["kind"] in {"VIDEO", "TRACK"}:
+            key = json.dumps([row["code"].lower(), row["source"], row["account"]], separators=(",", ":"))
+            codes.setdefault(key, set()).add((row["kind"], row["code"]))
+            if " " in row["code"]:
+                unsafe = json.dumps([row["code"].lower().partition(" ")[0], row["source"], row["account"]], separators=(",", ":"))
+                codes.setdefault(unsafe, set()).update({("unsafe", ""), (row["kind"], row["code"])})
+    search_codes = {key: list(next(iter(values))) if len(values) == 1 else None for key, values in codes.items()}
+    roots: dict[str, set] = defaultdict(set)
+    totals: dict[str, dict] = {}
+    for row in rows:
+        if not row.get("source") or not row.get("account"):
+            continue
+        slot = row.get("video_id") or row.get("track_id")
+        code = slot or row.get("product_upc")
+        if not code or not row.get("statement_period"):
+            continue
+        key = json.dumps([row["source"], row["account"], row.get("source_sheet") or "", row["statement_period"],
+                          "ID" if slot else "UPC", code.lower() if slot else code], separators=(",", ":"))
+        roots[key].add(associated_income_isrc(row, index))
+        total = totals.setdefault(key, {"amount_usd": 0.0, "raw_rows": 0})
+        total["amount_usd"] += float(row.get("amount_usd") or 0)
+        total["raw_rows"] += int(row.get("raw_rows") or 0)
+    selected = {row["isrc"] for row in snapshot["catalog"]}
+    owners = {key: {"isrc": next(iter(values)), **totals[key]} for key, values in roots.items()
+              if len(values) == 1 and next(iter(values)) in selected}
+    if owners:
+        include_upc = any(json.loads(key)[4] == "UPC" for key in owners)
+        unsafe = unsafe_ranking_slot_keys(input_manifest["bucket"], entry["object"], int(entry["generation"]), include_upc=include_upc)
+        owners = {key: value for key, value in owners.items() if key not in unsafe}
+    return {**snapshot, "schema_version": 2,
+            "associations": {"release_id": release_id, "ranking_layout": "artist-title-isrc-upc-id-v1",
+                             "search_codes": search_codes, "ranking_owners": owners, **index}}
 
 
 def stored_contracts(conn) -> list[dict]:

@@ -29,7 +29,7 @@ def published_unassigned_income(release_id: str) -> tuple[list[dict], list[dict]
     SELECT source, account, source_sheet, revenue_basis, artist, title, asset_isrc,
       product_upc, video_id, track_id, catalog_number,
       FORMAT_DATE('%Y-%m', statement_month) AS statement_period,
-      SUM(amount_usd) AS amount_usd
+      SUM(amount_usd) AS amount_usd, COUNT(*) AS raw_rows
     FROM `{prefix}.royalty_statement_fact`
     WHERE release_id = @release_id AND COALESCE(asset_isrc, '') = ''
       AND statement_month IS NOT NULL
@@ -74,10 +74,9 @@ def read_choices(conn: Any) -> dict[str, list[dict]]:
     return {row["isrc"]: json.loads(row["payload_json"]).get("code_association_overrides") or [] for row in rows}
 
 
-def consolidate_associated_income(
-    rows: list[dict], evidence: list[dict], aliases: dict[str, str],
-    choices: dict[str, list[dict]], claims: dict[str, str], cutoff: str,
-) -> dict[str, dict]:
+def income_association_index(
+    evidence: list[dict], aliases: dict[str, str], choices: dict[str, list[dict]], claims: dict[str, str],
+) -> dict[str, dict[str, list[str]]]:
     scopes: dict[tuple, list[dict]] = defaultdict(list)
     for item in evidence:
         scope = (item["kind"], item["code"])
@@ -107,11 +106,31 @@ def consolidate_associated_income(
                 included[item["key"]].add(root)
             if item["status"] == "excluded":
                 excluded[item["key"]].add(root)
+    return {"included": {key: sorted(roots) for key, roots in included.items()},
+            "excluded": {key: sorted(roots) for key, roots in excluded.items()}}
+
+
+def associated_income_isrc(row: dict, index: dict) -> str | None:
+    if row.get("asset_isrc") or (row["source"] == "ada" and row.get("catalog_number")):
+        return None
+    keys = [association_key(kind, row[field], row["source"], row["account"])
+            for kind, field in [("UPC", "product_upc"), ("VIDEO", "video_id"), ("TRACK", "track_id")]
+            if row.get(field)]
+    roots = {root for key in keys for root in index["included"].get(key, [])}
+    roots -= {root for key in keys for root in index["excluded"].get(key, [])}
+    return next(iter(roots)) if len(roots) == 1 else None
+
+
+def consolidate_associated_income(
+    rows: list[dict], evidence: list[dict], aliases: dict[str, str],
+    choices: dict[str, list[dict]], claims: dict[str, str], cutoff: str,
+) -> dict[str, dict]:
+    index = income_association_index(evidence, aliases, choices, claims)
     months: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     breakdown: dict[str, dict[tuple, float]] = defaultdict(lambda: defaultdict(float))
     for row in rows:
-        # A native ADA product is never absorbed into a recording, even through another ID.
-        if row.get("asset_isrc") or (row["source"] == "ada" and row.get("catalog_number")):
+        root = associated_income_isrc(row, index)
+        if root is None:
             continue
         month = row.get("statement_period")
         if not month:
@@ -119,17 +138,10 @@ def consolidate_associated_income(
         keys = [association_key(kind, row[field], row["source"], row["account"])
                 for kind, field in [("UPC", "product_upc"), ("VIDEO", "video_id"), ("TRACK", "track_id")]
                 if row.get(field)]
-        roots = set().union(*(included[key] for key in keys))
-        vetoed = set().union(*(excluded[key] for key in keys))
-        roots -= vetoed
-        # Conflicting identifiers do not authorize allocating the same economic row twice.
-        if len(roots) != 1:
-            continue
-        root = next(iter(roots))
         amount = float(row.get("amount_usd") or 0)
         months[root][month] += amount
         if month <= cutoff:
-            matched = tuple(sorted(key for key in keys if root in included[key]))
+            matched = tuple(sorted(key for key in keys if root in index["included"].get(key, [])))
             breakdown[root][matched] += amount
     return {root: {
         "amount_usd": sum(amount for month, amount in values.items() if month <= cutoff),

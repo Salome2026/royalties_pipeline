@@ -7405,15 +7405,25 @@ def create_royalty_report_job(
         raise HTTPException(status_code=503, detail="Los datos publicados no estan disponibles.") from exc
 
     if request.executive_mode == "contractual":
-        from app.royalty_reports.contract_snapshot import freeze_contract_snapshot, published_contract_catalog, stored_contracts
-        catalog = published_contract_catalog(gcs_client(), input_manifest)
+        from app.royalty_reports.contract_snapshot import (
+            contract_catalog_rows, freeze_contract_associations, freeze_contract_snapshot,
+            published_catalog_frame, stored_contracts,
+        )
+        catalog_frame = published_catalog_frame(gcs_client(), input_manifest)
+        catalog = contract_catalog_rows(catalog_frame)
         with operational_connect() as conn:
             conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
             contracts = stored_contracts(conn)
         try:
-            input_manifest["contract_snapshot"] = freeze_contract_snapshot(params["contract_artists"], catalog, contracts)
+            snapshot = freeze_contract_snapshot(params["contract_artists"], catalog, contracts)
+            input_manifest["contract_snapshot"] = freeze_contract_associations(
+                snapshot, catalog_frame, contracts, input_manifest["release_id"],
+                input_manifest=input_manifest,
+            )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="No se pudieron validar los codigos asociados del PDF. Volve a intentar.") from exc
 
     report_key = {
         "excel": "royalty_keyword",
@@ -8293,7 +8303,7 @@ def master_contract_associated_income(choices: dict[str, list[dict]]) -> dict[st
         evidence = infer_video_evidence(pl.read_parquet(marts[CATALOG_MASTER_FILE]).to_dicts(), evidence)
         claims = {choice["key"]: root for root, values in choices.items()
                   for choice in values if choice.get("included")}
-        schema = {key: pl.Utf8 for key in rows[0] if key != "amount_usd"}
+        schema = {key: pl.Int64 if key == "raw_rows" else pl.Utf8 for key in rows[0] if key != "amount_usd"}
         frame = pl.DataFrame(rows, schema_overrides=schema).lazy()
         eligible = filter_reportable_generation(frame, set(schema) | {"amount_usd"})
         adjusted = apply_report_net_personalization(eligible, set(eligible.collect_schema().names()))
