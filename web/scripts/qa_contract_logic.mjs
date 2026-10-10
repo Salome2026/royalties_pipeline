@@ -24,6 +24,29 @@ assert.deepEqual(associations.pendingAssociationCodes([], [selected]), [video.co
 assert.equal(associations.associationState({ ...video, automatic: false, selectable: false }, []).pending, true);
 assert.equal(associations.associationState({ ...video, automatic: false, selectable: false, requires_review: false }, []).pending, false);
 console.log("Associated-code automatic validation, explicit discard, changed evidence and close gate: PASS");
+const typedVideo = { ...video, kind: "VIDEO", source: "fuga", account: "indyana_records", titles: ["Tema"], artists: ["Artista"], isrcs: ["ISRC"], reason: "Exact" };
+const ugcVideo = { ...typedVideo, requires_review: false, reference_group: "ugc" };
+const grouped = associations.groupedAssociations([typedVideo, { ...typedVideo, key: anotherAccount.key },
+  { ...ugcVideo, code: "ugc-code", key: JSON.stringify(["VIDEO", "ugc-code", "fuga", "indyana_records"]) }], []);
+assert.equal(grouped.length, 2);
+assert.equal(grouped[0].items.length, 2);
+assert.equal(grouped[0].section, "associated");
+assert.equal(grouped[1].section, "ugc");
+assert.equal(grouped.reduce((total, group) => total + group.items.length, 0), 3);
+assert.equal(associations.groupedAssociations([ugcVideo], [selected])[0].section, "associated");
+assert.equal(associations.groupedAssociations([ugcVideo], [{ ...selected, included: false }])[0].section, "associated");
+assert.equal(associations.groupedAssociations([{ ...ugcVideo, automatic: false }], [])[0].section, "associated");
+assert.equal(associations.groupedAssociations([{ ...ugcVideo, selectable: false, automatic: false }], [])[0].section, "ugc");
+assert.equal(associations.groupedAssociations([{ ...ugcVideo, selectable: false, automatic: false, requires_review: true }], [])[0].section, "associated");
+assert.equal(associations.groupedAssociations([ugcVideo, { ...typedVideo, key: anotherAccount.key }], [])[0].section, "associated");
+const tracks = ["first", "second"].map((account) => ({ ...ugcVideo, kind: "TRACK", reference_group: "associated", key: JSON.stringify(["TRACK", "123", "onerpm", account]), account }));
+assert.equal(associations.groupedAssociations(tracks, []).length, 2);
+assert.equal(associations.associationGroupState(grouped[0], []).status, "automatic");
+assert.equal(associations.associationGroupState(grouped[0], [selected]).status, "confirmed");
+assert.equal(associations.associationGroupState(grouped[0], [{ ...selected, evidence_signature: "old" }]).pending, true);
+assert.equal(associations.associationGroupState(grouped[0], [{ ...selected, included: false }]).status, "excluded");
+assert.deepEqual(associations.pendingAssociationCodes([ugcVideo], []), []);
+console.log("Presentation-only grouping, complete account provenance, UGC references, saved choices and future pending evidence: PASS");
 const allocation = { principal: "La Juntada", indyana_percent: 70, principal_percent: 10,
   apply_guest_contracts: true, participants: [
     { artist: "Aneley", percent: 10, internal_contract_indyana_percent: 50 },

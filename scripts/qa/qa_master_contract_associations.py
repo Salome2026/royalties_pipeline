@@ -45,6 +45,56 @@ class ContractAssociationTests(unittest.TestCase):
         self.assertEqual(len(included), 2)
         self.assertEqual([item["status"] for item in items if item["account"] == "other"], ["blocked"])
 
+    def test_identified_ugc_is_reference_without_changing_decisions_or_signatures(self):
+        row = evidence("VIDEO", "abcdefghijk")
+        alias = {"VIDEO:abcdefghijk": f"ISRC:{ISRC}"}
+        before = self.items([row], aliases=alias)[0]
+        after = self.items([{**row, "content_origins": ["UGC / Content ID"], "only_ugc_rows": True,
+                             "has_identified_rows": True, "has_unassigned_rows": False}], aliases=alias)[0]
+        self.assertEqual(after["reference_group"], "ugc")
+        fields = {"reference_group", "content_origins"}
+        self.assertEqual({k: v for k, v in before.items() if k not in fields},
+                         {k: v for k, v in after.items() if k not in fields})
+
+    def test_ugc_missing_isrc_mixed_or_unknown_origin_stays_important(self):
+        row = evidence("VIDEO", "abcdefghijk", content_origins=["UGC / Content ID"],
+                       only_ugc_rows=True, has_identified_rows=True, has_unassigned_rows=False)
+        for changes in [{"has_unassigned_rows": True}, {"has_identified_rows": False},
+                        {"only_ugc_rows": False}, {"only_ugc_rows": None},
+                        {"kind": "UPC"}, {"kind": "TRACK"}]:
+            with self.subTest(changes=changes):
+                self.assertEqual(self.items([{**row, **changes}])[0]["reference_group"], "associated")
+
+    def test_shared_ugc_keeps_all_isrcs_and_remains_blocked(self):
+        row = evidence("VIDEO", "abcdefghijk", isrcs=[ISRC, OTHER],
+                       content_origins=["UGC / Content ID"], only_ugc_rows=True,
+                       has_identified_rows=True, has_unassigned_rows=False)
+        item = self.items([row], aliases={})[0]
+        self.assertEqual(item["reference_group"], "ugc")
+        self.assertEqual(item["status"], "blocked")
+        self.assertEqual(item["isrcs"], sorted([ISRC, OTHER]))
+        self.assertFalse(item["included"])
+
+    def test_api_preserves_reference_metadata_when_overlaying_inference(self):
+        catalog = pl.DataFrame({"asset_isrc": [ISRC], "upcs": ["8721466047355"], "video_ids": ["abcdefghijk"]})
+        exact = evidence("VIDEO", "abcdefghijk", content_origins=["UGC / Content ID"],
+                         only_ugc_rows=True, has_identified_rows=True, has_unassigned_rows=False)
+        inferred = evidence("VIDEO", "abcdefghijk", inferred_isrcs=[ISRC], inference_status="strong",
+                            inference_signature="stable", inference_reason="Complete credits")
+        with patch.object(api, "ensure_marts", return_value={api.CATALOG_MASTER_FILE: "catalog"}), \
+             patch.object(api.pl, "read_parquet", return_value=catalog), \
+             patch.object(api, "mart_release_cache") as cache, \
+             patch.object(api, "published_unassigned_income", return_value=([], [inferred])), \
+             patch.object(api, "infer_video_evidence", return_value=[inferred]), \
+             patch.object(api, "contract_identity_evidence", return_value=[exact]), \
+             patch.object(api, "catalog_alias_lookup", return_value=pl.DataFrame({
+                 "alias_catalog_key": ["VIDEO:abcdefghijk"], "catalog_key": [f"ISRC:{ISRC}"]})):
+            cache.return_value.status.return_value = {"active_release_id": "published"}
+            item = api.master_contract_associations(ISRC, [], {})[0]
+        self.assertEqual(item["reference_group"], "ugc")
+        self.assertTrue(item["automatic"])
+        self.assertFalse(item["requires_review"])
+
     def test_shared_upc_blocked_even_if_catalog_alias_points_to_target(self):
         rows = [evidence(), evidence(source="fuga", account="indyana_records", isrcs=[OTHER])]
         items = self.items(rows)
@@ -123,6 +173,9 @@ class ContractAssociationTests(unittest.TestCase):
         self.assertNotIn("amount_usd", sql)
         self.assertNotIn("statement_month", sql)
         self.assertIn("JOIN seeds", sql)
+        self.assertIn("content_origin", sql)
+        self.assertIn("only_ugc_rows", sql)
+        self.assertIn("has_unassigned_rows", sql)
         config = client.query.call_args.kwargs["job_config"]
         self.assertEqual(config.maximum_bytes_billed, 5_000_000_000)
         self.assertEqual(config.query_parameters[0].value, "published")

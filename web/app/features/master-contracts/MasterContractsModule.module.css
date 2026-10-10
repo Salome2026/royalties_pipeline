@@ -27,6 +27,9 @@
 .associationsHeading .associationsToggle:hover { color: #77e4c9; background: transparent; box-shadow: none; transform: none; }
 .associationsHeading .associationsToggle:focus-visible { outline: 2px solid #65d9c8; outline-offset: 4px; }
 .associationsCount { color: #a6bebc; font-size: .73rem; }
+.associationsSectionTitle { margin: 14px 0 0; color: #cde4df; font-size: .76rem; font-weight: 600; }
+.associationsUgc { margin-top: 14px; padding-top: 10px; border-top: 1px solid rgba(164, 188, 199, .18); background: transparent; }
+.associationSource + .associationSource { margin-top: 10px; }
 .associationsHeading .iconButton { margin-left: auto; width: 32px; height: 32px; }
 .associationsScroll { overflow: auto; max-height: 440px; margin-top: 12px; }
 .associationsControls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }

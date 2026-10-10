@@ -30,7 +30,7 @@ def identity_evidence(isrc: str, catalog_row: dict[str, Any], *, client: Any = N
     sql = f"""
     WITH facts AS (
       SELECT source, account, asset_isrc, product_upc, video_id, track_id,
-             title, artist, catalog_number
+             title, artist, catalog_number, content_origin
       FROM `{DEFAULT_PROJECT}.{DEFAULT_DATASET}.royalty_statement_fact`
       WHERE release_id = @release_id
     ), codes AS (
@@ -52,6 +52,10 @@ def identity_evidence(isrc: str, catalog_row: dict[str, Any], *, client: Any = N
       ARRAY_AGG(DISTINCT NULLIF(c.asset_isrc, '') IGNORE NULLS) AS isrcs,
       ARRAY_AGG(DISTINCT NULLIF(c.title, '') IGNORE NULLS LIMIT 3) AS titles,
       ARRAY_AGG(DISTINCT NULLIF(c.artist, '') IGNORE NULLS LIMIT 3) AS artists,
+      ARRAY_AGG(DISTINCT NULLIF(c.content_origin, '') IGNORE NULLS) AS content_origins,
+      LOGICAL_AND(COALESCE(c.content_origin, '') = 'UGC / Content ID') AS only_ugc_rows,
+      LOGICAL_OR(COALESCE(c.asset_isrc, '') != '') AS has_identified_rows,
+      LOGICAL_OR(COALESCE(c.asset_isrc, '') = '') AS has_unassigned_rows,
       LOGICAL_OR(c.source = 'ada' AND COALESCE(c.asset_isrc, '') = ''
                  AND COALESCE(c.catalog_number, '') != '') AS native_ada_product
     FROM codes c JOIN seeds s USING (kind, value, scope_source, scope_account)
@@ -196,6 +200,11 @@ def candidates(
             included, status = False, "blocked"
         if decision_scope(key) in excluded_scopes:
             included, status = False, "excluded"
+        origins = sorted(set(row.get("content_origins") or []))
+        # Presentation only: identified UGC uses do not need a new income association.
+        ugc_reference = (kind == "VIDEO" and row.get("only_ugc_rows") is True
+                         and row.get("has_identified_rows") is True
+                         and row.get("has_unassigned_rows") is False)
         items.append({
             "key": key, "kind": kind, "code": code, "source": source, "account": account,
             "titles": row.get("titles") or [], "artists": row.get("artists") or [],
@@ -204,6 +213,8 @@ def candidates(
             "evidence_signature": signature,
             "requires_review": inferred and not exact,
             "inference_rule": row.get("inference_rule") if inferred and not exact else None,
+            "reference_group": "ugc" if ugc_reference else "associated",
+            "content_origins": origins,
         })
     pending_codes = set(unresolved_associations(items, overrides))
     return sorted(items, key=lambda item: (item["code"] not in pending_codes,

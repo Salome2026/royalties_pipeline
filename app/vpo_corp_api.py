@@ -8474,7 +8474,7 @@ def master_contract_associations(isrc: str, choices: list[dict[str, Any]], claim
         for row in inferred:
             key = json.dumps([row["kind"], row["code"], row["source"], row["account"]], separators=(",", ":"))
             if isrc in (row.get("inferred_isrcs") or []) or key in chosen_keys or claims.get(key) == isrc:
-                by_key[key] = row
+                by_key[key] = {**by_key.get(key, {}), **row}
         evidence = list(by_key.values())
     except Exception as exc:
         raise HTTPException(status_code=503, detail="No se pudo verificar los códigos asociados. Volvé a intentar; no se guardó ningún cambio.") from exc

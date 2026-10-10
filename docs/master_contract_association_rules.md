@@ -71,6 +71,25 @@ that resolve to one included contract, once. Never re-add existing ISRC revenue,
 absorb an ADA native product, split ambiguous income, ignore a discard or bypass
 the existing generation/transfer eligibility and royalty discount policies.
 
+## Contract display groups
+
+- Group UPC/video references by code across distributor accounts, retaining every
+  underlying key, account, title, artist, signature and saved decision. TRACK IDs
+  remain scoped by distributor/account.
+- The main list contains UPCs, Art Tracks, channel videos, codes with unidentified
+  rows, unknown/mixed origins, pending validations and existing manual decisions.
+- A separate collapsed UGC reference list contains only video codes whose complete
+  evidence consists of UGC / Content ID rows already identified by ISRC. Shared
+  videos retain all observed ISRCs and their existing assignment blocks.
+- UGC reference rows are informational; they do not need an additional contract
+  selection for money that already carries an ISRC. Existing manual decisions
+  stay editable in the main list. Pending evidence always remains visible there.
+- Classify from statement evidence in the active immutable release, never from a
+  fixed song, distributor whitelist or saved count. New published statements
+  automatically reevaluate the display grouping.
+- This is presentation metadata only: no change to income associations, evidence
+  signatures, close validation, contract payloads, catalogs or any royalty report.
+
 ## Verification
 
 Run the Contracts association, metadata, income, pilot and contractual-executive

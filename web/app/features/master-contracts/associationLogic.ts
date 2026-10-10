@@ -3,7 +3,10 @@ export type Association = AssociationChoice & {
   kind: string; code: string; source: string; account: string; titles: string[]; artists: string[];
   isrcs: string[]; automatic: boolean; status: string; selectable: boolean; reason: string;
   requires_review?: boolean;
+  reference_group?: "associated" | "ugc";
+  content_origins?: string[];
 };
+export type AssociationGroup = { scope: string; kind: string; code: string; items: Association[]; section: "associated" | "ugc" };
 export type AssociationValidation = { loading: boolean; pending: number; error: string };
 
 export function associationScope(key: string): string {
@@ -30,4 +33,33 @@ export function pendingAssociationCodes(items: Association[], choices: Associati
     if (choice.included && !known.has(choice.key)) codes.push((JSON.parse(choice.key) as string[])[1]);
   }
   return [...new Set(codes)].sort();
+}
+
+export function groupedAssociations(items: Association[], choices: AssociationChoice[]): AssociationGroup[] {
+  const groups = new Map<string, AssociationGroup>();
+  const decisions = new Set(choices.map((choice) => associationScope(choice.key)));
+  for (const item of items) {
+    const scope = associationScope(item.key);
+    let group = groups.get(scope);
+    if (!group) {
+      group = { scope, kind: item.kind, code: item.code, items: [], section: "ugc" };
+      groups.set(scope, group);
+    }
+    group.items.push(item);
+    // Doubts and saved decisions stay in the editable list, including future evidence changes.
+    if (item.reference_group !== "ugc" || associationState(item, choices).pending || decisions.has(scope)) {
+      group.section = "associated";
+    }
+  }
+  return [...groups.values()];
+}
+
+export function associationGroupState(group: AssociationGroup, choices: AssociationChoice[]) {
+  const states = group.items.map((item) => associationState(item, choices));
+  const pending = states.some((state) => state.pending);
+  const included = states.every((state) => state.included);
+  const status = pending ? "pending" : included ? (states.every((state) => state.status === "automatic") ? "automatic" : "confirmed")
+    : states.every((state) => state.status === "excluded") ? "excluded" : "blocked";
+  return { included, pending, status, automatic: group.items.every((item) => item.automatic),
+    selectable: group.items.every((item) => item.selectable) };
 }
