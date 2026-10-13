@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "corrections": [
+    {
+      "id": "FUGA-META-ARDL12400086-20261013",
+      "catalog_key": "ISRC:ARDL12400086",
+      "track_title": "TU PONES LA HORA",
+      "artist_statement": "FACUU DJ and LAALODJ",
+      "catalog_duration_seconds": 135,
+      "confirmed_by": "Ruben Mariano Elkowich",
+      "confirmed_on": "2026-10-13",
+      "reason": "Wrong audio and title originally uploaded to FUGA; both corrected in 2025. Confirmed by the catalog owner. Historical revenue remains under ARDL12400086, never transferred to ARDL12400080.",
+      "evidence": {
+        "asset_reference": "1002091080026",
+        "product_upc": "8721253044475",
+        "historical_title": "ME PIDE CANDY",
+        "historical_duration_seconds": 190,
+        "historical_statements": ["2024-12", "2025-01"],
+        "current_audio_uploaded_on": "2025-01-15",
+        "current_audio_filename": "MASTER V2 FACUU DJ x LAALO DJ .wav",
+        "fuga_url": "https://fugamusic.com/asset/1002091080026",
+        "spotify_url": "https://open.spotify.com/track/1JQFmmEp5T3j73392owT0e"
+      }
+    }
+  ]
+}

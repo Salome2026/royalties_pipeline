@@ -471,3 +471,24 @@ Comportamiento rector:
 - `external_label` permanece visible como dato original y nunca se pisa;
 - usuarios sin permiso de edicion pueden consultar, pero no alterar estado ni
   normalizacion.
+
+## Correcciones manuales de metadata
+
+Las excepciones confirmadas viven en `scripts/lib/catalog_manual_metadata.json`.
+El builder aplica esa capa despues de construir el catalogo. Solo puede cambiar
+titulo visible, artistas visibles y duracion canonica; conserva identidad,
+variantes recibidas, fechas, filas, importes, unidades y contratos. La confirmacion
+y el motivo quedan en el snapshot. No es una regla automatica por parecido.
+
+Excepcion aprobada por Ruben el 2026-10-13: `ISRC:ARDL12400086` queda como
+`TU PONES LA HORA`, `FACUU DJ and LAALODJ`, 135 segundos. El audio y el titulo
+originales fueron cargados incorrectamente en FUGA y corregidos en 2025.
+La ficha actual muestra `MASTER V2 FACUU DJ x LAALO DJ .wav`, cargado el
+2025-01-15. Los statements 2024-12 y 2025-01 conservaron `ME PIDE CANDY`
+y 190 segundos. Sus ingresos permanecen en el mismo ISRC.
+
+`ARDL12400080` es otro asset: `ME PIDE CANDY RKT`, FACUU DJ, 17 segundos,
+UPC `8721093910459`. No se modifica, vincula ni recibe ingresos del `00086`.
+Ruben autorizo expresamente aplicar la excepcion tambien al catalogo cloud.
+La publicacion debe conservar los cinco marts economicos sin cambios y
+mantener las versiones Parquet/BigQuery alineadas.
