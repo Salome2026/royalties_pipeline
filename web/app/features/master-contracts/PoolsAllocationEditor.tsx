@@ -92,6 +92,13 @@ export function PoolsAllocationEditor({ agreement, allocation, canEdit, artistOp
         {rows.map((row, index) => {
           const rule = row.rule || { treatment: "direct" };
           const contract = artistContracts.find((item) => item.is_active && beneficiaryKey(item.artist_name) === beneficiaryKey(row.artist));
+          const availableBeneficiaries = contract ? artistBeneficiaries(contract) : [];
+          const contractApplied = contract && rule.contract_version === contract.version
+            && beneficiaryKey(rule.contract_artist || "") === beneficiaryKey(contract.artist_name)
+            && rule.beneficiaries?.length === availableBeneficiaries.length
+            && rule.beneficiaries.every((item, position) =>
+              beneficiaryKey(item.name) === beneficiaryKey(availableBeneficiaries[position].name)
+              && item.percent === availableBeneficiaries[position].percent);
           return <div className={styles.participantRow} key={index}>
             <div className={styles.participantIdentity}>
               <label>{index === 0 ? "Artista principal" : `Participante ${index}`}<input list={optionsId} disabled={!canEdit} value={row.artist}
@@ -113,7 +120,7 @@ export function PoolsAllocationEditor({ agreement, allocation, canEdit, artistOp
               <label>Retención del contrato %<input type="number" min="0" max="100" step="any" disabled={!canEdit} value={rule.retained_percent ?? ""} onChange={(event) => updateRow(index, { rule: { ...rule, retained_percent: numberOrNull(event.target.value), contract_artist: null, contract_version: null } })} /></label>
               <label>Retención para<input list={optionsId} disabled={!canEdit} value={rule.retained_recipient || ""} onChange={(event) => updateRow(index, { rule: { ...rule, retained_recipient: event.target.value } })} /></label>
               </>}
-              {contract && <div className={styles.ruleReference}><span>{artistBeneficiaries(contract).map((item) => `${item.name}: ${percent(item.percent || 0)}%`).join(" · ")}</span>
+              {contract && !contractApplied && <div className={styles.ruleReference}><span>Contrato disponible · versión {contract.version}: {availableBeneficiaries.map((item) => `${item.name}: ${percent(item.percent || 0)}%`).join(" · ")}</span>
                 {canEdit && <button type="button" className={styles.secondaryButton} onClick={() => updateRow(index, { rule: { treatment: "artist_contract", beneficiaries: structuredClone(artistBeneficiaries(contract)), contract_artist: contract.artist_name, contract_version: contract.version } })}>Usar contrato</button>}
               </div>}
               {rule.contract_artist && <small className={styles.fieldHint}>Contrato: {rule.contract_artist} · versión {rule.contract_version}</small>}
