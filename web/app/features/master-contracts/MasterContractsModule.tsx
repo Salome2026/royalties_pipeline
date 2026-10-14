@@ -197,10 +197,10 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
 
   function applyPrincipalContract(contract: ArtistContract) {
     if (!draft || !activeAgreement || !allocation) return;
-    if (!contract.is_project) {
+    if (contract.beneficiaries != null || !contract.is_project) {
       const solo = allocation.participants.length === 0;
       updateDraft({ has_contract: contract.has_contract, agreements: agreements.map((item) => item.id === activeAgreement.id
-        ? { ...item, master_pool_percent: solo ? 0 : item.master_pool_percent, allocation: {
+        ? { ...item, contract_kind: solo ? "simple" : item.contract_kind, master_pool_percent: solo ? 0 : item.master_pool_percent, allocation: {
           ...allocation, principal_percent: solo ? 100 : allocation.principal_percent,
           principal_rule: { treatment: "artist_contract", beneficiaries: structuredClone(artistBeneficiaries(contract)),
             contract_artist: contract.artist_name, contract_version: contract.version },

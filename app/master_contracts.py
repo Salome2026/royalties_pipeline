@@ -313,8 +313,11 @@ def suggested_split(
         ],
         "notes": "",
     }
-    if main_contract and not is_project and main_contract.get("beneficiaries") is not None:
+    # Named artist beneficiaries take precedence over the historical project flag.
+    if main_contract and main_contract.get("beneficiaries") is not None:
         result["agreements"][0]["master_pool_percent"] = 0
+        if len(artists) == 1:
+            result["agreements"][0]["contract_kind"] = "simple"
         result["principal_percent"] = 100 if len(artists) == 1 else None
         result["principal_rule"] = {
             "treatment": "artist_contract", "beneficiaries": contract_beneficiaries(main_contract),

@@ -184,3 +184,10 @@ porcentajes y conservación de centavos, incluidos ajustes negativos.
 La migración 016 añade beneficiaries_json en PostgreSQL. Los contratos anteriores
 sin ese campo conservan Indyana y el complemento del artista. Las reglas de
 retención antiguas siguen interpretándose con su significado guardado.
+
+La propuesta principal también copia todos los beneficiarios cuando el registro
+conserva la marca histórica Proyecto. Esa marca no convierte los socios del
+contrato del artista en titulares del proyecto. Para un tema sin invitados,
+Usar propuesta asigna el 100% al contrato del artista e incluye sus beneficiarios
+en la simulación. Los repartos ya guardados requieren esa aplicación explícita;
+no se alteran al abrir la ficha.

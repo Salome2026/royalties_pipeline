@@ -55,6 +55,14 @@ class BeneficiaryTests(unittest.TestCase):
         self.assertEqual(draft["agreements"][0]["master_pool_percent"], 0)
         self.assertEqual(draft["principal_percent"], 100)
         self.assertEqual(draft["principal_rule"]["beneficiaries"], self.sony)
+        contract["is_project"] = True
+        flagged = suggested_split(["G Sony"], contracts)
+        self.assertEqual(flagged["agreements"][0]["contract_kind"], "simple")
+        self.assertEqual(flagged["agreements"][0]["master_pool_percent"], 0)
+        self.assertEqual(flagged["principal_percent"], 100)
+        self.assertEqual(flagged["principal_rule"]["beneficiaries"], self.sony)
+        self.assertEqual(self.amounts(self.agreement(0, {"principal": "G Sony", "principal_percent": 100,
+            "principal_rule": flagged["principal_rule"], "participants": []}), 100)["Federico"], 33.33)
         contracts["la juntada"] = {"artist_name": "La Juntada", "indyana_percent": 70, "has_contract": True, "is_project": True, "version": 1}
         draft = suggested_split(["La Juntada", "G Sony"], contracts)
         self.assertEqual(draft["participants"][0]["rule"]["beneficiaries"], self.sony)
