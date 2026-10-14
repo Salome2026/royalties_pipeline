@@ -67,6 +67,11 @@ def allocation_rows(agreement: dict, split: dict) -> list[dict]:
             if rule.get("treatment") == "project_owners":
                 distribute(base, f"Participación de {item['artist']}")
             elif rule.get("treatment") == "artist_contract":
+                if rule.get("beneficiaries") is not None:
+                    for beneficiary in rule["beneficiaries"]:
+                        add(beneficiary["name"], base * float(beneficiary["percent"]) / 100,
+                            f"Contrato de {item['artist']}", beneficiary_key(beneficiary["name"]) != beneficiary_key(item["artist"]))
+                    continue
                 retained = base * float(rule["retained_percent"]) / 100
                 add(rule["retained_recipient"], retained, f"Contrato de {item['artist']}", True)
                 add(item["artist"], base - retained, "Participación después de contrato")

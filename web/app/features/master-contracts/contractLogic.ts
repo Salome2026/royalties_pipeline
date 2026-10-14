@@ -1,9 +1,12 @@
+export type ContractBeneficiary = { name: string; percent: number | null };
+
 export type ParticipationRule = {
   treatment: "direct" | "artist_contract" | "project_owners";
   retained_percent?: number | null;
   retained_recipient?: string;
   contract_artist?: string | null;
   contract_version?: number | null;
+  beneficiaries?: ContractBeneficiary[] | null;
 };
 
 export type Participant = {
@@ -59,6 +62,16 @@ export function allocationTotals(agreement: MasterAgreement | undefined, allocat
 }
 
 export const beneficiaryKey = (name: string) => name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().replace(/\s+/g, " ").toLowerCase();
+
+export function beneficiaryErrors(items: ContractBeneficiary[]): string[] {
+  const names = items.map((item) => beneficiaryKey(item.name));
+  if (items.length < 2 || items.length > 12 || names.some((name) => !name) || new Set(names).size !== names.length)
+    return ["Cada beneficiario debe tener un nombre único; se admiten entre dos y doce."];
+  if (items.some((item) => item.percent === null || !Number.isFinite(item.percent) || item.percent < 0 || item.percent > 100))
+    return ["Completá los porcentajes de los beneficiarios entre 0 y 100."];
+  return Math.abs(items.reduce((sum, item) => sum + (item.percent || 0), 0) - 100) > tolerance
+    ? ["Los beneficiarios del contrato deben sumar 100%."] : [];
+}
 
 export function ownershipTotal(agreement: MasterAgreement): number {
   return agreement.owner_split_mode === "equal" && agreement.owners.length ? 100
@@ -128,6 +141,13 @@ export function contractErrors(agreements: MasterAgreement[], fallback: Allocati
       const ownerKeys = agreement.owners.map((item) => beneficiaryKey(item.name)).filter(Boolean);
       if (new Set(ownerKeys).size !== ownerKeys.length) errors.push(`${label}: hay titulares repetidos.`);
       const rows = [{ artist: allocation.principal, rule: allocation.principal_rule }, ...allocation.participants];
+      for (const row of rows) {
+        if (row.rule?.treatment === "artist_contract" && row.rule.beneficiaries != null) {
+          errors.push(...beneficiaryErrors(row.rule.beneficiaries).map((error) => `${label}: ${error}`));
+          if (!row.rule.beneficiaries.some((item) => beneficiaryKey(item.name) === beneficiaryKey(row.artist)))
+            errors.push(`${label}: el artista debe estar incluido en su contrato.`);
+        }
+      }
       const keys = rows.map((item) => beneficiaryKey(item.artist)).filter(Boolean);
       if (new Set(keys).size !== keys.length) errors.push(`${label}: hay participantes repetidos.`);
       if (rows.some((row) => row.rule?.treatment === "project_owners")
@@ -202,6 +222,11 @@ function previewPools(agreement: MasterAgreement, allocation: Allocation, amount
     const rule = row.rule || { treatment: "direct" };
     if (rule.treatment === "project_owners") owners(base, `Participación de ${row.artist}`);
     else if (rule.treatment === "artist_contract") {
+      if (rule.beneficiaries != null) {
+        for (const beneficiary of rule.beneficiaries) rows.push({ artist: beneficiary.name,
+          percent: base * (beneficiary.percent || 0) / 100, label: `Contrato de ${row.artist}` });
+        continue;
+      }
       if (rule.retained_percent == null || !rule.retained_recipient?.trim()) return null;
       const retained = base * rule.retained_percent / 100;
       rows.push({ artist: rule.retained_recipient, percent: retained, label: `Contrato de ${row.artist}` });

@@ -312,12 +312,18 @@ class CatalogStatusRequest(BaseModel):
     label_normalized_override: str | None = Field(default=None, max_length=300)
 
 
+class MasterContractBeneficiary(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    percent: float = Field(..., ge=0, le=100)
+
+
 class MasterParticipationRule(BaseModel):
     treatment: Literal["direct", "artist_contract", "project_owners"] = "direct"
     retained_percent: float | None = Field(default=None, ge=0, le=100)
     retained_recipient: str = Field(default="Indyana", max_length=200)
     contract_artist: str | None = Field(default=None, max_length=200)
     contract_version: int | None = Field(default=None, ge=1)
+    beneficiaries: list[MasterContractBeneficiary] | None = Field(default=None, min_length=2, max_length=12)
 
 
 class MasterContractParticipant(BaseModel):
@@ -384,6 +390,7 @@ class MasterContractSaveRequest(BaseModel):
 
 
 class MasterArtistContractSaveRequest(BaseModel):
+    beneficiaries: list[MasterContractBeneficiary] | None = Field(default=None, min_length=2, max_length=12)
     artist_name: str = Field(..., min_length=1, max_length=200)
     indyana_percent: float = Field(..., ge=0, le=100)
     has_contract: bool

@@ -129,3 +129,18 @@ const distribution = { ...simple, commercialization: "distribution", owners: [],
 assert.deepEqual(logic.allocationTotals(distribution, { ...solo, principal_percent: 80 }), { master: 20, participation: 80, general: 100 });
 assert.deepEqual(logic.previewAllocation(distribution, { ...solo, principal_percent: 80, indyana_percent: null }, 100).map((row) => row.amount), [20, 80]);
 console.log("Two pools, master ownership, explicit nested contracts, project partners, legacy preservation and cent rounding: PASS");
+
+const sonyBeneficiaries = [{ name: "Indyana", percent: 33.33 }, { name: "G Sony", percent: 33.34 }, { name: "Federico", percent: 33.33 }];
+const soloAllocation = { principal: "G Sony", principal_percent: 100, participants: [], principal_rule: { treatment: "artist_contract", beneficiaries: sonyBeneficiaries } };
+const sonyAgreement = { id: "sony", commercialization: "master", allocation_model: "pools", contract_kind: "simple", master_pool_percent: 0, owners: [{ name: "Indyana", percent: 100 }], allocation: soloAllocation };
+assert.deepEqual(logic.previewAllocation(sonyAgreement, soloAllocation, 100).map(row => [row.artist, row.amount]), [["Indyana", 33.33], ["G Sony", 33.34], ["Federico", 33.33]]);
+const nestedAllocation = { principal: "La Juntada", principal_percent: 24, participants: [
+  { artist: "Candu Dominguez", percent: 3, internal_contract_indyana_percent: null, rule: { treatment: "artist_contract", beneficiaries: [{ name: "Indyana", percent: 70 }, { name: "Candu Dominguez", percent: 30 }] } },
+  { artist: "G Sony", percent: 3, internal_contract_indyana_percent: null, rule: { treatment: "artist_contract", beneficiaries: sonyBeneficiaries } },
+] };
+const nestedAgreement = { ...sonyAgreement, master_pool_percent: 70, allocation: nestedAllocation };
+assert.deepEqual(logic.previewAllocation(nestedAgreement, nestedAllocation, 100).map(row => [row.artist, row.amount]), [["Indyana", 73.1], ["La Juntada", 24], ["Candu Dominguez", .9], ["G Sony", 1], ["Federico", 1]]);
+assert.deepEqual(logic.previewAllocation(nestedAgreement, nestedAllocation, -100).map(row => row.amount), [-73.1, -24, -.9, -1, -1]);
+assert.ok(logic.beneficiaryErrors(sonyBeneficiaries.slice(0, 2)).length);
+assert.ok(logic.beneficiaryErrors([...sonyBeneficiaries, { name: "FEDERICO", percent: 0 }]).length);
+console.log("Multi-beneficiary artist contracts: solo, project allocation, duplicate names and negative adjustments: PASS");

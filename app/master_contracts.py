@@ -271,7 +271,7 @@ def suggested_split(
     main_contract = contracts.get(artist_key(principal))
     base = main_contract["indyana_percent"] if main_contract else None
     is_project = bool(main_contract and main_contract["is_project"])
-    return {
+    result = {
         "agreements": [{
             "id": "principal",
             "label": "Contrato principal",
@@ -306,12 +306,21 @@ def suggested_split(
                     "retained_recipient": "Indyana",
                     "contract_artist": contracts.get(artist_key(artist), {}).get("artist_name"),
                     "contract_version": contracts.get(artist_key(artist), {}).get("version"),
+                    "beneficiaries": contract_beneficiaries(contracts[artist_key(artist)]) if is_project and artist_key(artist) in contracts else None,
                 },
             }
             for artist in (artists[:10] if principal_uncertain else artists[1:11])
         ],
         "notes": "",
     }
+    if main_contract and not is_project and main_contract.get("beneficiaries") is not None:
+        result["agreements"][0]["master_pool_percent"] = 0
+        result["principal_percent"] = 100 if len(artists) == 1 else None
+        result["principal_rule"] = {
+            "treatment": "artist_contract", "beneficiaries": contract_beneficiaries(main_contract),
+            "contract_artist": main_contract["artist_name"], "contract_version": main_contract["version"],
+        }
+    return result
 
 
 def ensure_sqlite_tables(conn: Any) -> None:
@@ -364,6 +373,33 @@ def ensure_artist_contract_tables(conn: Any) -> None:
     )
 
 
+def contract_beneficiaries(contract: dict[str, Any]) -> list[dict[str, Any]]:
+    """Legacy two-party contracts retain their meaning until explicitly edited."""
+    if contract.get("beneficiaries") is not None:
+        return contract["beneficiaries"]
+    return [{"name": "Indyana", "percent": float(contract["indyana_percent"])},
+            {"name": contract["artist_name"], "percent": 100 - float(contract["indyana_percent"])}]
+
+
+def validate_contract_beneficiaries(items: list[dict[str, Any]]) -> None:
+    if not 2 <= len(items) <= 12:
+        raise ValueError("El contrato requiere entre dos y doce beneficiarios.")
+    seen: set[str] = set()
+    total = 0.0
+    for item in items:
+        name = str(item.get("name") or "").strip()
+        key = artist_key(name)
+        if not key or len(name) > 200 or key in seen:
+            raise ValueError("Cada beneficiario debe tener un nombre válido y único.")
+        seen.add(key)
+        value = item.get("percent")
+        if value is None or not math.isfinite(float(value)) or not 0 <= float(value) <= 100:
+            raise ValueError("Completá los porcentajes de los beneficiarios entre 0 y 100.")
+        total += float(value)
+    if abs(total - 100) > 0.0001:
+        raise ValueError("Los beneficiarios del contrato deben sumar 100%.")
+
+
 def list_artist_contracts(conn: Any) -> list[dict[str, Any]]:
     ensure_artist_contract_tables(conn)
     rows = conn.execute("SELECT * FROM master_artist_contracts ORDER BY artist_name").fetchall()
@@ -372,6 +408,7 @@ def list_artist_contracts(conn: Any) -> list[dict[str, Any]]:
             "artist_key": row["artist_key"],
             "artist_name": row["artist_name"],
             "indyana_percent": float(row["indyana_percent"]),
+            "beneficiaries": json.loads(row["beneficiaries_json"]) if "beneficiaries_json" in row.keys() and row["beneficiaries_json"] else None,
             "has_contract": bool(row["has_contract"]),
             "effective_from": row["effective_from"],
             "is_project": bool(row["is_project"]),
@@ -397,7 +434,17 @@ def save_artist_contract(
     key = artist_key(name)
     if not key or len(name) > 200:
         raise ValueError("Indicá un nombre de artista válido.")
-    percent = float(contract["indyana_percent"])
+    beneficiaries = contract.get("beneficiaries")
+    if beneficiaries is not None:
+        if not is_postgres_connection(conn):
+            raise ValueError("Los contratos con beneficiarios usan exclusivamente Cloud SQL Postgres.")
+        validate_contract_beneficiaries(beneficiaries)
+        if artist_key(name) not in {artist_key(item["name"]) for item in beneficiaries}:
+            raise ValueError("El artista debe estar incluido entre los beneficiarios.")
+        beneficiaries = [{"name": item["name"].strip(), "percent": float(item["percent"])} for item in beneficiaries]
+        percent = next((item["percent"] for item in beneficiaries if artist_key(item["name"]) == "indyana"), 0.0)
+    else:
+        percent = float(contract["indyana_percent"])
     if not math.isfinite(percent) or percent < 0 or percent > 100:
         raise ValueError("El porcentaje de Indyana debe estar entre 0 y 100.")
     effective_from = contract.get("effective_from") or None
@@ -439,6 +486,15 @@ def save_artist_contract(
         "is_project": bool(contract.get("is_project")), "is_active": bool(contract.get("is_active", True)),
         "notes": notes, "version": version, "updated_by": actor, "updated_at": now,
     }
+    if beneficiaries is not None:
+        conn.execute(db_sql(conn, "UPDATE master_artist_contracts SET beneficiaries_json = ? WHERE artist_key = ?"),
+                     (json.dumps(beneficiaries, ensure_ascii=False), key))
+    elif is_postgres_connection(conn):
+        # Old clients cannot silently erase an existing multi-beneficiary contract.
+        previous = conn.execute(db_sql(conn, "SELECT beneficiaries_json FROM master_artist_contracts WHERE artist_key = ?"), (key,)).fetchone()
+        if previous and previous["beneficiaries_json"]:
+            raise ValueError("Este contrato tiene beneficiarios. Actualizá la ficha antes de guardar.")
+    result["beneficiaries"] = beneficiaries
     history_values = (key, version, json.dumps(result, ensure_ascii=False, sort_keys=True), actor, now)
     history_insert = """INSERT INTO master_artist_contract_history
         (artist_key, version, payload_json, updated_by, updated_at) VALUES (?, ?, ?, ?, ?)"""
@@ -591,6 +647,12 @@ def _validate_pool_allocation(agreement: dict[str, Any], allocation: dict[str, A
             if agreement.get("commercialization") == "distribution" or agreement.get("contract_kind") != "project":
                 raise ValueError(f"{label}: repartir entre socios requiere un proyecto con titulares de master.")
         if treatment == "artist_contract":
+            beneficiaries = rule.get("beneficiaries")
+            if beneficiaries is not None:
+                validate_contract_beneficiaries(beneficiaries)
+                if key not in {artist_key(item["name"]) for item in beneficiaries}:
+                    raise ValueError(f"{label}: el artista debe estar incluido en su contrato.")
+                continue
             retained = rule.get("retained_percent")
             check_percent(retained)
             if closed and (retained is None or not str(rule.get("retained_recipient") or "").strip()):

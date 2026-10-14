@@ -2,7 +2,7 @@
 
 import { Divide, FilePenLine, Plus, Trash2 } from "lucide-react";
 import styles from "./MasterContractsModule.module.css";
-import type { ArtistContract } from "./ArtistContractsPanel";
+import { artistBeneficiaries, type ArtistContract } from "./ArtistContractsPanel";
 import { beneficiaryKey, ownershipTotal, poolAgreement, type Allocation, type MasterAgreement, type ParticipationRule } from "./contractLogic";
 
 const numberOrNull = (value: string) => value.trim() === "" ? null : Number(value);
@@ -109,10 +109,12 @@ export function PoolsAllocationEditor({ agreement, allocation, canEdit, artistOp
               {canEdit && row.artist.trim() && <button type="button" className={styles.iconButton} title={`Contrato de ${row.artist}`} aria-label={`Contrato de ${row.artist}`} onClick={() => onEditArtist(row.artist)}><FilePenLine size={16} /></button>}
             </div>
             {rule.treatment === "artist_contract" && <div className={styles.ruleFields}>
+              {rule.beneficiaries != null ? <div className={styles.ruleReference}>{rule.beneficiaries.map((item, position) => <span key={position}>{item.name}: {percent(item.percent || 0)}%</span>)}</div> : <>
               <label>Retención del contrato %<input type="number" min="0" max="100" step="any" disabled={!canEdit} value={rule.retained_percent ?? ""} onChange={(event) => updateRow(index, { rule: { ...rule, retained_percent: numberOrNull(event.target.value), contract_artist: null, contract_version: null } })} /></label>
               <label>Retención para<input list={optionsId} disabled={!canEdit} value={rule.retained_recipient || ""} onChange={(event) => updateRow(index, { rule: { ...rule, retained_recipient: event.target.value } })} /></label>
-              {contract && <div className={styles.ruleReference}><span>{contract.artist_name}: {percent(contract.indyana_percent)} / {percent(100 - contract.indyana_percent)}</span>
-                {canEdit && <button type="button" className={styles.secondaryButton} onClick={() => updateRow(index, { rule: { treatment: "artist_contract", retained_percent: contract.indyana_percent, retained_recipient: "Indyana", contract_artist: contract.artist_name, contract_version: contract.version } })}>Usar contrato</button>}
+              </>}
+              {contract && <div className={styles.ruleReference}><span>{artistBeneficiaries(contract).map((item) => `${item.name}: ${percent(item.percent || 0)}%`).join(" · ")}</span>
+                {canEdit && <button type="button" className={styles.secondaryButton} onClick={() => updateRow(index, { rule: { treatment: "artist_contract", beneficiaries: structuredClone(artistBeneficiaries(contract)), contract_artist: contract.artist_name, contract_version: contract.version } })}>Usar contrato</button>}
               </div>}
               {rule.contract_artist && <small className={styles.fieldHint}>Contrato: {rule.contract_artist} · versión {rule.contract_version}</small>}
             </div>}

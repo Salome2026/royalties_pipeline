@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ArrowLeft, Check, ChevronDown, ChevronLeft, ChevronRight, FilePenLine, Link2, RefreshCw, Search } from "lucide-react";
 import styles from "./MasterContractsModule.module.css";
-import { ArtistContractsPanel, type ArtistContract } from "./ArtistContractsPanel";
+import { ArtistContractsPanel, artistBeneficiaries, type ArtistContract } from "./ArtistContractsPanel";
 import { MasterAgreementsEditor, visibleAgreements, type MasterAgreement } from "./MasterAgreementsEditor";
 import { PoolsAllocationEditor } from "./PoolsAllocationEditor";
 import { ContractAssociationsPanel, type AssociationChoice, type AssociationValidation } from "./ContractAssociationsPanel";
@@ -197,6 +197,16 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
 
   function applyPrincipalContract(contract: ArtistContract) {
     if (!draft || !activeAgreement || !allocation) return;
+    if (!contract.is_project) {
+      const solo = allocation.participants.length === 0;
+      updateDraft({ has_contract: contract.has_contract, agreements: agreements.map((item) => item.id === activeAgreement.id
+        ? { ...item, master_pool_percent: solo ? 0 : item.master_pool_percent, allocation: {
+          ...allocation, principal_percent: solo ? 100 : allocation.principal_percent,
+          principal_rule: { treatment: "artist_contract", beneficiaries: structuredClone(artistBeneficiaries(contract)),
+            contract_artist: contract.artist_name, contract_version: contract.version },
+        } } : item) });
+      return;
+    }
     const nextAllocation = {
       ...allocation, indyana_percent: contract.indyana_percent,
       principal_percent: allocation.participants.length === 0 ? 100 - contract.indyana_percent : allocation.principal_percent,
@@ -329,7 +339,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
 
             {openAgreementId && <>
               {activeAgreement?.allocation_model === "pools" && contractFor(allocation.principal) && <div className={styles.contractReference}>
-                <span>Contrato de {contractFor(allocation.principal)?.artist_name}: Indyana {percent(contractFor(allocation.principal)!.indyana_percent)}% · artista {percent(100 - contractFor(allocation.principal)!.indyana_percent)}%</span>
+                <span>Contrato de {contractFor(allocation.principal)?.artist_name}: {artistBeneficiaries(contractFor(allocation.principal)!).map((item) => `${item.name}: ${percent(item.percent || 0)}%`).join(" · ")}</span>
                 {canEditCurrent && <button type="button" className={styles.secondaryButton} onClick={() => applyPrincipalContract(contractFor(allocation.principal)!)}>Usar propuesta</button>}
               </div>}
               {activeAgreement && <PoolsAllocationEditor agreement={activeAgreement} allocation={allocation} canEdit={canEditCurrent}

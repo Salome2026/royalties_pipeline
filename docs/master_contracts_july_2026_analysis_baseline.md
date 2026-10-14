@@ -161,3 +161,26 @@ Las cifras hasta julio consignadas arriba quedan como evidencia historica.
 La fecha sugerida de vigencia sigue tomando el primer statement real.
 Validacion: 57 pruebas de Contratos aprobadas, incluyendo junio y exclusion
 de julio en la base, asociados y meses devueltos para simular el reparto.
+
+## Beneficiarios del contrato del artista (2026-10-14)
+
+La ficha del artista admite entre dos y doce beneficiarios con nombre y porcentaje,
+incluido el artista. El botón + Agregar beneficiario permite incorporar socios.
+El total debe ser 100%; los nombres no pueden repetirse. Los porcentajes son
+independientes y no se calculan como un descuento sobre la parte de Indyana.
+
+El contrato reparte el importe asignado al artista en el tema. Para un tema
+exclusivo puede ser todo el ingreso; dentro de un proyecto se aplica únicamente
+a su participación. Esta configuración es independiente de los titulares o socios
+del proyecto. Usar contrato copia beneficiarios y versión en el reparto del ISRC;
+un cambio posterior del contrato no modifica esa copia guardada.
+
+Ejemplos de prueba, no valores reales: Candu 70% Indyana / 30% artista; G Sony
+33,33% Indyana / 33,33% Federico / 33,34% artista. En una participación de $3,
+el primero asigna $2,10 / $0,90 y el segundo distribuye $1 por beneficiario tras
+el redondeo consolidado. Simulación y PDF contractual utilizan los mismos nombres,
+porcentajes y conservación de centavos, incluidos ajustes negativos.
+
+La migración 016 añade beneficiaries_json en PostgreSQL. Los contratos anteriores
+sin ese campo conservan Indyana y el complemento del artista. Las reglas de
+retención antiguas siguen interpretándose con su significado guardado.
