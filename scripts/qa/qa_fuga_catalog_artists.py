@@ -15,7 +15,7 @@ from scripts.lib.catalog_report_filter import catalog_alias_lookup
 from scripts.lib.fuga_catalog_artists import (
     ARTIST_COLUMNS, RULE_VERSION, catalog_artist_display, enrich_fuga_catalog, parse_credit,
 )
-from scripts.load_bigquery_release import build_catalog, catalog_artist_schema_sql, CATALOG_FIELDS
+from scripts.load_bigquery_release import build_catalog, bq_load, catalog_artist_schema_sql, CATALOG_FIELDS
 
 
 class FugaCatalogArtistTests(unittest.TestCase):
@@ -207,6 +207,11 @@ class FugaCatalogArtistTests(unittest.TestCase):
         self.assertEqual(result["amount_usd"].to_list(), original["amount_usd"].to_list())
         self.assertTrue(set(ARTIST_COLUMNS) <= set(CATALOG_FIELDS))
         self.assertIn("catalog_artists ARRAY<STRING>", catalog_artist_schema_sql("project", "dataset"))
+
+    def test_bigquery_load_maps_parquet_lists_to_arrays_not_nested_structs(self):
+        with patch("scripts.load_bigquery_release.run") as run:
+            bq_load(bq="bq", project="project", dataset="dataset", location="US", table="stage", uri="gs://bucket/catalog.parquet")
+        self.assertIn("--parquet_enable_list_inference=true", run.call_args.args[0])
 
 
 if __name__ == "__main__":

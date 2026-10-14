@@ -559,6 +559,7 @@ def bq_load(
             "--replace",
             "--autodetect",
             "--source_format=PARQUET",
+            "--parquet_enable_list_inference=true",
             f"{project}:{dataset}.{table}",
             uri,
         ]
