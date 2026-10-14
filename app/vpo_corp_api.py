@@ -116,6 +116,7 @@ from lib.distributor_policy_store import (  # noqa: E402
     update_report_personalization,
 )
 from lib.mart_release import publish_mart_release  # noqa: E402
+from lib.fuga_catalog_artists import catalog_artist_display  # noqa: E402
 from lib.mart_release_cache import MartReleaseCache, MartReleaseCacheError  # noqa: E402
 from build_fuga_gusty_contract_report import build_fuga_gusty_contract_report  # noqa: E402
 import build_la_nueva_sangre_report as la_nueva_sangre_report  # noqa: E402
@@ -8015,7 +8016,7 @@ def catalog_items(
     if not path.exists():
         raise HTTPException(status_code=500, detail=f"No existe catalog master: {path}")
 
-    catalog = pl.read_parquet(path)
+    catalog = catalog_artist_display(pl.read_parquet(path))
     if "external_label" not in catalog.columns:
         catalog = catalog.with_columns(pl.lit(None).cast(pl.Utf8).alias("external_label"))
     if "label_normalized_auto" not in catalog.columns:
@@ -8316,7 +8317,7 @@ def master_contract_associated_income(choices: dict[str, list[dict]]) -> dict[st
 
 def master_contract_catalog(associated_income: dict[str, dict] | None = None) -> pl.DataFrame:
     marts = ensure_marts(filenames=[CATALOG_MASTER_FILE])
-    catalog = pl.read_parquet(marts[CATALOG_MASTER_FILE])
+    catalog = catalog_artist_display(pl.read_parquet(marts[CATALOG_MASTER_FILE]))
     current = (
         catalog
         .filter(pl.col("asset_isrc").fill_null("").str.contains(r"^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$"))
@@ -8535,7 +8536,10 @@ def get_master_contract(
         raw_path = ensure_marts(filenames=[STANDARDIZED_FILE])[STANDARDIZED_FILE]
     except Exception:
         pass
-    suggestions = artist_suggestions(clean, raw_path, catalog_row.get("artist_statement"))
+    suggestions = artist_suggestions(
+        clean, raw_path, catalog_row.get("artist_statement"), catalog_row.get("catalog_artists"),
+        catalog_row.get("catalog_artist_evidence"),
+    )
     first_sale_date = suggestions.get("first_sale_date") or catalog_row.get("first_transaction_month")
     first_sale_precision = suggestions.get("first_sale_precision") or ("month" if first_sale_date else None)
     income = combined_contract_income(float(catalog_row.get("isrc_amount_usd") or 0), extras.get(clean), master_contract_statement_income(clean))
@@ -8560,8 +8564,9 @@ def get_master_contract(
         "sources": catalog_row.get("sources"),
         "accounts": catalog_row.get("accounts"),
         "split": saved["split"] if saved else suggested_split(
-            [] if suggestions.get("principal_uncertain") else suggestions["artists"],
+            suggestions["artists"] if catalog_row.get("catalog_artists") is not None or not suggestions.get("principal_uncertain") else [],
             contracts, first_statement_date,
+            principal_uncertain=bool(suggestions.get("principal_uncertain")),
         ),
         "closed": saved["closed"] if saved else False,
         "future_reports_selected": saved["future_reports_selected"] if saved else False,

@@ -181,18 +181,21 @@ def _artist_suggestions(isrc: str, raw_path: str, file_mtime_ns: int) -> dict[st
             "first_sale_date": first_sale_date, "first_sale_precision": first_sale_precision}
 
 
-def artist_suggestions(isrc: str, raw_path: Path | None, fallback: str | None) -> dict[str, Any]:
+def artist_suggestions(
+    isrc: str, raw_path: Path | None, fallback: str | None,
+    catalog_artists: list[str] | None = None, catalog_artist_evidence: str | None = None,
+) -> dict[str, Any]:
     raw_result = None
     if raw_path and raw_path.exists():
         try:
             raw_result = _artist_suggestions(isrc, str(raw_path), raw_path.stat().st_mtime_ns)
-            if raw_result["evidence"]:
+            if raw_result["evidence"] and catalog_artists is None:
                 return raw_result
         except (OSError, pl.PolarsError):
             pass
     fallback = fallback or ""
-    artists = parse_artists(fallback, "catalog")
-    return {
+    artists = catalog_artists if catalog_artists is not None else parse_artists(fallback, "catalog")
+    result = {
         "artists": artists,
         "evidence": [{"source": "catalog", "field": "artist_statement", "raw": fallback, "artists": artists, "used": True}],
         "warnings": ["Sugerencia basada en el catálogo; confirmar con el statement."],
@@ -200,6 +203,22 @@ def artist_suggestions(isrc: str, raw_path: Path | None, fallback: str | None) -
         "first_sale_date": raw_result.get("first_sale_date") if raw_result else None,
         "first_sale_precision": raw_result.get("first_sale_precision") if raw_result else None,
     }
+    if catalog_artists is not None:
+        result = dict(raw_result or result)
+        evidence = json.loads(catalog_artist_evidence or "[]")
+        track_credits = [entry["artists"] for entry in evidence
+                         if entry.get("field") == "Asset Artist" and entry.get("artists")]
+        principal_keys = {artist_key(names[0]) for names in track_credits}
+        result["artists"] = catalog_artists
+        proposed_principal = {artist_key(catalog_artists[0])} if catalog_artists else set()
+        result["principal_uncertain"] = (
+            bool(result.get("principal_uncertain")) or len(principal_keys) != 1 or principal_keys != proposed_principal
+        )
+        result["evidence"] = [*result.get("evidence", []), {
+            "source": "catalog", "field": "catalog_artists", "raw": fallback,
+            "artists": catalog_artists, "used": True,
+        }]
+    return result
 
 
 def contract_statement_baseline(summary: pl.LazyFrame, cutoff_month: str) -> pl.DataFrame:
@@ -245,9 +264,10 @@ def contract_analysis_catalog(current: pl.DataFrame, baseline_net: pl.DataFrame)
 def suggested_split(
     artists: list[str], contracts: dict[str, dict[str, Any]] | None = None,
     first_statement_date: str | None = None,
+    *, principal_uncertain: bool = False,
 ) -> dict[str, Any]:
     contracts = contracts or {}
-    principal = artists[0] if artists else ""
+    principal = artists[0] if artists and not principal_uncertain else ""
     main_contract = contracts.get(artist_key(principal))
     base = main_contract["indyana_percent"] if main_contract else None
     is_project = bool(main_contract and main_contract["is_project"])
@@ -288,7 +308,7 @@ def suggested_split(
                     "contract_version": contracts.get(artist_key(artist), {}).get("version"),
                 },
             }
-            for artist in artists[1:11]
+            for artist in (artists[:10] if principal_uncertain else artists[1:11])
         ],
         "notes": "",
     }

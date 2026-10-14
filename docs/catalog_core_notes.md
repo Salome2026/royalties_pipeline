@@ -492,3 +492,26 @@ UPC `8721093910459`. No se modifica, vincula ni recibe ingresos del `00086`.
 Ruben autorizo expresamente aplicar la excepcion tambien al catalogo cloud.
 La publicacion debe conservar los cinco marts economicos sin cambios y
 mantener las versiones Parquet/BigQuery alineadas.
+
+## Lista comun de artistas FUGA
+
+Desde la autorizacion del 2026-10-14, el catalogo incorpora `FUGA-ARTISTS-1`:
+union estable de `Asset Artist` y `Product Artist` del mismo ISRC y contexto
+musical, con evidencia por detras. La regla completa vive en
+`fuga_pipeline_notes.md` y se ejecuta en cada reconstruccion del catalogo,
+incluidos lanzamientos y artistas nuevos, sin un listado cerrado de nombres.
+
+`catalog_artists` y `catalog_artist_statement` son la lista operativa y su texto
+de presentacion. `catalog_artist_evidence` conserva campos, literales, contexto
+y archivos; `catalog_artist_rule` identifica la version de lectura.
+Los campos existentes `artist_statement`, `artist_variants` e `identity_*`
+permanecen originales: las claves/aliases e inferencias no se reconstruyen con
+el nuevo texto de presentacion. No cambiar ventas, asociados ni contratos por
+la sola ampliacion de la lista de participantes.
+
+La API de Catalogo general y Contratos muestran esta lista comun. Las sugerencias
+contractuales la reutilizan; nunca reescriben acuerdos guardados ni calculan un
+porcentaje a partir de un credito. Dashboard, otros reportes y el PDF contractual
+conservan sus motores, datos economicos, periodos y reglas actuales.
+BigQuery recibe las cuatro columnas en `royalty_catalog` sin sustituir hechos
+financieros ni los textos nativos usados para identidad.

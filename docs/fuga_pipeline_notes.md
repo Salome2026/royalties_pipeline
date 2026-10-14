@@ -145,3 +145,44 @@ se clasifica como `UGC / Content ID` y `Partner-provided` como
 autoriza a clasificar todo como UGC.
 
 El mapa completo es `docs/store_dsp_taxonomy_policy.md`.
+
+## Artistas comunes de catalogo: FUGA-ARTISTS-1
+
+Decision de Ruben del 2026-10-14: aplicar a lo publicado y a futuras ingestas
+la union de artistas de pista (`Asset Artist`) y lanzamiento (`Product Artist`).
+El contrato define los beneficiarios y porcentajes; esta lectura no los infiere.
+
+Implementacion unica: `scripts/lib/fuga_catalog_artists.py`, llamada por
+`build_catalog_master.py` despues de las correcciones manuales confirmadas.
+Para cada ISRC recibido, se consideran las observaciones de contexto musical
+con Product Reference numerico, excluyendo referencias de explotacion YT-A/YT-V.
+No se buscan nombres por titulos ni se propagan artistas entre pistas de un UPC.
+
+- Conservar todos los nombres observados, tambien de statements anteriores;
+  un credito parcial posterior no borra participantes.
+- Ordenar primero artistas de pista y despues los adicionales del lanzamiento.
+  El orden no acredita derechos ni un principal unico.
+- Usar la gramatica FUGA observada: lista con coma y `and` final, opcionalmente
+  `featuring`; respetar comillas de nombres compuestos. Serializacion ambigua
+  conserva literal y estado en evidencia, sin inventar artistas por otra columna.
+- Deduplicar espacios y mayusculas; no quitar DJ ni crear aliases por parecido.
+- Las dos referencias humanas ya confirmadas se limitan a su ISRC en
+  `fuga_catalog_artist_references.json`: Kita/Federikita para ARDL12400060 y
+  Nueva/Nueva Adoracion para ARDL12500040. Se conservan los literales nativos;
+  no son equivalencias globales ni una lista de artistas admitidos.
+- Guardar literales, columna, cuenta, statement, archivo/hash, UPC y referencias.
+- No eliminar nombres que el catalogo global ya mostraba de otras fuentes.
+  Las correcciones manuales aprobadas prevalecen; los originales siguen intactos.
+
+El snapshot agrega `catalog_artists`, `catalog_artist_statement`,
+`catalog_artist_evidence` y `catalog_artist_rule`. No reemplaza los campos
+historicos de identidad ni los hechos economicos. Catalogo y Contratos proyectan
+la lista comun para visualizacion y sugerencias; un contrato guardado se devuelve
+sin cambiar participantes, porcentajes, vigencias, version, estado o asociados.
+BigQuery conserva la misma lista/evidencia en `royalty_catalog` por release.
+
+Esta adopcion no cambia el lector economico, FX, fechas de consumo/statement,
+factor historico del reporte ni personalizacion vigente. Tampoco habilita
+formatos complementarios no certificados ni modifica las otras distribuidoras.
+Antes de activar un release se comparan los campos anteriores del catalogo,
+los cinco marts economicos, aliases, inferencias, ingresos asociados y contratos.

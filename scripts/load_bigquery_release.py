@@ -149,6 +149,10 @@ CATALOG_FIELDS = [
     "track_id",
     "track_title",
     "artist_statement",
+    "catalog_artists",
+    "catalog_artist_statement",
+    "catalog_artist_evidence",
+    "catalog_artist_rule",
     "first_transaction_month",
     "last_transaction_month",
     "amount_usd",
@@ -467,6 +471,9 @@ def build_catalog(source: Path, target: Path, release_id: str) -> None:
             [
                 pl.lit(release_id).alias("release_id"),
                 *[text_expr(columns, [name]).alias(name) for name in ["catalog_key", "asset_isrc", "track_id", "track_title", "artist_statement"]],
+                (pl.col("catalog_artists").cast(pl.List(pl.Utf8)) if "catalog_artists" in columns
+                 else pl.lit(None, dtype=pl.List(pl.Utf8))).alias("catalog_artists"),
+                *[text_expr(columns, [name]).alias(name) for name in ["catalog_artist_statement", "catalog_artist_evidence", "catalog_artist_rule"]],
                 month_expr(columns, ["first_transaction_month"]).alias("first_transaction_month"),
                 month_expr(columns, ["last_transaction_month"]).alias("last_transaction_month"),
                 float_expr(columns, "amount_usd").alias("amount_usd"),
@@ -677,6 +684,16 @@ def detail_context_schema_sql(project: str, dataset: str) -> str:
     return "\n".join(statements)
 
 
+def catalog_artist_schema_sql(project: str, dataset: str) -> str:
+    return (
+        f"ALTER TABLE `{project}.{dataset}.royalty_catalog` "
+        "ADD COLUMN IF NOT EXISTS catalog_artists ARRAY<STRING>, "
+        "ADD COLUMN IF NOT EXISTS catalog_artist_statement STRING, "
+        "ADD COLUMN IF NOT EXISTS catalog_artist_evidence STRING, "
+        "ADD COLUMN IF NOT EXISTS catalog_artist_rule STRING;"
+    )
+
+
 def main() -> None:
     load_local_env(ENV_PATH)
     parser = argparse.ArgumentParser(description="Carga un release inmutable en BigQuery sombra.")
@@ -744,7 +761,7 @@ def main() -> None:
     suffix = re.sub(r"[^a-zA-Z0-9]", "", release_id)[-20:].lower()
     stages = {key: f"_stage_{key}_{suffix}" for key in prepared}
     bq = executable("bq")
-    schema_sql = detail_context_schema_sql(args.project, args.dataset)
+    schema_sql = detail_context_schema_sql(args.project, args.dataset) + "\n" + catalog_artist_schema_sql(args.project, args.dataset)
     run([bq, f"--project_id={args.project}", "query", f"--location={args.location}", "--use_legacy_sql=false"], input_text=schema_sql)
     for key, table in stages.items():
         bq_load(
