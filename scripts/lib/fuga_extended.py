@@ -210,7 +210,11 @@ def audit_directory(root: Path, input_dir: Path | None = None) -> list[dict]:
     if valid_paths:
         target = marts / METADATA_FILE
         temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
-        pl.concat([pl.scan_parquet(path) for path in valid_paths], how="diagonal_relaxed").sink_parquet(temporary)
+        combined = pl.concat([pl.scan_parquet(path) for path in valid_paths], how="diagonal_relaxed")
+        if target.exists() and "automatic_resolution_json" in pl.read_parquet_schema(target):
+            cached = pl.scan_parquet(target).select("source_file", "source_row", "automatic_resolution_json").unique(subset=["source_file", "source_row"])
+            combined = combined.join(cached, on=["source_file", "source_row"], how="left", validate="1:1")
+        combined.sink_parquet(temporary)
         os.replace(temporary, target)
     else:
         _atomic_parquet(pl.DataFrame(schema={"source_file": pl.String, "economic_role": pl.String}), marts / METADATA_FILE)
