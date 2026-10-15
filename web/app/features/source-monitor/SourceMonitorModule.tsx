@@ -119,6 +119,7 @@ export function SourceMonitorModule({
       onMessage({ type: "ok", text: "Archivos procesados localmente. Revisá el resumen antes de publicar." });
     } catch (error) {
       onMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo procesar la distribuidora." });
+      await loadMonitor();
     } finally {
       setProcessingId("");
     }
@@ -310,6 +311,20 @@ export function SourceMonitorModule({
                   <span title={item.latest_raw_file || ""}>Último raw: {item.latest_raw_file || "sin archivos"}</span>
                   {inventory && <span title={inventory}>{inventory}</span>}
                   {item.notes && <span title={item.notes}>{item.notes}</span>}
+                  {item.supplementary_audit_error && <span>{item.supplementary_audit_error}</span>}
+                  {(item.supplementary_audits || []).map((audit) => (
+                    <details key={audit.file_name}>
+                      <summary>YouTube Extended · {audit.status === "validated" ? "Comparado" : audit.status === "pending" ? "Pendiente" : "Requiere revisión"} · {audit.rows.toLocaleString("es-AR")} filas</summary>
+                      <p>{audit.file_name}</p>
+                      <p>{audit.reason}</p>
+                      {audit.additional_fields?.["YouTube Video Title"] && <p>Títulos de video conservados: {audit.additional_fields["YouTube Video Title"].distinct_values.toLocaleString("es-AR")}.</p>}
+                      {audit.additional_fields?.["YouTube Channel Display Name"] && <p>Nombres de canal conservados: {audit.additional_fields["YouTube Channel Display Name"].distinct_values.toLocaleString("es-AR")}.</p>}
+                      {Boolean(audit.isrc_review_rows) && <p>Los identificadores de video y audio se conservan por separado para revisión del catálogo.</p>}
+                      {audit.isrc_review_examples?.map((row) => (
+                        <p key={row["Sale ID"]}>Video: {row["YouTube Asset ISRC"]} · Principal: {row["native__Asset ISRC"] || "sin ISRC"}</p>
+                      ))}
+                    </details>
+                  ))}
                 </div>
 
                 <div className={styles.secondaryActions}>

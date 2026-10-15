@@ -39,6 +39,14 @@ def main():
         pl.lit(False).alias("possible_internal_transfer"),
     ])
 
+    # Product-only revenue keeps its release identity without inventing an ISRC.
+    is_product = pl.col("asset_product_type") == "Product"
+    df = df.with_columns([
+        pl.when(is_product).then(pl.col("product_upc").cast(pl.Utf8)).otherwise(None).alias("product_upc"),
+        pl.when(is_product).then(pl.col("product_title_statement")).otherwise(None).alias("track_statement_style"),
+        pl.when(is_product).then(pl.col("product_artist_statement")).otherwise(None).alias("artist_statement_style"),
+    ])
+
     # =========================
     # GROUP BY SONG LEVEL
     # =========================
@@ -55,6 +63,9 @@ def main():
             "include_in_statement_view",
             "possible_internal_transfer",
             "asset_isrc",
+            "product_upc",
+            "track_statement_style",
+            "artist_statement_style",
             "video_id",
             "asset_title_statement",
             "asset_artist_statement",
@@ -69,7 +80,9 @@ def main():
     )
 
     song_level = song_level.with_columns([
-    pl.when(pl.col("asset_isrc").is_null())
+    pl.when(pl.col("product_upc").is_not_null() | pl.col("track_statement_style").is_not_null())
+      .then(pl.lit("product"))
+      .when(pl.col("asset_isrc").is_null())
       .then(pl.lit("ugc"))
       .otherwise(pl.lit("catalog"))
       .alias("content_type")

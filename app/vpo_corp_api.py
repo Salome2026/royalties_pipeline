@@ -116,6 +116,14 @@ from lib.distributor_policy_store import (  # noqa: E402
     update_report_personalization,
 )
 from lib.mart_release import publish_mart_release  # noqa: E402
+from lib.fuga_extended import (  # noqa: E402
+    AUDIT_FILE as FUGA_EXTENDED_AUDIT_FILE,
+    METADATA_FILE as FUGA_EXTENDED_METADATA_FILE,
+    inventory_item as fuga_extended_inventory_item,
+    is_extended as is_fuga_extended,
+    load_reports as load_fuga_extended_reports,
+    monitor_directory as monitor_fuga_extended_directory,
+)
 from lib.fuga_catalog_artists import catalog_artist_display  # noqa: E402
 from lib.mart_release_cache import MartReleaseCache, MartReleaseCacheError  # noqa: E402
 from build_fuga_gusty_contract_report import build_fuga_gusty_contract_report  # noqa: E402
@@ -255,6 +263,8 @@ REQUIRED_MART_FILES = [
     CATALOG_MASTER_FILE,
 ]
 AUXILIARY_MART_FILES = [
+    FUGA_EXTENDED_AUDIT_FILE,
+    FUGA_EXTENDED_METADATA_FILE,
     STANDARDIZED_ONERPM_FILE,
     STANDARDIZED_FUGA_FILE,
     CATALOG_RELEASE_METADATA_FILE,
@@ -1807,6 +1817,10 @@ def classify_raw_file(source: str, path: Path, mart_names: set[str]) -> dict:
     name = path.name
     lower_name = name.lower()
 
+    # Supplemental files never become economic files, even if an old mart named one.
+    if source == "fuga" and is_fuga_extended(path):
+        return fuga_extended_inventory_item(BASE, path)
+
     if name in mart_names:
         return {"file_name": name, "status": "loaded_to_mart", "reason": "Cargado en mart nuevo."}
 
@@ -1966,7 +1980,12 @@ def publish_required_marts_to_gcs() -> dict:
     prefix = GCS_PREFIX.strip("/")
     uploads = []
     uploaded = []
-    for filename in REQUIRED_MART_FILES:
+    optional_fuga = [FUGA_EXTENDED_AUDIT_FILE, FUGA_EXTENDED_METADATA_FILE]
+    publication_files = [*REQUIRED_MART_FILES, *[
+        filename for filename in optional_fuga
+        if (BASE / "warehouse" / "marts" / filename).exists()
+    ]]
+    for filename in publication_files:
         local_path = BASE / "warehouse" / "marts" / filename
         if not local_path.exists():
             raise HTTPException(status_code=500, detail=f"No existe mart requerido: {local_path}")
@@ -7032,6 +7051,27 @@ def readiness(response: Response) -> dict:
     return payload
 
 
+def source_monitor_fuga_audits() -> dict:
+    """Evidence is optional for old releases; unreadable evidence is visible to operators."""
+    try:
+        if (BASE / "input_raw" / "fuga").exists():
+            return {"items": monitor_fuga_extended_directory(BASE), "error": None}
+        local = (VPO_LOCAL_MARTS_DIR or BASE / "warehouse" / "marts") / FUGA_EXTENDED_AUDIT_FILE
+        if local.exists():
+            return {"items": load_fuga_extended_reports(local), "error": None}
+        if VPO_LOCAL_MARTS_DIR is not None or not GCS_BUCKET:
+            return {"items": [], "error": None}
+        blob = gcs_client().bucket(GCS_BUCKET).blob(
+            "/".join(part for part in [GCS_PREFIX.strip("/"), FUGA_EXTENDED_AUDIT_FILE] if part)
+        )
+        if not blob.exists():
+            return {"items": [], "error": None}
+        paths = ensure_marts(filenames=[FUGA_EXTENDED_AUDIT_FILE])
+        return {"items": load_fuga_extended_reports(paths[FUGA_EXTENDED_AUDIT_FILE]), "error": None}
+    except Exception:
+        return {"items": [], "error": "No se pudo leer la revision de YouTube Extended. Volve a revisar los archivos."}
+
+
 @app.get("/source-monitor")
 def source_monitor(x_vpo_api_key: str | None = Header(default=None)):
     require_api_key(x_vpo_api_key)
@@ -7078,6 +7118,7 @@ def source_monitor(x_vpo_api_key: str | None = Header(default=None)):
         mart_names = set(mart_info.get("mart_file_names") or [])
         raw_inventory = build_raw_inventory(source, str(config.get("input_path") or ""), mart_names)
         raw_inventory_summary = raw_inventory["summary"]
+        supplemental = source_monitor_fuga_audits() if source == "fuga" else {"items": [], "error": None}
         unprocessed_raw_files = [
             str(item.get("file_name"))
             for item in raw_inventory["items"]
@@ -7100,6 +7141,10 @@ def source_monitor(x_vpo_api_key: str | None = Header(default=None)):
             status = "attention"
             alert = not alert_silenced
             reason = "Hay archivos raw que no figuran en el mart nuevo."
+        elif supplemental["error"] or any(item.get("status") != "validated" for item in supplemental["items"]):
+            status = "attention"
+            alert = not alert_silenced
+            reason = supplemental["error"] or "Hay complementos YouTube Extended que requieren revision."
         else:
             status = "ok"
             alert = False
@@ -7133,6 +7178,8 @@ def source_monitor(x_vpo_api_key: str | None = Header(default=None)):
             "unprocessed_raw_files": unprocessed_raw_files[:20],
             "unprocessed_raw_count": len(unprocessed_raw_files),
             "raw_inventory_summary": raw_inventory_summary,
+            "supplementary_audits": supplemental["items"],
+            "supplementary_audit_error": supplemental["error"],
             "ignored_raw_count": sum(
                 count
                 for status, count in raw_inventory_summary.items()
@@ -7216,6 +7263,9 @@ def process_source_monitor(
     account = before["account"]
     pending_files = before["unprocessed_raw_files"]
     scripts = source_monitor_pipeline_scripts(source)
+    if source == "fuga" and pending_files and all(is_fuga_extended(Path(name)) for name in pending_files):
+        # Late-arriving supplements need evidence processing, not an economic rebuild.
+        scripts = ["audit_fuga_youtube_extended.py"]
     if not scripts:
         raise HTTPException(status_code=400, detail=f"No hay pipeline nuevo configurado para {source}.")
 

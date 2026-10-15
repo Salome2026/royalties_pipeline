@@ -1,4 +1,16 @@
+export type SupplementaryAudit = {
+  file_name: string;
+  status: "validated" | "blocked" | "pending";
+  reason: string;
+  rows: number;
+  isrc_review_rows?: number;
+  additional_fields?: Record<string, { filled_rows: number; distinct_values: number }>;
+  isrc_review_examples?: { "Sale ID": string; "YouTube Asset ISRC": string; "native__Asset ISRC": string | null }[];
+};
+
 export type SourceMonitorItem = {
+  supplementary_audits?: SupplementaryAudit[];
+  supplementary_audit_error?: string | null;
   id: string;
   source: string;
   account: string;

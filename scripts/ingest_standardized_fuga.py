@@ -16,6 +16,7 @@ sys.path.append(str(SCRIPT_DIR))
 from lib.fx import get_monthly_fx
 from lib.identity import valid_youtube_video_id_expr
 from lib.statement_period import from_fuga_filename, fuga_correction
+from lib.fuga_extended import audit_directory
 
 
 # =========================
@@ -38,6 +39,10 @@ CORRECTION_STATEMENT_PERIOD = "2025-12"
 # =========================
 # HELPERS
 # =========================
+
+def is_economic_statement(file_path: Path) -> bool:
+    return file_path.name.lower().endswith("-royalty_product_and_asset.csv")
+
 
 def ensure_dirs():
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -146,6 +151,8 @@ def standardize_fuga_file(
     statement_period_note: str,
 ) -> pl.DataFrame:
 
+    if not is_economic_statement(file_path):
+        raise ValueError("El complemento YouTube Extended no es un statement economico adicional.")
     if df.height == 0:
         return df
 
@@ -301,7 +308,14 @@ def main():
         print(f"No existe carpeta: {INPUT_DIR}")
         return
 
-    all_files = sorted(INPUT_DIR.glob("*.csv"))
+    # Validate supplemental evidence before touching economic marts, including CLI loads.
+    audit_directory(BASE_DIR, INPUT_DIR)
+
+    discovered_files = sorted(p for p in INPUT_DIR.iterdir() if p.is_file() and p.suffix.lower() == ".csv")
+    all_files = [p for p in discovered_files if is_economic_statement(p)]
+    for supplementary in discovered_files:
+        if supplementary not in all_files:
+            print(f"Complemento fuera de ingesta economica: {supplementary.name}")
 
     regular_files = [
         p for p in all_files
@@ -320,6 +334,7 @@ def main():
     print(f"Temp: {TEMP_DIR}")
 
     part_paths = []
+    errors = []
 
     # =========================
     # REGULAR
@@ -359,6 +374,7 @@ def main():
 
         except Exception as e:
             print(f"  ERROR: {e}")
+            errors.append(f"{file_path.name}: {e}")
             continue
 
     # =========================
@@ -399,7 +415,11 @@ def main():
 
         except Exception as e:
             print(f"  ERROR: {e}")
+            errors.append(f"{file_path.name}: {e}")
             continue
+
+    if errors:
+        raise ValueError("FUGA no se actualizo porque hubo errores: " + " | ".join(errors))
 
     if not part_paths:
         print("\nNo se generaron partes.")
@@ -407,15 +427,18 @@ def main():
 
     print("\nConsolidando standardized_raw_fuga...")
 
-    frames = [pl.read_parquet(p) for p in part_paths]
+    frames = [pl.scan_parquet(p) for p in part_paths]
     final_df = pl.concat(frames, how="diagonal_relaxed")
 
-    final_df.write_parquet(OUTPUT_PATH)
+    temporary = OUTPUT_PATH.with_suffix(".parquet.tmp")
+    final_df.sink_parquet(temporary, engine="streaming")
+    temporary.replace(OUTPUT_PATH)
+    result = pl.scan_parquet(OUTPUT_PATH)
 
     print("\nListo.")
     print(f"Archivo generado: {OUTPUT_PATH}")
-    print(f"Filas totales: {final_df.height}")
-    print(f"Columnas totales: {len(final_df.columns)}")
+    print(f"Filas totales: {result.select(pl.len()).collect().item()}")
+    print(f"Columnas totales: {len(result.collect_schema())}")
 
 
 if __name__ == "__main__":

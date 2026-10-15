@@ -8,7 +8,14 @@ import type {
 async function readError(response: Response, fallback: string) {
   try {
     const payload = await response.json();
-    return payload.error || fallback;
+    const detail = payload.error;
+    if (typeof detail === "string") return detail;
+    if (detail?.message) {
+      const output = detail.scripts?.at(-1)?.tail?.join("\n") || "";
+      const explanation = output.split("\n").findLast((line: string) => line.includes("YouTube Extended requiere revision:"));
+      return explanation || detail.message;
+    }
+    return fallback;
   } catch {
     return fallback;
   }
