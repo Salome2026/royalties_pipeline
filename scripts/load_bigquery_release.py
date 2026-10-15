@@ -143,6 +143,9 @@ SONG_FIELDS = [
 ]
 
 CATALOG_FIELDS = [
+    "video_isrcs",
+    "catalog_aliases",
+    "video_relationships_json",
     "release_id",
     "catalog_key",
     "asset_isrc",
@@ -470,6 +473,10 @@ def build_catalog(source: Path, target: Path, release_id: str) -> None:
         frame.select(
             [
                 pl.lit(release_id).alias("release_id"),
+                *[(pl.col(name).cast(pl.List(pl.Utf8)) if name in columns
+                   else pl.lit(None, dtype=pl.List(pl.Utf8))).alias(name)
+                  for name in ["video_isrcs", "catalog_aliases"]],
+                text_expr(columns, ["video_relationships_json"]).alias("video_relationships_json"),
                 *[text_expr(columns, [name]).alias(name) for name in ["catalog_key", "asset_isrc", "track_id", "track_title", "artist_statement"]],
                 (pl.col("catalog_artists").cast(pl.List(pl.Utf8)) if "catalog_artists" in columns
                  else pl.lit(None, dtype=pl.List(pl.Utf8))).alias("catalog_artists"),
@@ -691,7 +698,10 @@ def catalog_artist_schema_sql(project: str, dataset: str) -> str:
         "ADD COLUMN IF NOT EXISTS catalog_artists ARRAY<STRING>, "
         "ADD COLUMN IF NOT EXISTS catalog_artist_statement STRING, "
         "ADD COLUMN IF NOT EXISTS catalog_artist_evidence STRING, "
-        "ADD COLUMN IF NOT EXISTS catalog_artist_rule STRING;"
+        "ADD COLUMN IF NOT EXISTS catalog_artist_rule STRING, "
+        "ADD COLUMN IF NOT EXISTS video_isrcs ARRAY<STRING>, "
+        "ADD COLUMN IF NOT EXISTS catalog_aliases ARRAY<STRING>, "
+        "ADD COLUMN IF NOT EXISTS video_relationships_json STRING;"
     )
 
 

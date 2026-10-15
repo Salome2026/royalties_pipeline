@@ -175,6 +175,10 @@ def catalog_alias_lookup(catalog_path: Path | None = None, *, catalog: pl.DataFr
         catalog = pl.read_parquet(catalog_path)
     rows: list[pl.DataFrame] = []
 
+    if {"catalog_aliases", "catalog_key"}.issubset(set(catalog.columns)):
+        rows.append(catalog.select("catalog_key", pl.col("catalog_aliases").alias("alias_catalog_key"))
+                    .explode("alias_catalog_key").filter(pl.col("alias_catalog_key").is_not_null()))
+
     if "catalog_key" in catalog.columns:
         rows.append(catalog.select([
             pl.col("catalog_key").alias("alias_catalog_key"),

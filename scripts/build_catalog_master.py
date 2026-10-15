@@ -10,6 +10,7 @@ from lib.distributor_policy_store import load_distributor_policy_document
 from lib.ada_identity import ada_catalog_key_expr
 from lib.catalog_manual_metadata import apply_catalog_manual_metadata
 from lib.fuga_catalog_artists import enrich_fuga_catalog_file
+from lib.catalog_video_metadata import apply_catalog_video_metadata
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -717,6 +718,7 @@ def build_catalog_master() -> pl.DataFrame:
 
     catalog = apply_catalog_manual_metadata(catalog)
     catalog = enrich_fuga_catalog_file(catalog, MARTS_DIR / "standardized_raw_fuga.parquet")
+    catalog = apply_catalog_video_metadata(catalog, registry_path=REGISTRY_DIR / "fuga_video_catalog_decisions.json")
     return catalog.sort("amount_usd", descending=True)
 
 

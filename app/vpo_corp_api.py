@@ -111,6 +111,7 @@ from build_custom_title_royalty_report import (  # noqa: E402
 )
 from lib.catalog_report_filter import apply_report_net_personalization, catalog_alias_lookup, filter_reportable_generation  # noqa: E402
 from lib.text_search import contains_search_expr, normalize_search_text  # noqa: E402
+from lib.catalog_video_metadata import video_search_expr  # noqa: E402
 from lib.distributor_policy_store import (  # noqa: E402
     load_distributor_policy_document,
     update_report_personalization,
@@ -8062,6 +8063,7 @@ def catalog_items(
     limit: int = 50,
     offset: int = 0,
     refresh_cache: bool = False,
+    video_relation_status: Literal["confirmed", "pending_confirmation", "video_only"] | None = None,
     x_vpo_api_key: str | None = Header(default=None),
 ):
     require_api_key(x_vpo_api_key)
@@ -8182,6 +8184,7 @@ def catalog_items(
                 | contains_search_expr(pl.col("asset_isrc"), needle)
                 | contains_search_expr(pl.col("title_variants"), needle)
                 | contains_search_expr(pl.col("artist_variants"), needle)
+                | video_search_expr(set(catalog.columns), needle)
                 | (
                     pl.col("sources").fill_null("").str.split(" | ").list.contains("ada")
                     & (
@@ -8191,6 +8194,14 @@ def catalog_items(
                     )
                 )
             )
+    if video_relation_status:
+        if "video_relationships_json" in catalog.columns:
+            keys = [row["catalog_key"] for row in catalog.select("catalog_key", "video_relationships_json").to_dicts()
+                    if any(relation["audio_relationship_status"] == video_relation_status
+                           for relation in json.loads(row["video_relationships_json"] or "[]"))]
+            filtered = filtered.filter(pl.col("catalog_key").is_in(keys))
+        else:
+            filtered = filtered.filter(pl.lit(False))
     if label:
         clean_label = label.strip()
         if clean_label == "__missing__":
@@ -8223,6 +8234,8 @@ def catalog_items(
         .collect()
         .to_dicts()
     )
+    for item in items:
+        item["video_relationships"] = json.loads(item.get("video_relationships_json") or "[]")
 
     return {
         "items": items,

@@ -7,6 +7,7 @@ async function responseError(response: Response, fallback: string) {
 
 export async function requestCatalog(query: CatalogQuery): Promise<CatalogData> {
   const params = new URLSearchParams();
+  if (query.videoRelationStatus) params.set("video_relation_status", query.videoRelationStatus);
   if (query.source) params.set("source", query.source);
   if (query.account) params.set("account", query.account);
   if (query.artist) params.set("artist", query.artist);

@@ -1,0 +1,776 @@
+{
+  "version": 1,
+  "reviewed_on": "2026-10-15",
+  "authorized_by": "usuario",
+  "scope": "Identificadores de video y relaciones de catalogo; no cambia ingresos, contratos o splits.",
+  "entries": [
+    {
+      "video_isrc": "ARS8H2500004",
+      "catalog_key": "ISRC:ARDL12500048",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "ARDL12500048",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
+      "video_ids": [
+        "cxX4-jOzY9g",
+        "nS8L4cXZ4I0"
+      ],
+      "youtube_asset_ids": [
+        "A354006057044222"
+      ],
+      "fuga_asset_ids": [
+        "1005433925798"
+      ],
+      "video_titles": [
+        "GUSTY DJ x @EzequielMatthysse - Diabla + Session en el Barrio #15 (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "Gusty dj; Ezequiel Matthysse"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "Sale ID y YouTube Asset ID historico",
+      "notes": "El titulo del video incluye Diabla + Session #15. El statement relaciona estas ventas con Session #15; conservar relacion de video compuesto, sin absorber Diabla ni repartirlo por inferencia.",
+      "is_composite_video": true
+    },
+    {
+      "video_isrc": "ARS8H2500005",
+      "catalog_key": "ISRC:ARDL12500050",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "ARDL12500050",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
+      "video_ids": [
+        "p6ZsJhn_CzQ"
+      ],
+      "youtube_asset_ids": [
+        "A873980215007666"
+      ],
+      "fuga_asset_ids": [
+        "1005489117242"
+      ],
+      "video_titles": [
+        "Candu Dominguez - Tu Último Baile (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "Candu Dominguez"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "Sale ID y YouTube Asset ID historico",
+      "notes": "Agregar como identificador de video relacionado, conservando el ISRC de audio.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2500006",
+      "catalog_key": "ISRC:ARDL12500051",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "ARDL12500051",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
+      "video_ids": [
+        "JuvswSSUW18",
+        "OplkzRT1vms"
+      ],
+      "youtube_asset_ids": [
+        "A166137920045175"
+      ],
+      "fuga_asset_ids": [
+        "1005506548093"
+      ],
+      "video_titles": [
+        "Grupo Red, Lolo OG, Nicole Fernandez - Amor de Adolescentes / No Podré Olvidarme de Ti | Remix"
+      ],
+      "video_artist_credits": [
+        "Grupo Red; Nicole Fernandez; Lolo OG"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "Sale ID y YouTube Asset ID historico",
+      "notes": "Agregar como identificador de video relacionado, conservando el ISRC de audio.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2500007",
+      "catalog_key": "ISRC:ARDL12500049",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "ARDL12500049",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
+      "video_ids": [
+        "g7G6i0rYvhk"
+      ],
+      "youtube_asset_ids": [
+        "A986943034895263"
+      ],
+      "fuga_asset_ids": [
+        "1005478317711"
+      ],
+      "video_titles": [
+        "Emiliano Nahuel - Somos de Barrio (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "Emiliano Nahuel"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "Sale ID y YouTube Asset ID historico",
+      "notes": "Agregar como identificador de video relacionado, conservando el ISRC de audio.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2500008",
+      "catalog_key": "VIDEO:a3uEMwacHBI",
+      "audio_relationship_status": "pending_confirmation",
+      "confirmed_audio_isrc": null,
+      "proposed_audio_isrc": "ARDL12500053",
+      "proposed_audio_title": "MAMI TE JURO PERREO TH",
+      "video_ids": [
+        "a3uEMwacHBI"
+      ],
+      "youtube_asset_ids": [
+        "A305521712986610"
+      ],
+      "fuga_asset_ids": [
+        "A305521712986610"
+      ],
+      "video_titles": [
+        "FACUU DJ x Mamiyosoyelth - MAMI TE JURO | PERREO TH (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "FACUU DJ; Mamiyosoyelth"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
+      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2500009",
+      "catalog_key": "VIDEO:3Ax-vrlWeYY",
+      "audio_relationship_status": "pending_confirmation",
+      "confirmed_audio_isrc": null,
+      "proposed_audio_isrc": "ARDL12500056",
+      "proposed_audio_title": "Por Ese Hombre",
+      "video_ids": [
+        "3Ax-vrlWeYY"
+      ],
+      "youtube_asset_ids": [
+        "A615054678694271"
+      ],
+      "fuga_asset_ids": [
+        "A615054678694271"
+      ],
+      "video_titles": [
+        "Aneley, Maxi Espindola, Valen - Por Ese Hombre (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "Aneley; Maxi Espindola"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
+      "notes": "El titulo incluye Valen, pero la lista de artistas del Extended lo omite. Conservar los creditos existentes; no reemplazarlos por la lista incompleta.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2500011",
+      "catalog_key": "VIDEO:8eeXRWfTUtk",
+      "audio_relationship_status": "pending_confirmation",
+      "confirmed_audio_isrc": null,
+      "proposed_audio_isrc": "ARDL12500059",
+      "proposed_audio_title": "Por Qué Tú",
+      "video_ids": [
+        "8eeXRWfTUtk"
+      ],
+      "youtube_asset_ids": [
+        "A615591025670166"
+      ],
+      "fuga_asset_ids": [
+        "A615591025670166"
+      ],
+      "video_titles": [
+        "Candu Dominguez - Por Qué Tú (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "Candu Dominguez"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
+      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2500012",
+      "catalog_key": "VIDEO:CkUfNnOvAcQ",
+      "audio_relationship_status": "video_only",
+      "confirmed_audio_isrc": null,
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
+      "video_ids": [
+        "CkUfNnOvAcQ"
+      ],
+      "youtube_asset_ids": [
+        "A738188893794555"
+      ],
+      "fuga_asset_ids": [
+        "A738188893794555"
+      ],
+      "video_titles": [
+        "LAALODJ, Los Anormales - Todo Ke Ver (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "LAALODJ; Los Anormales"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "YouTube Video ID exacto",
+      "notes": "Solo hay candidatos de audio llamados Todo Ke Ver de La Juntada De Los Artistas y Cumbia rocha, con dos ISRC distintos. No corresponden por creditos al video de LAALODJ y Los Anormales. No unir por titulo.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2500015",
+      "catalog_key": "VIDEO:ktyr2d3364s",
+      "audio_relationship_status": "pending_confirmation",
+      "confirmed_audio_isrc": null,
+      "proposed_audio_isrc": "ARDL12500072",
+      "proposed_audio_title": "Session Funk",
+      "video_ids": [
+        "ktyr2d3364s"
+      ],
+      "youtube_asset_ids": [
+        "A628147459558718"
+      ],
+      "fuga_asset_ids": [
+        "A628147459558718"
+      ],
+      "video_titles": [
+        "TOTI x FACUU DJ - Session Funk (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "TOTI; FACUU DJ"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
+      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2500017",
+      "catalog_key": "VIDEO:XYaMayZJlYw",
+      "audio_relationship_status": "pending_confirmation",
+      "confirmed_audio_isrc": null,
+      "proposed_audio_isrc": "ARDL12500084",
+      "proposed_audio_title": "Amigos No Por Favor",
+      "video_ids": [
+        "XYaMayZJlYw"
+      ],
+      "youtube_asset_ids": [
+        "A380347029192135"
+      ],
+      "fuga_asset_ids": [
+        "A380347029192135"
+      ],
+      "video_titles": [
+        "Aneley, Coty Hernandez - Amigos No Por Favor (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "Aneley; Coty Hernandez"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
+      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2500019",
+      "catalog_key": "VIDEO:mKX1lhIDkQc",
+      "audio_relationship_status": "pending_confirmation",
+      "confirmed_audio_isrc": null,
+      "proposed_audio_isrc": "ARDL12500085",
+      "proposed_audio_title": "La Oportunidad",
+      "video_ids": [
+        "mKX1lhIDkQc"
+      ],
+      "youtube_asset_ids": [
+        "A752729521412803"
+      ],
+      "fuga_asset_ids": [
+        "A752729521412803"
+      ],
+      "video_titles": [
+        "TATUM - La Oportunidad (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "Tatum 73"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
+      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2500027",
+      "catalog_key": "ISRC:ARDL12500089",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "ARDL12500089",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
+      "video_ids": [
+        "8CUvkg_Y4XM"
+      ],
+      "youtube_asset_ids": [
+        "A152214979784865"
+      ],
+      "fuga_asset_ids": [
+        "1006623493861"
+      ],
+      "video_titles": [
+        "Candu Dominguez, Fak - Qué Ironía (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "Candu Dominguez; Fak"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "Sale ID y YouTube Asset ID historico",
+      "notes": "El mismo video aparece tambien en VIDEO:8CUvkg_Y4XM, ficha de identidad sin filas economicas propias. Vincularla como alias; no sumar otra vez su evidencia de identidad.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2600001",
+      "catalog_key": "VIDEO:zQUvE7SYFp8",
+      "audio_relationship_status": "pending_confirmation",
+      "confirmed_audio_isrc": null,
+      "proposed_audio_isrc": "ARDL12600002",
+      "proposed_audio_title": "LLEGÓ EL VERANO",
+      "video_ids": [
+        "zQUvE7SYFp8"
+      ],
+      "youtube_asset_ids": [
+        "A291982129071648"
+      ],
+      "fuga_asset_ids": [
+        "A291982129071648"
+      ],
+      "video_titles": [
+        "FACUU DJ x MC TOTA - LLEGÓ EL VERANO (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "FACUU DJ; Mc Tota"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
+      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2600003",
+      "catalog_key": "VIDEO:RrfbwooTsLU",
+      "audio_relationship_status": "pending_confirmation",
+      "confirmed_audio_isrc": null,
+      "proposed_audio_isrc": "ARDL12600018",
+      "proposed_audio_title": "KANDELA RKT",
+      "video_ids": [
+        "RrfbwooTsLU"
+      ],
+      "youtube_asset_ids": [
+        "A190354936208554"
+      ],
+      "fuga_asset_ids": [
+        "A190354936208554"
+      ],
+      "video_titles": [
+        "KANDELA RKT - LAALODJ, @sheafiel. @SimoVianiOfficial (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "LAALODJ; sheafiel; Simo Viani"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
+      "notes": "sheafiel en Extended y sheafiell en audio. Diferencia de escritura; verificar alias antes de unificar artistas.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2600004",
+      "catalog_key": "VIDEO:RuPltncHdUk",
+      "audio_relationship_status": "pending_confirmation",
+      "confirmed_audio_isrc": null,
+      "proposed_audio_isrc": "ARDL12600019",
+      "proposed_audio_title": "PERREO TH 8",
+      "video_ids": [
+        "RuPltncHdUk"
+      ],
+      "youtube_asset_ids": [
+        "A584838780933866"
+      ],
+      "fuga_asset_ids": [
+        "A584838780933866"
+      ],
+      "video_titles": [
+        "PERREO TH 8 - Mamiyosoyelth, DJ Plaga (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "mamiyosoyelth; DJ Plaga"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
+      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2600005",
+      "catalog_key": "VIDEO:AgARTZfnERM",
+      "audio_relationship_status": "video_only",
+      "confirmed_audio_isrc": null,
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
+      "video_ids": [
+        "AgARTZfnERM"
+      ],
+      "youtube_asset_ids": [
+        "A168511544047220"
+      ],
+      "fuga_asset_ids": [
+        "A168511544047220"
+      ],
+      "video_titles": [
+        "Set Live RKT #4 (Edicion Verano) - FACUU DJ"
+      ],
+      "video_artist_credits": [
+        "FACUU DJ"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "YouTube Video ID exacto",
+      "notes": "No se encontro una correspondencia de audio suficientemente identificada para este Set Live #4. Mantener el video existente.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2600006",
+      "catalog_key": "ISRC:ARDL12600020",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "ARDL12600020",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
+      "video_ids": [
+        "uUGTgMyAttE"
+      ],
+      "youtube_asset_ids": [
+        "A600278967414072"
+      ],
+      "fuga_asset_ids": [
+        "1007694114721"
+      ],
+      "video_titles": [
+        "Dos Corazones - GUSTY DJ, Candu Dominguez, G Sony (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "Gusty dj; Candu Dominguez; G Sony"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "Sale ID y YouTube Asset ID historico",
+      "notes": "Agregar como identificador de video relacionado, conservando el ISRC de audio.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2600009",
+      "catalog_key": "VIDEO:lkAd2qScNuc",
+      "audio_relationship_status": "pending_confirmation",
+      "confirmed_audio_isrc": null,
+      "proposed_audio_isrc": "QT5M52695720",
+      "proposed_audio_title": "Cosas del Amor",
+      "video_ids": [
+        "lkAd2qScNuc"
+      ],
+      "youtube_asset_ids": [
+        "A379308909337092"
+      ],
+      "fuga_asset_ids": [
+        "A379308909337092"
+      ],
+      "video_titles": [
+        "Aneley, Candu Dominguez - Cosas del Amor (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "Aneley; Candu Dominguez"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
+      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2600011",
+      "catalog_key": "VIDEO:Ub31gB4XKYs",
+      "audio_relationship_status": "pending_confirmation",
+      "confirmed_audio_isrc": null,
+      "proposed_audio_isrc": "QT5M62683310",
+      "proposed_audio_title": "Nunca Voy a Olvidarte / Me Muero / Tú",
+      "video_ids": [
+        "Ub31gB4XKYs"
+      ],
+      "youtube_asset_ids": [
+        "A905477913274244"
+      ],
+      "fuga_asset_ids": [
+        "A905477913274244"
+      ],
+      "video_titles": [
+        "Aneley - Nunca Voy a Olvidarte / Me Muero / Tú (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "Aneley"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
+      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2600014",
+      "catalog_key": "VIDEO:YFBYqJeRzms",
+      "audio_relationship_status": "pending_confirmation",
+      "confirmed_audio_isrc": null,
+      "proposed_audio_isrc": "ARDL12600076",
+      "proposed_audio_title": "Oro y Platino",
+      "video_ids": [
+        "YFBYqJeRzms"
+      ],
+      "youtube_asset_ids": [
+        "A600815487605120"
+      ],
+      "fuga_asset_ids": [
+        "A600815487605120"
+      ],
+      "video_titles": [
+        "FACUU DJ, Issa The Kid - ORO Y PLATINO (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "FACUU DJ; Issa The Kid"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
+      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2600018",
+      "catalog_key": "ISRC:ARDL12600095",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "ARDL12600095",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
+      "video_ids": [
+        "9EgcJGgFtIw"
+      ],
+      "youtube_asset_ids": [
+        "A494671652419226"
+      ],
+      "fuga_asset_ids": [
+        "1008953481279"
+      ],
+      "video_titles": [
+        "FACUU DJ, MC GAA, PAPU DJ - Llegó la 26 - (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "FACUU DJ; MC GAA; PAPU DJ"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "Sale ID y YouTube Asset ID historico",
+      "notes": "Agregar como identificador de video relacionado, conservando el ISRC de audio.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2600019",
+      "catalog_key": "ISRC:QZTB62504366",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "QZTB62504366",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
+      "video_ids": [
+        "LZJSvkx13LI"
+      ],
+      "youtube_asset_ids": [
+        "A905072016613760"
+      ],
+      "fuga_asset_ids": [
+        "1007123255727"
+      ],
+      "video_titles": [
+        "Perreo mamiyosoyelth"
+      ],
+      "video_artist_credits": [
+        "mamiyosoyelth"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "Sale ID y YouTube Asset ID historico",
+      "notes": "El mismo video aparece tambien en VIDEO:LZJSvkx13LI, con el titulo PERREO TICKET, ficha de identidad sin filas economicas propias. Vincularla como alias, conservando el titulo alternativo.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2600023",
+      "catalog_key": "VIDEO:7bIu2EKopyc",
+      "audio_relationship_status": "pending_confirmation",
+      "confirmed_audio_isrc": null,
+      "proposed_audio_isrc": "ARDL12600105",
+      "proposed_audio_title": "Berretines al 0800",
+      "video_ids": [
+        "7bIu2EKopyc"
+      ],
+      "youtube_asset_ids": [
+        "A342511796518551"
+      ],
+      "fuga_asset_ids": [
+        "A342511796518551"
+      ],
+      "video_titles": [
+        "SoyTiara - Berretines al 0800 (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "SoyTiara"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
+      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2600024",
+      "catalog_key": "VIDEO:r45FjcDlBF8",
+      "audio_relationship_status": "pending_confirmation",
+      "confirmed_audio_isrc": null,
+      "proposed_audio_isrc": "QT8BW2649774",
+      "proposed_audio_title": "Imaginando La Gloria",
+      "video_ids": [
+        "r45FjcDlBF8"
+      ],
+      "youtube_asset_ids": [
+        "A495530322471533"
+      ],
+      "fuga_asset_ids": [
+        "A495530322471533"
+      ],
+      "video_titles": [
+        "Aneley, Para El Mundo - Imaginando La Gloria (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "Aneley; Para El Mundo"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
+      "notes": "El video acredita Para El Mundo y el audio figura con Aneley. Conservar ambos creditos con su fuente; no sobrescribir artistas ni contratos.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2600025",
+      "catalog_key": "VIDEO:iNaADuQMAxE",
+      "audio_relationship_status": "pending_confirmation",
+      "confirmed_audio_isrc": null,
+      "proposed_audio_isrc": "BK4DA2658122",
+      "proposed_audio_title": "Fui Nada",
+      "video_ids": [
+        "iNaADuQMAxE"
+      ],
+      "youtube_asset_ids": [
+        "A615008081981616"
+      ],
+      "fuga_asset_ids": [
+        "A615008081981616"
+      ],
+      "video_titles": [
+        "Fui Nada"
+      ],
+      "video_artist_credits": [
+        "G Sony; Ke Locura; Damaris"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
+      "notes": "Extended: G Sony / Ke Locura / Damaris. ADA: G Sony / Q' Lokura / DAMARIS / Kekelandia. Correspondencia propuesta por titulo y participantes; confirmar la variante de credito y version.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2600026",
+      "catalog_key": "VIDEO:UAF7fCYI41c",
+      "audio_relationship_status": "pending_confirmation",
+      "confirmed_audio_isrc": null,
+      "proposed_audio_isrc": "QMBZ92656367",
+      "proposed_audio_title": "LA CALLE ME LLAMA RKT",
+      "video_ids": [
+        "UAF7fCYI41c"
+      ],
+      "youtube_asset_ids": [
+        "A416873951849042"
+      ],
+      "fuga_asset_ids": [
+        "A416873951849042"
+      ],
+      "video_titles": [
+        "LAALODJ, Fede Tarifeño - LA CALLE ME LLAMA RKT (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "LAALODJ; Fede Tarifeño"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
+      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2600027",
+      "catalog_key": "VIDEO:qlQPBWedRSs",
+      "audio_relationship_status": "pending_confirmation",
+      "confirmed_audio_isrc": null,
+      "proposed_audio_isrc": "BK4DA2658121",
+      "proposed_audio_title": "Alerta",
+      "video_ids": [
+        "qlQPBWedRSs"
+      ],
+      "youtube_asset_ids": [
+        "A412734218338195"
+      ],
+      "fuga_asset_ids": [
+        "A412734218338195"
+      ],
+      "video_titles": [
+        "ALERTA - GUSTY DJ, Alejo Isakk, Loyaltty (Video Oficial)"
+      ],
+      "video_artist_credits": [
+        "Gusty dj; Alejo Isakk; Loyaltty"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
+      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "is_composite_video": false
+    },
+    {
+      "video_isrc": "ARS8H2600030",
+      "catalog_key": "VIDEO:ihDbZiJlZQU",
+      "audio_relationship_status": "pending_confirmation",
+      "confirmed_audio_isrc": null,
+      "proposed_audio_isrc": "ARDL12600108",
+      "proposed_audio_title": "PERREO TE CHOKO",
+      "video_ids": [
+        "ihDbZiJlZQU"
+      ],
+      "youtube_asset_ids": [
+        "A454326707902958"
+      ],
+      "fuga_asset_ids": [
+        "A454326707902958"
+      ],
+      "video_titles": [
+        "PERREO TE CHOKO - Mamiyosoyelth, Alejo Isakk, El Pesa 9, Eric Santana, Lihueeel, Guarra"
+      ],
+      "video_artist_credits": [
+        "mamiyosoyelth; Alejo Isakk; El Pesa 9; Eric Santana; Lihueeel; Guarra"
+      ],
+      "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
+      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
+      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "is_composite_video": false
+    }
+  ],
+  "aliases": [
+    {
+      "alias_catalog_key": "VIDEO:8CUvkg_Y4XM",
+      "catalog_key": "ISRC:ARDL12500089"
+    },
+    {
+      "alias_catalog_key": "VIDEO:LZJSvkx13LI",
+      "catalog_key": "ISRC:QZTB62504366"
+    }
+  ]
+}

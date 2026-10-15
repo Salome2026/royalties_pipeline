@@ -15,7 +15,7 @@ import {
 import { PeriodControl } from "../../components/PeriodControl";
 import { isResolvedPeriodInvalid, resolvePeriod, type PeriodSelection } from "../../lib/period";
 import { requestCatalog, requestCatalogUpdate } from "./api";
-import type { CatalogData, CatalogInitialFilter, CatalogItem, CatalogStatus } from "./types";
+import type { CatalogData, CatalogInitialFilter, CatalogItem, CatalogStatus, VideoRelationStatus } from "./types";
 import styles from "./CatalogModule.module.css";
 
 type Message = { type: "ok" | "error"; text: string };
@@ -51,6 +51,7 @@ export function CatalogModule({ canEdit, initialFilter, onMessage }: Props) {
   const [label, setLabel] = useState("");
   const [period, setPeriod] = useState<PeriodSelection>({ mode: "all" });
   const [status, setStatus] = useState<CatalogStatus>(initialFilter?.status || "active");
+  const [videoRelationStatus, setVideoRelationStatus] = useState<VideoRelationStatus>("");
   const [offset, setOffset] = useState(0);
   const [labelEditKey, setLabelEditKey] = useState("");
   const [labelDraft, setLabelDraft] = useState("");
@@ -74,6 +75,7 @@ export function CatalogModule({ canEdit, initialFilter, onMessage }: Props) {
         startMonth: resolvedPeriod.startMonth,
         endMonth: resolvedPeriod.endMonth,
         status,
+        videoRelationStatus,
         limit: PAGE_SIZE,
         offset: nextOffset,
       });
@@ -84,7 +86,7 @@ export function CatalogModule({ canEdit, initialFilter, onMessage }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [account, appliedKeyword, artist, label, onMessage, resolvedPeriod, source, status]);
+  }, [account, appliedKeyword, artist, label, onMessage, resolvedPeriod, source, status, videoRelationStatus]);
 
   useEffect(() => {
     void loadCatalog(0);
@@ -114,6 +116,7 @@ export function CatalogModule({ canEdit, initialFilter, onMessage }: Props) {
     setLabel("");
     setPeriod({ mode: "all" });
     setStatus("active");
+    setVideoRelationStatus("");
     setOffset(0);
   }
 
@@ -239,6 +242,15 @@ export function CatalogModule({ canEdit, initialFilter, onMessage }: Props) {
           </select>
         </div>
         <button type="button" className={styles.clearButton} onClick={clearFilters}>Limpiar</button>
+        <div className={styles.field}>
+          <label htmlFor="catalog_video_relation">Relación video / audio</label>
+          <select id="catalog_video_relation" value={videoRelationStatus} onChange={(event) => { setVideoRelationStatus(event.target.value as VideoRelationStatus); setOffset(0); }}>
+            <option value="">Todas</option>
+            <option value="confirmed">Confirmada</option>
+            <option value="pending_confirmation">Pendiente de confirmar</option>
+            <option value="video_only">Solo video</option>
+          </select>
+        </div>
       </form>
 
       <div className={styles.metrics} aria-label="Resumen del catálogo">
@@ -281,6 +293,8 @@ export function CatalogModule({ canEdit, initialFilter, onMessage }: Props) {
                 <td data-label="Identidad" className={styles.identityCell}>
                   <strong>{item.asset_isrc || item.track_id || "-"}</strong>
                   <small title={item.catalog_key}>{item.catalog_key}</small>
+                  {item.video_isrcs?.map((code) => <small key={code}>ISRC de video: {code}</small>)}
+                  {Boolean(item.catalog_aliases?.length) && <small>Alias: {item.catalog_aliases?.join(" · ")}</small>}
                 </td>
                 <td data-label="Distribución">
                   <strong>{item.sources || "-"}</strong>
@@ -292,6 +306,15 @@ export function CatalogModule({ canEdit, initialFilter, onMessage }: Props) {
                 <td data-label="Metadata">
                   <strong>{item.external_release_date || "Sin release"}</strong>
                   {item.external_match_url && <a href={item.external_match_url} target="_blank" rel="noreferrer">Abrir <ExternalLink size={12} /></a>}
+                  {item.video_relationships?.map((relation) => (
+                    <details key={relation.video_isrc}>
+                      <summary>{relation.audio_relationship_status === "confirmed" ? "Video relacionado: confirmado" : relation.audio_relationship_status === "pending_confirmation" ? "Audio propuesto: pendiente de confirmar" : "Video identificado"}</summary>
+                      {relation.confirmed_audio_isrc && <p>Audio: {relation.confirmed_audio_isrc}</p>}
+                      {relation.proposed_audio_isrc && <p>{relation.proposed_audio_title} · {relation.proposed_audio_isrc}</p>}
+                      {relation.audio_relationship_status === "pending_confirmation" && <p>Falta confirmar que sea la misma grabación o versión mediante la ficha del lanzamiento o la comparación del audio.</p>}
+                      <p>{relation.notes}</p>
+                    </details>
+                  ))}
                 </td>
                 <td data-label="Label" className={styles.labelCell}>
                   {labelEditKey === item.catalog_key ? (

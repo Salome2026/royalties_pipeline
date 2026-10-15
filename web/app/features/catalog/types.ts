@@ -1,4 +1,14 @@
 export type CatalogStatus = "active" | "inactive" | "all";
+export type VideoRelationStatus = "" | "confirmed" | "pending_confirmation" | "video_only";
+export type CatalogVideoRelationship = {
+  video_isrc: string;
+  audio_relationship_status: Exclude<VideoRelationStatus, "">;
+  confirmed_audio_isrc: string | null;
+  proposed_audio_isrc: string | null;
+  proposed_audio_title: string | null;
+  is_composite_video: boolean;
+  notes: string;
+};
 
 export type CatalogInitialFilter = {
   source?: string;
@@ -8,6 +18,9 @@ export type CatalogInitialFilter = {
 };
 
 export type CatalogItem = {
+  video_isrcs?: string[];
+  catalog_aliases?: string[];
+  video_relationships?: CatalogVideoRelationship[];
   catalog_key: string;
   asset_isrc: string | null;
   track_id: string | null;
@@ -56,6 +69,7 @@ export type CatalogData = {
 };
 
 export type CatalogQuery = {
+  videoRelationStatus?: VideoRelationStatus;
   source: string;
   account: string;
   artist: string;
