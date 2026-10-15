@@ -59,8 +59,11 @@ class RecordingLookup:
                     if (version in video_title) != (version in normalized(title)):
                         return None
             result = {"basis": "exact_isrc_release_and_official_video_metadata", "release_url": track.get("external_urls", {}).get("spotify"), "release_date": release_date.isoformat(), "duration_ms": track["duration_ms"], "videos": [{"id": item["id"], "title": item["snippet"]["title"], "published_at": item["snippet"]["publishedAt"], "duration": item["contentDetails"]["duration"]} for item in items], "audio_fingerprint_comparison_performed": False}
-        except (requests.RequestException, ValueError, KeyError, TypeError):
+        except requests.RequestException:
             # Stop provider requests on failures/quota limits. A later ingestion retries.
             self.unavailable = True
+        except (ValueError, KeyError, TypeError):
+            # An incomplete release is not a provider outage for other recordings.
+            result = None
         self.cache[key] = result
         return result
