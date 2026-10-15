@@ -8063,7 +8063,7 @@ def catalog_items(
     limit: int = 50,
     offset: int = 0,
     refresh_cache: bool = False,
-    video_relation_status: Literal["confirmed", "pending_confirmation", "video_only"] | None = None,
+    video_relation_status: Literal["confirmed", "pending_confirmation", "video_only", "not_linked"] | None = None,
     x_vpo_api_key: str | None = Header(default=None),
 ):
     require_api_key(x_vpo_api_key)

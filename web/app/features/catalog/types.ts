@@ -1,5 +1,5 @@
 export type CatalogStatus = "active" | "inactive" | "all";
-export type VideoRelationStatus = "" | "confirmed" | "pending_confirmation" | "video_only";
+export type VideoRelationStatus = "" | "confirmed" | "pending_confirmation" | "video_only" | "not_linked";
 export type CatalogVideoRelationship = {
   video_isrc: string;
   audio_relationship_status: Exclude<VideoRelationStatus, "">;
@@ -8,6 +8,9 @@ export type CatalogVideoRelationship = {
   proposed_audio_title: string | null;
   is_composite_video: boolean;
   notes: string;
+  review_closed?: boolean;
+  requires_user_confirmation?: boolean;
+  recording_evidence?: { official_video_url: string; release: { url: string } };
 };
 
 export type CatalogInitialFilter = {

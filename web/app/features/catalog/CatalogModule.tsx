@@ -247,7 +247,7 @@ export function CatalogModule({ canEdit, initialFilter, onMessage }: Props) {
           <select id="catalog_video_relation" value={videoRelationStatus} onChange={(event) => { setVideoRelationStatus(event.target.value as VideoRelationStatus); setOffset(0); }}>
             <option value="">Todas</option>
             <option value="confirmed">Confirmada</option>
-            <option value="pending_confirmation">Pendiente de confirmar</option>
+            <option value="not_linked">Revisión cerrada sin vínculo</option>
             <option value="video_only">Solo video</option>
           </select>
         </div>
@@ -308,10 +308,11 @@ export function CatalogModule({ canEdit, initialFilter, onMessage }: Props) {
                   {item.external_match_url && <a href={item.external_match_url} target="_blank" rel="noreferrer">Abrir <ExternalLink size={12} /></a>}
                   {item.video_relationships?.map((relation) => (
                     <details key={relation.video_isrc}>
-                      <summary>{relation.audio_relationship_status === "confirmed" ? "Video relacionado: confirmado" : relation.audio_relationship_status === "pending_confirmation" ? "Audio propuesto: pendiente de confirmar" : "Video identificado"}</summary>
+                      <summary>{relation.audio_relationship_status === "confirmed" ? "Video relacionado: confirmado" : relation.audio_relationship_status === "not_linked" ? "Revisión cerrada: sin vínculo comprobado" : relation.audio_relationship_status === "pending_confirmation" ? "Relación sin comprobar" : "Video identificado"}</summary>
                       {relation.confirmed_audio_isrc && <p>Audio: {relation.confirmed_audio_isrc}</p>}
                       {relation.proposed_audio_isrc && <p>{relation.proposed_audio_title} · {relation.proposed_audio_isrc}</p>}
-                      {relation.audio_relationship_status === "pending_confirmation" && <p>Falta confirmar que sea la misma grabación o versión mediante la ficha del lanzamiento o la comparación del audio.</p>}
+                      {relation.audio_relationship_status === "not_linked" && <p>Se conserva el video por separado. No requiere confirmación de un usuario.</p>}
+                      {relation.recording_evidence && <p><a href={relation.recording_evidence.official_video_url} target="_blank" rel="noreferrer">Video oficial</a> · <a href={relation.recording_evidence.release.url} target="_blank" rel="noreferrer">Lanzamiento contrastado</a></p>}
                       <p>{relation.notes}</p>
                     </details>
                   ))}

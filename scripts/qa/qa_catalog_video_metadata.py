@@ -30,6 +30,11 @@ class CatalogVideoMetadataTests(unittest.TestCase):
 
     def decisions(self):
         registry=load_decisions()
+        # Legacy pending evidence must remain non-operative; production decisions are now closed.
+        registry=copy.deepcopy(registry)
+        legacy=next(entry for entry in registry['entries'] if entry['video_isrc']=='ARS8H2600025')
+        legacy.update(audio_relationship_status='pending_confirmation',confirmed_audio_isrc=None,
+                      proposed_audio_isrc='BK4DA2658122',proposed_audio_title='Fui Nada')
         return {**registry,"entries":[entry for entry in registry['entries'] if entry['video_isrc'] in ['ARS8H2500027','ARS8H2600025']],
                 'aliases':[registry['aliases'][0]]}
 
@@ -80,8 +85,9 @@ class CatalogVideoMetadataTests(unittest.TestCase):
         registry=load_decisions()
         statuses=[entry['audio_relationship_status'] for entry in registry['entries']]
         self.assertEqual(len(registry['entries']),28)
-        self.assertEqual(statuses.count('confirmed'),8)
-        self.assertEqual(statuses.count('pending_confirmation'),18)
+        self.assertEqual(statuses.count('confirmed'),25)
+        self.assertEqual(statuses.count('pending_confirmation'),0)
+        self.assertEqual(statuses.count('not_linked'),1)
         self.assertEqual(statuses.count('video_only'),2)
         self.assertEqual(len(registry['aliases']),2)
         medley=next(entry for entry in registry['entries'] if entry['video_isrc']=='ARS8H2500004')
@@ -109,6 +115,42 @@ class CatalogVideoMetadataTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             path=Path(temp)/'decisions.json';path.write_text(json.dumps(data))
             with self.assertRaisesRegex(ValueError,'repetido'):load_decisions(path)
+
+    def test_confirmed_video_keeps_its_financial_rows_and_does_not_become_an_audio_alias(self):
+        decisions=self.decisions()
+        entry=next(item for item in decisions['entries'] if item['video_isrc']=='ARS8H2600025')
+        entry.update(audio_relationship_status='confirmed',confirmed_audio_isrc='BK4DA2658122',proposed_audio_isrc=None)
+        catalog=self.catalog()
+        audio=catalog.head(1).with_columns(pl.lit('ISRC:BK4DA2658122').alias('catalog_key'),
+            pl.lit('BK4DA2658122').alias('asset_isrc'),pl.lit('Fui Nada').alias('track_title'),
+            pl.lit('').alias('video_ids'),pl.lit('BK4DA2658122').alias('isrcs'))
+        before=pl.concat([catalog,audio])
+        after=apply_catalog_video_metadata(before,decisions=decisions)
+        for key in ['ISRC:BK4DA2658122','VIDEO:iNaADuQMAxE']:
+            assert_frame_equal(before.filter(pl.col('catalog_key')==key).select('catalog_key','amount_usd','units','song_level_rows'),
+                               after.filter(pl.col('catalog_key')==key).select('catalog_key','amount_usd','units','song_level_rows'))
+        lookup=catalog_alias_lookup(catalog=after)
+        self.assertEqual(lookup.filter(pl.col('alias_catalog_key')=='VIDEO:iNaADuQMAxE')['catalog_key'][0],'VIDEO:iNaADuQMAxE')
+
+    def test_closed_unlinked_review_never_requests_user_approval_or_assigns_an_audio(self):
+        decisions=self.decisions()
+        entry=next(item for item in decisions['entries'] if item['video_isrc']=='ARS8H2600025')
+        entry.update(audio_relationship_status='not_linked',confirmed_audio_isrc=None,proposed_audio_isrc=None,
+                     review_closed=True,requires_user_confirmation=False,notes='No se comprobo la misma version.')
+        result=apply_catalog_video_metadata(self.catalog(),decisions=decisions)
+        row=result.filter(pl.col('catalog_key')=='VIDEO:iNaADuQMAxE').to_dicts()[0]
+        review=json.loads(row['video_relationships_json'])[0]
+        self.assertEqual(review['audio_relationship_status'],'not_linked')
+        self.assertFalse(review['requires_user_confirmation'])
+        self.assertEqual(row['amount_usd'],50.)
+
+    def test_closed_unlinked_decision_requires_a_reason_and_no_user_action(self):
+        data=load_decisions()
+        entry=next(item for item in data['entries'] if item['audio_relationship_status']=='not_linked')
+        entry['requires_user_confirmation']=True
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/'decisions.json';path.write_text(json.dumps(data))
+            with self.assertRaisesRegex(ValueError,'sin aprobacion pendiente'):load_decisions(path)
 
 
 if __name__=='__main__':unittest.main()

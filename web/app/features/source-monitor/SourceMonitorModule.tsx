@@ -316,10 +316,10 @@ export function SourceMonitorModule({
                     <details key={audit.file_name}>
                       <summary>YouTube Extended · {audit.status === "validated" ? "Comparado" : audit.status === "pending" ? "Pendiente" : "Requiere revisión"} · {audit.rows.toLocaleString("es-AR")} filas</summary>
                       <p>{audit.file_name}</p>
-                      <p>{audit.reason}</p>
+                      <p>{audit.reason.replace("ISRC para revisar:", "Filas con ISRC de video diferente:")}</p>
                       {audit.additional_fields?.["YouTube Video Title"] && <p>Títulos de video conservados: {audit.additional_fields["YouTube Video Title"].distinct_values.toLocaleString("es-AR")}.</p>}
                       {audit.additional_fields?.["YouTube Channel Display Name"] && <p>Nombres de canal conservados: {audit.additional_fields["YouTube Channel Display Name"].distinct_values.toLocaleString("es-AR")}.</p>}
-                      {Boolean(audit.isrc_review_rows) && <p>Los identificadores de video y audio se conservan por separado para revisión del catálogo.</p>}
+                      {Boolean(audit.isrc_review_rows) && <p>Los identificadores de video y audio se conservan por separado. Las relaciones y el resultado de su revisión se consultan en el catálogo.</p>}
                       {audit.isrc_review_examples?.map((row) => (
                         <p key={row["Sale ID"]}>Video: {row["YouTube Asset ISRC"]} · Principal: {row["native__Asset ISRC"] || "sin ISRC"}</p>
                       ))}

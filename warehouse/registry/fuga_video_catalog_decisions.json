@@ -117,10 +117,10 @@
     {
       "video_isrc": "ARS8H2500008",
       "catalog_key": "VIDEO:a3uEMwacHBI",
-      "audio_relationship_status": "pending_confirmation",
-      "confirmed_audio_isrc": null,
-      "proposed_audio_isrc": "ARDL12500053",
-      "proposed_audio_title": "MAMI TE JURO PERREO TH",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "ARDL12500053",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
       "video_ids": [
         "a3uEMwacHBI"
       ],
@@ -137,17 +137,44 @@
         "FACUU DJ; Mamiyosoyelth"
       ],
       "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
-      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
-      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
-      "is_composite_video": false
+      "evidence": "Relacion de lanzamiento confirmada por fuentes oficiales e identificadores de distribucion",
+      "notes": "Relacion del video oficial con el lanzamiento ARDL12500053 confirmada por publicaciones oficiales, participantes, fecha y duracion compatible (video 124 s; audio 123.564 s). Se conservan las fichas e ingresos originales; la relacion no suma importes ni aplica contratos automaticamente. ",
+      "is_composite_video": false,
+      "prior_review_notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "reviewed_audio_candidate_isrc": "ARDL12500053",
+      "reviewed_audio_candidate_title": "MAMI TE JURO PERREO TH",
+      "review_closed": true,
+      "requires_user_confirmation": false,
+      "recording_evidence": {
+        "checked_at": "2026-10-15T15:56:00.335540+00:00",
+        "official_video_url": "https://www.youtube.com/watch?v=a3uEMwacHBI",
+        "official_video_title": "MAMI TE JURO | PERREO TH - FACUU DJ x MAMIYOSOYELTH  (Video Oficial)",
+        "official_channel": "FACUU DJ",
+        "video_published_at": "2025-09-12T00:00:06Z",
+        "video_duration_seconds": 124,
+        "release": {
+          "url": "https://open.spotify.com/track/3ar4EMjmQkJB6J9iwyWRaN",
+          "isrc": "ARDL12500053",
+          "duration_ms": 123564,
+          "release_date": "2025-09-11",
+          "title": "MAMI TE JURO - PERREO TH",
+          "artists": [
+            "FACUU DJ",
+            "mamiyosoyelth"
+          ]
+        },
+        "duration_difference_seconds": 0.436,
+        "audio_fingerprint_comparison_performed": false,
+        "basis": "Cruce de publicaciones oficiales, ISRC del distribuidor, artistas, fecha y duracion; no prueba de identidad bit a bit."
+      }
     },
     {
       "video_isrc": "ARS8H2500009",
       "catalog_key": "VIDEO:3Ax-vrlWeYY",
-      "audio_relationship_status": "pending_confirmation",
-      "confirmed_audio_isrc": null,
-      "proposed_audio_isrc": "ARDL12500056",
-      "proposed_audio_title": "Por Ese Hombre",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "ARDL12500056",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
       "video_ids": [
         "3Ax-vrlWeYY"
       ],
@@ -164,17 +191,45 @@
         "Aneley; Maxi Espindola"
       ],
       "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
-      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
-      "notes": "El titulo incluye Valen, pero la lista de artistas del Extended lo omite. Conservar los creditos existentes; no reemplazarlos por la lista incompleta.",
-      "is_composite_video": false
+      "evidence": "Relacion de lanzamiento confirmada por fuentes oficiales e identificadores de distribucion",
+      "notes": "Relacion del video oficial con el lanzamiento ARDL12500056 confirmada por publicaciones oficiales, participantes, fecha y duracion compatible (video 261 s; audio 254.333 s). Se conservan las fichas e ingresos originales; la relacion no suma importes ni aplica contratos automaticamente. El video oficial y Spotify acreditan a Valen; la omision en la lista del Extended no corresponde a otra version.",
+      "is_composite_video": false,
+      "prior_review_notes": "El titulo incluye Valen, pero la lista de artistas del Extended lo omite. Conservar los creditos existentes; no reemplazarlos por la lista incompleta.",
+      "reviewed_audio_candidate_isrc": "ARDL12500056",
+      "reviewed_audio_candidate_title": "Por Ese Hombre",
+      "review_closed": true,
+      "requires_user_confirmation": false,
+      "recording_evidence": {
+        "checked_at": "2026-10-15T15:56:00.335760+00:00",
+        "official_video_url": "https://www.youtube.com/watch?v=3Ax-vrlWeYY",
+        "official_video_title": "Aneley, Maxi Espindola, Valen - Por Ese Hombre (Video Oficial) Set Game 1",
+        "official_channel": "Aneley Oficial",
+        "video_published_at": "2025-10-02T23:00:06Z",
+        "video_duration_seconds": 261,
+        "release": {
+          "url": "https://open.spotify.com/track/4LLM1vflM6qCdFVsJPiq1p",
+          "isrc": "ARDL12500056",
+          "duration_ms": 254333,
+          "release_date": "2025-10-02",
+          "title": "Por Ese Hombre",
+          "artists": [
+            "Aneley",
+            "Maxi Espindola",
+            "Valen"
+          ]
+        },
+        "duration_difference_seconds": 6.667,
+        "audio_fingerprint_comparison_performed": false,
+        "basis": "Cruce de publicaciones oficiales, ISRC del distribuidor, artistas, fecha y duracion; no prueba de identidad bit a bit."
+      }
     },
     {
       "video_isrc": "ARS8H2500011",
       "catalog_key": "VIDEO:8eeXRWfTUtk",
-      "audio_relationship_status": "pending_confirmation",
-      "confirmed_audio_isrc": null,
-      "proposed_audio_isrc": "ARDL12500059",
-      "proposed_audio_title": "Por Qué Tú",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "ARDL12500059",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
       "video_ids": [
         "8eeXRWfTUtk"
       ],
@@ -191,9 +246,35 @@
         "Candu Dominguez"
       ],
       "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
-      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
-      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
-      "is_composite_video": false
+      "evidence": "Relacion de lanzamiento confirmada por fuentes oficiales e identificadores de distribucion",
+      "notes": "Relacion del video oficial con el lanzamiento ARDL12500059 confirmada por publicaciones oficiales, participantes, fecha y duracion compatible (video 167 s; audio 165.000 s). Se conservan las fichas e ingresos originales; la relacion no suma importes ni aplica contratos automaticamente. ",
+      "is_composite_video": false,
+      "prior_review_notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "reviewed_audio_candidate_isrc": "ARDL12500059",
+      "reviewed_audio_candidate_title": "Por Qué Tú",
+      "review_closed": true,
+      "requires_user_confirmation": false,
+      "recording_evidence": {
+        "checked_at": "2026-10-15T15:56:00.335786+00:00",
+        "official_video_url": "https://www.youtube.com/watch?v=8eeXRWfTUtk",
+        "official_video_title": "Candu Dominguez - Porque Tú (Video Oficial)",
+        "official_channel": "Candu Dominguez",
+        "video_published_at": "2025-10-12T23:00:06Z",
+        "video_duration_seconds": 167,
+        "release": {
+          "url": "https://open.spotify.com/track/4V8ij7cx57rUi9t7Mc8nwX",
+          "isrc": "ARDL12500059",
+          "duration_ms": 165000,
+          "release_date": "2025-10-12",
+          "title": "Por Qué Tú",
+          "artists": [
+            "Candu DomÍnguez"
+          ]
+        },
+        "duration_difference_seconds": 2.0,
+        "audio_fingerprint_comparison_performed": false,
+        "basis": "Cruce de publicaciones oficiales, ISRC del distribuidor, artistas, fecha y duracion; no prueba de identidad bit a bit."
+      }
     },
     {
       "video_isrc": "ARS8H2500012",
@@ -225,10 +306,10 @@
     {
       "video_isrc": "ARS8H2500015",
       "catalog_key": "VIDEO:ktyr2d3364s",
-      "audio_relationship_status": "pending_confirmation",
-      "confirmed_audio_isrc": null,
-      "proposed_audio_isrc": "ARDL12500072",
-      "proposed_audio_title": "Session Funk",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "ARDL12500072",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
       "video_ids": [
         "ktyr2d3364s"
       ],
@@ -245,17 +326,44 @@
         "TOTI; FACUU DJ"
       ],
       "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
-      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
-      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
-      "is_composite_video": false
+      "evidence": "Relacion de lanzamiento confirmada por fuentes oficiales e identificadores de distribucion",
+      "notes": "Relacion del video oficial con el lanzamiento ARDL12500072 confirmada por publicaciones oficiales, participantes, fecha y duracion compatible (video 129 s; audio 127.565 s). Se conservan las fichas e ingresos originales; la relacion no suma importes ni aplica contratos automaticamente. La descripcion tiene una linea con Virrshi DJ, pero el titulo oficial, los participantes enlazados y el lanzamiento acreditan TOTI y FACUU DJ. Se conserva esa contradiccion editorial en la evidencia, sin alterar creditos originales.",
+      "is_composite_video": false,
+      "prior_review_notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "reviewed_audio_candidate_isrc": "ARDL12500072",
+      "reviewed_audio_candidate_title": "Session Funk",
+      "review_closed": true,
+      "requires_user_confirmation": false,
+      "recording_evidence": {
+        "checked_at": "2026-10-15T15:56:00.335807+00:00",
+        "official_video_url": "https://www.youtube.com/watch?v=ktyr2d3364s",
+        "official_video_title": "TOTI x FACUU DJ - Session Funk (Video Oficial)",
+        "official_channel": "TOTI ",
+        "video_published_at": "2025-11-20T23:01:09Z",
+        "video_duration_seconds": 129,
+        "release": {
+          "url": "https://open.spotify.com/track/46LK0oh7WElkxnqi4tdNFY",
+          "isrc": "ARDL12500072",
+          "duration_ms": 127565,
+          "release_date": "2025-11-20",
+          "title": "Session Funk",
+          "artists": [
+            "TOTI",
+            "FACUU DJ"
+          ]
+        },
+        "duration_difference_seconds": 1.435,
+        "audio_fingerprint_comparison_performed": false,
+        "basis": "Cruce de publicaciones oficiales, ISRC del distribuidor, artistas, fecha y duracion; no prueba de identidad bit a bit."
+      }
     },
     {
       "video_isrc": "ARS8H2500017",
       "catalog_key": "VIDEO:XYaMayZJlYw",
-      "audio_relationship_status": "pending_confirmation",
-      "confirmed_audio_isrc": null,
-      "proposed_audio_isrc": "ARDL12500084",
-      "proposed_audio_title": "Amigos No Por Favor",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "ARDL12500084",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
       "video_ids": [
         "XYaMayZJlYw"
       ],
@@ -272,17 +380,44 @@
         "Aneley; Coty Hernandez"
       ],
       "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
-      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
-      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
-      "is_composite_video": false
+      "evidence": "Relacion de lanzamiento confirmada por fuentes oficiales e identificadores de distribucion",
+      "notes": "Relacion del video oficial con el lanzamiento ARDL12500084 confirmada por publicaciones oficiales, participantes, fecha y duracion compatible (video 207 s; audio 200.128 s). Se conservan las fichas e ingresos originales; la relacion no suma importes ni aplica contratos automaticamente. ",
+      "is_composite_video": false,
+      "prior_review_notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "reviewed_audio_candidate_isrc": "ARDL12500084",
+      "reviewed_audio_candidate_title": "Amigos No Por Favor",
+      "review_closed": true,
+      "requires_user_confirmation": false,
+      "recording_evidence": {
+        "checked_at": "2026-10-15T15:56:00.335823+00:00",
+        "official_video_url": "https://www.youtube.com/watch?v=XYaMayZJlYw",
+        "official_video_title": "Aneley, Coty Hernandez - Amigos No Por Favor (Video Oficial) Set Game 3",
+        "official_channel": "Aneley Oficial",
+        "video_published_at": "2025-12-11T23:00:06Z",
+        "video_duration_seconds": 207,
+        "release": {
+          "url": "https://open.spotify.com/track/3eFLsoPjX06SsLFcAYcLjv",
+          "isrc": "ARDL12500084",
+          "duration_ms": 200128,
+          "release_date": "2025-12-11",
+          "title": "Amigos No Por Favor",
+          "artists": [
+            "Aneley",
+            "Coty Hernández"
+          ]
+        },
+        "duration_difference_seconds": 6.872,
+        "audio_fingerprint_comparison_performed": false,
+        "basis": "Cruce de publicaciones oficiales, ISRC del distribuidor, artistas, fecha y duracion; no prueba de identidad bit a bit."
+      }
     },
     {
       "video_isrc": "ARS8H2500019",
       "catalog_key": "VIDEO:mKX1lhIDkQc",
-      "audio_relationship_status": "pending_confirmation",
-      "confirmed_audio_isrc": null,
-      "proposed_audio_isrc": "ARDL12500085",
-      "proposed_audio_title": "La Oportunidad",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "ARDL12500085",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
       "video_ids": [
         "mKX1lhIDkQc"
       ],
@@ -299,9 +434,35 @@
         "Tatum 73"
       ],
       "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
-      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
-      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
-      "is_composite_video": false
+      "evidence": "Relacion de lanzamiento confirmada por fuentes oficiales e identificadores de distribucion",
+      "notes": "Relacion del video oficial con el lanzamiento ARDL12500085 confirmada por publicaciones oficiales, participantes, fecha y duracion compatible (video 140 s; audio 138.367 s). Se conservan las fichas e ingresos originales; la relacion no suma importes ni aplica contratos automaticamente. El enlace promocional del video lleva por error a Te Pensaste Que Yo Pense. No se uso ese enlace como prueba; Spotify e ISRC identifican La Oportunidad con fecha y duracion coincidentes.",
+      "is_composite_video": false,
+      "prior_review_notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "reviewed_audio_candidate_isrc": "ARDL12500085",
+      "reviewed_audio_candidate_title": "La Oportunidad",
+      "review_closed": true,
+      "requires_user_confirmation": false,
+      "recording_evidence": {
+        "checked_at": "2026-10-15T15:56:00.335837+00:00",
+        "official_video_url": "https://www.youtube.com/watch?v=mKX1lhIDkQc",
+        "official_video_title": "TATUM - La Oportunidad (Video Oficial)",
+        "official_channel": "TATUM",
+        "video_published_at": "2025-12-09T22:01:03Z",
+        "video_duration_seconds": 140,
+        "release": {
+          "url": "https://open.spotify.com/track/4e1YJILxYtOPEkFVqIXPtA",
+          "isrc": "ARDL12500085",
+          "duration_ms": 138367,
+          "release_date": "2025-12-09",
+          "title": "La Oportunidad",
+          "artists": [
+            "Tatum 73"
+          ]
+        },
+        "duration_difference_seconds": 1.633,
+        "audio_fingerprint_comparison_performed": false,
+        "basis": "Cruce de publicaciones oficiales, ISRC del distribuidor, artistas, fecha y duracion; no prueba de identidad bit a bit."
+      }
     },
     {
       "video_isrc": "ARS8H2500027",
@@ -333,10 +494,10 @@
     {
       "video_isrc": "ARS8H2600001",
       "catalog_key": "VIDEO:zQUvE7SYFp8",
-      "audio_relationship_status": "pending_confirmation",
-      "confirmed_audio_isrc": null,
-      "proposed_audio_isrc": "ARDL12600002",
-      "proposed_audio_title": "LLEGÓ EL VERANO",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "ARDL12600002",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
       "video_ids": [
         "zQUvE7SYFp8"
       ],
@@ -353,17 +514,44 @@
         "FACUU DJ; Mc Tota"
       ],
       "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
-      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
-      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
-      "is_composite_video": false
+      "evidence": "Relacion de lanzamiento confirmada por fuentes oficiales e identificadores de distribucion",
+      "notes": "Relacion del video oficial con el lanzamiento ARDL12600002 confirmada por publicaciones oficiales, participantes, fecha y duracion compatible (video 133 s; audio 132.000 s). Se conservan las fichas e ingresos originales; la relacion no suma importes ni aplica contratos automaticamente. ",
+      "is_composite_video": false,
+      "prior_review_notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "reviewed_audio_candidate_isrc": "ARDL12600002",
+      "reviewed_audio_candidate_title": "LLEGÓ EL VERANO",
+      "review_closed": true,
+      "requires_user_confirmation": false,
+      "recording_evidence": {
+        "checked_at": "2026-10-15T15:56:00.335851+00:00",
+        "official_video_url": "https://www.youtube.com/watch?v=zQUvE7SYFp8",
+        "official_video_title": "FACUU DJ, Mc Tota - LLEGÓ EL VERANO (Video Oficial)",
+        "official_channel": "FACUU DJ",
+        "video_published_at": "2026-01-16T00:00:06Z",
+        "video_duration_seconds": 133,
+        "release": {
+          "url": "https://open.spotify.com/track/0b0NdCLGpYsMzdyNnouIND",
+          "isrc": "ARDL12600002",
+          "duration_ms": 132000,
+          "release_date": "2026-01-15",
+          "title": "LLEGÓ EL VERANO",
+          "artists": [
+            "FACUU DJ",
+            "Mc Tota"
+          ]
+        },
+        "duration_difference_seconds": 1.0,
+        "audio_fingerprint_comparison_performed": false,
+        "basis": "Cruce de publicaciones oficiales, ISRC del distribuidor, artistas, fecha y duracion; no prueba de identidad bit a bit."
+      }
     },
     {
       "video_isrc": "ARS8H2600003",
       "catalog_key": "VIDEO:RrfbwooTsLU",
-      "audio_relationship_status": "pending_confirmation",
-      "confirmed_audio_isrc": null,
-      "proposed_audio_isrc": "ARDL12600018",
-      "proposed_audio_title": "KANDELA RKT",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "ARDL12600018",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
       "video_ids": [
         "RrfbwooTsLU"
       ],
@@ -380,17 +568,45 @@
         "LAALODJ; sheafiel; Simo Viani"
       ],
       "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
-      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
-      "notes": "sheafiel en Extended y sheafiell en audio. Diferencia de escritura; verificar alias antes de unificar artistas.",
-      "is_composite_video": false
+      "evidence": "Relacion de lanzamiento confirmada por fuentes oficiales e identificadores de distribucion",
+      "notes": "Relacion del video oficial con el lanzamiento ARDL12600018 confirmada por publicaciones oficiales, participantes, fecha y duracion compatible (video 114 s; audio 115.324 s). Se conservan las fichas e ingresos originales; la relacion no suma importes ni aplica contratos automaticamente. El video identifica a SHEAFIEL y Spotify a sheafiell; misma colaboracion, fecha y duracion compatible. No se fusionan personas ni se cambian splits por el nombre.",
+      "is_composite_video": false,
+      "prior_review_notes": "sheafiel en Extended y sheafiell en audio. Diferencia de escritura; verificar alias antes de unificar artistas.",
+      "reviewed_audio_candidate_isrc": "ARDL12600018",
+      "reviewed_audio_candidate_title": "KANDELA RKT",
+      "review_closed": true,
+      "requires_user_confirmation": false,
+      "recording_evidence": {
+        "checked_at": "2026-10-15T15:56:00.335865+00:00",
+        "official_video_url": "https://www.youtube.com/watch?v=RrfbwooTsLU",
+        "official_video_title": "KANDELA RKT - LAALODJ, @sheafiel @SimoVianiOfficial (Video Oficial)",
+        "official_channel": "LAALODJ",
+        "video_published_at": "2026-02-04T22:00:06Z",
+        "video_duration_seconds": 114,
+        "release": {
+          "url": "https://open.spotify.com/track/3hXQPT6fcKg4m9aLAEGkSq",
+          "isrc": "ARDL12600018",
+          "duration_ms": 115324,
+          "release_date": "2026-02-04",
+          "title": "KANDELA RKT",
+          "artists": [
+            "LAALODJ",
+            "sheafiell",
+            "Simo Viani"
+          ]
+        },
+        "duration_difference_seconds": -1.324,
+        "audio_fingerprint_comparison_performed": false,
+        "basis": "Cruce de publicaciones oficiales, ISRC del distribuidor, artistas, fecha y duracion; no prueba de identidad bit a bit."
+      }
     },
     {
       "video_isrc": "ARS8H2600004",
       "catalog_key": "VIDEO:RuPltncHdUk",
-      "audio_relationship_status": "pending_confirmation",
-      "confirmed_audio_isrc": null,
-      "proposed_audio_isrc": "ARDL12600019",
-      "proposed_audio_title": "PERREO TH 8",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "ARDL12600019",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
       "video_ids": [
         "RuPltncHdUk"
       ],
@@ -407,9 +623,36 @@
         "mamiyosoyelth; DJ Plaga"
       ],
       "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
-      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
-      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
-      "is_composite_video": false
+      "evidence": "Relacion de lanzamiento confirmada por fuentes oficiales e identificadores de distribucion",
+      "notes": "Relacion del video oficial con el lanzamiento ARDL12600019 confirmada por publicaciones oficiales, participantes, fecha y duracion compatible (video 129 s; audio 124.062 s). Se conservan las fichas e ingresos originales; la relacion no suma importes ni aplica contratos automaticamente. ",
+      "is_composite_video": false,
+      "prior_review_notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "reviewed_audio_candidate_isrc": "ARDL12600019",
+      "reviewed_audio_candidate_title": "PERREO TH 8",
+      "review_closed": true,
+      "requires_user_confirmation": false,
+      "recording_evidence": {
+        "checked_at": "2026-10-15T15:56:00.335877+00:00",
+        "official_video_url": "https://www.youtube.com/watch?v=RuPltncHdUk",
+        "official_video_title": "PERREO TH 8 - Mamiyosoyelth, DJ Plaga (Video Oficial)",
+        "official_channel": "Mamiyosoyelth ",
+        "video_published_at": "2026-02-05T22:00:06Z",
+        "video_duration_seconds": 129,
+        "release": {
+          "url": "https://open.spotify.com/track/56Dmb7beLapXrszpvwe65B",
+          "isrc": "ARDL12600019",
+          "duration_ms": 124062,
+          "release_date": "2026-02-05",
+          "title": "PERREO TH 8",
+          "artists": [
+            "mamiyosoyelth",
+            "Dj Plaga"
+          ]
+        },
+        "duration_difference_seconds": 4.938,
+        "audio_fingerprint_comparison_performed": false,
+        "basis": "Cruce de publicaciones oficiales, ISRC del distribuidor, artistas, fecha y duracion; no prueba de identidad bit a bit."
+      }
     },
     {
       "video_isrc": "ARS8H2600005",
@@ -468,10 +711,10 @@
     {
       "video_isrc": "ARS8H2600009",
       "catalog_key": "VIDEO:lkAd2qScNuc",
-      "audio_relationship_status": "pending_confirmation",
+      "audio_relationship_status": "not_linked",
       "confirmed_audio_isrc": null,
-      "proposed_audio_isrc": "QT5M52695720",
-      "proposed_audio_title": "Cosas del Amor",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
       "video_ids": [
         "lkAd2qScNuc"
       ],
@@ -488,17 +731,44 @@
         "Aneley; Candu Dominguez"
       ],
       "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
-      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
-      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
-      "is_composite_video": false
+      "evidence": "Revision externa cerrada sin vinculo de grabacion comprobado",
+      "notes": "Revision cerrada sin vinculo: el clip oficial dura 222 s y el audio QT5M52695720 dura 199,5 s. Coinciden lanzamiento, artistas y productores, pero no se comprobo si los 22,5 s adicionales son solo material audiovisual o una edicion musical distinta. Se conserva la ficha de video y su ISRC, sin fusionar ni imputar ingresos al audio; no requiere aprobacion de usuario.",
+      "is_composite_video": false,
+      "prior_review_notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "reviewed_audio_candidate_isrc": "QT5M52695720",
+      "reviewed_audio_candidate_title": "Cosas del Amor",
+      "review_closed": true,
+      "requires_user_confirmation": false,
+      "recording_evidence": {
+        "checked_at": "2026-10-15T15:56:00.335891+00:00",
+        "official_video_url": "https://www.youtube.com/watch?v=lkAd2qScNuc",
+        "official_video_title": "Aneley, Candu Dominguez - Cosas del Amor (Video Oficial)",
+        "official_channel": "Aneley Oficial",
+        "video_published_at": "2026-03-05T23:00:06Z",
+        "video_duration_seconds": 222,
+        "release": {
+          "url": "https://open.spotify.com/track/79QuM3lw2nuGoyhv0r2Dpa",
+          "isrc": "QT5M52695720",
+          "duration_ms": 199500,
+          "release_date": "2026-03-05",
+          "title": "Cosas del Amor",
+          "artists": [
+            "Aneley",
+            "Candu DomÍnguez"
+          ]
+        },
+        "duration_difference_seconds": 22.5,
+        "audio_fingerprint_comparison_performed": false,
+        "basis": "Cruce de publicaciones oficiales, ISRC del distribuidor, artistas, fecha y duracion; no prueba de identidad bit a bit."
+      }
     },
     {
       "video_isrc": "ARS8H2600011",
       "catalog_key": "VIDEO:Ub31gB4XKYs",
-      "audio_relationship_status": "pending_confirmation",
-      "confirmed_audio_isrc": null,
-      "proposed_audio_isrc": "QT5M62683310",
-      "proposed_audio_title": "Nunca Voy a Olvidarte / Me Muero / Tú",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "QT5M62683310",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
       "video_ids": [
         "Ub31gB4XKYs"
       ],
@@ -515,17 +785,43 @@
         "Aneley"
       ],
       "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
-      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
-      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
-      "is_composite_video": false
+      "evidence": "Relacion de lanzamiento confirmada por fuentes oficiales e identificadores de distribucion",
+      "notes": "Relacion del video oficial con el lanzamiento QT5M62683310 confirmada por publicaciones oficiales, participantes, fecha y duracion compatible (video 294 s; audio 292.873 s). Se conservan las fichas e ingresos originales; la relacion no suma importes ni aplica contratos automaticamente. ",
+      "is_composite_video": false,
+      "prior_review_notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "reviewed_audio_candidate_isrc": "QT5M62683310",
+      "reviewed_audio_candidate_title": "Nunca Voy a Olvidarte / Me Muero / Tú",
+      "review_closed": true,
+      "requires_user_confirmation": false,
+      "recording_evidence": {
+        "checked_at": "2026-10-15T15:56:00.335903+00:00",
+        "official_video_url": "https://www.youtube.com/watch?v=Ub31gB4XKYs",
+        "official_video_title": "Aneley - Nunca Voy a Olvidarte / Me Muero / Tú (Set Tenis 1)",
+        "official_channel": "Aneley Oficial",
+        "video_published_at": "2026-03-26T23:00:06Z",
+        "video_duration_seconds": 294,
+        "release": {
+          "url": "https://open.spotify.com/track/0t2LWVSqbulJtpVkeXobN4",
+          "isrc": "QT5M62683310",
+          "duration_ms": 292873,
+          "release_date": "2026-03-26",
+          "title": "Nunca Voy a Olvidarte / Me Muero / Tú",
+          "artists": [
+            "Aneley"
+          ]
+        },
+        "duration_difference_seconds": 1.127,
+        "audio_fingerprint_comparison_performed": false,
+        "basis": "Cruce de publicaciones oficiales, ISRC del distribuidor, artistas, fecha y duracion; no prueba de identidad bit a bit."
+      }
     },
     {
       "video_isrc": "ARS8H2600014",
       "catalog_key": "VIDEO:YFBYqJeRzms",
-      "audio_relationship_status": "pending_confirmation",
-      "confirmed_audio_isrc": null,
-      "proposed_audio_isrc": "ARDL12600076",
-      "proposed_audio_title": "Oro y Platino",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "ARDL12600076",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
       "video_ids": [
         "YFBYqJeRzms"
       ],
@@ -542,9 +838,36 @@
         "FACUU DJ; Issa The Kid"
       ],
       "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
-      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
-      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
-      "is_composite_video": false
+      "evidence": "Relacion de lanzamiento confirmada por fuentes oficiales e identificadores de distribucion",
+      "notes": "Relacion del video oficial con el lanzamiento ARDL12600076 confirmada por publicaciones oficiales, participantes, fecha y duracion compatible (video 137 s; audio 136.750 s). Se conservan las fichas e ingresos originales; la relacion no suma importes ni aplica contratos automaticamente. ",
+      "is_composite_video": false,
+      "prior_review_notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "reviewed_audio_candidate_isrc": "ARDL12600076",
+      "reviewed_audio_candidate_title": "Oro y Platino",
+      "review_closed": true,
+      "requires_user_confirmation": false,
+      "recording_evidence": {
+        "checked_at": "2026-10-15T15:56:00.335916+00:00",
+        "official_video_url": "https://www.youtube.com/watch?v=YFBYqJeRzms",
+        "official_video_title": "FACUU DJ, Issa The Kid - ORO Y PLATINO (Video Oficial)",
+        "official_channel": "FACUU DJ",
+        "video_published_at": "2026-04-23T22:00:06Z",
+        "video_duration_seconds": 137,
+        "release": {
+          "url": "https://open.spotify.com/track/6jQkukii1unBMf9k2ZZrrG",
+          "isrc": "ARDL12600076",
+          "duration_ms": 136750,
+          "release_date": "2026-04-23",
+          "title": "Oro y Platino",
+          "artists": [
+            "FACUU DJ",
+            "Issa The Kid"
+          ]
+        },
+        "duration_difference_seconds": 0.25,
+        "audio_fingerprint_comparison_performed": false,
+        "basis": "Cruce de publicaciones oficiales, ISRC del distribuidor, artistas, fecha y duracion; no prueba de identidad bit a bit."
+      }
     },
     {
       "video_isrc": "ARS8H2600018",
@@ -603,10 +926,10 @@
     {
       "video_isrc": "ARS8H2600023",
       "catalog_key": "VIDEO:7bIu2EKopyc",
-      "audio_relationship_status": "pending_confirmation",
-      "confirmed_audio_isrc": null,
-      "proposed_audio_isrc": "ARDL12600105",
-      "proposed_audio_title": "Berretines al 0800",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "ARDL12600105",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
       "video_ids": [
         "7bIu2EKopyc"
       ],
@@ -623,17 +946,43 @@
         "SoyTiara"
       ],
       "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
-      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
-      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
-      "is_composite_video": false
+      "evidence": "Relacion de lanzamiento confirmada por fuentes oficiales e identificadores de distribucion",
+      "notes": "Relacion del video oficial con el lanzamiento ARDL12600105 confirmada por publicaciones oficiales, participantes, fecha y duracion compatible (video 147 s; audio 145.841 s). Se conservan las fichas e ingresos originales; la relacion no suma importes ni aplica contratos automaticamente. ",
+      "is_composite_video": false,
+      "prior_review_notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "reviewed_audio_candidate_isrc": "ARDL12600105",
+      "reviewed_audio_candidate_title": "Berretines al 0800",
+      "review_closed": true,
+      "requires_user_confirmation": false,
+      "recording_evidence": {
+        "checked_at": "2026-10-15T15:56:00.335934+00:00",
+        "official_video_url": "https://www.youtube.com/watch?v=7bIu2EKopyc",
+        "official_video_title": "SoyTiara - Berretines al 0800 (Video Oficial)",
+        "official_channel": "SoyTiara",
+        "video_published_at": "2026-06-10T23:00:06Z",
+        "video_duration_seconds": 147,
+        "release": {
+          "url": "https://open.spotify.com/track/5EDOFgDOPvLa3i4erUdT4x",
+          "isrc": "ARDL12600105",
+          "duration_ms": 145841,
+          "release_date": "2026-06-10",
+          "title": "Berretines al 0800",
+          "artists": [
+            "SoyTiara"
+          ]
+        },
+        "duration_difference_seconds": 1.159,
+        "audio_fingerprint_comparison_performed": false,
+        "basis": "Cruce de publicaciones oficiales, ISRC del distribuidor, artistas, fecha y duracion; no prueba de identidad bit a bit."
+      }
     },
     {
       "video_isrc": "ARS8H2600024",
       "catalog_key": "VIDEO:r45FjcDlBF8",
-      "audio_relationship_status": "pending_confirmation",
-      "confirmed_audio_isrc": null,
-      "proposed_audio_isrc": "QT8BW2649774",
-      "proposed_audio_title": "Imaginando La Gloria",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "QT8BW2649774",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
       "video_ids": [
         "r45FjcDlBF8"
       ],
@@ -650,17 +999,44 @@
         "Aneley; Para El Mundo"
       ],
       "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
-      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
-      "notes": "El video acredita Para El Mundo y el audio figura con Aneley. Conservar ambos creditos con su fuente; no sobrescribir artistas ni contratos.",
-      "is_composite_video": false
+      "evidence": "Relacion de lanzamiento confirmada por fuentes oficiales e identificadores de distribucion",
+      "notes": "Relacion del video oficial con el lanzamiento QT8BW2649774 confirmada por publicaciones oficiales, participantes, fecha y duracion compatible (video 188 s; audio 182.955 s). Se conservan las fichas e ingresos originales; la relacion no suma importes ni aplica contratos automaticamente. Spotify actual acredita a Aneley y Para El Mundo para el ISRC propuesto, resolviendo el credito incompleto del catalogo anterior.",
+      "is_composite_video": false,
+      "prior_review_notes": "El video acredita Para El Mundo y el audio figura con Aneley. Conservar ambos creditos con su fuente; no sobrescribir artistas ni contratos.",
+      "reviewed_audio_candidate_isrc": "QT8BW2649774",
+      "reviewed_audio_candidate_title": "Imaginando La Gloria",
+      "review_closed": true,
+      "requires_user_confirmation": false,
+      "recording_evidence": {
+        "checked_at": "2026-10-15T15:56:00.335947+00:00",
+        "official_video_url": "https://www.youtube.com/watch?v=r45FjcDlBF8",
+        "official_video_title": "Aneley  - Mundial 2026 / Imaginando La Gloria (Video oficial) Para el mundo / ESTABA AQUÍ PENSANDO ",
+        "official_channel": "Aneley Oficial",
+        "video_published_at": "2026-06-11T23:00:06Z",
+        "video_duration_seconds": 188,
+        "release": {
+          "url": "https://open.spotify.com/track/1nE5bLHVjDI2bmbp6t1n96",
+          "isrc": "QT8BW2649774",
+          "duration_ms": 182955,
+          "release_date": "2026-06-13",
+          "title": "Imaginando La Gloria",
+          "artists": [
+            "Aneley",
+            "Para El Mundo"
+          ]
+        },
+        "duration_difference_seconds": 5.045,
+        "audio_fingerprint_comparison_performed": false,
+        "basis": "Cruce de publicaciones oficiales, ISRC del distribuidor, artistas, fecha y duracion; no prueba de identidad bit a bit."
+      }
     },
     {
       "video_isrc": "ARS8H2600025",
       "catalog_key": "VIDEO:iNaADuQMAxE",
-      "audio_relationship_status": "pending_confirmation",
-      "confirmed_audio_isrc": null,
-      "proposed_audio_isrc": "BK4DA2658122",
-      "proposed_audio_title": "Fui Nada",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "BK4DA2658122",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
       "video_ids": [
         "iNaADuQMAxE"
       ],
@@ -677,17 +1053,46 @@
         "G Sony; Ke Locura; Damaris"
       ],
       "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
-      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
-      "notes": "Extended: G Sony / Ke Locura / Damaris. ADA: G Sony / Q' Lokura / DAMARIS / Kekelandia. Correspondencia propuesta por titulo y participantes; confirmar la variante de credito y version.",
-      "is_composite_video": false
+      "evidence": "Relacion de lanzamiento confirmada por fuentes oficiales e identificadores de distribucion",
+      "notes": "Relacion del video oficial con el lanzamiento BK4DA2658122 confirmada por publicaciones oficiales, participantes, fecha y duracion compatible (video 166 s; audio 165.757 s). Se conservan las fichas e ingresos originales; la relacion no suma importes ni aplica contratos automaticamente. El canal oficial acredita a Q' Lokura y a Kekelandia como productor musical. Spotify identifica el mismo lanzamiento e ISRC, con G Sony, Q' Lokura, DAMARIS y Kekelandia. Ke Locura era una variante del credito del Extended.",
+      "is_composite_video": false,
+      "prior_review_notes": "Extended: G Sony / Ke Locura / Damaris. ADA: G Sony / Q' Lokura / DAMARIS / Kekelandia. Correspondencia propuesta por titulo y participantes; confirmar la variante de credito y version.",
+      "reviewed_audio_candidate_isrc": "BK4DA2658122",
+      "reviewed_audio_candidate_title": "Fui Nada",
+      "review_closed": true,
+      "requires_user_confirmation": false,
+      "recording_evidence": {
+        "checked_at": "2026-10-15T15:56:00.335959+00:00",
+        "official_video_url": "https://www.youtube.com/watch?v=iNaADuQMAxE",
+        "official_video_title": "G Sony, Q' Lokura, DAMARIS - Fui Nada (Video Oficial)",
+        "official_channel": "G SONY",
+        "video_published_at": "2026-06-19T22:00:06Z",
+        "video_duration_seconds": 166,
+        "release": {
+          "url": "https://open.spotify.com/track/1Qpsk8X3Ee4Yq0VtQjL54m",
+          "isrc": "BK4DA2658122",
+          "duration_ms": 165757,
+          "release_date": "2026-06-19",
+          "title": "Fui Nada",
+          "artists": [
+            "G Sony",
+            "Q' Lokura",
+            "DAMARIS",
+            "Kekelandia"
+          ]
+        },
+        "duration_difference_seconds": 0.243,
+        "audio_fingerprint_comparison_performed": false,
+        "basis": "Cruce de publicaciones oficiales, ISRC del distribuidor, artistas, fecha y duracion; no prueba de identidad bit a bit."
+      }
     },
     {
       "video_isrc": "ARS8H2600026",
       "catalog_key": "VIDEO:UAF7fCYI41c",
-      "audio_relationship_status": "pending_confirmation",
-      "confirmed_audio_isrc": null,
-      "proposed_audio_isrc": "QMBZ92656367",
-      "proposed_audio_title": "LA CALLE ME LLAMA RKT",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "QMBZ92656367",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
       "video_ids": [
         "UAF7fCYI41c"
       ],
@@ -704,17 +1109,47 @@
         "LAALODJ; Fede Tarifeño"
       ],
       "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
-      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
-      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
-      "is_composite_video": false
+      "evidence": "Relacion de lanzamiento confirmada por fuentes oficiales e identificadores de distribucion",
+      "notes": "Relacion del video oficial con el lanzamiento QMBZ92656367 confirmada por publicaciones oficiales, participantes, fecha y duracion compatible (video 179 s; audio 184.865 s). Se conservan las fichas e ingresos originales; la relacion no suma importes ni aplica contratos automaticamente. ",
+      "is_composite_video": false,
+      "prior_review_notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "reviewed_audio_candidate_isrc": "QMBZ92656367",
+      "reviewed_audio_candidate_title": "LA CALLE ME LLAMA RKT",
+      "review_closed": true,
+      "requires_user_confirmation": false,
+      "recording_evidence": {
+        "checked_at": "2026-10-15T15:56:00.335973+00:00",
+        "official_video_url": "https://www.youtube.com/watch?v=UAF7fCYI41c",
+        "official_video_title": "LAALODJ, Fede Tarifeño - LA CALLE ME LLAMA RKT (Audio Oficial)",
+        "official_channel": "LAALODJ",
+        "video_published_at": "2026-06-26T22:00:13Z",
+        "video_duration_seconds": 179,
+        "release": {
+          "url": "https://music.apple.com/ar/album/la-calle-me-llama-rkt/6783495843?i=6783496090&uo=4",
+          "isrc": "QMBZ92656367",
+          "duration_ms": 184865,
+          "release_date": "2026-06-26",
+          "title": "LA CALLE ME LLAMA RKT",
+          "artists": [
+            "LAALODJ",
+            "Fede Tarifeño"
+          ],
+          "upc": "820233827928",
+          "identity_bridge": "El statement Orchard vincula el ISRC con GWKKplwkilU y UPC 820233827928; el video de audio oficial UAF7fCYI41c y Apple coinciden en lanzamiento, artistas y fecha.",
+          "topic_url": "https://www.youtube.com/watch?v=GWKKplwkilU"
+        },
+        "duration_difference_seconds": -5.865,
+        "audio_fingerprint_comparison_performed": false,
+        "basis": "Cruce de publicaciones oficiales, ISRC del distribuidor, artistas, fecha y duracion; no prueba de identidad bit a bit."
+      }
     },
     {
       "video_isrc": "ARS8H2600027",
       "catalog_key": "VIDEO:qlQPBWedRSs",
-      "audio_relationship_status": "pending_confirmation",
-      "confirmed_audio_isrc": null,
-      "proposed_audio_isrc": "BK4DA2658121",
-      "proposed_audio_title": "Alerta",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "BK4DA2658121",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
       "video_ids": [
         "qlQPBWedRSs"
       ],
@@ -731,17 +1166,45 @@
         "Gusty dj; Alejo Isakk; Loyaltty"
       ],
       "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
-      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
-      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
-      "is_composite_video": false
+      "evidence": "Relacion de lanzamiento confirmada por fuentes oficiales e identificadores de distribucion",
+      "notes": "Relacion del video oficial con el lanzamiento BK4DA2658121 confirmada por publicaciones oficiales, participantes, fecha y duracion compatible (video 165 s; audio 164.117 s). Se conservan las fichas e ingresos originales; la relacion no suma importes ni aplica contratos automaticamente. ",
+      "is_composite_video": false,
+      "prior_review_notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "reviewed_audio_candidate_isrc": "BK4DA2658121",
+      "reviewed_audio_candidate_title": "Alerta",
+      "review_closed": true,
+      "requires_user_confirmation": false,
+      "recording_evidence": {
+        "checked_at": "2026-10-15T15:56:00.335990+00:00",
+        "official_video_url": "https://www.youtube.com/watch?v=qlQPBWedRSs",
+        "official_video_title": "ALERTA - GUSTY DJ, @AlejoIsakk  @Loyaltty9CG  (Video Oficial)",
+        "official_channel": "GUSTY DJ",
+        "video_published_at": "2026-06-25T22:00:06Z",
+        "video_duration_seconds": 165,
+        "release": {
+          "url": "https://open.spotify.com/track/5JPBvU8H7eNdu60Vwmr3ku",
+          "isrc": "BK4DA2658121",
+          "duration_ms": 164117,
+          "release_date": "2026-06-25",
+          "title": "Alerta",
+          "artists": [
+            "Gusty dj",
+            "Alejo Isakk",
+            "Loyaltty"
+          ]
+        },
+        "duration_difference_seconds": 0.883,
+        "audio_fingerprint_comparison_performed": false,
+        "basis": "Cruce de publicaciones oficiales, ISRC del distribuidor, artistas, fecha y duracion; no prueba de identidad bit a bit."
+      }
     },
     {
       "video_isrc": "ARS8H2600030",
       "catalog_key": "VIDEO:ihDbZiJlZQU",
-      "audio_relationship_status": "pending_confirmation",
-      "confirmed_audio_isrc": null,
-      "proposed_audio_isrc": "ARDL12600108",
-      "proposed_audio_title": "PERREO TE CHOKO",
+      "audio_relationship_status": "confirmed",
+      "confirmed_audio_isrc": "ARDL12600108",
+      "proposed_audio_isrc": null,
+      "proposed_audio_title": null,
       "video_ids": [
         "ihDbZiJlZQU"
       ],
@@ -758,9 +1221,40 @@
         "mamiyosoyelth; Alejo Isakk; El Pesa 9; Eric Santana; Lihueeel; Guarra"
       ],
       "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
-      "evidence": "YouTube Video ID exacto; audio propuesto por titulo y artistas",
-      "notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
-      "is_composite_video": false
+      "evidence": "Relacion de lanzamiento confirmada por fuentes oficiales e identificadores de distribucion",
+      "notes": "Relacion del video oficial con el lanzamiento ARDL12600108 confirmada por publicaciones oficiales, participantes, fecha y duracion compatible (video 202 s; audio 201.923 s). Se conservan las fichas e ingresos originales; la relacion no suma importes ni aplica contratos automaticamente. ",
+      "is_composite_video": false,
+      "prior_review_notes": "Relacion propuesta por titulo y artistas; sin identificador comun de audio que la confirme.",
+      "reviewed_audio_candidate_isrc": "ARDL12600108",
+      "reviewed_audio_candidate_title": "PERREO TE CHOKO",
+      "review_closed": true,
+      "requires_user_confirmation": false,
+      "recording_evidence": {
+        "checked_at": "2026-10-15T15:56:00.336006+00:00",
+        "official_video_url": "https://www.youtube.com/watch?v=ihDbZiJlZQU",
+        "official_video_title": "PERREO TE CHOKO - Mamiyosoyelth, Alejo Isakk, El Pesa 9, Eric Santana, Lihueeel, Guarra",
+        "official_channel": "Mamiyosoyelth ",
+        "video_published_at": "2026-07-02T22:00:06Z",
+        "video_duration_seconds": 202,
+        "release": {
+          "url": "https://open.spotify.com/track/4Qq9akwnwdDbDOCv5cSZMW",
+          "isrc": "ARDL12600108",
+          "duration_ms": 201923,
+          "release_date": "2026-07-02",
+          "title": "PERREO TE CHOKO",
+          "artists": [
+            "mamiyosoyelth",
+            "Alejo Isakk",
+            "El Pesa 9",
+            "Eric Santana",
+            "Lihueeel",
+            "Guarra"
+          ]
+        },
+        "duration_difference_seconds": 0.077,
+        "audio_fingerprint_comparison_performed": false,
+        "basis": "Cruce de publicaciones oficiales, ISRC del distribuidor, artistas, fecha y duracion; no prueba de identidad bit a bit."
+      }
     }
   ],
   "aliases": [
@@ -772,5 +1266,7 @@
       "alias_catalog_key": "VIDEO:LZJSvkx13LI",
       "catalog_key": "ISRC:QZTB62504366"
     }
-  ]
+  ],
+  "recording_review_closed_on": "2026-10-15",
+  "recording_review_policy": "Sin tareas pendientes de aprobacion: confirmar con evidencia suficiente o cerrar sin vinculo comprobado, conservando motivo y fuentes. No mover ingresos ni fusionar fichas economicas por esta relacion."
 }

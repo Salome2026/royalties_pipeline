@@ -33,13 +33,18 @@ def load_decisions(path: Path = REGISTRY_PATH) -> dict:
     for entry in entries:
         if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}[0-9]{7}", entry["video_isrc"]):
             raise ValueError("ISRC de video invalido.")
-        if entry["audio_relationship_status"] not in {"confirmed", "pending_confirmation", "video_only"}:
+        if entry["audio_relationship_status"] not in {"confirmed", "pending_confirmation", "video_only", "not_linked"}:
             raise ValueError("Estado de relacion de video invalido.")
         if entry["audio_relationship_status"] == "confirmed":
-            if entry["catalog_key"] != "ISRC:" + entry["confirmed_audio_isrc"]:
+            if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}[0-9]{7}", entry.get("confirmed_audio_isrc") or ""):
+                raise ValueError("Falta el ISRC de audio confirmado.")
+            if entry["catalog_key"].startswith("ISRC:") and entry["catalog_key"] != "ISRC:" + entry["confirmed_audio_isrc"]:
                 raise ValueError("La relacion confirmada no coincide con la ficha de audio.")
         elif entry.get("confirmed_audio_isrc"):
             raise ValueError("Una propuesta no puede figurar como relacion confirmada.")
+        if entry["audio_relationship_status"] == "not_linked":
+            if not entry.get("review_closed") or entry.get("requires_user_confirmation") is not False or not entry.get("notes"):
+                raise ValueError("Una revision sin vinculo necesita cierre y motivo, sin aprobacion pendiente.")
         if not entry.get("video_ids") or not entry.get("source_file"):
             raise ValueError("Falta evidencia de la relacion de video.")
     return document
@@ -86,6 +91,8 @@ def apply_catalog_video_metadata(catalog: pl.DataFrame, *, decisions: dict | Non
         key = entry["catalog_key"]
         if key not in rows:
             raise ValueError(f"No existe ficha para incorporar {entry['video_isrc']}: {key}")
+        if entry["audio_relationship_status"] == "confirmed" and "ISRC:" + entry["confirmed_audio_isrc"] not in rows:
+            raise ValueError(f"No existe el audio relacionado con {entry['video_isrc']}.")
         if not (values(rows[key].get("video_ids")) & set(entry["video_ids"])):
             raise ValueError(f"La ficha {key} ya no coincide con el video revisado.")
         grouped.setdefault(key, []).append(entry)
