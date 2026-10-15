@@ -11,6 +11,24 @@ def normalized(value):
     return " ".join(re.sub(r"[^a-z0-9]+", " ", unicodedata.normalize("NFKD", value or "").encode("ascii", "ignore").decode().lower()).split())
 
 
+def artist_names(value):
+    return [part.strip() for part in re.split(r"\s+(?:and|feat\.?|ft\.?)\s+|[;|,&/]", value or "", flags=re.I) if part.strip()]
+
+
+def recording_title(value, artists):
+    title = normalized(value)
+    for decoration in ["video oficial", "official video", "audio oficial", "official audio", "visualizer", "videoclip oficial"]:
+        title = re.sub(r"\b" + decoration + r"\b", " ", title)
+    title = " ".join(title.split())
+    changed = True
+    while changed:
+        before = title
+        for artist in sorted({normalized(artist) for artist in artists}, key=len, reverse=True):
+            title = re.sub(r"^" + re.escape(artist) + r"\b|\b" + re.escape(artist) + r"$", "", title).strip()
+        changed = before != title
+    return title
+
+
 class RecordingLookup:
     def __init__(self):
         self.token = None

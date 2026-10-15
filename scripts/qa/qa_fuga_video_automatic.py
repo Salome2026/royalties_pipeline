@@ -55,6 +55,15 @@ class AutomaticVideoTests(unittest.TestCase):
         lookup.verify.assert_called_once()
         self.assertEqual(result["amount_usd"].sum(), 112.)
 
+    def test_collaborations_and_official_video_decoration_match_without_fuzzy_aliases(self):
+        lookup = Mock()
+        lookup.verify.return_value = {"basis": "exact_isrc_release_and_official_video_metadata"}
+        catalog = self.catalog().with_columns(pl.lit("Artista and Invitado").alias("artist_statement"))
+        metadata = self.metadata(None).with_columns(pl.lit("Artista; Invitado").alias("YouTube Asset Artists"), pl.lit("Nueva cancion - Artista, Invitado (Video Oficial)").alias("YouTube Asset Title"))
+        _, outcomes = resolve_extended(catalog, metadata, {"version": 1, "entries": [], "aliases": []}, lookup)
+        self.assertEqual(outcomes[0]["audio_relationship_status"], "confirmed")
+        lookup.verify.assert_called_once_with("ARAAA2600001", "Nueva cancion", ["Artista", "Invitado"], ["newVideo123"])
+
     def test_provider_failure_closes_without_user_confirmation(self):
         lookup = Mock()
         lookup.verify.return_value = None

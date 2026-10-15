@@ -13,7 +13,7 @@ import polars as pl
 
 from .catalog_video_metadata import apply_catalog_video_metadata, load_decisions, values
 from .fuga_extended import METADATA_FILE, _atomic_parquet
-from .fuga_recording_lookup import RecordingLookup, normalized
+from .fuga_recording_lookup import RecordingLookup, normalized, artist_names, recording_title
 
 
 def resolve_extended(catalog: pl.DataFrame, metadata: pl.DataFrame, decisions: dict, lookup=None) -> tuple[pl.DataFrame, list[dict]]:
@@ -43,12 +43,12 @@ def resolve_extended(catalog: pl.DataFrame, metadata: pl.DataFrame, decisions: d
             confirmed = bool(audio and code not in native_codes and videos and len(targets) <= 1)
             recording_evidence = {"native_audio_isrcs": principals, "basis": "audited_native_sale_id", "audio_fingerprint_comparison_performed": False}
             if not audio and not principals and videos and len(targets) == 1 and lookup:
-                titles = {normalized(r.get("YouTube Asset Title")) for r in evidence} - {""}
-                artists = {normalized(r.get("YouTube Asset Artists")) for r in evidence} - {""}
-                candidates = [row for candidate_key, row in rows.items() if candidate_key.startswith("ISRC:") and normalized(row.get("track_title")) in titles and normalized(row.get("artist_statement")) in artists]
+                artist_sets = [{normalized(name) for name in artist_names(r.get("YouTube Asset Artists"))} for r in evidence]
+                titles = {recording_title(r.get("YouTube Asset Title"), artist_names(r.get("YouTube Asset Artists"))) for r in evidence} - {""}
+                candidates = [row for candidate_key, row in rows.items() if candidate_key.startswith("ISRC:") and normalized(row.get("track_title")) in titles and {normalized(name) for name in artist_names(row.get("artist_statement"))} in artist_sets and artist_names(row.get("artist_statement"))]
                 if len(candidates) == 1:
                     candidate = candidates[0]
-                    verified = lookup.verify(candidate["catalog_key"][5:], candidate["track_title"], [candidate["artist_statement"]], videos)
+                    verified = lookup.verify(candidate["catalog_key"][5:], candidate["track_title"], artist_names(candidate["artist_statement"]), videos)
                     if verified:
                         audio = candidate["catalog_key"][5:]
                         confirmed = True
