@@ -214,6 +214,10 @@ def artist_suggestions(
         result["principal_uncertain"] = (
             bool(result.get("principal_uncertain")) or len(principal_keys) != 1 or principal_keys != proposed_principal
         )
+        from app.master_contract_participants import onerpm_principal
+        source_principal = onerpm_principal(evidence, catalog_artists, bool((raw_result or {}).get("principal_uncertain")))
+        if source_principal is not None:
+            result["principal_uncertain"] = source_principal
         result["evidence"] = [*result.get("evidence", []), {
             "source": "catalog", "field": "catalog_artists", "raw": fallback,
             "artists": catalog_artists, "used": True,

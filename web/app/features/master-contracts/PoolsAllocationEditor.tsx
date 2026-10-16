@@ -3,7 +3,7 @@
 import { Divide, FilePenLine, Plus, Trash2 } from "lucide-react";
 import styles from "./MasterContractsModule.module.css";
 import { artistBeneficiaries, type ArtistContract } from "./ArtistContractsPanel";
-import { beneficiaryKey, ownershipTotal, poolAgreement, type Allocation, type MasterAgreement, type ParticipationRule } from "./contractLogic";
+import { beneficiaryKey, ownershipTotal, participantExclusions, poolAgreement, type Allocation, type MasterAgreement, type ParticipationRule } from "./contractLogic";
 
 const numberOrNull = (value: string) => value.trim() === "" ? null : Number(value);
 const percent = (value: number) => value.toLocaleString("es-AR", { maximumFractionDigits: 4 });
@@ -27,12 +27,16 @@ export function PoolsAllocationEditor({ agreement, allocation, canEdit, artistOp
   function update(patch: Partial<MasterAgreement>) { onChange({ ...agreement, ...patch }); }
   function updateAllocation(patch: Partial<Allocation>) { update({ allocation: { ...allocation, ...patch } }); }
   function updateRow(index: number, patch: { artist?: string; percent?: number | null; rule?: ParticipationRule }) {
+    const exclusions = patch.artist !== undefined ? {
+      catalog_participant_exclusions: participantExclusions(allocation, rows[index].artist, patch.artist, artistOptions),
+    } : {};
     if (index === 0) updateAllocation({
+      ...exclusions,
       ...(patch.artist !== undefined ? { principal: patch.artist } : {}),
       ...(patch.percent !== undefined ? { principal_percent: patch.percent } : {}),
       ...(patch.rule ? { principal_rule: patch.rule } : {}),
     });
-    else updateAllocation({ participants: allocation.participants.map((item, position) => position === index - 1 ? { ...item, ...patch } : item) });
+    else updateAllocation({ ...exclusions, participants: allocation.participants.map((item, position) => position === index - 1 ? { ...item, ...patch } : item) });
   }
 
   if (agreement.allocation_model !== "pools") return <section className={styles.band}>
@@ -104,7 +108,10 @@ export function PoolsAllocationEditor({ agreement, allocation, canEdit, artistOp
               <label>{index === 0 ? "Artista principal" : `Participante ${index}`}<input list={optionsId} disabled={!canEdit} value={row.artist}
                 onChange={(event) => updateRow(index, { artist: event.target.value, rule: rule.treatment === "artist_contract" ? { treatment: "artist_contract", retained_percent: null, retained_recipient: rule.retained_recipient || "Indyana" } : rule })} /></label>
               <label>% del ingreso<input type="number" min="0" max="100" step="any" disabled={!canEdit} value={row.percent ?? ""} onChange={(event) => updateRow(index, { percent: numberOrNull(event.target.value) })} /></label>
-              {canEdit && index > 0 && <button type="button" className={styles.iconButton} title={`Quitar participante ${index}`} aria-label={`Quitar participante ${index}`} onClick={() => updateAllocation({ participants: allocation.participants.filter((_, position) => position !== index - 1) })}><Trash2 size={16} /></button>}
+              {canEdit && index > 0 && <button type="button" className={styles.iconButton} title={`Quitar participante ${index}`} aria-label={`Quitar participante ${index}`} onClick={() => updateAllocation({
+                catalog_participant_exclusions: participantExclusions(allocation, row.artist, "", artistOptions),
+                participants: allocation.participants.filter((_, position) => position !== index - 1),
+              })}><Trash2 size={16} /></button>}
             </div>
             <div className={styles.treatmentRow}>
               <label>Tratamiento<select disabled={!canEdit} value={rule.treatment} onChange={(event) => updateRow(index, { rule: {

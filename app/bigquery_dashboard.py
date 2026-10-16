@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import os
 import unicodedata
 from datetime import date
 from functools import lru_cache
@@ -9,9 +10,9 @@ from typing import Any, Iterable
 from google.cloud import bigquery
 
 
-DEFAULT_PROJECT = "vpo-corp-royalties"
-DEFAULT_DATASET = "royalties_analytics"
-DEFAULT_LOCATION = "US"
+DEFAULT_PROJECT = os.environ.get("VPO_BIGQUERY_PROJECT", "vpo-corp-royalties")
+DEFAULT_DATASET = os.environ.get("VPO_BIGQUERY_DATASET", "royalties_analytics")
+DEFAULT_LOCATION = os.environ.get("VPO_BIGQUERY_LOCATION", "US")
 RANKING_CATEGORIES = [
     "sources",
     "dsp",

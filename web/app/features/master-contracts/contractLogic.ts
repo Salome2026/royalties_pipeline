@@ -22,6 +22,7 @@ export type Allocation = {
   principal_percent: number | null;
   apply_guest_contracts: boolean;
   participants: Participant[];
+  catalog_participant_exclusions?: string[] | null;
   principal_rule?: ParticipationRule | null;
 };
 
@@ -49,6 +50,7 @@ export function agreementAllocation(agreement: MasterAgreement | undefined, fall
     principal_percent: fallback.principal_percent, apply_guest_contracts: fallback.apply_guest_contracts,
     participants: fallback.participants,
     principal_rule: fallback.principal_rule,
+    catalog_participant_exclusions: fallback.catalog_participant_exclusions,
   };
 }
 
@@ -62,6 +64,14 @@ export function allocationTotals(agreement: MasterAgreement | undefined, allocat
 }
 
 export const beneficiaryKey = (name: string) => name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().replace(/\s+/g, " ").toLowerCase();
+
+export function participantExclusions(allocation: Allocation, previous: string, next: string, knownNames: string[]): string[] {
+  const oldKey = beneficiaryKey(previous), newKey = beneficiaryKey(next);
+  const excluded = (allocation.catalog_participant_exclusions || []).filter((name) => beneficiaryKey(name) !== newKey);
+  if (oldKey && oldKey !== newKey && knownNames.some((name) => beneficiaryKey(name) === oldKey)
+    && !excluded.some((name) => beneficiaryKey(name) === oldKey)) excluded.push(previous);
+  return excluded;
+}
 
 export function beneficiaryErrors(items: ContractBeneficiary[]): string[] {
   const names = items.map((item) => beneficiaryKey(item.name));

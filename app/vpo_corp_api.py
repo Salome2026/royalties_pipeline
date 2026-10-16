@@ -356,6 +356,7 @@ class MasterContractAllocation(BaseModel):
     apply_guest_contracts: bool = False
     principal_rule: MasterParticipationRule | None = None
     participants: list[MasterContractParticipant] = Field(default_factory=list, max_length=10)
+    catalog_participant_exclusions: list[str] | None = Field(default=None, max_length=250)
 
 
 class MasterAgreement(BaseModel):
@@ -8596,6 +8597,8 @@ def get_master_contract(
         saved = read_split(conn, clean)
         contracts = active_artist_contracts(conn)
         choices = read_contract_association_choices(conn)
+        from app.master_contract_participants import read_participant_history
+        participant_history = read_participant_history(conn, clean) if saved and not saved["closed"] and is_postgres_connection(conn) else []
     extras = master_contract_associated_income(choices)
     matches = master_contract_catalog(extras).filter(pl.col("asset_isrc") == clean)
     if matches.is_empty():
@@ -8615,6 +8618,14 @@ def get_master_contract(
     income = combined_contract_income(float(catalog_row.get("isrc_amount_usd") or 0), extras.get(clean), master_contract_statement_income(clean))
     statement_income = income["statement_income"]
     first_statement_date = f"{statement_income[0]['statement_month']}-01" if statement_income else None
+    proposed = saved["split"] if saved else suggested_split(
+        suggestions["artists"] if catalog_row.get("catalog_artists") is not None or not suggestions.get("principal_uncertain") else [],
+        contracts, first_statement_date, principal_uncertain=bool(suggestions.get("principal_uncertain")),
+    )
+    participant_proposal = None
+    if catalog_row.get("catalog_artists") is not None:
+        from app.master_contract_participants import propose_participants
+        proposed, participant_proposal = propose_participants(proposed, suggestions["artists"], saved=saved, history=participant_history)
     return {
         "isrc": clean,
         "title": catalog_row.get("track_title"),
@@ -8633,11 +8644,8 @@ def get_master_contract(
         "last_month": catalog_row.get("_contract_last_statement_month"),
         "sources": catalog_row.get("sources"),
         "accounts": catalog_row.get("accounts"),
-        "split": saved["split"] if saved else suggested_split(
-            suggestions["artists"] if catalog_row.get("catalog_artists") is not None or not suggestions.get("principal_uncertain") else [],
-            contracts, first_statement_date,
-            principal_uncertain=bool(suggestions.get("principal_uncertain")),
-        ),
+        "split": proposed,
+        "participant_proposal": participant_proposal,
         "closed": saved["closed"] if saved else False,
         "future_reports_selected": saved["future_reports_selected"] if saved else False,
         "version": saved["version"] if saved else 0,

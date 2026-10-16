@@ -61,6 +61,7 @@ type ContractDetail = ContractItem & {
   updated_at: string | null;
   reports_effective: false;
   pool_contracts_supported?: boolean;
+  participant_proposal?: { status: string; added: Record<string, string[]>; capacity_exceeded: boolean } | null;
 };
 
 type Message = { type: "ok" | "error"; text: string };
@@ -168,13 +169,15 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
     JSON.stringify(draft) !== JSON.stringify(detail.split)
     || closed !== detail.closed
     || futureSelected !== detail.future_reports_selected
+    || (!detail.closed && detail.version > 0 && Object.keys(detail.participant_proposal?.added || {}).length > 0)
   );
   const canEditCurrent = canEdit && (!closed || canApprove);
   const agreements = draft ? visibleAgreements(draft.agreements, draft, detail?.first_statement_date || null) : [];
   const activeAgreement = agreements.find((item) => item.id === openAgreementId);
   const allocation = draft ? agreementAllocation(activeAgreement, draft) : null;
   const totals = allocation ? allocationTotals(activeAgreement, allocation) : { master: 0, participation: 0, general: 0 };
-  const errors = draft ? contractErrors(agreements, draft) : [];
+  const errors = draft ? [...contractErrors(agreements, draft), ...(agreements.some((agreement) => agreementAllocation(agreement, draft).participants.length > 10)
+    ? ["La ficha supera diez participantes adicionales. Quitá los que no correspondan antes de guardar."] : [])] : [];
   const associationsIncomplete = associationValidation.loading || !!associationValidation.error || associationValidation.pending > 0;
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
   const periodIncome = detail ? agreementIncome(activeAgreement, detail.statement_income || [], today) : null;
@@ -250,7 +253,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
           expected_version: detail.version,
         }),
       });
-      setDetail({ ...detail, ...saved });
+      setDetail({ ...detail, ...saved, participant_proposal: null });
       setDraft(structuredClone(saved.split));
       setClosed(saved.closed);
       setFutureSelected(saved.future_reports_selected);

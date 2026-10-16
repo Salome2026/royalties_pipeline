@@ -14,6 +14,7 @@ from lib.identity import (
     first_valid_youtube_video_id_expr,
 )
 from lib.statement_period import from_onerpm_filename
+from lib.onerpm_catalog_artists import METADATA_FILE, read_onerpm_metadata
 from lib.distributor_policy_store import load_distributor_policy_document
 
 
@@ -733,6 +734,7 @@ def process_account(account: str, config: dict) -> list[Path]:
 
 def main():
     ensure_dirs()
+    artist_metadata = read_onerpm_metadata(INPUT_ROOT, allowed_accounts=set(ACCOUNTS))
 
     print("ONErpm standardized ingest")
     print("Output:", OUTPUT_PATH)
@@ -750,7 +752,11 @@ def main():
     final = pl.concat([pl.read_parquet(part) for part in parts], how="diagonal_relaxed")
     temp_output = OUTPUT_PATH.with_suffix(".tmp.parquet")
     final.write_parquet(temp_output)
+    metadata_output = OUTPUT_PATH.parent / METADATA_FILE
+    metadata_temp = metadata_output.with_suffix(".tmp.parquet")
+    artist_metadata.write_parquet(metadata_temp)
     temp_output.replace(OUTPUT_PATH)
+    metadata_temp.replace(metadata_output)
 
     print("\nListo.")
     print(f"Archivo: {OUTPUT_PATH}")

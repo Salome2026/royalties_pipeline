@@ -4,6 +4,37 @@
 
 Unificar las subcuentas de ONErpm dentro de un solo mart `onerpm`, preservando reglas distintas por cuenta y agregando flags de vista para reportes.
 
+## Catalogo maestro y contratos: version 2026-10-16
+
+La lectura economica descrita abajo no cambia. La metadata de participantes
+se obtiene por separado con `lib.onerpm_catalog_artists`, regla
+ONERPM-LECTURA-1, conservando archivo/hash, cuenta, hoja y fila de evidencia.
+Las reglas completas estan en `catalogo_lectura_onerpm_reglas_v1_20261014.md`.
+
+- La ingesta genera `catalog_onerpm_artists.parquet` antes de reconstruir el
+  catalogo; si falta, el constructor se detiene en lugar de omitir participantes.
+- Formato certificado: XLSX. XLS/XLSM/XLSB se detienen con un mensaje para
+  exportar a XLSX; no se ejecutan macros ni se procesa un lote parcialmente.
+- El ingreso normal admite solo las cuentas de `ACCOUNTS`; una carpeta de
+  cuenta desconocida requiere configuracion explicita antes de procesar.
+- Masters aporta performer y featuring. Writers, producers y el nombre del
+  pagador/canal no se convierten automaticamente en participantes.
+- Shares conserva exactamente sus importes, filas, flags y reglas por cuenta.
+  Su metadata no decide por si sola quien es el artista principal.
+- Solo se completan cuatro columnas comunes de artistas del catalogo. No se
+  reescriben `artist_statement`, identificadores, aliases, montos o unidades.
+- Contratos propone los nombres faltantes sin porcentajes en fichas sin
+  guardar y borradores abiertos nunca cerrados, con historial completo. Una
+  lectura no guarda nada. Se respetan eliminaciones manuales, contratos cerrados
+  y contratos que estuvieron cerrados y fueron reabiertos.
+- Los motores de reportes actuales y su entrada legacy se conservan. No se
+  aplican porcentajes nuevos, no se cierran contratos ni se copia la base de QA.
+
+La promocion actualiza metadata del mismo release economico con backup,
+comparacion por campo, transaccion limitada a cuatro columnas de BigQuery y
+manifiesto GCS condicional. Los cinco marts economicos mantienen sus versiones.
+Ver `onerpm_publicacion_20261016.md` para controles, recuperacion y evidencia.
+
 ## Inputs
 
 - `C:\royalties_pipeline\input_raw\onerpm\henry_remix`
