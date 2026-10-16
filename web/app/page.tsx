@@ -46,6 +46,7 @@ import {
   type PeriodSelection,
 } from "./lib/period";
 import { downloadBlob, filenameFromDisposition } from "./lib/download";
+import { compositeBaseAdjustment, incorporatedCommissionForArtist } from "./lib/compositeAllocation";
 
 type Message = {
   type: "ok" | "error";
@@ -1322,6 +1323,7 @@ type BookingCompositeEventLine = {
   booking_commission_exempt: number;
   booking_commission_notes: string | null;
   booking_show_id: number | null;
+  child_updated_at?: string;
   notes: string | null;
   show_expenses?: BookingExpense[];
   external_shares?: BookingExternalShare[];
@@ -1329,12 +1331,14 @@ type BookingCompositeEventLine = {
 
 type BookingCompositeEvent = {
   id: number;
+  updated_at: string;
   event_date: string;
   venue: string;
   city: string | null;
   responsible: string | null;
   status: string;
   currency: "ARS" | "USD";
+  fx_rate: number | null;
   gross_amount: number;
   general_expenses_amount: number;
   operational_expenses_amount: number;
@@ -1379,6 +1383,7 @@ type CaserioForm = {
 
 type BookingCompositeLineForm = {
   id?: number;
+  childUpdatedAt?: string;
   uid: string;
   lineType: "artista_vpo" | "artista_externo" | "comision_externa";
   description: string;
@@ -1399,6 +1404,7 @@ type BookingCompositeLineForm = {
 };
 
 type BookingCompositeForm = {
+  expectedUpdatedAt?: string;
   eventDate: string;
   venue: string;
   city: string;
@@ -5594,6 +5600,7 @@ export default function Home() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         booking_event_id: compositeBookingAgendaEventId,
+        expected_updated_at: compositeBookingForm.expectedUpdatedAt,
         event_date: compositeBookingForm.eventDate,
         venue: compositeBookingForm.venue,
         city: compositeBookingForm.city || null,
@@ -5615,6 +5622,7 @@ export default function Home() {
           })),
         lines: compositeBookingForm.lines.map((line) => ({
           id: line.id || null,
+          child_updated_at: line.childUpdatedAt,
           line_type: line.lineType,
           description: line.description,
           artist: line.artist || null,
@@ -5676,15 +5684,20 @@ export default function Home() {
   function editCompositeBookingEvent(event: BookingCompositeEvent) {
     const vpoLines = event.lines.filter((line) => line.line_type === "artista_vpo");
     const equalShare = vpoLines.length > 0 ? event.artist_base_amount / vpoLines.length : 0;
+    const commissions = event.expenses.filter(isCommissionExpense).map((expense) => {
+      const decoded = decodeCommissionNotes(expense.notes);
+      return { amount: expense.amount, destination: decoded.commissionDestination, artist: decoded.commissionTargetArtist };
+    });
     setCompositeBookingEditingId(event.id);
     setCompositeBookingForm({
+      expectedUpdatedAt: event.updated_at,
       eventDate: event.event_date,
       venue: event.venue,
       city: event.city || "",
       responsible: event.responsible || "",
       grossAmount: amountToInput(event.gross_amount),
       currency: event.currency,
-      fxRate: "",
+      fxRate: event.fx_rate ? amountToInput(event.fx_rate) : "",
       status: event.status,
       receivedAmount: amountToInput(event.received_amount),
       receiptRefs: event.receipt_refs.join("\n"),
@@ -5705,6 +5718,7 @@ export default function Home() {
       })),
       lines: event.lines.map((line) => ({
         id: line.id,
+        childUpdatedAt: line.child_updated_at,
         uid: `composite-line-${line.id}-${Date.now()}`,
         lineType: line.line_type as BookingCompositeLineForm["lineType"],
         description: line.description || "",
@@ -5712,7 +5726,7 @@ export default function Home() {
         allocationMode: line.line_type === "artista_vpo" && vpoLines.length > 1 ? "equal" : "manual",
         allocationPercent: "",
         baseAdjustment: line.line_type === "artista_vpo" && vpoLines.length > 1
-          ? amountToInput(line.amount - equalShare)
+          ? amountToInput(compositeBaseAdjustment(line.amount, equalShare, incorporatedCommissionForArtist(commissions, line.artist || "")))
           : "",
         amount: line.line_type === "artista_vpo" && vpoLines.length > 1 ? "" : amountToInput(line.amount),
         artistPercent: amountToInput(line.artist_percent),

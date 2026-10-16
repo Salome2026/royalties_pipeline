@@ -503,6 +503,32 @@ Regla practica:
 
 ## Comision directa vs tercero externo
 
+### Edicion de compuestas: identidad y conservacion (2026-10-16)
+
+- Editar conserva el `id` de cada linea y su `booking_show_id`. No se borran y
+  recrean las lineas existentes. Identificadores ajenos, repetidos u obsoletos
+  devuelven conflicto, sin guardar parcialmente.
+- Una linea nueva de artista VPO genera su individual en la misma transaccion.
+  Quitar o cambiar de artista una linea ya vinculada exige resolver primero su
+  liquidacion; la edicion comun no deja una individual huerfana.
+- Al reabrir, el ajuste manual de una linea excluye las comisiones ya incorporadas
+  a su base. El preview las agrega una sola vez. Abrir y guardar sin cambios no
+  puede aumentar la base de G Sony.
+- La madre devuelve pagos, porcentajes, gastos y terceros actuales de las hijas.
+  Al aplicar campos editables conserva los datos exclusivos de la individual:
+  caja detallada, comisiones directas, recuperos, ajustes, comprobantes y notas.
+  Un campo omitido conserva su valor; una lista editable vacia explicitamente
+  elimina sus conceptos. El total pagado no vuelve a sumar la caja detallada.
+- El formulario envia la version de madre e hijas. Si otro operador modifico
+  alguna mientras estaba abierto, se rechaza el guardado y se pide reabrir.
+- La actualizacion opera exclusivamente en Cloud SQL Postgres y bloquea las
+  filas durante la transaccion. No agrega tablas ni caminos SQLite.
+
+Regresion: `scripts/qa/qa_composite_edit.py` y
+`node web/scripts/qa-composite-allocation.cjs`. Las verificaciones opcionales
+contra PostgreSQL requieren `VPO_QA_POSTGRES_ROLLBACK=1` y siempre revierten la
+transaccion; nunca confirman cambios sobre los shows usados para verificar.
+
 ### Comision directa del evento
 
 Es una salida o asignacion que se calcula a nivel evento antes de repartir lineas.

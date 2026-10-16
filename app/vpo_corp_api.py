@@ -820,6 +820,7 @@ class BookingCompositeEventExpenseRequest(BaseModel):
 
 class BookingCompositeEventLineRequest(BaseModel):
     id: int | None = Field(default=None, ge=1)
+    child_updated_at: str | None = None
     line_type: Literal["artista_vpo", "artista_externo", "comision_externa"] = "artista_vpo"
     description: str = Field(..., min_length=1, max_length=180)
     artist: str | None = Field(default=None, max_length=160)
@@ -837,6 +838,7 @@ class BookingCompositeEventLineRequest(BaseModel):
 
 class BookingCompositeEventRequest(BaseModel):
     booking_event_id: int | None = Field(default=None, ge=1)
+    expected_updated_at: str | None = None
     event_date: str = Field(..., min_length=10, max_length=10)
     venue: str = Field(..., min_length=1, max_length=180)
     city: str | None = Field(default=None, max_length=120)
@@ -12662,6 +12664,49 @@ def row_to_booking_composite_event(row: sqlite3.Row) -> dict:
     return item
 
 
+def composite_child_request(
+    current: dict, line: BookingCompositeEventLineRequest,
+    request: BookingCompositeEventRequest,
+) -> BookingQuickShowRequest:
+    """Apply the mother's editable fields without dropping child-only facts."""
+    data = {key: current[key] for key in BookingQuickShowRequest.model_fields if key in current}
+    data.update(
+        artist=line.artist, show_date=request.event_date, venue=request.venue,
+        city=request.city, tour_manager=request.responsible,
+        currency=request.currency, fx_rate=request.fx_rate,
+        cachet_amount=line.amount, contracted_cachet_amount=line.amount,
+        venue_collected_amount=max(0.0, line.amount - max(
+            0.0, float(current['contracted_cachet_amount']) - float(current['venue_collected_amount'])
+        )),
+    )
+    for field in (
+        'show_expenses', 'external_shares', 'artist_paid_amount',
+        'producer_received_amount', 'artist_percent', 'producer_percent',
+        'booking_commission_exempt', 'booking_commission_notes',
+    ):
+        if field in line.model_fields_set:
+            data[field] = getattr(line, field)
+    if 'show_expenses' in line.model_fields_set:
+        data['expenses_amount'] = 0.0
+    # Stored paid totals already include detailed cash movements. The calculator
+    # adds those movements, so pass only the remainder to avoid counting twice.
+    for field, recipient in [('artist_paid_amount', 'artist'), ('producer_received_amount', 'producer')]:
+        detailed = sum(float(m['amount']) for m in current.get('cash_movements', []) if m['recipient'] == recipient)
+        total = float(data.get(field) or 0)
+        if total + 0.01 < detailed:
+            raise HTTPException(status_code=409, detail='El pago no puede ser menor que los movimientos de caja de la individual. Revisala antes de guardar.')
+        data[field] = max(0.0, total - detailed)
+    return BookingQuickShowRequest(**data)
+
+
+def booking_version_matches(stored: Any, submitted: str) -> bool:
+    # FastAPI serializes datetimes with T; the database adapter uses a space.
+    try:
+        return datetime.fromisoformat(str(stored)) == datetime.fromisoformat(submitted)
+    except ValueError:
+        return False
+
+
 def fetch_booking_composite_event_item(conn: sqlite3.Connection, event_id: int) -> dict:
     row = conn.execute("SELECT * FROM booking_composite_events WHERE id = ?", (event_id,)).fetchone()
     if row is None:
@@ -12703,6 +12748,15 @@ def fetch_booking_composite_event_item(conn: sqlite3.Connection, event_id: int) 
         - item["direct_commissions_amount"]
     )
     lines = [dict(line) for line in line_rows]
+    # Expose current child values, including payments made from the individual
+    # screen, instead of returning the mother's last saved copies.
+    for line in lines:
+        if line.get('booking_show_id'):
+            child = conn.execute('SELECT * FROM booking_shows WHERE id = ?', (line['booking_show_id'],)).fetchone()
+            if child is not None:
+                for field in ('artist_paid_amount', 'producer_received_amount', 'artist_percent', 'producer_percent', 'booking_commission_exempt', 'booking_commission_notes'):
+                    line[field] = child[field]
+                line['child_updated_at'] = str(child['updated_at'])
     child_show_ids = [
         int(line["booking_show_id"])
         for line in lines
@@ -13817,7 +13871,7 @@ def update_booking_composite_event(
     x_vpo_api_key: str | None = Header(default=None),
 ) -> dict:
     require_api_key(x_vpo_api_key)
-    init_booking_db()
+    require_booking_agenda_postgres()
 
     event_date = validate_iso_date(request.event_date)
     venue = request.venue.strip()
@@ -13825,7 +13879,7 @@ def update_booking_composite_event(
     responsible = clean_optional_text(request.responsible)
     notes = clean_optional_text(request.notes)
     receipt_refs = clean_receipt_refs(request.receipt_refs)
-    now = datetime.now().isoformat(timespec="seconds")
+    now = datetime.now().astimezone().isoformat()
 
     prepared_expenses = [
         {
@@ -13844,23 +13898,34 @@ def update_booking_composite_event(
 
     with booking_connect() as conn:
         existing = conn.execute(
-            "SELECT id FROM booking_composite_events WHERE id = ?",
+            "SELECT id, updated_at FROM booking_composite_events WHERE id = ? FOR UPDATE",
             (event_id,),
         ).fetchone()
         if existing is None:
             raise HTTPException(status_code=404, detail="Composite booking event not found.")
 
-        old_line_show_ids = {
-            int(row["id"]): row["booking_show_id"]
+        if request.expected_updated_at and not booking_version_matches(existing["updated_at"], request.expected_updated_at):
+            raise HTTPException(status_code=409, detail="La compuesta cambio desde que la abriste. Volve a abrirla antes de guardar.")
+        old_lines = {
+            int(row["id"]): dict(row)
             for row in conn.execute(
-                """
-                SELECT id, booking_show_id
-                FROM booking_composite_event_lines
-                WHERE event_id = ?
-                """,
-                (event_id,),
+                "SELECT * FROM booking_composite_event_lines WHERE event_id = ? FOR UPDATE", (event_id,)
             ).fetchall()
         }
+        submitted_ids = [line.id for line in request.lines if line.id is not None]
+        if len(submitted_ids) != len(set(submitted_ids)) or any(line_id not in old_lines for line_id in submitted_ids):
+            raise HTTPException(status_code=409, detail="Las lineas cambiaron o no pertenecen a esta compuesta. Volve a abrirla antes de guardar.")
+        for old_id, old in old_lines.items():
+            if old_id not in submitted_ids and old["booking_show_id"]:
+                raise HTTPException(status_code=409, detail="No se puede quitar una linea con liquidacion individual vinculada.")
+        for line in request.lines:
+            old = old_lines.get(line.id)
+            if old and old["booking_show_id"]:
+                if line.line_type != old["line_type"] or clean_booking_artist(line.artist) != clean_booking_artist(old["artist"]):
+                    raise HTTPException(status_code=409, detail="No se puede cambiar el artista o tipo de una linea vinculada.")
+                child = conn.execute("SELECT updated_at FROM booking_shows WHERE id = ? FOR UPDATE", (old["booking_show_id"],)).fetchone()
+                if child is None or (line.child_updated_at and not booking_version_matches(child["updated_at"], line.child_updated_at)):
+                    raise HTTPException(status_code=409, detail="La individual cambio desde que abriste la compuesta. Volve a abrirla antes de guardar.")
 
         conn.execute(
             """
@@ -13901,7 +13966,8 @@ def update_booking_composite_event(
         )
 
         conn.execute("DELETE FROM booking_composite_event_expenses WHERE event_id = ?", (event_id,))
-        conn.execute("DELETE FROM booking_composite_event_lines WHERE event_id = ?", (event_id,))
+        for old_id in old_lines.keys() - set(submitted_ids):
+            conn.execute("DELETE FROM booking_composite_event_lines WHERE id = ? AND event_id = ?", (old_id, event_id))
 
         for expense in prepared_expenses:
             conn.execute(
@@ -13923,7 +13989,7 @@ def update_booking_composite_event(
             if producer_percent is None:
                 producer_percent = max(0.0, 100.0 - line.artist_percent)
 
-            booking_show_id = old_line_show_ids.get(line.id) if line.id else None
+            booking_show_id = old_lines[line.id]["booking_show_id"] if line.id else None
             if line.line_type == "artista_vpo":
                 if not line_artist:
                     raise HTTPException(status_code=400, detail="artist is required for artista_vpo lines.")
@@ -13937,37 +14003,15 @@ def update_booking_composite_event(
                         (booking_show_id,),
                     ).fetchone()
                     if show_row is not None:
-                        if str(show_row["settlement_status"] or "") in {"historico", "cerrado"}:
+                        if str(show_row["settlement_status"] or "") == "historico" or str(show_row["settlement_status"] or "").startswith("cerrado"):
                             existing_target = conn.execute(
                                 "SELECT producer_cash_target_amount FROM booking_shows WHERE id = ?",
                                 (booking_show_id,),
                             ).fetchone()
                             producer_expected += float(existing_target["producer_cash_target_amount"] or 0)
                         else:
-                            show_receipts = json.loads(show_row["receipt_refs_json"] or "[]")
-                            show_request = BookingQuickShowRequest(
-                                artist=line_artist,
-                                show_date=event_date,
-                                venue=venue,
-                                city=city,
-                                tour_manager=responsible,
-                                status="aprobado" if request.status == "cerrado" else "realizado",
-                                currency=request.currency,
-                                fx_rate=request.fx_rate,
-                                contracted_cachet_amount=line.amount,
-                                venue_collected_amount=line.amount,
-                                cachet_amount=line.amount,
-                                show_expenses=line.show_expenses,
-                                external_shares=line.external_shares,
-                                artist_paid_amount=line.artist_paid_amount,
-                                producer_received_amount=line.producer_received_amount,
-                                artist_percent=line.artist_percent,
-                                producer_percent=producer_percent,
-                                receipt_refs=show_receipts,
-                                booking_commission_exempt=line.booking_commission_exempt,
-                                booking_commission_notes=commission_notes,
-                                notes=f"Sincronizado desde liquidacion madre #{event_id}: {line.description}. {line_notes or ''}".strip(),
-                            )
+                            current_child = fetch_booking_show_item(conn, int(booking_show_id))
+                            show_request = composite_child_request(current_child, line, request)
                             synced_show = update_booking_show_from_request(
                                 conn,
                                 int(booking_show_id),
@@ -13979,36 +14023,50 @@ def update_booking_composite_event(
                     else:
                         booking_show_id = None
                 if not booking_show_id:
-                    line_expenses = sum(expense.amount for expense in line.show_expenses)
-                    producer_expected += max(0.0, line.amount - line_expenses) * producer_percent / 100
+                    show_request = BookingQuickShowRequest(
+                        artist=line_artist, show_date=event_date, venue=venue,
+                        city=city, tour_manager=responsible, currency=request.currency,
+                        fx_rate=request.fx_rate, cachet_amount=line.amount,
+                        show_expenses=line.show_expenses, external_shares=line.external_shares,
+                        artist_paid_amount=line.artist_paid_amount,
+                        producer_received_amount=line.producer_received_amount,
+                        artist_percent=line.artist_percent, producer_percent=producer_percent,
+                        booking_commission_exempt=line.booking_commission_exempt,
+                        booking_commission_notes=commission_notes,
+                        notes=f"Liquidacion hija de show madre #{event_id}: {line.description}.",
+                    )
+                    child = insert_booking_show_from_request(
+                        conn, show_request, now, origin_type="booking_composite", origin_id=event_id,
+                        settlement_group=f"booking_composite_{event_id}_{event_date}", validate_artist=False,
+                    )
+                    booking_show_id = child["id"]
+                    producer_expected += float(child["producer_cash_target_amount"] or 0)
 
-            conn.execute(
-                """
-                INSERT INTO booking_composite_event_lines (
-                    event_id, line_type, description, artist, amount,
-                    artist_percent, producer_percent, artist_paid_amount,
-                    producer_received_amount, booking_commission_exempt,
-                    booking_commission_notes, booking_show_id, notes, created_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    event_id,
-                    line.line_type,
-                    line.description.strip(),
-                    line_artist,
-                    line.amount,
-                    line.artist_percent,
-                    producer_percent,
-                    line.artist_paid_amount,
-                    line.producer_received_amount,
-                    1 if line.booking_commission_exempt else 0,
-                    commission_notes,
-                    booking_show_id,
-                    line_notes,
-                    now,
-                ),
+            line_values = (
+                line.line_type, line.description.strip(), line_artist, line.amount,
+                line.artist_percent, producer_percent, line.artist_paid_amount,
+                line.producer_received_amount, 1 if line.booking_commission_exempt else 0,
+                commission_notes, booking_show_id, line_notes,
             )
+            if line.id:
+                conn.execute(
+                    """UPDATE booking_composite_event_lines SET
+                        line_type=?, description=?, artist=?, amount=?, artist_percent=?,
+                        producer_percent=?, artist_paid_amount=?, producer_received_amount=?,
+                        booking_commission_exempt=?, booking_commission_notes=?, booking_show_id=?, notes=?
+                        WHERE id=? AND event_id=?""",
+                    (*line_values, line.id, event_id),
+                )
+            else:
+                conn.execute(
+                    """INSERT INTO booking_composite_event_lines (
+                        line_type, description, artist, amount, artist_percent,
+                        producer_percent, artist_paid_amount, producer_received_amount,
+                        booking_commission_exempt, booking_commission_notes, booking_show_id, notes,
+                        event_id, created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (*line_values, event_id, now),
+                )
 
         balance = producer_expected - request.received_amount
         conn.execute(
