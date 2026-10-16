@@ -9,6 +9,11 @@ const compiled = ts.transpileModule(fs.readFileSync(filename, 'utf8'), {
 const output = { exports: {} };
 new Function('module', 'exports', compiled)(output, output.exports);
 const { compositeBaseAdjustment, incorporatedCommissionForArtist } = output.exports;
+assert.equal(incorporatedCommissionForArtist([
+  { amount: '900000.000000', destination: 'artist_base', artist: 'G Sony' },
+  { amount: '900000.000000', destination: 'direct', artist: 'G Sony' },
+  { amount: '700000.000000', destination: 'artist_base', artist: 'Other' },
+], 'G Sony'), 900000, 'Cloud SQL decimal strings must sum numerically');
 
 for (const [equalShare, incorporated, saved] of [
   [7310000, 900000, 8210000],

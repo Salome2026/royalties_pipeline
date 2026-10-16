@@ -1,9 +1,9 @@
 export function incorporatedCommissionForArtist(
-  expenses: { amount: number; destination: string; artist: string }[],
+  expenses: { amount: number | string; destination: string; artist: string }[],
   artist: string,
 ): number {
   return expenses.reduce((total, expense) => total + (
-    expense.destination === "artist_base" && expense.artist === artist ? expense.amount : 0
+    expense.destination === "artist_base" && expense.artist === artist ? Number(expense.amount) : 0
   ), 0);
 }
 
