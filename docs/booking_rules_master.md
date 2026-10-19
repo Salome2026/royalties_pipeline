@@ -572,8 +572,15 @@ Regla operativa:
 - si el show excluye comision general, no aplica ninguna regla salvo que esa
   regla particular tenga habilitado cobrar shows con booking ya pagado;
 - una regla bloqueada por la exclusion suma cero y no genera deuda pendiente;
-- las reglas aplicables se calculan en cascada por `orden` del 1 al 5;
-- cada comision calculada reduce la base disponible para la siguiente regla;
+- las reglas aplicables se procesan por `orden` del 1 al 5;
+- `Sobre saldo, según orden` (`commissionable`) calcula sobre lo que queda de
+  Indyana despues de las comisiones de los ordenes anteriores;
+- `Sobre ingreso original de Indyana` (`total`) calcula sobre la parte original
+  de Indyana del show, sin descontar comisiones previas;
+- todas las comisiones calculadas, incluso las de ingreso original, reducen
+  el saldo disponible para los ordenes posteriores;
+- ambas bases respetan las mismas exclusiones y la opcion `Cobra igual`;
+- se conservan las claves guardadas; no se migran porcentajes ni preferencias;
 - el orden se debe elegir cuando la regla esta activa y tiene porcentaje mayor
   a cero; una regla sin porcentaje puede quedar sin orden;
 - no puede haber dos reglas activas con porcentaje mayor a cero usando el mismo
@@ -583,9 +590,11 @@ Regla operativa:
 
 Ejemplos:
 
-- Gusty DJ sin exclusion: si Marce tiene 20% y David 10%, el resumen resta 30%
-  solo si ambos cobran sobre el bruto. Con cascada, Marce orden 1 cobra sobre el
-  bruto y David orden 2 cobra sobre lo que queda.
+- Gusty DJ sin exclusion, Indyana 100: Marce orden 1 al 20% cobra 20.
+  David orden 2 al 10% cobra 8 con `Sobre saldo, según orden` (base 80), o 10
+  con `Sobre ingreso original de Indyana` (base 100). Indyana queda en 72 o 70.
+  Si hay un orden 3 sobre saldo, su base descuenta ambas comisiones, incluso
+  cuando la del orden 2 se calculo sobre ingreso original.
 - Virrshi con exclusion general: Marce no cobra si respeta la exclusion; David
   cobra solo si su regla particular lo habilita.
 

@@ -10256,9 +10256,12 @@ def booking_summary_for_module(module_key: str, x_vpo_username: str | None) -> d
         for rule in applicable_rules:
             rules_by_priority.setdefault(rule["priority_order"], []).append(rule)
         for priority_order in sorted(rules_by_priority):
-            base_amount = max(cascade_base, 0.0)
+            remaining_base = max(cascade_base, 0.0)
             priority_commission_total = 0.0
             for rule in sorted(rules_by_priority[priority_order], key=lambda value: (value["employee_name"], value["employee_id"])):
+                # Original-income rules ignore prior deductions for their own
+                # base, but their commission still reduces the next order's saldo.
+                base_amount = max(indyana_total, 0.0) if rule["calculation_base"] == "total" else remaining_base
                 commission_amount = base_amount * rule["percentage"] / 100
                 priority_commission_total += commission_amount
                 commission_total += commission_amount

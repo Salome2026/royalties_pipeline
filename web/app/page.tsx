@@ -9056,8 +9056,8 @@ export default function Home() {
                               disabled={!canEditModule("booking_commissions") || commissionRulesLoading || commissionRulesSaving}
                               onChange={(event) => updateCommissionRuleDraft(item.artist, { base: event.target.value as CommissionRuleDraftState["base"] })}
                             >
-                              <option value="commissionable">Ingreso Indyana aplicable</option>
-                              <option value="total">Ingreso Indyana total de shows aplicables</option>
+                              <option value="commissionable">Sobre saldo, según orden</option>
+                              <option value="total">Sobre ingreso original de Indyana</option>
                             </select>
                           </td>
                           <td>
