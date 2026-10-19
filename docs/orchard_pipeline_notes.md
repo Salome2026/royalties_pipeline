@@ -1,5 +1,36 @@
 # Orchard / Altafonte pipeline notes
 
+## Lectura comun de participantes: 2026-10-19
+
+La construccion del catalogo incorpora `scripts/lib/orchard_catalog_artists.py`
+despues de FUGA, ONErpm y ADA. Su alcance se limita a `catalog_artists`,
+`catalog_artist_statement`, `catalog_artist_rule` y `catalog_artist_evidence`.
+No reescribe importes, unidades, ISRC/UPC, asociados ni contratos guardados.
+
+`TRACK ARTIST`, separado exclusivamente por barra vertical, acredita la pista.
+`PRODUCT ARTIST` se conserva como contexto y no agrega participantes. Los nombres
+nuevos no requieren diccionario ni porcentajes; listas contradictorias conservan
+su evidencia y las decisiones previas. El orden estable es una propuesta, no
+un rol contractual. La evidencia `ORCHARD-CAT003-adapter-1` permite a Contratos
+reconocer artista unico u orden estable sin exigir evidencia propia de FUGA,
+sin borrar dudas reales de otras fuentes o correcciones manuales.
+
+Se usa el raw estandarizado inmutable como evidencia; `standardized_row` es un
+localizador en su vista Orchard moderna, no una linea del CSV original.
+Altafonte legacy queda excluido de este adaptador. La ingesta economica sigue
+vigente: no se reemplaza su lector ni se cambia el tratamiento actual de unidades.
+Antes de sustituirla, debe certificarse la conservacion de unidades desconocidas.
+El dashboard actual sigue mostrando generacion completa, sin splits.
+
+Validacion previa: 16 CSV, 419 ISRC, 127 pruebas de regresion, 419 registros HTTP,
+nueve fichas y paneles asociados, cinco casos visuales desktop/mobile en cloud.
+Las 247 listas estructuradas nuevas complementan las 172 ya conservadas;
+las 102 dudas reales de orden principal no se resuelven artificialmente.
+La adopcion productiva tiene sus comprobantes en
+`staging/catalogo_lectura/20261019_orchard_production` y conserva el release
+economico y las cinco generaciones de marts financieros existentes.
+La auditoria de dependencias del frontend queda separada de esta adopcion.
+
 ## Objetivo
 
 Unificar Orchard moderno y el historico Altafonte dentro de la fuente `orchard`, sin perder la distincion entre datos granulares modernos y legacy limitado.

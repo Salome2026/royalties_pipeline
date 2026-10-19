@@ -222,6 +222,11 @@ def artist_suggestions(
         ada_uncertain = ada_principal(evidence, catalog_artists)
         if ada_uncertain is not None:
             result["principal_uncertain"] = ada_uncertain
+        from app.master_contract_participants import orchard_principal
+        orchard_uncertain = orchard_principal(evidence, catalog_artists,
+            bool((raw_result or {}).get("principal_uncertain")), isrc=isrc)
+        if orchard_uncertain is not None:
+            result["principal_uncertain"] = orchard_uncertain
         result["evidence"] = [*result.get("evidence", []), {
             "source": "catalog", "field": "catalog_artists", "raw": fallback,
             "artists": catalog_artists, "used": True,
