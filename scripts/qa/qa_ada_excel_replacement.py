@@ -15,6 +15,7 @@ from ingest_standardized_ada import read_statement, select_statement_files, stan
 from lib.ada_identity import ada_catalog_key_expr, add_ada_artist_evidence
 from app.master_contracts import _ada_artists
 from lib.store_taxonomy import add_store_dimensions
+from lib.ada_statement_reader import FIELDS
 
 
 def fixture(path: Path, changes: dict | None = None, account: str = "99500", period: str = "07/26 - 07/26", empty: bool = False) -> None:
@@ -32,6 +33,7 @@ def fixture(path: Path, changes: dict | None = None, account: str = "99500", per
         "Parent Product ID": "8718521191726", "UPC": None,
         "Price Name": "Streaming Full Price", "Revenue Type Desc": "Subscription",
     }
+    row = {**dict.fromkeys(FIELDS), **row, "Royalty Earnings": 0.189}
     row.update(changes or {})
     sheet.append(list(row))
     if not empty:

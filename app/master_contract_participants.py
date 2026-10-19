@@ -11,6 +11,28 @@ from app.operational_db import db_sql, is_postgres_connection
 EXCLUSIONS = "catalog_participant_exclusions"
 
 
+def ada_principal(evidence: list[dict], artists: list[str]) -> bool | None:
+    from lib.ada_catalog_artists import EVIDENCE_VERSION
+
+    records = [entry for entry in evidence if entry.get("source") == "ada"
+               and entry.get("adapter_version") == EVIDENCE_VERSION]
+    if not records:
+        return None
+    if len(records) != 1:
+        return True
+    entry = records[0]
+    if (entry.get("identity_status") != "resolved"
+            or entry.get("native_resolution_status") != "resolved"
+            or not entry.get("used_for_catalog")):
+        return True
+    names = entry.get("artists") or []
+    if (not artists or set(map(artist_key, names)) != set(map(artist_key, artists))
+            or entry.get("principal_status") != "order_only"
+            or not entry.get("principal_proposed")):
+        return True
+    return artist_key(entry["principal_proposed"]) != artist_key(artists[0])
+
+
 def allocations(split: dict) -> list[tuple[str, dict]]:
     return [("fallback", split), *[("agreement:" + str(item["id"]), item["allocation"])
         for item in split.get("agreements") or [] if isinstance(item.get("allocation"), dict)]]

@@ -12,6 +12,7 @@ from lib.catalog_manual_metadata import apply_catalog_manual_metadata
 from lib.fuga_catalog_artists import enrich_fuga_catalog_file
 from lib.fuga_video_automatic import apply_automatic_extended
 from lib.onerpm_catalog_artists import METADATA_FILE, enrich_onerpm_catalog_file
+from lib.ada_catalog_artists import METADATA_FILE as ADA_METADATA_FILE, enrich_ada_catalog_file
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -721,6 +722,7 @@ def build_catalog_master() -> pl.DataFrame:
     catalog = enrich_fuga_catalog_file(catalog, MARTS_DIR / "standardized_raw_fuga.parquet")
     catalog = apply_automatic_extended(catalog, MARTS_DIR.parent.parent)
     catalog = enrich_onerpm_catalog_file(catalog, MARTS_DIR / METADATA_FILE)
+    catalog = enrich_ada_catalog_file(catalog, MARTS_DIR / ADA_METADATA_FILE, MARTS_DIR / "standardized_raw_orchard.parquet")
     return catalog.sort("amount_usd", descending=True)
 
 

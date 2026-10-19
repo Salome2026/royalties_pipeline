@@ -16,6 +16,8 @@ from lib.statement_period import from_ada_filename
 from lib.distributor_policy_store import load_distributor_policy_document
 from lib.ada_identity import ada_isrc_expr, ada_native_code_expr, add_ada_artist_evidence
 from lib.ada_release_codes import add_ada_release_codes
+from lib.ada_statement_reader import read_operational_package
+from lib.ada_catalog_artists import METADATA_FILE, metadata_observations
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -90,90 +92,10 @@ def read_statement(path: Path) -> pl.DataFrame:
 
 
 def read_excel_statement(path: Path) -> pl.DataFrame:
-    from openpyxl import load_workbook
-
-    period = from_ada_filename(path.name).period
     match = re.fullmatch(r"(\d+)_\d{6}_\d{6}_\1_DTL\.xlsx", path.name, flags=re.IGNORECASE)
-    if period == "unknown" or match is None:
+    if match is None:
         raise ValueError(f"Nombre de statement Excel ADA no valido: {path.name}")
-    account = match.group(1)
-    workbook = load_workbook(path, read_only=True, data_only=True)
-    try:
-        if "Distribution Statement" not in workbook.sheetnames:
-            raise ValueError(f"Falta la hoja Distribution Statement: {path.name}")
-        sheet = workbook["Distribution Statement"]
-        rows = iter(sheet.iter_rows(values_only=True))
-        required = {"Artist Name", "Project Title", "Catalogue Number", "ISRC", "Catalogue Title", "Reported Month", "Territory", "Country Code", "Price Name", "Revenue Type Desc", "Sales", "Receipts Value", "Distribution Fees", "Artist Royalties", "Mechanical Fees", "Admin Fees", "Upload Fees", "Other Fees"}
-        contract = None
-        workbook_period = None
-        headers = None
-        for row_number, row in enumerate(rows, start=1):
-            names = [str(value).strip() if value is not None else "" for value in row]
-            for index, name in enumerate(names[:-1]):
-                if name.rstrip(":") == "Contract":
-                    contract = names[index + 1]
-                if name.rstrip(":") == "Royalties Statement for Period":
-                    workbook_period = names[index + 1]
-            if required.issubset(set(names)):
-                headers = names
-                break
-            if row_number >= 20:
-                break
-        if headers is None:
-            raise ValueError(f"No se encontro la cabecera de detalle ADA: {path.name}")
-        if not contract or not re.match(rf"^{re.escape(account)}\s*-", contract):
-            raise ValueError(f"Contrato del Excel no coincide con la cuenta {account}: {path.name}")
-        expected_period = datetime.strptime(period, "%Y-%m").strftime("%m/%y")
-        if not workbook_period or re.sub(r"\s+", "", workbook_period) != f"{expected_period}-{expected_period}":
-            raise ValueError(f"Periodo del Excel no coincide con {period}: {path.name}")
-        positions = [(index, name) for index, name in enumerate(headers) if name]
-        if len({name for _, name in positions}) != len(positions):
-            raise ValueError(f"Columnas duplicadas en ADA: {path.name}")
-        records = []
-        footer_labels = {"sub totals", "previously accounted deductions", "totals"}
-        for row in rows:
-            nonempty = [value for value in row if value is not None and str(value).strip()]
-            if not nonempty:
-                continue
-            first_label = str(nonempty[0]).strip().rstrip(":").lower()
-            has_identity = any(row[index] is not None and str(row[index]).strip()
-                               for index, name in positions if name in {"ISRC", "Catalogue Number"})
-            if first_label in footer_labels and not has_identity:
-                continue
-            records.append([str(row[index]).strip() if row[index] is not None else None for index, _ in positions])
-        frame = pl.DataFrame(records, schema={name: pl.Utf8 for _, name in positions}, orient="row")
-    finally:
-        workbook.close()
-
-    columns = set(frame.columns)
-    # Reject unknown financial components instead of silently losing money.
-    fee_names = ["Distribution Fees", "Mechanical Fees", "Admin Fees", "Upload Fees", "Other Fees"]
-    for name in ["Receipts Value", "Sales", "Artist Royalties", *fee_names]:
-        value = decimal_expr(name, columns)
-        if frame.select((value.is_null() | ~value.is_finite()).any()).item():
-            raise ValueError(f"{name} contiene valores vacios o invalidos: {path.name}")
-        if name in ["Artist Royalties", *fee_names[1:]] and frame.select((value != 0).any()).item():
-            raise ValueError(f"{name} no es cero; revisar la regla economica de ADA: {path.name}")
-    gross = decimal_expr("Receipts Value", columns)
-    exact_fees = [Decimal(value.replace(",", "")) for value in frame.get_column("Distribution Fees")]
-    exact_net = [float(Decimal(value.replace(",", "")) - fee) for value, fee in zip(frame.get_column("Receipts Value"), exact_fees)]
-    consumed = text_expr("Reported Month", columns).str.replace(r"^(\d{4})(\d{2})$", "${1}-${2}")
-    frame = frame.with_columns([
-        text_expr("Catalogue Number", columns).alias("catalog_number"),
-        text_expr("Parent Product ID", columns).alias("parent_product_id"),
-        text_expr("UPC", columns).alias("ada_explicit_upc"),
-        pl.lit(account).alias("ada_account_id"),
-        pl.lit(period).alias("statement_period"),
-        consumed.alias("transaction_month"),
-        gross.alias("gross_royalty_usd"),
-        pl.Series("deductible_fees_usd", [float(value) for value in exact_fees], dtype=pl.Float64),
-        pl.Series("amount_usd", exact_net, dtype=pl.Float64),
-    ])
-    months = frame.get_column("transaction_month").unique().to_list()
-    for month in months:
-        if month is None:
-            raise ValueError(f"Mes de consumo vacio en ADA: {path.name}")
-        datetime.strptime(month, "%Y-%m")
+    frame, _native, _metadata = read_operational_package(path, match[1])
     return frame
 
 
@@ -320,6 +242,8 @@ def main() -> None:
     policy_rules = load_ada_policy_rules()
 
     parts: list[Path] = []
+    native_parts: list[Path] = []
+    metadata_parts: list[pl.DataFrame] = []
     empty_periods: list[str] = []
     statement_count = 0
 
@@ -343,7 +267,7 @@ def main() -> None:
 
         for path in files:
             statement = from_ada_filename(path.name)
-            frame = read_statement(path)
+            frame, native, _validation = read_operational_package(path, str(config["original_account"]))
             if frame.is_empty():
                 empty_periods.append(f"{account}/{statement.period}")
                 print(f"  {statement.period}: sin actividad")
@@ -359,6 +283,10 @@ def main() -> None:
             part_path = account_temp_dir / f"{path.stem}.parquet"
             standardized.write_parquet(part_path)
             parts.append(part_path)
+            native_path = account_temp_dir / f"{path.stem}.native.parquet"
+            native.write_parquet(native_path)
+            native_parts.append(native_path)
+            metadata_parts.append(metadata_observations(native))
             print(
                 f"  {statement.period}: {standardized.height} filas | "
                 f"USD {standardized['amount_usd'].sum():.8f}"
@@ -370,6 +298,14 @@ def main() -> None:
     final = add_ada_artist_evidence(pl.concat([pl.read_parquet(path) for path in parts], how="diagonal_relaxed"))
     temporary_output = OUTPUT_PATH.with_name(f"{OUTPUT_PATH.name}.tmp")
     final.write_parquet(temporary_output)
+    metadata_path = OUTPUT_PATH.with_name(METADATA_FILE)
+    metadata_temp = metadata_path.with_suffix(".tmp.parquet")
+    pl.concat(metadata_parts, how="diagonal_relaxed").write_parquet(metadata_temp)
+    audit_path = OUTPUT_PATH.with_name("ada_native_evidence.parquet")
+    audit_temp = audit_path.with_suffix(".tmp.parquet")
+    pl.concat([pl.scan_parquet(path) for path in native_parts], how="diagonal_relaxed").sink_parquet(audit_temp)
+    metadata_temp.replace(metadata_path)
+    audit_temp.replace(audit_path)
     temporary_output.replace(OUTPUT_PATH)
 
     print(f"Archivo: {OUTPUT_PATH}")

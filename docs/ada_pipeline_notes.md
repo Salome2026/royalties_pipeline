@@ -25,6 +25,12 @@ Se valida la cuenta de Contract contra filename y carpeta; no se mezclan cuentas
 - Preservar las columnas originales y duplicados economicos reales.
 - Conservar filename, ruta, hash y fecha de ingesta como trazabilidad.
 
+Desde la adopcion de ADA-LECTURA-1 (2026-10-19), el lector rector es
+scripts/lib/ada_statement_reader.py. Lee las celdas reales de OOXML, incluso
+fuera del ancho declarado por Excel; admite los dos perfiles certificados de
+27/28 columnas, detecta macros, hojas/columnas nuevas y formulas sin cache.
+Una extension no certificada se detiene, no se interpreta como otro formato.
+
 ## Mapa obligatorio
 
 | Columna Excel | Significado y destino |
@@ -48,6 +54,7 @@ Se valida la cuenta de Contract contra filename y carpeta; no se mezclan cuentas
 | Receipts Value | Bruto; gross_royalty_usd |
 | Distribution Fees | Deduccion ADA; deductible_fees_usd |
 | Bruto menos deduccion | amount_usd, net_amount y net_amount_usd |
+| Royalty Earnings | Control independiente en la evidencia nativa; no se suma al ingreso ni reemplaza el neto |
 | Marketing Owner | Contexto original; NO prueba de contrato ni titularidad |
 
 ADA Excel no informa fecha de acreditacion bancaria: receipt_month queda vacio.
@@ -64,6 +71,17 @@ Nunca cambiar el dinero para que cierre ni descartar una fila invalida.
 Las flags y revenue_basis se leen de la policy vigente de Cloud SQL. Mantener
 sin cambios los ajustes de reportes de cada cuenta. El lector NO aplica splits,
 no convierte ingresos en cobros bancarios y no descuenta otra vez la policy.
+
+La referencia Decimal conserva los literales con contexto 80 y se controla
+independientemente con contexto 160 y capacidad certificada de 60 digitos mas
+exponente. La proyeccion operativa Float64 reproduce la ya aprobada; no hay
+migracion de tipos, tolerancia global ni redondeo por fila.
+
+El control Royalty Earnings exige igualdad exacta. Unicamente las 22
+observaciones previamente aceptadas de Mawz 2025-12 se reconocen por hash del
+archivo, cuenta, statement, fila, valores y version en ada_known_controls.json.
+Sus estados originales siguen siendo diferentes, no iguales; no se corrige
+dinero. Una discrepancia nueva exige revision y no activa un paquete parcial.
 
 ## Identidades y lanzamientos
 
@@ -94,6 +112,27 @@ Tener 30 caracteres no demuestra por si solo que un nombre este mal.
 Creditos, orden principal y porcentajes contractuales son cosas distintas.
 No aplicar contratos a los reportes actuales.
 
+La lista comun se resuelve en scripts/lib/ada_catalog_artists.py y se incorpora
+en build_catalog_master.py despues de los enriquecimientos existentes. Se
+completan conjuntos compatibles con evidencia, sin union indiscriminada ni
+interseccion que borre invitados. Creditos completos de pista Orchard ya
+interpretados pueden aportar evidencia compatible; no se cambia su lector.
+Las contradicciones conservan la lista anterior y ambas evidencias. El orden
+propuesto no demuestra titularidad ni porcentaje. Las listas nuevas no dependen
+de un diccionario cerrado de artistas; referencias de nombres colectivos se
+pueden pasar al resolver. Gramatica no certificada queda sin atribucion nueva,
+sin que otro parser rellene silenciosamente la propuesta.
+
+El adaptador ADA de Contratos consume ese estado comun y conserva dudas reales,
+contratos cerrados/reabiertos e historial/exclusiones. Solo agrega nombres sin
+porcentaje a propuestas habilitadas; no guarda ni reabre contratos.
+
+El dashboard de regalias actual sigue SIN SPLITS: al buscar Candu muestra la
+generacion total de los temas donde participa, con las policies y filtros de
+siempre, no el saldo que debe cobrar. El reparto para artista, productora y
+socios pertenece a OTRO dashboard futuro. Crear o cambiar contratos no modifica
+automaticamente esa primera pantalla.
+
 ## Circuito y controles de reemplazo
 
 Procesar ejecuta ingest_standardized_ada.py y build_song_level_ada.py, luego
@@ -103,6 +142,22 @@ Las columnas originales permanecen en Parquet; BigQuery conserva identidad,
 lanzamiento, participantes originales/evidencia, fechas, DSP/pais, unidades,
 bruto, fees, neto y trazabilidad. La columna historica gpid en BigQuery queda
 nula en nuevos releases ADA; no se utiliza para interpretar Excel.
+
+La ingesta tambien produce catalog_ada_artists.parquet (metadata compacta) y
+ada_native_evidence.parquet (procedencia y controles exactos), separados del
+archivo economico compatible. Se preparan todos los candidatos antes de
+reemplazar archivos canonicos. build_catalog_master exige la metadata ADA;
+no vuelve a adivinar participantes desde campos de otra distribuidora.
+
+La adopcion del 2026-10-19 sobre lo publicado es SOLO una revision de metadata:
+se conservan el release economico y los cinco marts no catalogo con sus
+generaciones/hash, las tablas financieras BigQuery, asociados/UGC, policies y
+contratos. Se actualizan las cuatro columnas artisticas del catalogo en GCS y
+BigQuery mediante copia de seguridad, control de concurrencia y manifest.
+No se reconstruyen los ingresos ni los reportes publicados por esta adopcion.
+Inventario de esta validacion: cuatro Excel Indyana (hasta septiembre 2026),
+28 Mawz (hasta agosto 2026), 750690 observaciones, 340 ISRC y 11 claves nativas.
+La contradiccion conocida ARDL12400078 queda conservada, no resuelta por fuerza.
 
 Antes de reemplazar, respaldar y conciliar por cuenta, statement, consumo,
 ISRC, Catalogue Number, DSP, pais, modalidad y precio: bruto, fees, neto y unidades.
@@ -120,7 +175,8 @@ son antecedentes de continuidad, no filas economicas inventadas ni archivos
 activos necesarios. Agosto Mawz es nuevo: neto USD 12633.68009634.
 Evidencia del reemplazo: C:/royalties_pipeline/staging/ada_excel_only_20261007.
 
-Pruebas obligatorias al cambiar estas reglas: qa_ada_excel_replacement.py,
+Pruebas obligatorias al cambiar estas reglas: qa_ada_catalog_artists.py,
+los 50 casos ADA-T01 a ADA-T50, qa_ada_excel_replacement.py,
 qa_ada_artist_display.py,
 qa_ada_release_codes.py, qa_ada_accounts.py, qa_master_contracts_pilot.py,
 qa_store_reporting_dimensions.py, qa_bigquery_release_transform.py y conciliacion BigQuery.

@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "acceptance_version": "Ruben-20261019-ADA-E",
+  "source_rule_version": "ADA-LECTURA-1",
+  "account": "99205",
+  "statement_period": "2025-12",
+  "file_sha256": "703275e7a86a779588f04aec5fd7903397fa637ff8c7bb24b12e99e944192669",
+  "fields": [
+    "statement_file_name",
+    "source_row",
+    "Receipts Value",
+    "Distribution Fees",
+    "Royalty Earnings",
+    "native_net"
+  ],
+  "observations": [
+    {
+      "source_row": 995,
+      "control_sha256": "645653d858f0f04abb3b0d355c7d9e6aeebe7b0afcded1b2ac4a88075b44b73a"
+    },
+    {
+      "source_row": 1031,
+      "control_sha256": "ee8fc946bc4f3279ebf46978b45d0101cc1f5c71af8bdc95cfd4d8807e3d086e"
+    },
+    {
+      "source_row": 2486,
+      "control_sha256": "c4e5e1207b0d707b90ae4d71dfaffc73d0b91bfdf8f4e88342de32883226384b"
+    },
+    {
+      "source_row": 2489,
+      "control_sha256": "6cfe298f7fad91e34dd87d7ddc215ef313b05c4aade093e22c072bea9feb8653"
+    },
+    {
+      "source_row": 3315,
+      "control_sha256": "610eb56ef7c6b95434f762fd6a3661d87d37937fa79be0d54c5202bd6da834b7"
+    },
+    {
+      "source_row": 3344,
+      "control_sha256": "bed11cf75dc3e159603c363ac19c132e44382f6ad80c18e0df457f095fd7d5f5"
+    },
+    {
+      "source_row": 3387,
+      "control_sha256": "87093a52a47928a3b1d2444ea76925fe41a0e908b177ccd1e007c224adef7262"
+    },
+    {
+      "source_row": 6647,
+      "control_sha256": "828dec429b8525c67dc866b3fcb5ae83c2686712383a57bea326286a1cad09f1"
+    },
+    {
+      "source_row": 6668,
+      "control_sha256": "1bc5d6b90321c10e477b39f2e15501fb10b892f0b38f1518ceaa15d9bc9922a0"
+    },
+    {
+      "source_row": 6703,
+      "control_sha256": "fff29763a1bf54b0a10865e3289342454a4e4ebbdf227cc147e498110053e9e8"
+    },
+    {
+      "source_row": 6771,
+      "control_sha256": "7b2a96c68d81cd5832761468a64fa929604edd634c3f1e63a0bfba5b8993673c"
+    },
+    {
+      "source_row": 7691,
+      "control_sha256": "031b9f2cb90b6453c78e36dacae70f666dd0fd0acc9850c60ab9831412528a67"
+    },
+    {
+      "source_row": 7718,
+      "control_sha256": "a04a4edea472085383fcd1193fe8fefbdd235a25bf4e72de85805431f9612654"
+    },
+    {
+      "source_row": 9977,
+      "control_sha256": "521cf02e920267ef28f4d5c9fbde4277ac76e32834c326f8c669db59db7b9b2b"
+    },
+    {
+      "source_row": 10991,
+      "control_sha256": "2e970e8e2fe50520d74ec72b310e68ee0eb4ed1622132106499a55e815ef477e"
+    },
+    {
+      "source_row": 10995,
+      "control_sha256": "cf68eb3da345aef92cf1441f6f00c22d7033fdff0ca573ae31de2079c71dd883"
+    },
+    {
+      "source_row": 11008,
+      "control_sha256": "a7f082744b9ac175e58426490be322c5c35fc99a0d238b54bd80ec27211900e6"
+    },
+    {
+      "source_row": 11009,
+      "control_sha256": "b14b8338d1234cfa8f7f0f31ac38cc6bb300d028875b6345aff90aeb8ab36c88"
+    },
+    {
+      "source_row": 11024,
+      "control_sha256": "52e3773eabbc4c711937be602a7f93db271a29ea9606afc1e5af46555695ca19"
+    },
+    {
+      "source_row": 11038,
+      "control_sha256": "cc78bc5d3864ddea9f6f773ef68ab37b6f4b93325840f0905970d51dafcc96de"
+    },
+    {
+      "source_row": 11083,
+      "control_sha256": "d7922a1d2f5b618f2998f4ef5f9e11d563a604b17bd07908e64c2646d1a1c7f3"
+    },
+    {
+      "source_row": 20863,
+      "control_sha256": "cad299f8606bcc6cfc54968053f7c9099d177c6fa9ee1336a686e309d8b5e559"
+    }
+  ]
+}
