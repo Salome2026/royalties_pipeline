@@ -14,6 +14,7 @@ from lib.fuga_video_automatic import apply_automatic_extended
 from lib.onerpm_catalog_artists import METADATA_FILE, enrich_onerpm_catalog_file
 from lib.ada_catalog_artists import METADATA_FILE as ADA_METADATA_FILE, enrich_ada_catalog_file
 from lib.orchard_catalog_artists import enrich_orchard_catalog_file
+from lib.soundon_catalog_artists import enrich_soundon_catalog_file
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -725,6 +726,7 @@ def build_catalog_master() -> pl.DataFrame:
     catalog = enrich_onerpm_catalog_file(catalog, MARTS_DIR / METADATA_FILE)
     catalog = enrich_ada_catalog_file(catalog, MARTS_DIR / ADA_METADATA_FILE, MARTS_DIR / "standardized_raw_orchard.parquet")
     catalog = enrich_orchard_catalog_file(catalog, MARTS_DIR / "standardized_raw_orchard.parquet")
+    catalog = enrich_soundon_catalog_file(catalog, MARTS_DIR / "standardized_raw_soundon.parquet")
     return catalog.sort("amount_usd", descending=True)
 
 

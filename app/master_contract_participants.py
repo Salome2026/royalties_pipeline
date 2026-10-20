@@ -85,6 +85,87 @@ def allocations(split: dict) -> list[tuple[str, dict]]:
         for item in split.get("agreements") or [] if isinstance(item.get("allocation"), dict)]]
 
 
+def soundon_suggestions(result: dict, evidence: list[dict], artists: list[str], raw: dict | None, *, isrc: str) -> dict | None:
+    import re
+    from lib.soundon_catalog_artists import EVIDENCE_VERSION, RULE_VERSION, credit_parts
+    from lib.soundon_identity import artist_key as native_key
+
+    records = [entry for entry in evidence if entry.get("source") == "soundon"
+               and entry.get("adapter_version") == EVIDENCE_VERSION]
+    if not records:
+        return None
+    result = copy.deepcopy(result)
+    valid = len(records) == 1
+    entry = records[0]
+    native, observations = entry.get("native_artists"), entry.get("observations")
+    valid = valid and (entry.get("rule") == RULE_VERSION and entry.get("asset_isrc") == isrc
+        and entry.get("level") == "track" and entry.get("field") == "Track Artists"
+        and entry.get("account") == "soundon" and entry.get("source_sheet") == "my_royalty"
+        and entry.get("identity_status") == "resolved" and isinstance(native, list) and bool(native)
+        and all(isinstance(name, str) and name.strip() for name in native)
+        and isinstance(observations, list) and bool(observations))
+    if valid:
+        for row in observations:
+            filename = re.fullmatch(r"SoundOn_royalty_monthly_statement_(\d{4})_(\d{2})_My Royalty\.csv", str(row.get("statement_file_name") or "")) if isinstance(row, dict) else None
+            valid = isinstance(row, dict) and (row.get("asset_isrc") == row.get("ISRC") == isrc
+                and row.get("account") == "soundon" and row.get("source_sheet") == "my_royalty"
+                and filename and "-".join(filename.groups()) == row.get("statement_period") == row.get("Reporting Period")
+                and re.fullmatch(r"[a-fA-F0-9]{64}", str(row.get("statement_file_hash") or ""))
+                and re.fullmatch(r"20\d{2}-(?:0[1-9]|1[0-2])", str(row.get("statement_period") or ""))
+                and isinstance(row.get("standardized_rows"), list) and bool(row["standardized_rows"])
+                and all(isinstance(index, int) and index > 0 for index in row["standardized_rows"])
+                and row.get("locator_kind") == "standardized_soundon_subset_row"
+                and isinstance(row.get("Track Artists"), str) and row.get("artists") == credit_parts(row["Track Artists"]))
+            if not valid:
+                break
+        observed = {native_key(name) for row in observations for name in row.get("artists", [])} if valid else set()
+        valid = valid and {native_key(name) for name in native} <= observed
+    if not valid:
+        result["principal_uncertain"] = True
+        result["warnings"] = [*result.get("warnings", []), "Evidencia SoundOn incompleta; se conserva la propuesta anterior."]
+        return result
+    # Recover only names directly evidenced in track credits, not unchecked serialized proposals.
+    reported = list(artists)
+    for name in [*native, *(name for row in observations for name in row["artists"])]:
+        if native_key(name) not in {native_key(value) for value in reported}:
+            reported.append(name)
+    target = keys(artists[:1])
+    first = entry.get("principal_proposed")
+    uncertain = bool((raw or {}).get("principal_uncertain"))
+    uncertain = uncertain or entry.get("principal_status") not in {"single_artist", "order_only", "verified_isrc_reference"}
+    uncertain = uncertain or not first or keys([first]) != target
+    observed_sets = {frozenset(keys(row["artists"])) for row in observations}
+    observed_firsts = keys([row["artists"][0] for row in observations])
+    if entry.get("native_resolution_status") != "as_reported" or observed_sets != {frozenset(keys(native))}:
+        uncertain = True
+    elif entry.get("principal_status") == "verified_isrc_reference":
+        from lib.soundon_catalog_artists import references
+        from lib.soundon_identity import REFERENCE_PATH
+        approved = references(REFERENCE_PATH).get(isrc)
+        uncertain = uncertain or not approved or approved != entry.get("isrc_reference") or keys(approved["artists"]) != keys(native) or native_key(approved["artists"][0]) != native_key(first)
+    else:
+        uncertain = uncertain or observed_firsts != keys([first] if first else [])
+    fuga = keys([record["artists"][0] for record in evidence
+                 if record.get("source") == "fuga" and record.get("field") == "Asset Artist" and record.get("artists")])
+    uncertain = uncertain or bool(fuga and fuga != target)
+    uncertain = uncertain or ada_principal(evidence, artists) is True or onerpm_principal(evidence, artists, False) is True
+    uncertain = uncertain or orchard_principal(evidence, artists, bool((raw or {}).get("principal_uncertain")), isrc=isrc) is True
+    result.update(artists=reported, artists_reported=reported, principal_uncertain=bool(uncertain),
+        participant_resolution_status=entry["participant_resolution_status"], principal_resolution_status="unresolved" if uncertain else entry["principal_status"],
+        identity_relationship_status=entry.get("identity_relationship_status", "unknown"),
+        identity_relationship_conflicts=entry.get("identity_relationship_conflicts", []),
+        participant_alternatives=[{"source": "catalog_prior", "artists": artists},
+            *[{"source": "soundon", "artists": row["artists"], "statement_period": row["statement_period"]} for row in observations]])
+    result["evidence"] = [*result.get("evidence", []), entry]
+    if entry["participant_resolution_status"] != "as_reported":
+        obsolete = "Las fuentes de pista discrepan; sugerimos solo los nombres comunes. Revisar antes de cerrar."
+        result["warnings"] = [warning for warning in result.get("warnings", []) if warning != obsolete]
+        result["warnings"].append("Las fuentes difieren en participantes; se conservan los nombres informados, sin asignar porcentajes.")
+    if entry.get("identity_relationship_conflicts"):
+        result["warnings"].append("Un Track ID declara mas de un ISRC; se conservan las grabaciones separadas.")
+    return result
+
+
 def names(allocation: dict) -> list[str]:
     return [name for name in [allocation.get("principal") or "", *(row.get("artist") or "" for row in allocation.get("participants") or [])] if name.strip()]
 

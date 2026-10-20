@@ -231,6 +231,10 @@ def artist_suggestions(
             "source": "catalog", "field": "catalog_artists", "raw": fallback,
             "artists": catalog_artists, "used": True,
         }]
+        from app.master_contract_participants import soundon_suggestions
+        soundon_result = soundon_suggestions(result, evidence, catalog_artists, raw_result, isrc=isrc)
+        if soundon_result is not None:
+            result = soundon_result
     return result
 
 

@@ -81,11 +81,14 @@ importa automaticamente el resto de la hoja ni se modifica la hoja de Pablo.
 Una nueva referencia se incorpora por ISRC y evidencia, no mediante excepciones
 en reportes. Ediciones futuras de OGS deben contrastarse antes de aprobarlas.
 
-Sin referencia, un cambio del primer artista se marca `principal_unresolved`.
-Un cambio del conjunto de participantes se marca `conflicting_participants`.
-No se inventan invitados ni se unen listas contradictorias; Contratos muestra
-la advertencia y no precarga un principal incierto. Nuevos ISRC con creditos
-consistentes siguen entrando normalmente. Ningun split guardado cambia.
+Sin referencia, un cambio no resuelto del primer artista mantiene la duda de
+principal. Los integrantes y el orden se evaluan por separado: una diferencia
+de integrantes entre distribuidoras no vuelve incierto un principal observado
+de forma consistente. Se conservan las listas y su procedencia, sin borrar
+nombres por interseccion ni declarar que una union prueba derechos.
+Contratos ofrece los participantes reportados en la propuesta y muestra la
+diferencia entre fuentes, sin asignar porcentajes ni modificar contratos
+guardados. Si el principal es incierto, no se precarga como confirmado.
 
 `PUBLISHING` se incluye en el circuito economico actual de recordings. Se
 conserva `Royalty Type` para auditoria; no se excluye ni se suma dos veces.
@@ -102,7 +105,41 @@ de mes de consumo no habilita splits nuevos ni cambia formatos o descuentos.
 
 ## Share in / Share out
 
-Actualmente vienen vacios. El script esta preparado para leerlos si en el futuro traen filas, pero no hay impacto hoy.
+Los 22 archivos revisados estan vacios, con cuatro layouts. Eso no certifica
+transferencias futuras. El adaptador de metadata rechaza entradas con
+movimientos no certificados; el camino financiero real requiere una muestra
+y conciliacion antes de reemplazarlo. No se modifican Shares In & Out de ONErpm.
+
+## Catalogo comun y Contratos 2026-10-20
+
+La adopcion de SOUNDON-LECTURA-1 es de metadata, no un reemplazo del lector
+economico. El contrato completo y los 72 casos del lector estan en
+`catalogo_lectura_soundon_reglas_v1_20261019.md`.
+
+`scripts/lib/soundon_catalog_artists.py` interpreta las columnas SoundOn ya
+preservadas en standardized, conserva las observaciones y produce evidencia
+comun versionada. `build_catalog_master.py` aplica ese adaptador tambien en
+futuras construcciones. No depende de abrir CSV locales desde la API ni de
+consultar OGS durante la lectura de una ficha.
+
+Solo se estructuran `catalog_artists`, `catalog_artist_statement`,
+`catalog_artist_rule` y `catalog_artist_evidence`. Las listas previas y las
+referencias aprobadas se conservan. `app/master_contract_participants.py`
+reconoce su evidencia y Contratos utiliza esa lectura en sus propuestas;
+participantes nuevos no reciben porcentajes del statement. `Artist Share`
+es dinero, nunca el porcentaje de un contrato.
+
+La prueba cloud cubre las 17 fichas SoundOn, dos testigos de otras fuentes,
+los asociados reales, escritorio/movil y 159 regresiones del contexto de codigo
+adoptado. Se conservan importes, ambas fechas, unidades, aliases/UGC, decisiones
+de asociados, contratos e historiales, policies y entradas de reportes. El
+dashboard actual continua sin splits.
+
+QA de metadata: `scripts/qa/qa_soundon_catalog_artists.py`. El soporte financiero
+de unidades desconocidas (SO-D-02 / ORCH-INT-02) y SoundOn Shares con movimientos
+(SO-D-03) siguen separados de esta adopcion. La carrera de recarga/busqueda
+rapida del frontal (SO-CLOUD-UI-01), reproducida en el preview con la web previa,
+tampoco se modifica en esta etapa.
 
 ## Outputs
 
