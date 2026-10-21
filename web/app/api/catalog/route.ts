@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const config = await apiConfig("editor");
+  const config = await apiConfig();
   if ("error" in config) return config.error;
 
   const body = await request.json();
@@ -51,6 +51,7 @@ export async function PATCH(request: NextRequest) {
     headers: {
       "Content-Type": "application/json",
       "X-VPO-API-Key": config.apiKey,
+      "X-VPO-Username": config.user.username,
     },
     body: JSON.stringify(body),
   });

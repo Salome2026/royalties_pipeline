@@ -8254,8 +8254,14 @@ def catalog_items(
 def update_catalog_status(
     request: CatalogStatusRequest,
     x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
 ):
     require_api_key(x_vpo_api_key)
+    username = clean_username(x_vpo_username or "")
+    if not username:
+        raise HTTPException(status_code=401, detail="Se requiere una sesión de usuario.")
+    with operational_connect() as conn:
+        require_module_permission(conn, username, "catalog", "edit")
     catalog_key = request.catalog_key.strip()
     if not catalog_key:
         raise HTTPException(status_code=400, detail="catalog_key vacio.")
