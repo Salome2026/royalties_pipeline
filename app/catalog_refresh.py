@@ -53,6 +53,10 @@ def snapshot_id(release_id: str, generation: str) -> str:
     return f"catalog-{digest}"
 
 
+def validation_sql(table: str, refresh_id: str) -> str:
+    return f"SELECT COUNT(*) AS row_count, COALESCE(SUM(amount_usd),0) AS amount FROM `{table}` WHERE release_id = '{refresh_id}'"
+
+
 def dashboard_state(client=None) -> dict:
     generation = catalog_generation(client)
     ready = read_json("catalog_dashboard_ready.json", client)
@@ -189,8 +193,8 @@ INSERT INTO `{table}` ({columns}) SELECT {columns} FROM `{stage}`;
 COMMIT TRANSACTION;""", location=location).result()
                     finally:
                         bq.delete_table(stage, not_found_ok=True)
-                    checked = next(iter(bq.query(f"SELECT COUNT(*) AS rows, COALESCE(SUM(amount_usd),0) AS amount FROM `{table}` WHERE release_id = '{refresh_id}'", location=location).result()))
-                    if int(checked["rows"]) != expected[0] or abs(float(checked["amount"]) - float(expected[1] or 0)) > .01:
+                    checked = next(iter(bq.query(validation_sql(table, refresh_id), location=location).result()))
+                    if int(checked["row_count"]) != expected[0] or abs(float(checked["amount"]) - float(expected[1] or 0)) > .01:
                         raise RuntimeError("La actualizacion del catalogo no concilia con BigQuery.")
                     # A change made during this build is processed on the next iteration.
                     if catalog_generation(client) != generation:
