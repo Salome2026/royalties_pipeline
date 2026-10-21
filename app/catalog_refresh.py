@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from datetime import datetime, timezone
 
 import google.auth
@@ -83,9 +84,40 @@ def request_refresh() -> dict:
         operation = launch_refresh()
         return {"status": "queued", "operation": operation}
     except Exception as exc:
-        # The scheduled reconciliation retries independently of the API process.
+        # The GCS notification remains in Pub/Sub until launch is acknowledged.
         print(json.dumps({"event": "catalog_refresh_launch_failed", "error": str(exc)}), flush=True)
         return {"status": "pending_retry"}
+
+
+def receive_change_event(payload: dict, authorization: str | None) -> dict:
+    from fastapi import HTTPException
+    from google.oauth2 import id_token
+    from google.auth.transport.requests import Request
+
+    audience = os.environ.get("VPO_CATALOG_EVENT_AUDIENCE", "")
+    email = os.environ.get("VPO_CATALOG_EVENT_SERVICE_ACCOUNT", "")
+    if not audience or not email:
+        raise HTTPException(status_code=503, detail="Notificaciones de catálogo no configuradas.")
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Notificacion no autenticada.")
+    try:
+        claims = id_token.verify_oauth2_token(authorization[7:], Request(), audience=audience)
+        if claims.get("email") != email or claims.get("email_verified") is not True:
+            raise ValueError("Identidad incorrecta.")
+    except (ValueError, google.auth.exceptions.GoogleAuthError) as exc:
+        raise HTTPException(status_code=401, detail="Identidad de notificacion invalida.") from exc
+    message = payload.get("message") or {}
+    attributes = message.get("attributes") or {}
+    if attributes.get("eventType") != "OBJECT_FINALIZE" or attributes.get("bucketId") != os.environ["GCS_BUCKET"]:
+        return {"ignored": True}
+    if attributes.get("objectId") not in {status_object(), object_name("release_manifest.json")}:
+        return {"ignored": True}
+    try:
+        operation = launch_refresh()
+    except Exception as exc:
+        # Non-2xx keeps the message in Pub/Sub for durable automatic redelivery.
+        raise HTTPException(status_code=503, detail="Se reintentara la actualizacion del catalogo.") from exc
+    return {"queued": True, "operation": operation}
 
 
 def select_dashboard_release(base_release: str, state: dict) -> tuple[str, str]:
@@ -149,18 +181,19 @@ def run_refresh() -> None:
             return
         conn.commit()
         try:
-            for _ in range(5):
+            for _ in range(30):
                 state = dashboard_state(client)
                 release = next(iter(bq.query(f"SELECT release_id FROM `{project}.{dataset}.current_release`", location=location).result()))["release_id"]
-                _, status = select_dashboard_release(release, state)
-                if status == "ready":
-                    return
                 manifest = build_gcs_input_manifest(
                     client=client, bucket_name=os.environ["GCS_BUCKET"], prefix=os.environ.get("GCS_PREFIX", "marts"),
                     filenames=["standardized_raw_all_sources.parquet", "catalog_master.parquet"],
                 )
                 if manifest["release_id"] != release:
-                    raise RuntimeError("La publicacion de datos esta en curso; se reintentara la actualizacion del catalogo.")
+                    time.sleep(30)
+                    continue
+                _, status = select_dashboard_release(release, state)
+                if status == "ready":
+                    return
                 generation = state["catalog_generation"]
                 refresh_id = snapshot_id(release, generation)
                 with TemporaryDirectory(prefix="catalog-refresh-") as directory:

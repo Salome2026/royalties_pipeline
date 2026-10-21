@@ -5,11 +5,29 @@ from unittest.mock import patch
 
 import polars as pl
 
-from app.catalog_refresh import select_dashboard_release, snapshot_id
+from app.catalog_refresh import select_dashboard_release, snapshot_id, receive_change_event
+from fastapi import HTTPException
 from app import vpo_corp_api as api
 
 
 class CatalogRefreshTests(unittest.TestCase):
+    def test_durable_event_authentication_and_redelivery(self):
+        environment = {"VPO_CATALOG_EVENT_AUDIENCE": "https://api/catalog/refresh-event",
+                       "VPO_CATALOG_EVENT_SERVICE_ACCOUNT": "worker@example.test", "GCS_BUCKET": "bucket", "GCS_PREFIX": "marts"}
+        payload = {"message": {"attributes": {"bucketId": "bucket", "eventType": "OBJECT_FINALIZE", "objectId": "marts/catalog_status.parquet"}}}
+        with patch.dict("os.environ", environment), \
+             patch("google.oauth2.id_token.verify_oauth2_token", return_value={"email": "worker@example.test", "email_verified": True}), \
+             patch("app.catalog_refresh.launch_refresh", return_value="operations/test") as launch:
+            with self.assertRaises(HTTPException) as caught:
+                receive_change_event(payload, None)
+            self.assertEqual(caught.exception.status_code, 401)
+            launch.assert_not_called()
+            self.assertTrue(receive_change_event(payload, "Bearer test")["queued"])
+            launch.side_effect = RuntimeError("temporary outage")
+            with self.assertRaises(HTTPException) as caught:
+                receive_change_event(payload, "Bearer test")
+            self.assertEqual(caught.exception.status_code, 503)
+
     def test_ready_requires_exact_catalog_generation_and_base_release(self):
         ready = {"base_release_id": "base", "catalog_generation": "123", "dashboard_release_id": "snapshot"}
         self.assertEqual(select_dashboard_release("base", {"catalog_generation": "123", "ready": ready}), ("snapshot", "ready"))

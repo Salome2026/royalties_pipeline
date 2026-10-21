@@ -8276,6 +8276,12 @@ def update_catalog_status(
     return result
 
 
+@app.post("/catalog/refresh-event")
+def catalog_refresh_event(payload: dict, authorization: str | None = Header(default=None)):
+    from app.catalog_refresh import receive_change_event
+    return receive_change_event(payload, authorization)
+
+
 def write_catalog_status(request: CatalogStatusRequest) -> dict:
     catalog_key = request.catalog_key.strip()
     if not catalog_key:
