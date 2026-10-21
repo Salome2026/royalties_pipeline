@@ -150,3 +150,34 @@ assert.deepEqual(logic.previewAllocation(nestedAgreement, nestedAllocation, -100
 assert.ok(logic.beneficiaryErrors(sonyBeneficiaries.slice(0, 2)).length);
 assert.ok(logic.beneficiaryErrors([...sonyBeneficiaries, { name: "FEDERICO", percent: 0 }]).length);
 console.log("Multi-beneficiary artist contracts: solo, project allocation, duplicate names and negative adjustments: PASS");
+
+// Simple masters expose the final ownership without changing project calculations.
+{
+const soloAllocation = { principal: "G Sony", principal_percent: 100, indyana_percent: null,
+  apply_guest_contracts: false, participants: [], principal_rule: { treatment: "artist_contract",
+    beneficiaries: [{name:"Indyana",percent:33.3334},{name:"G Sony",percent:33.3333},{name:"Federico",percent:33.3333}] } };
+const soloAgreement = { id:"solo", label:"Solo", commercialization:"master", allocation_model:"pools", contract_kind:"simple",
+  master_pool_percent:0, owners:[{name:"Indyana",percent:100}], owner_split_mode:"percent", effective_from:"2026-06-01",effective_until:null };
+const simpleSolo = logic.simpleMasterAgreement(soloAgreement, soloAllocation);
+assert.equal(simpleSolo.allocation_model,"flat");
+assert.deepEqual(logic.previewAllocation(simpleSolo,simpleSolo.allocation,123.45).map(r=>[r.artist,r.amount]).sort(),
+  logic.previewAllocation(soloAgreement,soloAllocation,123.45).map(r=>[r.artist,r.amount]).sort());
+assert.equal(simpleSolo.allocation.principal_percent,33.3333);
+const duetAllocation = {...soloAllocation,principal:"Aneley",principal_percent:null,principal_rule:{treatment:"direct"},
+  participants:[{artist:"Maxi Espindola",percent:null,internal_contract_indyana_percent:null}]};
+const duet = logic.simpleMasterAgreement(soloAgreement,duetAllocation,[{name:"Indyana",percent:50},{name:"Aneley",percent:50}]);
+assert.equal(duet.owners[0].percent,50);
+assert.equal(duet.allocation.principal_percent,50);
+assert.equal(duet.allocation.participants[0].artist,"Maxi Espindola");
+assert.equal(duet.allocation.participants[0].percent,null);
+assert.equal(logic.previewAllocation(duet,duet.allocation,100),null);
+duet.allocation.participants[0].percent=20;
+assert.equal(logic.allocationTotals(duet,duet.allocation).general,120);
+assert.ok(logic.contractErrors([duet],duet.allocation).length);
+duet.owners[0].percent=40;duet.allocation.principal_percent=40;
+assert.equal(logic.contractErrors([duet],duet.allocation).length,0);
+assert.deepEqual(logic.previewAllocation(duet,duet.allocation,100).map(r=>r.amount),[40,40,20]);
+assert.equal(logic.simpleMasterAgreement(soloAgreement,soloAllocation).allocation.principal_rule.treatment,"direct");
+console.log("Simple master: economic equivalence, multi-beneficiary ownership, all credited participants, incomplete shares and 120% rejection: PASS");
+
+}

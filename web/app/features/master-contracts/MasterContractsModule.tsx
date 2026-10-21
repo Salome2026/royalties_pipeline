@@ -7,7 +7,7 @@ import { ArtistContractsPanel, artistBeneficiaries, type ArtistContract } from "
 import { MasterAgreementsEditor, visibleAgreements, type MasterAgreement } from "./MasterAgreementsEditor";
 import { PoolsAllocationEditor } from "./PoolsAllocationEditor";
 import { ContractAssociationsPanel, type AssociationChoice, type AssociationValidation } from "./ContractAssociationsPanel";
-import { agreementAllocation, agreementIncome, allocationTotals, contractErrors, previewAllocation, type Allocation, type StatementIncome } from "./contractLogic";
+import { simpleMasterAgreement, agreementAllocation, agreementIncome, allocationTotals, contractErrors, previewAllocation, type Allocation, type StatementIncome } from "./contractLogic";
 
 type Split = Allocation & {
   code_association_overrides?: AssociationChoice[] | null;
@@ -200,6 +200,13 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
 
   function applyPrincipalContract(contract: ArtistContract) {
     if (!draft || !activeAgreement || !allocation) return;
+    if (activeAgreement.commercialization === "master" && activeAgreement.contract_kind !== "project") {
+      const simple = simpleMasterAgreement(activeAgreement, allocation, artistBeneficiaries(contract));
+      if (simple?.allocation) simple.allocation.principal_rule = { treatment: "direct", contract_artist: contract.artist_name, contract_version: contract.version };
+      if (simple) updateDraft({ has_contract: contract.has_contract,
+        agreements: agreements.map((item) => item.id === activeAgreement.id ? simple : item) });
+      return;
+    }
     if (contract.beneficiaries != null || !contract.is_project) {
       const solo = allocation.participants.length === 0;
       updateDraft({ has_contract: contract.has_contract, agreements: agreements.map((item) => item.id === activeAgreement.id
@@ -341,7 +348,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
             {errors.length > 0 && <div className={styles.validationErrors} role="alert">{errors.map((error) => <p key={error}>{error}</p>)}</div>}
 
             {openAgreementId && <>
-              {activeAgreement?.allocation_model === "pools" && contractFor(allocation.principal) && <div className={styles.contractReference}>
+              {(activeAgreement?.allocation_model === "pools" || (activeAgreement?.commercialization === "master" && activeAgreement.contract_kind !== "project")) && contractFor(allocation.principal) && <div className={styles.contractReference}>
                 <span>Contrato de {contractFor(allocation.principal)?.artist_name}: {artistBeneficiaries(contractFor(allocation.principal)!).map((item) => `${item.name}: ${percent(item.percent || 0)}%`).join(" · ")}</span>
                 {canEditCurrent && <button type="button" className={styles.secondaryButton} onClick={() => applyPrincipalContract(contractFor(allocation.principal)!)}>Usar propuesta</button>}
               </div>}
@@ -349,8 +356,10 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
                 artistOptions={artistOptions} artistContracts={detail.artist_contracts} onEditArtist={setEditingArtist}
                 onChange={(next) => updateDraft({ agreements: agreements.map((item) => item.id === next.id ? next : item) })} />}
               <div className={styles.totalsGrid}>
+                {!(activeAgreement?.commercialization === "master" && activeAgreement.contract_kind !== "project") && <>
                 <div><span>{activeAgreement?.allocation_model === "pools" && activeAgreement.commercialization === "distribution" ? "Total comercialización" : "Total master"}</span><strong>{percent(totals.master)}%</strong></div>
                 <div><span>Total participaciones</span><strong>{percent(totals.participation)}%</strong></div>
+                </>}
                 <div className={Math.abs(totals.general - 100) < .0001 ? styles.totalOk : totals.general > 100 ? styles.totalError : styles.totalPending}><span>Total general</span><strong>{percent(totals.general)}%</strong><small>{Math.abs(totals.general - 100) < .0001 ? "Cuadra" : totals.general < 100 ? `Faltan ${percent(100 - totals.general)} puntos` : `Excede ${percent(totals.general - 100)} puntos`}</small></div>
               </div>
 

@@ -191,3 +191,17 @@ contrato del artista en titulares del proyecto. Para un tema sin invitados,
 Usar propuesta asigna el 100% al contrato del artista e incluye sus beneficiarios
 en la simulación. Los repartos ya guardados requieren esa aplicación explícita;
 no se alteran al abrir la ficha.
+
+
+## Carga uniforme de masters simples (2026-10-21)
+
+Los acuerdos Master / Contrato simple muestran un único reparto del ingreso total,
+con titulares y todos los artistas acreditados. Usar propuesta copia beneficiarios
+al reparto visible y mantiene artistas adicionales con porcentaje por definir.
+No redistribuye porcentajes automáticamente: exceder 100% bloquea Guardar y un
+reparto incompleto bloquea Cerrar. El contrato general del artista no se modifica.
+La edición explícita guarda el modelo plano existente; porcentajes y vista previa
+conservan el resultado económico del modelo anterior. La lectura no escribe ni
+migra fichas. Proyectos con socios y distribuciones conservan sus bolsas y tratamientos.
+Punto de retorno del código: checkpoint/contracts-before-simple-master-20261021.
+El retorno de código no elimina versiones ni revierte contratos editados por usuarios.

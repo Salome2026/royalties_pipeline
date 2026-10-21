@@ -118,7 +118,7 @@ export function MasterAgreementsEditor({ agreements, fallbackAllocation, canEdit
                 </label>
               </div>
               {index === 0 && firstStatementDate && <p className={styles.fieldHint}>Primer statement registrado: {firstStatementDate}</p>}
-              {agreement.commercialization === "master" && agreement.allocation_model !== "pools" && <div className={styles.ownerSection}>
+              {agreement.commercialization === "master" && agreement.contract_kind === "project" && agreement.allocation_model !== "pools" && <div className={styles.ownerSection}>
                 <div className={styles.sectionHeading}><h3>Titulares del master</h3><span>Total master {ownerTotal.toLocaleString("es-AR", { maximumFractionDigits: 2 })}%</span></div>
                 {agreement.owners.map((owner, ownerIndex) => <div className={styles.ownerRow} key={ownerIndex}>
                   <label>Titular<input list={`master-owner-options-${agreement.id}`} disabled={!canEdit} value={owner.name} onChange={(event) => updateOwner(index, ownerIndex, { name: event.target.value })} placeholder="Indyana, Mawz u otro" /></label>

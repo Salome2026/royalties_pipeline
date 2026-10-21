@@ -3,7 +3,7 @@
 import { Divide, FilePenLine, Plus, Trash2 } from "lucide-react";
 import styles from "./MasterContractsModule.module.css";
 import { artistBeneficiaries, type ArtistContract } from "./ArtistContractsPanel";
-import { beneficiaryKey, ownershipTotal, participantExclusions, poolAgreement, type Allocation, type MasterAgreement, type ParticipationRule } from "./contractLogic";
+import { beneficiaryKey, simpleMasterAgreement, ownershipTotal, participantExclusions, poolAgreement, type Allocation, type MasterAgreement, type ParticipationRule } from "./contractLogic";
 
 const numberOrNull = (value: string) => value.trim() === "" ? null : Number(value);
 const percent = (value: number) => value.toLocaleString("es-AR", { maximumFractionDigits: 4 });
@@ -37,6 +37,49 @@ export function PoolsAllocationEditor({ agreement, allocation, canEdit, artistOp
       ...(patch.rule ? { principal_rule: patch.rule } : {}),
     });
     else updateAllocation({ ...exclusions, participants: allocation.participants.map((item, position) => position === index - 1 ? { ...item, ...patch } : item) });
+  }
+
+  const simple = isMaster && !isProject ? simpleMasterAgreement(agreement, allocation) : null;
+  if (simple && simple.allocation) {
+    const current = simple.allocation;
+    const entries = [
+      ...simple.owners.map((owner, index) => ({ name: owner.name, percent: owner.percent, kind: "owner", index })),
+      { name: current.principal, percent: current.principal_percent, kind: "principal", index: 0 },
+      ...current.participants.map((row, index) => ({ name: row.artist, percent: row.percent, kind: "participant", index })),
+    ];
+    const total = entries.reduce((sum, row) => sum + (row.percent || 0), 0);
+    const change = (entry: typeof entries[number], name: string, value: number | null) => {
+      const next = structuredClone(simple);
+      const target = next.allocation!;
+      if (entry.kind === "owner") next.owners[entry.index] = { name, percent: value };
+      else if (entry.kind === "principal") { target.principal = name; target.principal_percent = value; }
+      else target.participants[entry.index] = { ...target.participants[entry.index], artist: name, percent: value };
+      onChange(next);
+    };
+    return <section className={styles.band}>
+      <div className={styles.sectionHeading}><h2>Reparto del master</h2><span className={Math.abs(total - 100) < .0001 ? styles.counterOk : styles.counterPending}>Total {percent(total)}%</span></div>
+      <div className={styles.segmented} aria-label="Tipo de contrato">
+        <button type="button" aria-pressed="true" className={styles.selected} disabled={!canEdit}>Contrato simple</button>
+        <button type="button" disabled={!canEdit} onClick={() => onChange({ ...poolAgreement(simple, current), contract_kind: "project" })}>Proyecto con socios</button>
+      </div>
+      <div className={styles.ownerRows}>{entries.map((entry, index) => <div className={styles.ownerRow} key={index}>
+        <label>{entry.kind === "principal" ? "Artista principal" : "Titular / participante"}<input list={optionsId} disabled={!canEdit} value={entry.name} onChange={(event) => change(entry, event.target.value, entry.percent)} /></label>
+        <label>% del ingreso total<input type="number" min="0" max="100" step="any" disabled={!canEdit} value={entry.percent ?? ""} onChange={(event) => change(entry, entry.name, numberOrNull(event.target.value))} /></label>
+        {canEdit && entry.name.trim() && <button type="button" className={styles.iconButton} title={`Contrato de ${entry.name}`} onClick={() => onEditArtist(entry.name)}><FilePenLine size={16} /></button>}
+        {canEdit && entry.kind !== "principal" && <button type="button" className={styles.iconButton} title={`Quitar ${entry.name || "participante"}`} onClick={() => {
+          const next = structuredClone(simple);
+          if (entry.kind === "owner") next.owners.splice(entry.index, 1);
+          else {
+            next.allocation!.catalog_participant_exclusions = participantExclusions(current, entry.name, "", artistOptions);
+            next.allocation!.participants.splice(entry.index, 1);
+          }
+          onChange(next);
+        }}><Trash2 size={16} /></button>}
+      </div>)}</div>
+      {total > 100.0001 && <p className={styles.counterPending} role="alert">El reparto supera el 100%.</p>}
+      {canEdit && <button type="button" className={styles.addButton} disabled={current.participants.length >= 10} onClick={() => onChange({ ...simple, allocation: { ...current, participants: [...current.participants, { artist: "", percent: null, internal_contract_indyana_percent: null, rule: { treatment: "direct" } }] } })}><Plus size={16} />Agregar participante</button>}
+      <datalist id={optionsId}>{[...new Set(["Indyana", "Mawz", ...artistOptions])].map((name) => <option value={name} key={name} />)}</datalist>
+    </section>;
   }
 
   if (agreement.allocation_model !== "pools") return <section className={styles.band}>

@@ -267,3 +267,39 @@ function settleRows(rows: Array<{ artist: string; percent: number; label: string
   result.forEach((row, index) => { row.amount = (amount < 0 ? -1 : 1) * floor[index] / 100; });
   return result;
 }
+
+
+// A simple master has one visible 100% allocation. Projects keep their pools.
+export function simpleMasterAgreement(agreement: MasterAgreement, allocation: Allocation,
+  proposed?: ContractBeneficiary[]): MasterAgreement | null {
+  const preview = proposed ? null : previewAllocation(agreement, allocation, 100)
+    || (agreement.allocation_model === "pools" ? previewPools(agreement, allocation, 100) : null);
+  if (!proposed && agreement.allocation_model === "pools" && !preview) return null;
+  const amounts = new Map<string, { name: string; percent: number | null }>();
+  const add = (name: string, value: number | null) => {
+    const key = beneficiaryKey(name);
+    if (!key) return;
+    const old = amounts.get(key);
+    amounts.set(key, { name, percent: old ? old.percent === null || value === null ? null : old.percent + value : value });
+  };
+  if (proposed) proposed.forEach((row) => add(row.name, row.percent));
+  else if (preview) preview.forEach((row) => add(row.artist, row.percent));
+  else {
+    agreement.owners.forEach((row) => add(row.name, row.percent));
+    add(allocation.principal, allocation.principal_percent);
+    allocation.participants.forEach((row) => add(row.artist, row.percent));
+  }
+  const artistNames = [allocation.principal, ...allocation.participants.map((row) => row.artist)];
+  const artistKeys = new Set(artistNames.map(beneficiaryKey));
+  const undefinedArtists = new Set(!proposed ? [{ artist: allocation.principal, percent: allocation.principal_percent }, ...allocation.participants]
+    .filter((row) => row.percent === null).map((row) => beneficiaryKey(row.artist)) : []);
+  const value = (name: string) => undefinedArtists.has(beneficiaryKey(name)) ? null : amounts.get(beneficiaryKey(name))?.percent ?? null;
+  return { ...agreement, commercialization: "master", contract_kind: "simple", allocation_model: "flat",
+    owner_split_mode: "percent", master_pool_percent: null,
+    owners: [...amounts].filter(([key]) => !artistKeys.has(key)).map(([, row]) => row),
+    allocation: { ...allocation, indyana_percent: null, apply_guest_contracts: false,
+      principal_percent: value(allocation.principal), principal_rule: { treatment: "direct" },
+      participants: allocation.participants.map((row) => ({ ...row, percent: value(row.artist),
+        internal_contract_indyana_percent: null, rule: { treatment: "direct" } })) },
+  };
+}
