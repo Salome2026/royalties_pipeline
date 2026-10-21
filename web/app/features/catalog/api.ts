@@ -24,11 +24,12 @@ export async function requestCatalog(query: CatalogQuery): Promise<CatalogData> 
   return response.json();
 }
 
-export async function requestCatalogUpdate(update: CatalogUpdate): Promise<void> {
+export async function requestCatalogUpdate(update: CatalogUpdate): Promise<{ refresh?: { status: string } }> {
   const response = await fetch("/api/catalog", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(update),
   });
   if (!response.ok) throw new Error(await responseError(response, "No se pudo actualizar el catálogo."));
+  return response.json();
 }

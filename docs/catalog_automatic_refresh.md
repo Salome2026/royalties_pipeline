@@ -1,0 +1,13 @@
+# Automatic catalog refresh
+
+Catalog writes require catalog.edit. PostgreSQL serializes governance writes; each writer reads the canonical GCS status first. Every save dispatches vpo-catalog-refresh. A Cloud Scheduler reconciliation retries missed dispatches every ten minutes. The job takes a PostgreSQL session advisory lock, coalesces concurrent executions, downloads generation-pinned full published inputs and the latest governance generation, then rebuilds the dashboard with the existing reportability rules. Previously excluded rows can therefore be restored.
+
+BigQuery refreshes live in royalty_catalog_dashboard, separate from immutable ingestion release tables. Only after row/amount reconciliation, and a second check of source release and governance generation, does GCS publish the ready pointer. The dashboard keeps the previous complete version visible while pending and polls until ready. Its parquet fallback uses the same pinned summary. Subsequent source releases invalidate the pointer by base release ID and are reconciled by the scheduled job.
+
+New ordinary reports pin current canonical catalog_status, even when an ingestion manifest carries an older status entry. New contractual PDFs pin an exact ready dashboard snapshot matching that status; while pending they ask the user to retry rather than generate an inconsistent PDF. Existing report artifacts and saved contracts remain unchanged.
+
+Runtime: vpo-catalog-refresh, us-central1, same application image as API and report job; python -m app.catalog_refresh; 4 CPU / 16 GiB / one task / max retries 2. Environment and SQL secret match the operational production database. The publisher identity has write permission only on the derived dashboard table and catalog_refresh_work scratch dataset (24-hour table expiry), in addition to its existing GCS and SQL rights. No raw BigQuery financial table write permissions are added.
+
+Cloud Build updates the refresh job with every release and checks image alignment. Scheduler uses OAuth as the publisher identity to invoke the dedicated job. No API daemon threads, local worker, ingestion rebuild or historic report rewrite is involved.
+
+Rollback: disable VPO_CATALOG_REFRESH_JOB in API to restore base-release dashboard reads, stop the scheduler, and redeploy the previous commit if required. Base release tables are unchanged.

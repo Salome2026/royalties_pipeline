@@ -73,6 +73,7 @@ def dashboard_sql(
     dataset: str,
     period_basis: str,
     policy_document: dict[str, Any],
+    refreshed_catalog: bool = False,
 ) -> str:
     if period_basis == "transaction_month":
         period_column = "transaction_month"
@@ -81,7 +82,8 @@ def dashboard_sql(
     else:
         raise ValueError(f"Base temporal no soportada: {period_basis}")
     factor_sql = personalization_factor_sql(policy_document)
-    table = f"`{project}.{dataset}.royalty_dashboard_rankings`"
+    table_name = "royalty_catalog_dashboard" if refreshed_catalog else "royalty_dashboard_rankings"
+    table = f"`{project}.{dataset}.{table_name}`"
     ranking_unions = [
         ("sources", "source"),
         ("dsp", "dsp"),
@@ -666,6 +668,7 @@ def format_dashboard_response(
 def royalties_dashboard_bigquery(
     *,
     policy_document: dict[str, Any],
+    catalog_state: dict | None = None,
     source: str | None = None,
     account: str | None = None,
     keyword: str | None = None,
@@ -703,15 +706,21 @@ def royalties_dashboard_bigquery(
     release = next(iter(release_rows), None)
     if release is None:
         raise RuntimeError("No hay una version analitica conciliada disponible.")
+    dashboard_release = release["release_id"]
+    refresh_status = "ready"
+    if catalog_state is not None:
+        from app.catalog_refresh import select_dashboard_release
+        dashboard_release, refresh_status = select_dashboard_release(dashboard_release, catalog_state)
     sql = dashboard_sql(
         project=project,
         dataset=dataset,
         period_basis=period_basis,
         policy_document=policy_document,
+        refreshed_catalog=dashboard_release != release["release_id"],
     )
     rows = query_rows(
         sql=sql,
-        release_id=release["release_id"],
+        release_id=dashboard_release,
         project=project,
         location=location,
         source=source.strip() if source else None,
@@ -726,9 +735,11 @@ def royalties_dashboard_bigquery(
         maximum_bytes_billed=maximum_bytes_billed,
         client=query_client,
     )
-    return format_dashboard_response(
+    result = format_dashboard_response(
         rows=rows,
         policy_document=policy_document,
         period_basis=period_basis,
         keyword=search,
     )
+    result["catalog_refresh"] = {"status": refresh_status}
+    return result

@@ -1017,6 +1017,7 @@ type RoyaltiesDashboardMatrixRow = {
 };
 
 type RoyaltiesDashboardData = {
+  catalog_refresh?: { status: "ready" | "pending" };
   report_personalization: {
     enabled: boolean;
     amount_basis?: string;
@@ -4096,6 +4097,12 @@ export default function Home() {
       setRoyaltiesDashboardLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (view !== "royalties-dashboard" || royaltiesDashboard?.catalog_refresh?.status !== "pending") return;
+    const timer = window.setTimeout(() => void loadRoyaltiesDashboard(), 15000);
+    return () => window.clearTimeout(timer);
+  }, [view, royaltiesDashboard]);
 
   async function loadDistributorConfig() {
     setDistributorConfigLoading(true);
@@ -7690,6 +7697,7 @@ export default function Home() {
 
         {view === "royalties-dashboard" && (
           <section className={`${digitalStyles.workspace} ${royaltyDashboardStyles.workspace}`}>
+            {royaltiesDashboard?.catalog_refresh?.status === "pending" && <div className="message" role="status">Actualizando los datos por cambios en el catálogo. Los importes se renovarán automáticamente al finalizar.</div>}
             <header className={digitalStyles.header}>
               <div className={digitalStyles.titleGroup}>
                 <span className={digitalStyles.eyebrow}>Royalty intelligence</span>

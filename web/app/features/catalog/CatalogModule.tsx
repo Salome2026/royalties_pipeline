@@ -125,14 +125,15 @@ export function CatalogModule({ canEdit, initialFilter, onMessage }: Props) {
     const active = !item.active;
     setSavingKey(item.catalog_key);
     try {
-      await requestCatalogUpdate({
+      const result = await requestCatalogUpdate({
         catalog_key: item.catalog_key,
         active,
         include_in_reports: active,
         business_status: active ? "vpo_catalog" : "inactive",
         notes: active ? "" : "Excluido manualmente desde Catálogo General.",
       });
-      onMessage({ type: "ok", text: active ? "Tema marcado como activo." : "Tema marcado como inactivo." });
+      const refreshMessage = result.refresh?.status === "queued" ? " El dashboard se está actualizando automáticamente." : result.refresh?.status === "pending_retry" ? " La actualización del dashboard se reintentará automáticamente." : "";
+      onMessage({ type: "ok", text: (active ? "Tema marcado como activo." : "Tema marcado como inactivo.") + refreshMessage });
       await loadCatalog(offset);
     } catch (error) {
       onMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo actualizar el catálogo." });
@@ -145,7 +146,7 @@ export function CatalogModule({ canEdit, initialFilter, onMessage }: Props) {
     if (!canEdit) return;
     setSavingKey(item.catalog_key);
     try {
-      await requestCatalogUpdate({
+      const result = await requestCatalogUpdate({
         catalog_key: item.catalog_key,
         active: item.active,
         include_in_reports: item.include_in_reports,
@@ -155,7 +156,7 @@ export function CatalogModule({ canEdit, initialFilter, onMessage }: Props) {
       });
       setLabelEditKey("");
       setLabelDraft("");
-      onMessage({ type: "ok", text: "Label normalizado actualizado." });
+      onMessage({ type: "ok", text: "Label normalizado actualizado." + (result.refresh?.status === "queued" ? " El dashboard se está actualizando automáticamente." : "") });
       await loadCatalog(offset);
     } catch (error) {
       onMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo actualizar el label." });

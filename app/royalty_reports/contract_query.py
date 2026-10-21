@@ -105,6 +105,9 @@ def query_contract_income(request, manifest: dict, policy: dict) -> list[dict]:
             raise ValueError("Falta la validacion de asociados de la version de datos del pedido.")
     project = os.environ.get("VPO_BIGQUERY_PROJECT", "vpo-corp-royalties")
     dataset = os.environ.get("VPO_BIGQUERY_DATASET", "royalties_analytics")
+    dashboard = manifest.get("catalog_dashboard") or {}
+    ranking_table = "royalty_catalog_dashboard" if dashboard else "royalty_dashboard_rankings"
+    ranking_release = dashboard.get("release_id") or release
     client = bigquery.Client(project=project, location=os.environ.get("VPO_BIGQUERY_LOCATION", "US"))
     norm = r"REGEXP_REPLACE(NORMALIZE_AND_CASEFOLD(COALESCE(search_text, ''), NFD), r'\pM', '')"
     prefix = "CONCAT(LOWER(COALESCE(artist, '')), ' ', LOWER(COALESCE(title, '')), ' ', LOWER(COALESCE(isrc, '')), ' ', LOWER(COALESCE(upc, '')), ' ')"
@@ -124,7 +127,7 @@ def query_contract_income(request, manifest: dict, policy: dict) -> list[dict]:
     sql = rf"""
 WITH base AS (
  SELECT *, {norm} AS normalized_search {code_column}
- FROM `{project}.{dataset}.royalty_dashboard_rankings`
+ FROM `{project}.{dataset}.{ranking_table}`
  WHERE release_id = @release_id
    AND (@source IS NULL OR source = @source) AND (@account IS NULL OR account = @account)
    AND (@start_month IS NULL OR statement_month >= @start_month)
@@ -144,7 +147,7 @@ WHERE (isrc IN UNNEST(@isrcs) OR EXISTS (
 GROUP BY isrc, upc, artist, title, source, account, statement_month {identity_columns}
 ORDER BY statement_month, isrc, upc, title, artist, source, account
 """
-    params = [bigquery.ScalarQueryParameter("release_id", "STRING", release),
+    params = [bigquery.ScalarQueryParameter("release_id", "STRING", ranking_release),
               bigquery.ArrayQueryParameter("isrcs", "STRING", [row["isrc"] for row in snapshot["catalog"]]),
               bigquery.ArrayQueryParameter("artists", "STRING", [normalize_search_text(name) for name in snapshot["artists"]]),
               bigquery.ArrayQueryParameter("keywords", "STRING", [normalize_search_text(name) for name in request.keywords]),

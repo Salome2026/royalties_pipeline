@@ -51,6 +51,8 @@ def build_gcs_input_manifest(
         if not isinstance(release_files, dict):
             raise RuntimeError("El manifiesto de publicacion no contiene archivos.")
         for filename in expected:
+            if filename == "catalog_status.parquet":
+                continue
             entry = release_files.get(filename)
             if not isinstance(entry, dict):
                 continue

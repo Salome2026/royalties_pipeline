@@ -1486,17 +1486,17 @@ def ensure_marts(refresh_cache: bool = False, filenames: list[str] | None = None
 
 
 def load_catalog_status() -> pl.DataFrame:
-    if not CATALOG_STATUS_PATH.exists() and GCS_BUCKET and VPO_CATALOG_STATUS_SYNC_GCS:
+    if GCS_BUCKET and VPO_CATALOG_STATUS_SYNC_GCS:
+        from io import BytesIO
+        from google.api_core.exceptions import NotFound
+        blob = gcs_client().bucket(GCS_BUCKET).blob(catalog_status_object_name())
         try:
-            client = gcs_client()
-            bucket = client.bucket(GCS_BUCKET)
-            blob = bucket.blob(catalog_status_object_name())
-            if blob.exists(client):
-                CATALOG_STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
-                blob.download_to_filename(str(CATALOG_STATUS_PATH))
-        except Exception:
-            # Catalog status is a governance layer. If remote sync is unavailable,
-            # the API can still operate with the local/default active status.
+            blob.reload()
+            status_df = pl.read_parquet(BytesIO(blob.download_as_bytes(if_generation_match=int(blob.generation))))
+            if "label_normalized_override" not in status_df.columns:
+                status_df = status_df.with_columns(pl.lit(None).cast(pl.Utf8).alias("label_normalized_override"))
+            return status_df
+        except NotFound:
             pass
 
     if not CATALOG_STATUS_PATH.exists():
@@ -1534,13 +1534,14 @@ def normalized_label_expr(expr: pl.Expr) -> pl.Expr:
 
 
 def save_catalog_status(df: pl.DataFrame) -> None:
+    from io import BytesIO
+    payload = BytesIO()
+    df.write_parquet(payload)
+    if GCS_BUCKET and VPO_CATALOG_STATUS_SYNC_GCS:
+        blob = gcs_client().bucket(GCS_BUCKET).blob(catalog_status_object_name())
+        blob.upload_from_string(payload.getvalue(), content_type="application/octet-stream")
     CATALOG_STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
     df.write_parquet(CATALOG_STATUS_PATH)
-    if GCS_BUCKET and VPO_CATALOG_STATUS_SYNC_GCS:
-        client = gcs_client()
-        bucket = client.bucket(GCS_BUCKET)
-        blob = bucket.blob(catalog_status_object_name())
-        blob.upload_from_filename(str(CATALOG_STATUS_PATH))
 
 
 def configure_catalog_report_env(marts: dict[str, Path] | None = None) -> None:
@@ -7468,6 +7469,11 @@ def create_royalty_report_job(
         raise HTTPException(status_code=503, detail="Los datos publicados no estan disponibles.") from exc
 
     if request.executive_mode == "contractual":
+        from app.catalog_refresh import pin_report_dashboard
+        try:
+            pin_report_dashboard(input_manifest)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         from app.royalty_reports.contract_snapshot import (
             contract_catalog_rows, freeze_contract_associations, freeze_contract_snapshot,
             published_catalog_frame, stored_contracts,
@@ -8262,6 +8268,15 @@ def update_catalog_status(
         raise HTTPException(status_code=401, detail="Se requiere una sesión de usuario.")
     with operational_connect() as conn:
         require_module_permission(conn, username, "catalog", "edit")
+        if is_postgres_connection(conn):
+            conn.execute("SELECT pg_advisory_xact_lock(721064222)")
+        result = write_catalog_status(request)
+    from app.catalog_refresh import request_refresh
+    result["refresh"] = request_refresh()
+    return result
+
+
+def write_catalog_status(request: CatalogStatusRequest) -> dict:
     catalog_key = request.catalog_key.strip()
     if not catalog_key:
         raise HTTPException(status_code=400, detail="catalog_key vacio.")
@@ -9671,7 +9686,9 @@ def query_royalties_dashboard_from_bigquery(
     limit: int,
     artist_scope: set[str] | None = None,
 ) -> dict[str, Any]:
+    from app.catalog_refresh import dashboard_state, enabled
     return query_royalties_dashboard_bigquery(
+        catalog_state=dashboard_state() if enabled() else None,
         policy_document=load_distributor_policy_document(),
         source=source,
         account=account,
@@ -9769,6 +9786,8 @@ def royalties_dashboard(
             filenames=[ROYALTIES_DASHBOARD_SUMMARY_FILE],
         )
         summary_path = summary_marts[ROYALTIES_DASHBOARD_SUMMARY_FILE]
+    from app.catalog_refresh import fallback_summary
+    summary_path, catalog_refresh_status = fallback_summary(summary_path)
     base = pl.scan_parquet(summary_path)
     policy_document = load_distributor_policy_document()
     base = apply_report_net_personalization(
@@ -10028,6 +10047,7 @@ def royalties_dashboard(
     }
 
     return {
+        "catalog_refresh": {"status": catalog_refresh_status},
         "report_personalization": personalization_state,
         "period_basis": period_basis,
         "period_column": period_col,
