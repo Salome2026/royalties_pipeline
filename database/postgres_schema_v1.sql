@@ -1051,4 +1051,22 @@ CREATE TABLE IF NOT EXISTS master_artist_contract_history (
     updated_by TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (artist_key, version)
 );
 
+-- Reviewed Spotify metadata stays separate from raw statements and financial facts.
+CREATE TABLE IF NOT EXISTS catalog_metadata_observations (
+ catalog_key TEXT PRIMARY KEY, payload_json JSONB NOT NULL,
+ version INTEGER NOT NULL CHECK(version>0), fetched_at TIMESTAMPTZ NOT NULL,
+ origin TEXT NOT NULL, updated_by TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS catalog_metadata_reviews (
+ catalog_key TEXT PRIMARY KEY, observation_version INTEGER NOT NULL,
+ version INTEGER NOT NULL CHECK(version>0), decisions_json JSONB NOT NULL,
+ overrides_json JSONB NOT NULL, updated_by TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL
+);
+CREATE TABLE IF NOT EXISTS catalog_metadata_review_history (
+ id BIGSERIAL PRIMARY KEY, catalog_key TEXT NOT NULL, version INTEGER NOT NULL,
+ observation_version INTEGER NOT NULL, payload_json JSONB NOT NULL,
+ updated_by TEXT NOT NULL, updated_at TIMESTAMPTZ NOT NULL,
+ UNIQUE(catalog_key,version)
+);
+
 COMMIT;

@@ -8059,6 +8059,61 @@ def config_seed(
     return load_config_seed(config_name)
 
 
+def metadata_catalog_rows(username: str, action: str = "access"):
+    if not username:
+        raise HTTPException(401, detail="Se requiere una sesión.")
+    with operational_connect() as conn:
+        require_module_permission(conn, username, "catalog", action)
+        allowed, scope = user_artist_scope_for_module(conn, username, "catalog")
+    frame = pl.read_parquet(ensure_marts(filenames=[CATALOG_MASTER_FILE])[CATALOG_MASTER_FILE])
+    rows = frame.to_dicts()
+    if scope is not None:
+        from app.catalog_metadata_review import norm
+        keys = {norm(x) for x in scope}
+        rows = [row for row in rows if keys & {norm(x) for x in row.get("catalog_artists") or [row.get("artist_statement") or ""]}]
+    status = {row["catalog_key"]: row for row in load_catalog_status().to_dicts()}
+    for row in rows:
+        if status.get(row["catalog_key"], {}).get("label_normalized_override"):
+            row["label_normalized_override"] = status[row["catalog_key"]]["label_normalized_override"]
+    return rows
+
+
+@app.get("/catalog/spotify-review")
+def catalog_spotify_review(keyword: str = "", status: str = "all", offset: int = 0, limit: int = 30,
+                           x_vpo_api_key: str | None = Header(default=None), x_vpo_username: str | None = Header(default=None)):
+    require_api_key(x_vpo_api_key)
+    from app.catalog_metadata_review import read_state, comparison, norm
+    rows = metadata_catalog_rows(x_vpo_username)
+    observations, reviews = read_state()
+    items = [comparison(row, observations.get(row["catalog_key"]), reviews.get(row["catalog_key"])) for row in rows if row.get("asset_isrc")]
+    summary = {}
+    for item in items:
+        summary[item["status"]] = summary.get(item["status"], 0) + 1
+    if keyword.strip():
+        tokens = norm(keyword).split()
+        items = [item for item in items if all(token in norm(str(item["ours"]) + item["isrc"]) for token in tokens)]
+    if status != "all":
+        items = [item for item in items if item["status"] == status]
+    offset, limit = max(0, offset), max(1, min(100, limit))
+    return {"items": items[offset:offset+limit], "total": len(items), "summary": summary, "offset": offset, "limit": limit}
+
+
+@app.post("/catalog/spotify-review")
+def update_catalog_spotify_review(request: dict, x_vpo_api_key: str | None = Header(default=None),
+                                  x_vpo_username: str | None = Header(default=None)):
+    require_api_key(x_vpo_api_key)
+    from app.catalog_metadata_review import decide, refresh
+    rows = metadata_catalog_rows(x_vpo_username, "edit")
+    row = next((row for row in rows if row["catalog_key"] == request.get("catalog_key")), None)
+    if not row:
+        raise HTTPException(404, detail="Tema no disponible en tu catálogo.")
+    if request.get("action") == "refresh":
+        refresh(row["asset_isrc"], x_vpo_username)
+    else:
+        decide(row, request, x_vpo_username)
+    return {"ok": True}
+
+
 @app.get("/catalog")
 def catalog_items(
     source: str | None = None,
@@ -8084,7 +8139,8 @@ def catalog_items(
     if not path.exists():
         raise HTTPException(status_code=500, detail=f"No existe catalog master: {path}")
 
-    catalog = catalog_artist_display(pl.read_parquet(path))
+    from app.catalog_metadata_review import apply_approved
+    catalog = catalog_artist_display(apply_approved(pl.read_parquet(path)))
     if "external_label" not in catalog.columns:
         catalog = catalog.with_columns(pl.lit(None).cast(pl.Utf8).alias("external_label"))
     if "label_normalized_auto" not in catalog.columns:
@@ -8417,7 +8473,8 @@ def master_contract_associated_income(choices: dict[str, list[dict]]) -> dict[st
 
 def master_contract_catalog(associated_income: dict[str, dict] | None = None) -> pl.DataFrame:
     marts = ensure_marts(filenames=[CATALOG_MASTER_FILE])
-    catalog = catalog_artist_display(pl.read_parquet(marts[CATALOG_MASTER_FILE]))
+    from app.catalog_metadata_review import apply_approved
+    catalog = catalog_artist_display(apply_approved(pl.read_parquet(marts[CATALOG_MASTER_FILE])))
     current = (
         catalog
         .filter(pl.col("asset_isrc").fill_null("").str.contains(r"^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$"))

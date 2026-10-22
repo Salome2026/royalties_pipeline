@@ -17,6 +17,7 @@ import { isResolvedPeriodInvalid, resolvePeriod, type PeriodSelection } from "..
 import { requestCatalog, requestCatalogUpdate } from "./api";
 import type { CatalogData, CatalogInitialFilter, CatalogItem, CatalogStatus, VideoRelationStatus } from "./types";
 import styles from "./CatalogModule.module.css";
+import { SpotifyReview } from "./SpotifyReview";
 
 type Message = { type: "ok" | "error"; text: string };
 
@@ -41,6 +42,7 @@ function normalizedLabel(item: CatalogItem) {
 }
 
 export function CatalogModule({ canEdit, initialFilter, onMessage }: Props) {
+  const [spotifyMode, setSpotifyMode] = useState(false);
   const [data, setData] = useState<CatalogData | null>(null);
   const [loading, setLoading] = useState(false);
   const [source, setSource] = useState(initialFilter?.source || "");
@@ -168,6 +170,8 @@ export function CatalogModule({ canEdit, initialFilter, onMessage }: Props) {
   const firstVisible = data && data.items.length ? data.offset + 1 : 0;
   const lastVisible = data ? Math.min(data.offset + data.items.length, data.total) : 0;
 
+  if (spotifyMode) return <SpotifyReview canEdit={canEdit} onBack={() => setSpotifyMode(false)} />;
+
   return (
     <section className={styles.workspace}>
       <header className={styles.intro}>
@@ -182,6 +186,8 @@ export function CatalogModule({ canEdit, initialFilter, onMessage }: Props) {
           <span>{loading ? "Actualizando" : "Actualizar"}</span>
         </button>
       </header>
+
+      <button type="button" className={styles.refreshButton} onClick={() => setSpotifyMode(true)}>Nuestro catálogo vs. Spotify</button>
 
       <form className={styles.filters} onSubmit={applySearch}>
         <div className={styles.searchField}>
