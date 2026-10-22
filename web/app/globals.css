@@ -1,4 +1,5 @@
 @import "./features/employees/employees.css";
+@import "./features/commissions/commissions.css";
 
 :root {
   --bg: #f5f2ec;

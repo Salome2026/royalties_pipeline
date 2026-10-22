@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, CircleDollarSign, FileDown, LayoutDashboard, Pencil, RefreshCw, RotateCcw, Search, ShieldCheck, Table2, Trash2, Rows3, Youtube } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CircleDollarSign, FileDown, LayoutDashboard, Pencil, Printer, RefreshCw, RotateCcw, Save, Search, ShieldCheck, SlidersHorizontal, Table2, Trash2, Rows3, Youtube } from "lucide-react";
 import { PeriodControl } from "./components/PeriodControl";
 import { BookingDashboard, type BookingAgendaEvent } from "./components/BookingDashboard";
 import { VpoHome } from "./components/VpoHome";
@@ -7422,7 +7422,7 @@ export default function Home() {
       onOpen={(targetView) => targetView === "booking" ? openBookingWorkspace() : openView(targetView as View)}
       onLogout={logout}
     >
-      <main className={view === "menu" ? "home-main" : view === "booking" && bookingSurface === "dashboard" ? "booking-main" : view === "booking" && bookingSurface === "settlement" ? "booking-settlement-main" : view === "booking-artist-summary" || view === "booking-summary" ? "booking-detail-main" : view === "booking-lab" ? "booking-settlement-main booking-lab-main" : view === "employees" ? "employee-main" : view === "catalog" || view === "master-contracts" ? "catalog-main" : view === "royalties-dashboard" ? "royalties-dashboard-main" : view === "digital-income" ? "digital-income-main" : undefined}>
+      <main className={view === "menu" ? "home-main" : view === "booking" && bookingSurface === "dashboard" ? "booking-main" : view === "booking" && bookingSurface === "settlement" ? "booking-settlement-main" : view === "booking-artist-summary" || view === "booking-summary" ? "booking-detail-main" : view === "booking-lab" ? "booking-settlement-main booking-lab-main" : view === "commissions" ? "commissions-main" : view === "employees" ? "employee-main" : view === "catalog" || view === "master-contracts" ? "catalog-main" : view === "royalties-dashboard" ? "royalties-dashboard-main" : view === "digital-income" ? "digital-income-main" : undefined}>
         {message && <div className={`message ${message.type === "error" ? "error" : ""}`}>{message.text}</div>}
 
         {view === "menu" && (
@@ -8777,14 +8777,15 @@ export default function Home() {
         )}
 
         {view === "commissions" && (
-          <section className="panel wide-panel">
+          <section className="commissions-page">
             <div className="section-heading">
               <div>
                 <h1>Comisiones</h1>
-                <p>Configura porcentajes por empleado y revisa la liquidacion segun las reglas aplicables de booking.</p>
+                <p>Booking Indyana</p>
               </div>
               <button
                 type="button"
+                className="commission-button commission-save"
                 onClick={saveCommissionRules}
                 disabled={
                   !commissionsEmployee
@@ -8796,6 +8797,7 @@ export default function Home() {
                   || commissionRulesSaving
                 }
               >
+                <Save size={16} aria-hidden="true" />
                 {commissionRulesSaving ? "Guardando..." : "Guardar configuracion"}
               </button>
             </div>
@@ -8805,7 +8807,7 @@ export default function Home() {
               </p>
             )}
 
-            <div className="row three">
+            <div className="commission-filters">
               <div>
                 <label htmlFor="commission_employee">Empleado</label>
                 <select
@@ -8824,9 +8826,6 @@ export default function Home() {
                     <option key={employee.id} value={String(employee.id)}>{employee.display_name}</option>
                   ))}
                 </select>
-                <p className="field-help">
-                  La lista viene de empleados activos. Los artistas salen del permiso del modulo Comisiones.
-                </p>
               </div>
               <PeriodControl
                 id="commission_period"
@@ -8834,29 +8833,51 @@ export default function Home() {
                 profile="commission_period"
                 selection={selectionFromMonths(commissionStartMonth, commissionEndMonth)}
                 onChange={(selection) => applyResolvedPeriod(selection, "commission_period", setCommissionStartMonth, setCommissionEndMonth)}
-                helperText="Un mes solo muestra ese mes. Todo muestra todos los meses."
               />
             </div>
 
-            <div className="finance-tabs" role="tablist" aria-label="Vistas de comisiones">
+            <div
+              className="commission-tabs"
+              role="tablist"
+              aria-label="Vistas de comisiones"
+              onKeyDown={(event) => {
+                if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+                event.preventDefault();
+                const next = event.key === "Home" ? "settlement" : event.key === "End" ? "config" : commissionsTab === "settlement" ? "config" : "settlement";
+                setCommissionsTab(next);
+                document.getElementById(`commission_${next}_tab`)?.focus();
+              }}
+            >
               <button
                 type="button"
+                role="tab"
+                id="commission_settlement_tab"
+                aria-selected={commissionsTab === "settlement"}
+                aria-controls="commission_settlement_panel"
+                tabIndex={commissionsTab === "settlement" ? 0 : -1}
                 className={commissionsTab === "settlement" ? "active" : ""}
                 onClick={() => setCommissionsTab("settlement")}
               >
+                <CircleDollarSign size={16} aria-hidden="true" />
                 Liquidacion
               </button>
               <button
                 type="button"
+                role="tab"
+                id="commission_config_tab"
+                aria-selected={commissionsTab === "config"}
+                aria-controls="commission_config_panel"
+                tabIndex={commissionsTab === "config" ? 0 : -1}
                 className={commissionsTab === "config" ? "active" : ""}
                 onClick={() => setCommissionsTab("config")}
               >
+                <SlidersHorizontal size={16} aria-hidden="true" />
                 Configuracion
               </button>
             </div>
 
             {commissionsTab === "settlement" && (
-              <>
+              <div id="commission_settlement_panel" role="tabpanel" aria-labelledby="commission_settlement_tab">
                 {!selectedCommissionEmployee && (
                   <p className="field-help">Selecciona un empleado para ver su liquidacion de comisiones.</p>
                 )}
@@ -8873,7 +8894,7 @@ export default function Home() {
                 )}
                 {selectedCommissionEmployee && selectedCommissionPermission?.can_access && (
                   <>
-                <div className="control-dashboard compact-dashboard">
+                <div className="control-dashboard compact-dashboard commission-metrics commission-settlement-metrics">
                   <div>
                     <span>Empleado</span>
                     <strong>{selectedCommissionEmployee.display_name}</strong>
@@ -8898,41 +8919,41 @@ export default function Home() {
                     <span>Excluido general</span>
                     <strong>{ars(commissionTotals.nonCommissionable)}</strong>
                   </div>
-                  <div>
+                  <div className="commission-total">
                     <span>Comision calculada</span>
                     <strong>{ars(commissionTotals.commissionAmount)}</strong>
                   </div>
                 </div>
 
-                <div className="row">
-                  <div>
+                <div className="commission-table-toolbar">
+                  <div className="commission-search">
                     <label htmlFor="commission_settlement_search">Buscar en liquidacion</label>
-                    <input
-                      id="commission_settlement_search"
-                      value={commissionSettlementSearch}
-                      onChange={(event) => setCommissionSettlementSearch(event.target.value)}
-                      placeholder="Gusty DJ, 2026-06, nota..."
-                    />
-                    <p className="field-help">
-                      Mostrando {visibleCommissionSettlementRows.length} de {commissionSettlementRows.length} filas.
-                    </p>
+                    <div className="commission-search-input">
+                      <Search size={16} aria-hidden="true" />
+                      <input
+                        id="commission_settlement_search"
+                        value={commissionSettlementSearch}
+                        onChange={(event) => setCommissionSettlementSearch(event.target.value)}
+                        placeholder="Gusty DJ, 2026-06, nota..."
+                      />
+                    </div>
                   </div>
-                  <div className="actions-panel">
-                    <button
-                      type="button"
-                      onClick={printCommissionSettlement}
-                      disabled={!selectedCommissionEmployee || !selectedCommissionPermission?.can_access || commissionSummaryLoading}
-                    >
-                      Imprimir PDF
-                    </button>
-                    <p className="field-help">
-                      Abre un informe listo para imprimir o guardar como PDF.
-                    </p>
-                  </div>
+                  <span className="commission-row-count" aria-live="polite">
+                    {visibleCommissionSettlementRows.length} de {commissionSettlementRows.length} filas
+                  </span>
+                  <button
+                    type="button"
+                    className="commission-button"
+                    onClick={printCommissionSettlement}
+                    disabled={!selectedCommissionEmployee || !selectedCommissionPermission?.can_access || commissionSummaryLoading}
+                  >
+                    <Printer size={16} aria-hidden="true" />
+                    Imprimir PDF
+                  </button>
                 </div>
 
-                <div className="summary-table-wrap">
-                  <table className="summary-table">
+                <div className="summary-table-wrap" tabIndex={0} role="region" aria-label="Detalle de comisiones">
+                  <table className="summary-table commission-settlement-table">
                     <thead>
                       <tr>
                         <th>Mes</th>
@@ -8967,7 +8988,7 @@ export default function Home() {
                       ))}
                       {visibleCommissionSettlementRows.length === 0 && (
                         <tr>
-                          <td colSpan={9}>Sin movimientos para los artistas asignados.</td>
+                          <td colSpan={10}>Sin movimientos para los artistas asignados.</td>
                         </tr>
                       )}
                     </tbody>
@@ -8975,11 +8996,11 @@ export default function Home() {
                 </div>
                   </>
                 )}
-              </>
+              </div>
             )}
 
             {commissionsTab === "config" && (
-              <>
+              <div id="commission_config_panel" role="tabpanel" aria-labelledby="commission_config_tab">
                 {!selectedCommissionEmployee && (
                   <p className="field-help">Selecciona un empleado para configurar sus porcentajes por artista.</p>
                 )}
@@ -8990,7 +9011,7 @@ export default function Home() {
                 )}
                 {selectedCommissionEmployee && selectedCommissionPermission?.can_access && (
                   <>
-                <div className="control-dashboard compact-dashboard">
+                <div className="control-dashboard compact-dashboard commission-metrics commission-config-metrics">
                   <div>
                     <span>Reglas activas</span>
                     <strong>{commissionRulesForEmployee.filter((item) => item.active && Number(item.percent || 0) > 0).length}</strong>
@@ -9012,7 +9033,7 @@ export default function Home() {
                   <p className="field-help">Cargando reglas guardadas...</p>
                 )}
 
-                <div className="summary-table-wrap">
+                <div className="summary-table-wrap" tabIndex={0} role="region" aria-label="Reglas de comisiones por artista">
                   <table className="summary-table commission-config-table">
                     <thead>
                       <tr>
@@ -9134,7 +9155,7 @@ export default function Home() {
                 )}
                   </>
                 )}
-              </>
+              </div>
             )}
           </section>
         )}
