@@ -235,6 +235,10 @@ def artist_suggestions(
         soundon_result = soundon_suggestions(result, evidence, catalog_artists, raw_result, isrc=isrc)
         if soundon_result is not None:
             result = soundon_result
+        from app.master_contract_participants import dashgo_suggestions
+        dashgo_result = dashgo_suggestions(result, evidence, catalog_artists, raw_result, isrc=isrc)
+        if dashgo_result is not None:
+            result = dashgo_result
     return result
 
 

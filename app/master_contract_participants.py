@@ -5,7 +5,7 @@ import copy
 import json
 from typing import Any
 
-from app.master_contracts import artist_key
+from app.master_contracts import artist_key, canonical_artist
 from app.operational_db import db_sql, is_postgres_connection
 
 EXCLUSIONS = "catalog_participant_exclusions"
@@ -163,6 +163,64 @@ def soundon_suggestions(result: dict, evidence: list[dict], artists: list[str], 
         result["warnings"].append("Las fuentes difieren en participantes; se conservan los nombres informados, sin asignar porcentajes.")
     if entry.get("identity_relationship_conflicts"):
         result["warnings"].append("Un Track ID declara mas de un ISRC; se conservan las grabaciones separadas.")
+    return result
+
+
+def dashgo_suggestions(result: dict, evidence: list[dict], artists: list[str], raw: dict | None, *, isrc: str) -> dict | None:
+    from lib.dashgo_catalog_artists import EVIDENCE_VERSION, valid_dashgo_evidence, native_names
+
+    records = [entry for entry in evidence if entry.get("source") == "dashgo"
+               and entry.get("adapter_version") == EVIDENCE_VERSION]
+    if not records:
+        return None
+    result = copy.deepcopy(result)
+    if len(records) != 1 or not valid_dashgo_evidence(records[0], isrc):
+        result["principal_uncertain"] = True
+        result["warnings"] = [*result.get("warnings", []), "Evidencia DashGo incompleta; se conserva la propuesta anterior."]
+        return result
+    entry = records[0]
+    observations, native = entry["observations"], entry["native_artists"]
+    inherited = entry.get("prior_artists") is not None or entry.get("manual_protected")
+    reported = [name if inherited else canonical_artist(name) for name in (result.get("artists") or artists)]
+    for observation in observations:
+        for name in observation["artists"]:
+            if artist_key(name) not in keys(reported):
+                reported.append(canonical_artist(name))
+    observed_sets = {frozenset(keys(row["artists"])) for row in observations}
+    context_conflict = any(row.get("Track Artist") and row.get("Artist Name")
+        and keys(native_names(row["Track Artist"])) != keys(native_names(row["Artist Name"])) for row in observations)
+    native_status = "as_reported" if len(observed_sets) == 1 and native else "incomplete" if not native else "conflicting_participants"
+    if native_status == "as_reported" and context_conflict:
+        native_status = "conflicting_context"
+    status = native_status
+    if status == "as_reported" and artists and keys(artists) != keys(native):
+        status = "cross_source_membership_difference" if keys(artists) <= keys(native) or keys(native) <= keys(artists) else "conflicting_participants"
+    target = keys(artists[:1])
+    uncertain = bool((raw or {}).get("principal_uncertain"))
+    uncertain = uncertain or native_status != "as_reported" or len(native) != 1 or keys(native) != target
+    uncertain = uncertain or entry.get("principal_status") != "single_artist" or keys([entry.get("principal_proposed") or ""]) != target
+    uncertain = uncertain or keys(entry.get("artists") or []) != keys(artists) or bool(entry.get("manual_protected"))
+    fuga = keys([record["artists"][0] for record in evidence if record.get("source") == "fuga"
+                 and record.get("field") == "Asset Artist" and record.get("artists")])
+    uncertain = uncertain or bool(fuga and fuga != target)
+    uncertain = uncertain or ada_principal(evidence, artists) is True or onerpm_principal(evidence, artists, False) is True
+    uncertain = uncertain or orchard_principal(evidence, artists, bool((raw or {}).get("principal_uncertain")), isrc=isrc) is True
+    soundon = soundon_suggestions(result, evidence, artists, raw, isrc=isrc)
+    uncertain = uncertain or bool(soundon and soundon.get("principal_uncertain"))
+    uncertain = uncertain or any(record.get("principal_status") == "unresolved" for record in evidence
+                                  if record.get("source") not in {None, "dashgo"})
+    # Only DashGo's missing-source recognition is removed; real uncertainty stays independent.
+    result.update(artists=reported, artists_reported=reported, principal_uncertain=bool(uncertain),
+        participant_resolution_status=status, principal_resolution_status="unresolved" if uncertain else "single_artist",
+        principal_scope="sole_declared_track_credit_not_explicit_role_or_contract_rights",
+        participant_alternatives=[*result.get("participant_alternatives", []),
+            {"source": "catalog_prior", "artists": artists},
+            *[{"source": "dashgo", "artists": row["artists"], "statement_period": row["statement_period"]} for row in observations]])
+    result["evidence"] = [*result.get("evidence", []), entry]
+    if status != "as_reported":
+        obsolete = "Las fuentes de pista discrepan; sugerimos solo los nombres comunes. Revisar antes de cerrar."
+        result["warnings"] = [warning for warning in result.get("warnings", []) if warning != obsolete]
+        result["warnings"].append("Los creditos DashGo difieren; se conserva la evidencia sin asignar porcentajes.")
     return result
 
 

@@ -15,6 +15,7 @@ from lib.onerpm_catalog_artists import METADATA_FILE, enrich_onerpm_catalog_file
 from lib.ada_catalog_artists import METADATA_FILE as ADA_METADATA_FILE, enrich_ada_catalog_file
 from lib.orchard_catalog_artists import enrich_orchard_catalog_file
 from lib.soundon_catalog_artists import enrich_soundon_catalog_file
+from lib.dashgo_catalog_artists import enrich_dashgo_catalog_file
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -727,6 +728,7 @@ def build_catalog_master() -> pl.DataFrame:
     catalog = enrich_ada_catalog_file(catalog, MARTS_DIR / ADA_METADATA_FILE, MARTS_DIR / "standardized_raw_orchard.parquet")
     catalog = enrich_orchard_catalog_file(catalog, MARTS_DIR / "standardized_raw_orchard.parquet")
     catalog = enrich_soundon_catalog_file(catalog, MARTS_DIR / "standardized_raw_soundon.parquet")
+    catalog = enrich_dashgo_catalog_file(catalog, MARTS_DIR / "standardized_raw_dashgo.parquet")
     return catalog.sort("amount_usd", descending=True)
 
 
