@@ -48,17 +48,25 @@ class FugaCatalogArtistTests(unittest.TestCase):
         return enrich_fuga_catalog(self.catalog() if catalog is None else catalog,
                                    pl.DataFrame(rows or [self.raw()]).lazy())
 
+    def test_album_names_do_not_return_through_contaminated_display(self):
+        catalog = self.catalog().with_columns(pl.lit("La Juntada De Los Artistas, Candu Dominguez and G Sony").alias("artist_statement"))
+        result = self.enrich(catalog=catalog)
+        self.assertNotIn("G Sony", result["catalog_artists"][0].to_list())
+        self.assertEqual(result["amount_usd"].to_list(), catalog["amount_usd"].to_list())
+        evidence = json.loads(result["catalog_artist_evidence"][0])
+        self.assertTrue(all(not e["used_for_catalog"] for e in evidence if e["field"] == "Product Artist"))
+
     def test_union_preserves_every_existing_column_and_other_sources(self):
         before = self.catalog()
         after = self.enrich(catalog=before)
         assert_frame_equal(before, after.select(before.columns))
-        self.assertEqual(after["catalog_artists"][0].to_list(), ["La Juntada De Los Artistas", "Candu Dominguez", "G Sony"])
+        self.assertEqual(after["catalog_artists"][0].to_list(), ["La Juntada De Los Artistas", "Candu Dominguez"])
         self.assertIsNone(after["catalog_artists"][1])
         self.assertIsNone(after["catalog_artists"][2])
         self.assertEqual(after["catalog_artist_rule"][0], RULE_VERSION)
 
     def test_track_only_and_release_only_credits_and_blank_values(self):
-        for track, release, expected in [("Lead", "", ["Lead"]), ("", "New Guest", ["New Guest"]), ("", "", [])]:
+        for track, release, expected in [("Lead", "", ["Lead"]), ("", "New Guest", []), ("", "", [])]:
             result = self.enrich([self.raw(**{"Asset Artist": track, "Product Artist": release})],
                                 self.catalog().with_columns(pl.lit("").alias("artist_statement")))
             self.assertEqual(result["catalog_artists"][0].to_list(), expected)
@@ -67,7 +75,7 @@ class FugaCatalogArtistTests(unittest.TestCase):
         rows = [self.raw(**{"Product Artist": "La Juntada De Los Artistas, Candu Dominguez and Previously Unknown Guest"}),
                 self.raw(**{"statement_period": "2026-02", "statement_file_name": "February2026.csv",
                             "Product Artist": "La Juntada De Los Artistas"})]
-        self.assertIn("Previously Unknown Guest", self.enrich(rows)["catalog_artists"][0].to_list())
+        self.assertNotIn("Previously Unknown Guest", self.enrich(rows)["catalog_artists"][0].to_list())
 
     def test_multiple_upcs_do_not_multiply_catalog_or_sales(self):
         rows = [self.raw(), self.raw(**{"Product UPC": "8721000000002", "Product Reference": "55819",
@@ -75,15 +83,15 @@ class FugaCatalogArtistTests(unittest.TestCase):
         result = self.enrich(rows)
         self.assertEqual(result.height, self.catalog().height)
         self.assertEqual(result["amount_usd"].to_list(), self.catalog()["amount_usd"].to_list())
-        self.assertIn("Another Guest", result["catalog_artists"][0].to_list())
+        self.assertNotIn("Another Guest", result["catalog_artists"][0].to_list())
 
     def test_spaces_and_case_deduplicate_but_dj_and_accents_are_not_aliases(self):
         catalog = self.catalog().with_columns(pl.lit("").alias("artist_statement"))
         rows = [self.raw(**{"Asset Artist": "Guest", "Product Artist": " guest "}),
                 self.raw(**{"Asset Artist": "DJ Guest", "Product Artist": "Gu\u00e9st"})]
         artists = self.enrich(rows, catalog)["catalog_artists"][0].to_list()
-        self.assertEqual(len(artists), 3)
-        self.assertEqual(set(artists), {"Guest", "DJ Guest", "Gu\u00e9st"})
+        self.assertEqual(len(artists), 2)
+        self.assertEqual(set(artists), {"Guest", "DJ Guest"})
 
     def test_original_literals_origins_files_hashes_and_upcs_remain_in_evidence(self):
         evidence = json.loads(self.enrich()["catalog_artist_evidence"][0])
@@ -114,7 +122,7 @@ class FugaCatalogArtistTests(unittest.TestCase):
                            catalog_alias_lookup(catalog=after).sort("alias_catalog_key"))
         self.assertEqual(infer_video_evidence(before.to_dicts(), []), infer_video_evidence(after.to_dicts(), []))
         displayed = catalog_artist_display(after)
-        self.assertIn("G Sony", displayed["artist_statement"][0])
+        self.assertNotIn("G Sony", displayed["artist_statement"][0])
         assert_frame_equal(before.select("catalog_key", "amount_usd"), displayed.select("catalog_key", "amount_usd"))
 
     def test_approved_manual_metadata_has_priority_without_erasing_raw_evidence(self):
@@ -129,7 +137,7 @@ class FugaCatalogArtistTests(unittest.TestCase):
 
     def test_title_only_correction_does_not_disable_artist_union(self):
         catalog = self.catalog().with_columns(pl.Series("catalog_manual_correction_id", ["TITLE-ONLY", None, None]))
-        self.assertIn("G Sony", self.enrich(catalog=catalog)["catalog_artists"][0].to_list())
+        self.assertNotIn("G Sony", self.enrich(catalog=catalog)["catalog_artists"][0].to_list())
 
     def test_quoted_group_does_not_create_ghost_names_from_existing_display(self):
         catalog = self.catalog().with_columns(pl.lit('"New and Future" and Lead').alias("artist_statement"))

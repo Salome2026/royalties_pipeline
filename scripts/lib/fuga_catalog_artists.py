@@ -10,7 +10,7 @@ import polars as pl
 from .catalog_manual_metadata import CORRECTIONS_PATH
 
 
-RULE_VERSION = "FUGA-ARTISTS-1"
+RULE_VERSION = "FUGA-ARTISTS-2"
 REFERENCES_PATH = Path(__file__).with_name("fuga_catalog_artist_references.json")
 ARTIST_COLUMNS = {
     "catalog_artists": pl.List(pl.Utf8),
@@ -113,17 +113,18 @@ def collect_fuga_artists(frame: pl.LazyFrame) -> dict[str, dict[str, Any]]:
         .collect(engine="streaming").to_dicts()
     )
     result: dict[str, dict[str, Any]] = {}
-    # All track credits precede release-only names, including historical variants.
+    # Only track credits define participants; album credits remain evidence.
     for field in ("Asset Artist", "Product Artist"):
         for row in rows:
             raw = str(row.get(field) or "")
             artists, status = parse_credit(raw)
             entity = result.setdefault(row["asset_isrc"], {"artists": {}, "evidence": []})
-            for artist in artists:
-                entity["artists"].setdefault(name_key(artist), artist)
+            if field == "Asset Artist":
+                for artist in artists:
+                    entity["artists"].setdefault(name_key(artist), artist)
             entity["evidence"].append({
                 "source": "fuga", "field": field, "raw": raw, "artists": artists,
-                "status": status, **{name: row.get(name) for name in context},
+                "status": status, "used_for_catalog": field == "Asset Artist", **{name: row.get(name) for name in context},
                 "Product Reference": row["Product Reference"], "Asset Reference": row["Asset Reference"],
             })
     return result
@@ -163,10 +164,12 @@ def enrich_fuga_catalog(
         artists = list(resolved.values())
         # A source-specific list must not erase names already shared by another distributor.
         original = str(row.get("artist_statement") or "")
-        previous = [aliases.get((row["asset_isrc"], name_key(name)), name) for name in parse_catalog_credit(original)]
+        album_only = {name_key(name) for entry in entity["evidence"] if entry["field"] == "Product Artist" for name in entry["artists"]} - set(entity["artists"])
+        previous = [aliases.get((row["asset_isrc"], name_key(name)), name) for name in parse_catalog_credit(original)
+                    if name_key(name) not in album_only]
         correction = artist_corrections.get(row.get("catalog_key"))
         if correction and row.get("catalog_manual_correction_id") == correction["id"]:
-            artists = previous
+            artists = [aliases.get((row["asset_isrc"], name_key(name)), name) for name in parse_catalog_credit(original)]
         else:
             seen = {name_key(name) for name in artists}
             for name in previous:

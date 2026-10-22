@@ -495,9 +495,11 @@ mantener las versiones Parquet/BigQuery alineadas.
 
 ## Lista comun de artistas FUGA
 
-Desde la autorizacion del 2026-10-14, el catalogo incorpora `FUGA-ARTISTS-1`:
-union estable de `Asset Artist` y `Product Artist` del mismo ISRC y contexto
-musical, con evidencia por detras. La regla completa vive en
+Desde la correccion autorizada el 2026-10-22, el catalogo incorpora `FUGA-ARTISTS-2`:
+`Asset Artist` define artistas de pista; `Product Artist` queda exclusivamente
+como evidencia de album, nunca como participantes de cada ISRC. La lectura
+no permite reintroducir nombres exclusivos del album desde textos previos contaminados.
+Las correcciones humanas confirmadas conservan prioridad. La regla completa vive en
 `fuga_pipeline_notes.md` y se ejecuta en cada reconstruccion del catalogo,
 incluidos lanzamientos y artistas nuevos, sin un listado cerrado de nombres.
 

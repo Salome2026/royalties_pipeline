@@ -186,3 +186,13 @@ factor historico del reporte ni personalizacion vigente. Tampoco habilita
 formatos complementarios no certificados ni modifica las otras distribuidoras.
 Antes de activar un release se comparan los campos anteriores del catalogo,
 los cinco marts economicos, aliases, inferencias, ingresos asociados y contratos.
+
+
+## Correccion de creditos por nivel (2026-10-22)
+
+FUGA-ARTISTS-2 sustituye la union de artistas de pista y lanzamiento. Solo Asset Artist
+alimenta participantes del ISRC; Product Artist se conserva en evidencia con
+used_for_catalog=false. Los nombres exclusivos de album tampoco se reincorporan
+desde artist_statement previo. Ventas, importes, identidad, codigos asociados y
+correcciones humanas confirmadas se preservan. Los cinco contratos identificados
+se reabren y retiran unicamente el participante ajeno, sin reasignar porcentajes.
