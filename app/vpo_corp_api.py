@@ -8085,7 +8085,7 @@ def catalog_spotify_review(keyword: str = "", status: str = "all", offset: int =
     from app.catalog_metadata_review import read_state, comparison, norm
     rows = metadata_catalog_rows(x_vpo_username)
     observations, reviews = read_state()
-    items = [comparison(row, observations.get(row["catalog_key"]), reviews.get(row["catalog_key"])) for row in rows if row.get("asset_isrc")]
+    items = [comparison(row, observations.get(row["catalog_key"]), reviews.get(row["catalog_key"])) for row in rows if row.get("asset_isrc") or row.get("identity_video_id")]
     summary = {}
     for item in items:
         summary[item["status"]] = summary.get(item["status"], 0) + 1
@@ -8108,7 +8108,7 @@ def update_catalog_spotify_review(request: dict, x_vpo_api_key: str | None = Hea
     if not row:
         raise HTTPException(404, detail="Tema no disponible en tu catálogo.")
     if request.get("action") == "refresh":
-        refresh(row["asset_isrc"], x_vpo_username)
+        refresh(row["asset_isrc"], x_vpo_username, row)
     else:
         decide(row, request, x_vpo_username)
     return {"ok": True}

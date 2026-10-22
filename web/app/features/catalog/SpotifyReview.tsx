@@ -4,7 +4,7 @@ import { ArrowLeft, Check, ChevronLeft, ChevronRight, ExternalLink, RefreshCw, S
 import styles from "./SpotifyReview.module.css";
 
 type Values = Record<string, string | number | string[] | boolean | null>;
-type Item = { catalog_key: string; isrc: string; title: string; ours: Values; spotify: Values;
+type Item = { catalog_key: string; isrc: string; title: string; ours: Values; spotify: Values; provider: string;
   protected: Record<string, { by?: string; date?: string; reason?: string }>; differences: string[];
   decisions: Record<string, string>; status: string; observation_version: number; review_version: number;
   fetched_at: string; origin: string; reviewed_by: string | null; reviewed_at: string; sources: string };
@@ -43,16 +43,17 @@ export function SpotifyReview({ canEdit, onBack }: { canEdit: boolean; onBack: (
   }
   async function refresh(keys: string[]) {
     setBusy(true); setError(""); setMessage(""); let complete = 0;
-    try { for (const key of keys) { setMessage(`Consultando Spotify ${complete + 1} de ${keys.length}…`); await post({ action: "refresh", catalog_key: key }); complete++; }
+    try { for (const key of keys) { setMessage(`Consultando Spotify / YouTube ${complete + 1} de ${keys.length}…`); await post({ action: "refresh", catalog_key: key }); complete++; }
       setMessage(`${complete} consulta${complete === 1 ? "" : "s"} actualizada${complete === 1 ? "" : "s"}.`); }
     catch (e) { setError(`${complete} consultas completadas. ${e instanceof Error ? e.message : "No se pudo continuar."}`); }
     finally { await load(); setBusy(false); }
   }
   const current = data?.items.find((item) => item.catalog_key === selected);
+  const provider = current?.provider === "youtube" ? "YouTube" : "Spotify";
   return <section className={styles.workspace}>
     <header className={styles.header}>
       <button className={styles.icon} onClick={onBack} disabled={busy} aria-label="Volver al catálogo"><ArrowLeft size={20}/></button>
-      <div><span>Catálogo y distribución</span><h1>Nuestro catálogo vs. Spotify</h1><p>Compará los datos por tema y validá cada diferencia.</p></div>
+      <div><span>Catálogo y distribución</span><h1>Nuestro catálogo vs. Spotify y YouTube</h1><p>Spotify primero. YouTube como alternativa, con el video vinculado al tema.</p></div>
       <button className={styles.button} onClick={() => void load()} disabled={loading || busy}><RefreshCw size={16}/>Actualizar vista</button>
     </header>
     <div className={styles.stats}>{["pending", "reviewed", "protected", "not_consulted"].map((key) => <button key={key} onClick={() => { setStatus(key); setOffset(0); }}><strong>{data?.summary[key] || 0}</strong><span>{labels[key]}</span></button>)}</div>
@@ -60,6 +61,7 @@ export function SpotifyReview({ canEdit, onBack }: { canEdit: boolean; onBack: (
       <div><Search size={16}/><input aria-label="Buscar tema, artista o ISRC" placeholder="Tema, artista o ISRC" value={query} onChange={(e) => setQuery(e.target.value)}/></div>
       <button className={styles.button} type="submit">Buscar</button>
       <select aria-label="Estado de revisión" value={status} onChange={(e) => { setStatus(e.target.value); setOffset(0); setSelected(null); }}>{Object.entries(labels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select>
+      {canEdit && <button className={styles.button} type="button" disabled={busy || !data?.items.length} onClick={() => setChecked(Array.from(new Set([...checked, ...(data?.items.map(item => item.catalog_key) || [])])))}>Seleccionar página</button>}
       {canEdit && <button className={styles.primary} type="button" disabled={busy || !checked.length} onClick={() => void refresh(checked)}><RefreshCw size={16}/>Consultar selección ({checked.length})</button>}
     </form>
     {error && <div className={styles.error} role="alert">{error}</div>}{message && <div className={styles.notice} role="status">{message}</div>}
@@ -75,22 +77,23 @@ export function SpotifyReview({ canEdit, onBack }: { canEdit: boolean; onBack: (
       <div className={styles.pagination}><span>{data?.total || 0} temas</span><button className={styles.icon} aria-label="Anterior" disabled={offset === 0 || loading} onClick={() => setOffset(offset - 20)}><ChevronLeft size={18}/></button><button className={styles.icon} aria-label="Siguiente" disabled={!data || offset + 20 >= data.total || loading} onClick={() => setOffset(offset + 20)}><ChevronRight size={18}/></button></div></div>
       <aside className={styles.detail}>{current ? <>
         <h2>{current.title}</h2><p>{current.isrc} · {current.sources}</p>
-        <div className={styles.detailActions}>{canEdit && <button className={styles.button} disabled={busy} onClick={() => void refresh([current.catalog_key])}><RefreshCw size={15}/>Consultar Spotify</button>}
-          {current.spotify.url && <a className={styles.button} href={String(current.spotify.url)} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Abrir Spotify</a>}</div>
-        <p className={styles.muted}>{current.origin === "legacy_cache" ? "Consulta anterior recuperada" : current.origin === "spotify_live" ? "Consulta directa a Spotify" : "Sin consulta de Spotify"} · {date(current.fetched_at)}</p>
-        {!!current.observation_version && !current.spotify.exact_isrc && <div className={styles.notice}>No hay una coincidencia exacta y única por ISRC para aprobar.</div>}
-        <div className={styles.comparisonHeading}><span>Nuestro catálogo</span><span>Spotify</span></div>
+        <div className={styles.detailActions}>{canEdit && <button className={styles.button} disabled={busy} onClick={() => void refresh([current.catalog_key])}><RefreshCw size={15}/>Consultar fuentes</button>}
+          {current.spotify.url && <a className={styles.button} href={String(current.spotify.url)} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Abrir {provider}</a>}</div>
+        <p className={styles.muted}>{current.origin === "legacy_cache" ? "Consulta anterior recuperada" : current.origin === "youtube_live" ? "YouTube: alternativa a Spotify" : current.origin === "spotify_live" ? "Consulta directa a Spotify" : "Sin consulta"} · {date(current.fetched_at)}</p>
+        {!!current.observation_version && !current.spotify.exact_isrc && current.provider !== "youtube" && <div className={styles.notice}>No hay una coincidencia exacta y única por ISRC para aprobar.</div>}
+        <div className={styles.comparisonHeading}><span>Nuestro catálogo</span><span>{provider}</span></div>
         {fields.map(([field, label]) => <div className={styles.field} key={field}>
           <h3>{label}{current.protected[field] && <span className={styles.lock}><ShieldCheck size={14}/>Protegido</span>}</h3>
           <div className={`${styles.values} ${current.differences.includes(field) ? styles.difference : ""}`}><span>{value(current.ours[field])}</span><span>{value(current.spotify[field])}</span></div>
           {current.protected[field] && <small>Confirmado por {current.protected[field].by || "el equipo"}{current.protected[field].date ? ` · ${current.protected[field].date}` : ""}</small>}
-          {current.decisions[field] && <small className={styles.validated}><Check size={13}/>{current.decisions[field] === "accept" ? "Dato de Spotify aprobado" : "Se conserva nuestro dato"}</small>}
+          {current.decisions[field] && <small className={styles.validated}><Check size={13}/>{current.decisions[field] === "accept" ? `Dato de ${provider} aprobado` : "Se conserva nuestro dato"}</small>}
           {canEdit && current.differences.includes(field) && !!current.observation_version && <div className={styles.fieldActions}>
-            {!current.protected[field] && <button className={styles.primary} disabled={busy || !current.spotify.exact_isrc || current.spotify.status !== "found"} onClick={() => void decide(current, field, "accept")}>Aceptar Spotify</button>}
+            {!current.protected[field] && <button className={styles.primary} disabled={busy || (current.provider === "youtube" ? !["track_title", "duration_seconds"].includes(field) : !current.spotify.exact_isrc) || current.spotify.status !== "found"} onClick={() => void decide(current, field, "accept")}>Aceptar {provider}</button>}
             <button className={styles.button} disabled={busy} onClick={() => void decide(current, field, "keep")}>Conservar nuestro dato</button>
           </div>}
         </div>)}
-        <div className={styles.context}><h3>Contexto del álbum en Spotify</h3><p>{value(current.spotify.album)}</p><small>{value(current.spotify.album_artists)}</small></div>
+        {current.spotify.fallback_note && <div className={styles.notice}>{value(current.spotify.fallback_note)}</div>}
+        <div className={styles.context}>{current.provider === "youtube" ? <><h3>Video vinculado en YouTube</h3><p>Canal: {value(current.spotify.channel)}</p><small>Publicado: {value(current.spotify.published_at)}. Esta fecha corresponde al video; el canal no se toma como artista ni sello.</small></> : <><h3>Contexto del álbum en Spotify</h3><p>{value(current.spotify.album)}</p><small>{value(current.spotify.album_artists)}</small></>}</div>
         {current.reviewed_by && <p className={styles.muted}>Última validación: {current.reviewed_by} · {date(current.reviewed_at)}</p>}
       </> : <div className={styles.empty}><ShieldCheck size={30}/><h2>Elegí un tema</h2><p>Vas a ver nuestros datos, la consulta de Spotify y las correcciones protegidas.</p></div>}</aside>
     </div>

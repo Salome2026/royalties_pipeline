@@ -36,6 +36,36 @@ class MetadataTests(unittest.TestCase):
   with patch.object(m,'operational_connect',connect),patch.object(m,'protection',return_value={'artists':{}}):
    with self.assertRaises(HTTPException) as e:m.decide(self.row(),{'field':'artists','decision':'accept','observation_version':3,'review_version':1},'editor')
    self.assertEqual(e.exception.status_code,409)
+ def test_youtube_does_not_invent_artists_label_or_release(self):
+  payload=m.youtube_observation({'id':'abcDEF12345','snippet':{'title':'Video title','channelTitle':'Channel','publishedAt':'2026-01-01'},'contentDetails':{'duration':'PT3M2S'}},{'status':'not_found'})
+  self.assertEqual(payload['duration_seconds'],182)
+  for field in ['artists','label','release_date']:self.assertIsNone(payload[field])
+  row={**self.row(),'identity_video_id':'abcDEF12345'}
+  self.assertTrue(m.acceptable(payload,row,'track_title'));self.assertFalse(m.acceptable(payload,row,'artists'))
+  self.assertFalse(m.acceptable(payload,self.row(),'track_title'))
+ def test_empty_isrc_is_not_exact(self):
+  self.assertFalse(m.observation_from_cache({'raw_json':{}},'')['exact_isrc'])
+ def test_spotify_success_does_not_query_youtube(self):
+  track={'external_ids':{'isrc':'ARDL12600005'},'name':'Tema','artists':[{'name':'Lead'}],'duration_ms':100000}
+  token=Mock();token.json.return_value={'access_token':'test'}
+  response=Mock(status_code=200);response.json.return_value={'tracks':{'items':[track]}}
+  with patch.dict(m.os.environ,{'SPOTIFY_CLIENT_ID':'id','SPOTIFY_CLIENT_SECRET':'secret','YOUTUBE_API_KEY':'yt'}),patch.object(m.requests,'post',return_value=token),patch.object(m.requests,'get',return_value=response) as get,patch.object(m,'store_observation') as store:
+   m.refresh('ARDL12600005','editor',{**self.row(),'identity_video_id':'abcDEF12345'})
+   self.assertEqual(get.call_count,1);self.assertEqual(store.call_args.args[3],'spotify_live')
+ def test_spotify_missing_uses_linked_video_only(self):
+  token=Mock();token.json.return_value={'access_token':'test'}
+  empty=Mock(status_code=200);empty.json.return_value={'tracks':{'items':[]}}
+  video=Mock(status_code=200);video.json.return_value={'items':[{'id':'abcDEF12345','snippet':{'title':'Video'},'contentDetails':{'duration':'PT2M'}}]}
+  with patch.dict(m.os.environ,{'SPOTIFY_CLIENT_ID':'id','SPOTIFY_CLIENT_SECRET':'secret','YOUTUBE_API_KEY':'yt'}),patch.object(m.requests,'post',return_value=token),patch.object(m.requests,'get',side_effect=[empty,video]) as get,patch.object(m,'store_observation') as store:
+   m.refresh('ARDL12600005','editor',{**self.row(),'identity_video_id':'abcDEF12345'})
+   self.assertEqual(get.call_args.kwargs['params']['id'],'abcDEF12345');self.assertEqual(store.call_args.args[3],'youtube_live')
+   self.assertEqual(store.call_args.args[1]['spotify_observation']['status'],'not_found')
+ def test_spotify_rate_limit_preserves_observation_and_stops(self):
+  token=Mock();token.json.return_value={'access_token':'test'}
+  limited=Mock(status_code=429,headers={'Retry-After':'120'})
+  with patch.dict(m.os.environ,{'SPOTIFY_CLIENT_ID':'id','SPOTIFY_CLIENT_SECRET':'secret'}),patch.object(m.requests,'post',return_value=token),patch.object(m.requests,'get',return_value=limited) as get,patch.object(m,'store_observation') as store:
+   with self.assertRaises(HTTPException) as e:m.refresh('ARDL12600005','editor',{**self.row(),'identity_video_id':'abcDEF12345'})
+   self.assertEqual(e.exception.status_code,429);self.assertEqual(get.call_count,1);store.assert_not_called()
  def test_unknown_isrc_cannot_refresh(self):
   with self.assertRaises(HTTPException) as e:m.refresh('TITLE:similar','editor')
   self.assertEqual(e.exception.status_code,400)

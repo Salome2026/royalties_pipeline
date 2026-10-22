@@ -49,9 +49,9 @@ def protection(row):
 def observation_from_cache(record, isrc):
     raw = document(record.get("raw_json") or "{}")
     selected = raw.get("selected") or {}
-    exact = (selected.get("external_ids") or {}).get("isrc", "").upper() == isrc.upper()
+    exact = bool(isrc) and (selected.get("external_ids") or {}).get("isrc", "").upper() == isrc.upper()
     album = raw.get("selected_album") or selected.get("album") or {}
-    return {"status": record.get("metadata_status") or "not_consulted", "exact_isrc": exact,
+    return {"provider": "spotify", "status": record.get("metadata_status") or "not_consulted", "exact_isrc": exact,
             "track_title": selected.get("name") or record.get("match_title"),
             "artists": [x["name"] for x in selected.get("artists") or []],
             "album": album.get("name"), "album_artists": [x["name"] for x in album.get("artists") or []],
@@ -114,7 +114,7 @@ def comparison(row, observation=None, review=None):
             "ours": ours, "spotify": spotify, "protected": protected, "differences": differences, "decisions": decisions,
             "status": status, "observation_version": observation.get("version", 0), "review_version": review.get("version", 0),
             "origin": observation.get("origin"), "fetched_at": str(observation.get("fetched_at") or ""),
-            "reviewed_by": review.get("updated_by"), "reviewed_at": str(review.get("updated_at") or ""), "sources": row.get("sources")}
+            "reviewed_by": review.get("updated_by"), "reviewed_at": str(review.get("updated_at") or ""), "sources": row.get("sources"), "provider": spotify.get("provider", "spotify")}
 
 
 def decide(row, body, actor):
@@ -131,8 +131,8 @@ def decide(row, body, actor):
         payload = document(observation["payload_json"])
         if decision == "accept" and field in protection(row):
             raise HTTPException(409, "Este campo tiene una corrección manual confirmada y está protegido.")
-        if decision == "accept" and (not payload.get("exact_isrc") or payload.get("status") != "found" or payload.get(field) is None):
-            raise HTTPException(400, "Se requiere una coincidencia exacta por ISRC y un valor informado.")
+        if decision == "accept" and not acceptable(payload, row, field):
+            raise HTTPException(400, "Se requiere una coincidencia verificable y un valor informado para este campo.")
         decisions = document(review["decisions_json"]) if review and review["observation_version"] == observation["version"] else {}
         overrides = document(review["overrides_json"]) if review else {}
         decisions[field] = decision
@@ -145,7 +145,7 @@ def decide(row, body, actor):
           ON CONFLICT(catalog_key) DO UPDATE SET observation_version=EXCLUDED.observation_version,version=EXCLUDED.version,
           decisions_json=EXCLUDED.decisions_json,overrides_json=EXCLUDED.overrides_json,updated_by=EXCLUDED.updated_by,updated_at=EXCLUDED.updated_at""",
                      (key, observation["version"], version, json.dumps(decisions), json.dumps(overrides), actor, now))
-        audit = {"field": field, "decision": decision, "proposed": payload.get(field), "previous": current_values(row).get(field), "decisions": decisions, "overrides": overrides}
+        audit = {"field": field, "decision": decision, "proposed": payload.get(field), "previous": comparison(row, observation, review)["ours"].get(field), "provider": payload.get("provider", "spotify"), "source_url": payload.get("url"), "decisions": decisions, "overrides": overrides}
         conn.execute("""INSERT INTO catalog_metadata_review_history(catalog_key,version,observation_version,payload_json,updated_by,updated_at)
           VALUES (%s,%s,%s,%s::jsonb,%s,%s)""", (key, version, observation["version"], json.dumps(audit), actor, now))
 
@@ -173,8 +173,28 @@ def apply_approved(frame):
     return pl.DataFrame(rows, infer_schema_length=None, schema_overrides={name: dtype for name, dtype in frame.schema.items()})
 
 
-def refresh(isrc, actor):
-    if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}[0-9]{7}", isrc):
+def acceptable(payload, row, field):
+    if payload.get("status") != "found" or payload.get(field) is None:
+        return False
+    if payload.get("provider", "spotify") == "youtube":
+        return field in {"track_title", "duration_seconds"} and bool(payload.get("video_id")) and payload["video_id"] == row.get("identity_video_id")
+    return bool(payload.get("exact_isrc"))
+
+
+def youtube_observation(item, spotify):
+    snippet = item.get("snippet") or {}
+    duration = re.fullmatch(r"PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", (item.get("contentDetails") or {}).get("duration", ""))
+    seconds = sum(int(x or 0) * scale for x, scale in zip(duration.groups(), [3600, 60, 1])) if duration else None
+    return {"provider": "youtube", "status": "found", "exact_isrc": False,
+            "video_id": item["id"], "track_title": snippet.get("title"), "duration_seconds": seconds,
+            "artists": None, "release_date": None, "label": None,
+            "channel": snippet.get("channelTitle"), "published_at": snippet.get("publishedAt"),
+            "url": "https://www.youtube.com/watch?v=" + item["id"], "spotify_observation": spotify}
+
+
+def refresh(isrc, actor, row=None):
+    valid_isrc = bool(re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}[0-9]{7}", isrc or ""))
+    if not valid_isrc and not re.fullmatch(r"[A-Za-z0-9_-]{11}", (row or {}).get("identity_video_id") or ""):
         raise HTTPException(400, "ISRC inválido.")
     client, secret = os.getenv("SPOTIFY_CLIENT_ID"), os.getenv("SPOTIFY_CLIENT_SECRET")
     if not client or not secret:
@@ -182,17 +202,41 @@ def refresh(isrc, actor):
     try:
         token_response = requests.post("https://accounts.spotify.com/api/token", auth=(client, secret), data={"grant_type": "client_credentials"}, timeout=10)
         token_response.raise_for_status()
-        response = requests.get("https://api.spotify.com/v1/search", headers={"Authorization": "Bearer " + token_response.json()["access_token"]}, params={"q": "isrc:" + isrc, "type": "track", "limit": 10}, timeout=15)
+        response = requests.get("https://api.spotify.com/v1/search", headers={"Authorization": "Bearer " + token_response.json()["access_token"]}, params={"q": "isrc:" + isrc if valid_isrc else "track:" + str(row.get("track_title") or "") + " artist:" + " ".join(current_values(row)["artists"] or []), "type": "track", "limit": 10}, timeout=15)
         if response.status_code == 429:
             raise HTTPException(429, "Spotify pidió una pausa. No se modificaron tus validaciones.", headers={"Retry-After": response.headers.get("Retry-After", "60")})
         response.raise_for_status()
         items = response.json().get("tracks", {}).get("items", [])
-        matches = [x for x in items if (x.get("external_ids") or {}).get("isrc", "").upper() == isrc]
+        matches = [x for x in items if valid_isrc and (x.get("external_ids") or {}).get("isrc", "").upper() == isrc]
         unique = {json.dumps({"title": norm(x.get("name", "")), "artists": sorted(norm(a["name"]) for a in x.get("artists", [])), "duration": x.get("duration_ms")}, sort_keys=True) for x in matches}
         selected = matches[0] if len(unique) == 1 else {}
         record = {"raw_json": {"selected": selected, "items": items}, "metadata_status": "found" if selected else "ambiguous" if matches else "not_found", "looked_up_at": datetime.now(timezone.utc).isoformat(), "metadata_match_method": "isrc_exact"}
-        payload = observation_from_cache(record, isrc)
-        store_observation("ISRC:" + isrc, payload, actor, "spotify_live")
+        payload = observation_from_cache(record, isrc or "")
+        if not valid_isrc:
+            payload["search_candidates"] = [{"title": x.get("name"), "url": x.get("external_urls", {}).get("spotify")} for x in items[:5]]
+        origin = "spotify_live"
+        video_id = (row or {}).get("identity_video_id")
+        if not payload.get("exact_isrc") and video_id and re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):
+            api_key = os.getenv("YOUTUBE_API_KEY")
+            if not api_key:
+                payload["fallback_note"] = "YouTube todavía no está configurado."
+            else:
+                try:
+                    youtube = requests.get("https://www.googleapis.com/youtube/v3/videos", params={"part": "snippet,contentDetails", "id": video_id, "key": api_key}, timeout=12)
+                    if youtube.status_code in {403, 429}:
+                        raise HTTPException(429, "YouTube pidió una pausa. Las validaciones se conservaron.", headers={"Retry-After": youtube.headers.get("Retry-After", "60")})
+                    youtube.raise_for_status()
+                    videos = [v for v in youtube.json().get("items", []) if v.get("id") == video_id]
+                    if videos:
+                        payload = youtube_observation(videos[0], payload)
+                        origin = "youtube_live"
+                    else:
+                        payload["fallback_note"] = "El video vinculado no está disponible en YouTube."
+                except requests.RequestException:
+                    raise HTTPException(502, "No se pudo consultar YouTube. Se conservaron las observaciones y validaciones anteriores.")
+        elif not payload.get("exact_isrc"):
+            payload["fallback_note"] = "No hay un video vinculado para consultar YouTube con seguridad."
+        store_observation((row or {}).get("catalog_key") or "ISRC:" + isrc, payload, actor, origin)
     except HTTPException:
         raise
     except (requests.RequestException, KeyError, ValueError):

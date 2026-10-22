@@ -187,7 +187,7 @@ export function CatalogModule({ canEdit, initialFilter, onMessage }: Props) {
         </button>
       </header>
 
-      <button type="button" className={styles.refreshButton} onClick={() => setSpotifyMode(true)}>Nuestro catálogo vs. Spotify</button>
+      <button type="button" className={styles.refreshButton} onClick={() => setSpotifyMode(true)}>Nuestro catálogo vs. Spotify y YouTube</button>
 
       <form className={styles.filters} onSubmit={applySearch}>
         <div className={styles.searchField}>

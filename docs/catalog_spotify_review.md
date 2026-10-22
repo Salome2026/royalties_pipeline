@@ -30,3 +30,16 @@ maintenance. Future scheduled jobs must use the same observations/decisions.
 
 Rollback: redeploy the previous code; preserve the three operational tables and
 history. No manual correction or cache must be deleted to roll back the screen.
+
+
+## Provider priority
+Every refresh queries Spotify first. Exact ISRC Spotify matches take precedence;
+otherwise YouTube is queried using only the catalog identity_video_id (never
+an arbitrary claimed/UGC video from the video_ids list). Video-only catalog rows
+are included: Spotify is searched by title/artist without treating that text
+search as confirmed identity, then the linked YouTube video is consulted.
+YouTube only proposes video title and duration. Channel and publication date
+are shown separately, never converted into artist, label or release date.
+The original Spotify miss/ambiguity remains inside the fallback observation.
+Approvals remain explicit, protected fields are enforced server-side, and the
+history records provider and URL. A provider rate limit stops the block.
