@@ -8091,7 +8091,7 @@ def catalog_spotify_review(keyword: str = "", status: str = "all", offset: int =
         summary[item["status"]] = summary.get(item["status"], 0) + 1
     if keyword.strip():
         tokens = norm(keyword).split()
-        items = [item for item in items if all(token in norm(str(item["ours"]) + item["isrc"]) for token in tokens)]
+        items = [item for item in items if all(token in norm(str(item["ours"]) + (item["isrc"] or item["catalog_key"])) for token in tokens)]
     if status != "all":
         items = [item for item in items if item["status"] == status]
     offset, limit = max(0, offset), max(1, min(100, limit))

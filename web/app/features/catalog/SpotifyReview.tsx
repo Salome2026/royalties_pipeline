@@ -4,7 +4,7 @@ import { ArrowLeft, Check, ChevronLeft, ChevronRight, ExternalLink, RefreshCw, S
 import styles from "./SpotifyReview.module.css";
 
 type Values = Record<string, string | number | string[] | boolean | null>;
-type Item = { catalog_key: string; isrc: string; title: string; ours: Values; spotify: Values; provider: string;
+type Item = { catalog_key: string; isrc: string | null; title: string; ours: Values; spotify: Values; provider: string;
   protected: Record<string, { by?: string; date?: string; reason?: string }>; differences: string[];
   decisions: Record<string, string>; status: string; observation_version: number; review_version: number;
   fetched_at: string; origin: string; reviewed_by: string | null; reviewed_at: string; sources: string };
@@ -69,14 +69,14 @@ export function SpotifyReview({ canEdit, onBack }: { canEdit: boolean; onBack: (
       <div><div className={styles.tableWrap}><table><thead><tr><th aria-label="Seleccionar"/><th>Tema</th><th>Estado</th><th>Última consulta</th></tr></thead><tbody>
         {data?.items.map((item) => <tr key={item.catalog_key} className={selected === item.catalog_key ? styles.selected : ""}>
           <td><input type="checkbox" aria-label={`Seleccionar ${item.title}`} checked={checked.includes(item.catalog_key)} disabled={busy || !canEdit} onChange={(e) => setChecked((old) => e.target.checked ? [...old, item.catalog_key] : old.filter((key) => key !== item.catalog_key))}/></td>
-          <td><button className={styles.title} onClick={() => setSelected(item.catalog_key)}>{item.title}</button><small>{item.isrc}</small><small>{value(item.ours.artists)}</small></td>
+          <td><button className={styles.title} onClick={() => setSelected(item.catalog_key)}>{item.title}</button><small>{item.isrc || item.catalog_key}</small><small>{value(item.ours.artists)}</small></td>
           <td><span className={styles.badge}>{labels[item.status] || item.status}</span>{item.differences.length > 0 && <small>{item.differences.length} diferencias</small>}</td>
           <td>{date(item.fetched_at)}</td>
         </tr>)}{!loading && data?.items.length === 0 && <tr><td colSpan={4}>No hay temas para este filtro.</td></tr>}
       </tbody></table></div>
       <div className={styles.pagination}><span>{data?.total || 0} temas</span><button className={styles.icon} aria-label="Anterior" disabled={offset === 0 || loading} onClick={() => setOffset(offset - 20)}><ChevronLeft size={18}/></button><button className={styles.icon} aria-label="Siguiente" disabled={!data || offset + 20 >= data.total || loading} onClick={() => setOffset(offset + 20)}><ChevronRight size={18}/></button></div></div>
       <aside className={styles.detail}>{current ? <>
-        <h2>{current.title}</h2><p>{current.isrc} · {current.sources}</p>
+        <h2>{current.title}</h2><p>{current.isrc || current.catalog_key} · {current.sources}</p>
         <div className={styles.detailActions}>{canEdit && <button className={styles.button} disabled={busy} onClick={() => void refresh([current.catalog_key])}><RefreshCw size={15}/>Consultar fuentes</button>}
           {current.spotify.url && <a className={styles.button} href={String(current.spotify.url)} target="_blank" rel="noreferrer"><ExternalLink size={15}/>Abrir {provider}</a>}</div>
         <p className={styles.muted}>{current.origin === "legacy_cache" ? "Consulta anterior recuperada" : current.origin === "youtube_live" ? "YouTube: alternativa a Spotify" : current.origin === "spotify_live" ? "Consulta directa a Spotify" : "Sin consulta"} · {date(current.fetched_at)}</p>
