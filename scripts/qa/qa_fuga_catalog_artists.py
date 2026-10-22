@@ -48,6 +48,12 @@ class FugaCatalogArtistTests(unittest.TestCase):
         return enrich_fuga_catalog(self.catalog() if catalog is None else catalog,
                                    pl.DataFrame(rows or [self.raw()]).lazy())
 
+    def test_existing_track_metadata_from_other_sources_is_preserved(self):
+        before = self.catalog().with_columns(pl.Series("catalog_artists", [["La Juntada De Los Artistas", "Candu Dominguez", "Other Track Guest"], None, None], dtype=pl.List(pl.String)))
+        result = self.enrich(catalog=before)
+        self.assertIn("Other Track Guest", result["catalog_artists"][0].to_list())
+        self.assertNotIn("G Sony", result["catalog_artists"][0].to_list())
+
     def test_album_names_do_not_return_through_contaminated_display(self):
         catalog = self.catalog().with_columns(pl.lit("La Juntada De Los Artistas, Candu Dominguez and G Sony").alias("artist_statement"))
         result = self.enrich(catalog=catalog)

@@ -165,7 +165,7 @@ def enrich_fuga_catalog(
         # A source-specific list must not erase names already shared by another distributor.
         original = str(row.get("artist_statement") or "")
         album_only = {name_key(name) for entry in entity["evidence"] if entry["field"] == "Product Artist" for name in entry["artists"]} - set(entity["artists"])
-        previous = [aliases.get((row["asset_isrc"], name_key(name)), name) for name in parse_catalog_credit(original)
+        previous = [aliases.get((row["asset_isrc"], name_key(name)), name) for name in [*parse_catalog_credit(original), *(row.get("catalog_artists") or [])]
                     if name_key(name) not in album_only]
         correction = artist_corrections.get(row.get("catalog_key"))
         if correction and row.get("catalog_manual_correction_id") == correction["id"]:
