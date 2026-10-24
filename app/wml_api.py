@@ -18,10 +18,17 @@ class WorkspaceUpdate(BaseModel):
     delivery_lag_months: int | None = Field(default=None,ge=0,le=6)
 
 def install(api: Any) -> None:
+    def allowed_artist(permission):
+        artists=permission.get('scope')
+        return artists is None or any(re.sub(r'[^a-z]','',str(s).lower())=='litkillah' for s in artists)
+
     def authorize(username,module,action='access'):
         if not username:raise HTTPException(401,'Se requiere una sesión de usuario.')
         with api.operational_connect() as conn:
-            return api.require_module_permission(conn,username,module,action)
+            permission=api.require_module_permission(conn,username,module,action)
+        if module=='source_monitor' and action=='edit' and not allowed_artist(permission):
+            raise HTTPException(403,'No tenés permiso para operar WML.')
+        return permission
 
     def request_context(path,key,username):
         api.require_api_key(key)
@@ -29,13 +36,14 @@ def install(api: Any) -> None:
                 'master_contracts' if path.startswith('/master-contracts') else
                 'royalties_dashboard' if path.startswith('/royalties-dashboard') else 'royalty_reports')
         if path.startswith('/wml/references'):
-            try:permission=authorize(username,'catalog')
+            try:
+                permission=authorize(username,'catalog')
+                if not allowed_artist(permission):raise HTTPException(403,'Sin acceso al catálogo WML.')
             except HTTPException as exc:
                 if exc.status_code != 403:raise
                 permission=authorize(username,'master_contracts')
         else:permission=authorize(username,module)
-        scope=permission.get('scope')
-        if scope is not None and not any(re.sub(r'[^a-z]','',str(s).lower())=='litkillah' for s in scope):
+        if not allowed_artist(permission):
             raise HTTPException(403,'No tenés permiso para el catálogo de Lit Killah.')
         state=settings()
         historical=bool(re.fullmatch(r'/reports/jobs/\d+(?:/download)?',path))
@@ -78,11 +86,13 @@ def install(api: Any) -> None:
         allowed=False
         with api.operational_connect() as conn:
             for module in ('source_monitor','catalog','master_contracts','royalties_dashboard','royalty_reports'):
-                if api.user_module_permission(conn,x_vpo_username,module).get('allowed'):allowed=True;break
+                permission=api.user_module_permission(conn,x_vpo_username,module)
+                if permission.get('allowed') and allowed_artist(permission):allowed=True;break
         if not allowed:raise HTTPException(403,'Sin acceso a los módulos de regalías.')
         state=settings()
         local=local_release() if (api.BASE/'input_raw/wml').exists() else None
-        return {**state,'label':WML_LABEL,'amount_basis':'wml_contractual_base_100','applies_references_automatically':False,
+        visible_config={key:state['config'][key] for key in ('frequency','delivery_lag_months','processing_status','processing_error','published_at') if key in state['config']}
+        return {**state,'config':visible_config,'label':WML_LABEL,'amount_basis':'wml_contractual_base_100','applies_references_automatically':False,
             'ready':bool(state['config'].get('published_release_id')),
             'prepared_local_release':local[0]['release_id'] if local else None}
 

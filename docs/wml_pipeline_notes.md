@@ -70,6 +70,8 @@ se procesa en bloques de 50.000 líneas para acotar la memoria. Usa el pool oper
 y el secreto PostgreSQL existente, permiso de escritura limitado al dataset
 WML, lectura/escritura GCS e invocación limitada al Job correspondiente.
 La imagen debe incluir `sql/`, además de `app/` y `scripts/`.
+El despliegue habitual desde `main` actualiza API, reportes y el Job WML a la
+misma imagen y verifica esa coincidencia. No vuelve a cargar statements.
 
 Los archivos se identifican por contenido. Copias idénticas del mismo semestre
 se omiten; dos versiones distintas del mismo semestre bloquean la carga hasta

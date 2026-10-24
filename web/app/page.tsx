@@ -6402,7 +6402,7 @@ export default function Home() {
   }
 
   function resetRoyaltiesDashboardFilters() {
-    const period: PeriodSelection = { mode: "last_6_months" };
+    const period: PeriodSelection = { mode: wmlScope ? "all" : "last_6_months" };
     setRoyaltiesDashboardKeyword("");
     setRoyaltiesDashboardSource("");
     setRoyaltiesDashboardAccount("");

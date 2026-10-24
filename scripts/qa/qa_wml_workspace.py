@@ -206,6 +206,16 @@ class WmlIsolationTests(unittest.TestCase):
             self.assertEqual(client.get('/catalog').json()['scope'],'regular')
             self.assertEqual(client.get('/health',headers=headers).status_code,400)
             self.assertEqual(client.get('/catalog',headers={'X-VPO-Royalty-Scope':'other'}).status_code,400)
+            state['config'].update(amount_usd=999,semesters=[{'amount_usd':999}],run_token='private')
+            workspace=client.get('/wml/workspace',headers={'X-VPO-Username':'tester'})
+            self.assertEqual(workspace.status_code,200)
+            self.assertNotIn('amount_usd',workspace.json()['config']);self.assertNotIn('run_token',workspace.json()['config'])
+            fake.user_module_permission=lambda *a:{'allowed':True,'scope':{'Aneley'}}
+            self.assertEqual(client.get('/wml/workspace',headers={'X-VPO-Username':'tester'}).status_code,403)
+            fake.require_module_permission=lambda conn,user,module,*a:{'allowed':True,'scope':{'Lit Killah'} if module=='master_contracts' else {'Aneley'}}
+            fake.ensure_marts=marts
+            with patch('app.wml_api.references_for_isrc',return_value=[]):
+                self.assertEqual(client.get('/wml/references/USWL12300725',headers=headers).status_code,200)
 
     def test_processing_same_release_does_not_launch_or_write(self):
         from app.wml_cloud import launch_processing

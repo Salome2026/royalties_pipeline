@@ -28,6 +28,18 @@ steps:
       - --region=${_REGION}
       - --quiet
 
+  - id: Deploy WML ingest Job
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - jobs
+      - update
+      - ${_WML_INGEST_JOB}
+      - --image=${_IMAGE_REPOSITORY}/vpo-corp-platform:${COMMIT_SHA}
+      - --region=${_REGION}
+      - --quiet
+
   - id: Deploy API
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     entrypoint: gcloud
@@ -81,6 +93,7 @@ steps:
         EXPECTED_IMAGE="${_IMAGE_REPOSITORY}/vpo-corp-platform:${COMMIT_SHA}"
         API_IMAGE="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --format='value(spec.template.spec.containers[0].image)')"
         JOB_IMAGE="$(gcloud run jobs describe "${_REPORT_JOB}" --region="${_REGION}" --format='value(spec.template.spec.template.spec.containers[0].image)')"
+        WML_IMAGE="$(gcloud run jobs describe "${_WML_INGEST_JOB}" --region="${_REGION}" --format='value(spec.template.spec.template.spec.containers[0].image)')"
         TRAFFIC="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --format='value(status.traffic[0].percent)')"
         LATEST_REVISION="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --format='value(status.latestReadyRevisionName)')"
         SERVING_REVISION="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --format='value(status.traffic[0].revisionName)')"
@@ -91,6 +104,7 @@ steps:
         test "$${CATALOG_IMAGE}" = "$${EXPECTED_IMAGE}"
         test "$${API_IMAGE}" = "$${EXPECTED_IMAGE}"
         test "$${JOB_IMAGE}" = "$${EXPECTED_IMAGE}"
+        test "$${WML_IMAGE}" = "$${EXPECTED_IMAGE}"
         test "$${TRAFFIC}" = "100"
         test "$${SERVING_REVISION}" = "$${LATEST_REVISION}"
         test "$${SERVING_COMMIT}" = "${COMMIT_SHA}"
@@ -115,6 +129,7 @@ substitutions:
   _IMAGE_REPOSITORY: us-central1-docker.pkg.dev/vpo-corp-royalties/cloud-run-source-deploy/royalties_pipeline
   _REGION: us-central1
   _REPORT_JOB: vpo-royalty-report-job
+  _WML_INGEST_JOB: vpo-wml-91230-ingest
 
 tags:
   - vpo-corp-platform
