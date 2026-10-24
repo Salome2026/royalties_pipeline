@@ -30,6 +30,7 @@ class ReportRequest:
     source: str | None
     account: str | None
     executive_mode: str = "income"
+    royalty_scope: str = 'regular'
 
     @classmethod
     def from_job(cls, job: dict[str, Any], *, keywords: list[str]) -> "ReportRequest":
@@ -76,6 +77,7 @@ class ReportRequest:
             source=(str(params.get("source") or "").strip().lower() or None),
             account=(str(params.get("account") or "").strip().lower() or None),
             executive_mode=executive_mode,
+            royalty_scope=str(params.get('royalty_scope') or 'regular'),
         )
 
 

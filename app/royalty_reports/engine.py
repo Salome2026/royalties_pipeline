@@ -43,6 +43,10 @@ class ReportEngine:
         params = dict(job.get("params") or {})
         normalized_keywords = self.runtime.normalize_keywords(params.get("keywords") or [])
         request = ReportRequest.from_job(job, keywords=normalized_keywords)
+        if ((job.get('input_manifest') or {}).get('royalty_scope') or 'regular') != request.royalty_scope:
+            raise RuntimeError('El ámbito del manifiesto no coincide con el pedido del reporte.')
+        if request.royalty_scope == 'wml' and request.executive_mode == 'contractual':
+            raise ValueError('WML utiliza informes de ingresos al 100%; las referencias no generan un reparto automático.')
 
         self.runtime.report_stage(request.job_id, "reading_data")
         if request.executive_mode == "contractual":
@@ -50,15 +54,18 @@ class ReportEngine:
             self.runtime.report_stage(request.job_id, "building")
             built = build_contractual_pdf(request, job, self.runtime.output_dir)
             return self.store(request, built)
+        extra_files = ['wml_isrc_references.parquet'] if request.royalty_scope == 'wml' else []
         marts = self.runtime.resolve_marts(
             dict(job.get("input_manifest") or {}),
             [
                 self.runtime.song_filename,
                 self.runtime.standardized_filename,
                 self.runtime.catalog_master_filename,
+                *extra_files,
             ],
         )
-        self.runtime.configure_catalog_environment(marts)
+        if request.royalty_scope == 'regular':
+            self.runtime.configure_catalog_environment(marts)
         inputs = ReportInputs(
             song_path=marts[self.runtime.song_filename],
             standardized_path=marts[self.runtime.standardized_filename],
@@ -72,7 +79,9 @@ class ReportEngine:
         from lib.distributor_policy_store import use_distributor_policy_snapshot
 
         self.runtime.report_stage(request.job_id, "building")
-        with use_distributor_policy_snapshot(policy_snapshot):
+        from app.royalty_scope import use_scope
+        with use_scope(request.royalty_scope,marts=marts,
+                       catalog_status=job.get('input_manifest',{}).get('catalog_status_snapshot')), use_distributor_policy_snapshot(policy_snapshot):
             built = build_registered_report(
                 request,
                 inputs,

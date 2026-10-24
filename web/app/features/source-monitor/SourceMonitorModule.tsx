@@ -113,6 +113,14 @@ export function SourceMonitorModule({
     setProcessingId(id);
     onMessage(null);
     try {
+      if (id === 'wml_91230') {
+        const response = await fetch('/api/wml',{method:'POST'});
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || 'No se pudo iniciar WML.');
+        onMessage({type:'ok',text:body.reused ? 'WML ya está actualizada; se reutiliza la carga validada.' : 'Actualización WML iniciada en cloud. El ámbito habitual conserva sus datos.'});
+        await loadMonitor();
+        return;
+      }
       const result = await requestSourceMonitorProcess(id);
       setLastProcess(result);
       await loadMonitor();
@@ -124,6 +132,26 @@ export function SourceMonitorModule({
       setProcessingId("");
     }
   }
+
+  async function updateWml(item: SourceMonitorItem, enabled: boolean, lag?: number) {
+    setLoading(true);
+    try {
+      const response = await fetch('/api/wml',{method:'PATCH',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({enabled,expected_version:item.workspace_version,...(lag === undefined ? {} : {delivery_lag_months:lag})})});
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || 'No se pudo actualizar WML.');
+      await loadMonitor();
+      onMessage({type:'ok',text:enabled ? 'WML habilitada como ámbito separado. Los royalties habituales conservan sus importes.' : 'WML desactivada. Se conservaron datos, contratos e historial.'});
+    } catch(error) {onMessage({type:'error',text:error instanceof Error ? error.message : 'Error al actualizar WML.'});}
+    finally {setLoading(false);}
+  }
+
+  useEffect(() => {
+    const item=data?.items.find((r) => r.id === 'wml_91230');
+    if (!item || !['queued','running'].includes(item.processing_status || '')) return;
+    const timer=window.setTimeout(() => void loadMonitor(),10000);
+    return () => window.clearTimeout(timer);
+  },[data]);
 
   async function pollPublishJob(jobId: string) {
     try {
@@ -279,7 +307,7 @@ export function SourceMonitorModule({
                 <div className={styles.statement}>
                   <span>Último statement</span>
                   <strong>{item.last_statement_period || "Sin datos"}</strong>
-                  <small>{item.statement_age_months === null ? "Antigüedad no disponible" : `${item.statement_age_months} mes(es) · tolerancia ${item.max_age_months}`}</small>
+                  <small>{item.expected_frequency === 'semiannual' ? `Semestral · esperado ${item.expected_statement_period || 'por confirmar'}` : item.statement_age_months === null ? "Antigüedad no disponible" : `${item.statement_age_months} mes(es) · tolerancia ${item.max_age_months}`}</small>
                 </div>
 
                 <div className={styles.fileStats}>
@@ -295,6 +323,19 @@ export function SourceMonitorModule({
                 </div>
 
                 <div className={styles.primaryAction}>
+                  {item.id === 'wml_91230' ? <>
+                    <button type="button" disabled={loading || !canEdit || !item.workspace_installed || (!item.workspace_enabled && !item.workspace_ready)} onClick={() => void updateWml(item,!item.workspace_enabled)}>
+                      {item.workspace_enabled ? 'Desactivar WML' : 'Habilitar WML'}
+                    </button>
+                    <button type="button" disabled={Boolean(processingId) || !canEdit || ['queued','running'].includes(item.processing_status || '')} onClick={() => void processItem(item.id)}>
+                      {['queued','running'].includes(item.processing_status || '') ? 'Actualizando WML' : 'Actualizar WML'}
+                    </button>
+                    <label>Entrega después del cierre
+                      <select aria-label="Plazo de entrega semestral WML" disabled={loading || !canEdit} value={item.delivery_lag_months ?? 3} onChange={(event) => void updateWml(item,Boolean(item.workspace_enabled),Number(event.target.value))}>
+                        {[0,1,2,3,4,5,6].map((lag) => <option key={lag} value={lag}>{lag} mes(es)</option>)}
+                      </select>
+                    </label>
+                  </> : <>
                   <button
                     type="button"
                     disabled={Boolean(processingId) || !canEdit || item.unprocessed_raw_count === 0}
@@ -304,11 +345,12 @@ export function SourceMonitorModule({
                     <Play size={15} />
                     {processing ? "Procesando" : item.unprocessed_raw_count === 0 ? "Al día" : `Procesar ${item.unprocessed_raw_count}`}
                   </button>
+                  </>}
                 </div>
 
                 <div className={styles.details}>
                   <span title={item.input_path || ""}>{item.input_path || "Sin carpeta configurada"}</span>
-                  <span title={item.latest_raw_file || ""}>Último raw: {item.latest_raw_file || "sin archivos"}</span>
+                  {item.id !== 'wml_91230' && <span title={item.latest_raw_file || ""}>Último raw: {item.latest_raw_file || "sin archivos"}</span>}
                   {inventory && <span title={inventory}>{inventory}</span>}
                   {item.notes && <span title={item.notes}>{item.notes}</span>}
                   {item.supplementary_audit_error && <span>{item.supplementary_audit_error}</span>}
@@ -332,9 +374,10 @@ export function SourceMonitorModule({
                     <a href={item.portal_url} target="_blank" rel="noreferrer" title="Abrir portal de la distribuidora" aria-label={`Abrir portal de ${item.display_name}`}><ExternalLink size={16} /></a>
                   )}
                   <button type="button" disabled={loading} title="Revisar directorios" aria-label="Revisar directorios" onClick={() => void loadMonitor()}><RotateCw size={16} /></button>
-                  <button type="button" disabled={loading || !canEdit} title="Marcar como revisada" aria-label="Marcar como revisada" onClick={() => void updateItem(item.id, { last_manual_review_at: new Date().toISOString(), alert_silenced: false })}><Check size={16} /></button>
+                  {item.id !== 'wml_91230' && <><button type="button" disabled={loading || !canEdit} title="Marcar como revisada" aria-label="Marcar como revisada" onClick={() => void updateItem(item.id, { last_manual_review_at: new Date().toISOString(), alert_silenced: false })}><Check size={16} /></button>
                   <button type="button" disabled={loading || !canEdit} title={item.alert_silenced ? "Reactivar alerta" : "Silenciar alerta"} aria-label={item.alert_silenced ? "Reactivar alerta" : "Silenciar alerta"} onClick={() => void updateItem(item.id, { alert_silenced: !item.alert_silenced })}>{item.alert_silenced ? <BellRing size={16} /> : <BellOff size={16} />}</button>
                   <button type="button" disabled={loading || !canEdit} title={item.monitoring_active ? "Dejar de monitorear" : "Activar monitoreo"} aria-label={item.monitoring_active ? "Dejar de monitorear" : "Activar monitoreo"} onClick={() => void updateItem(item.id, { monitoring_active: !item.monitoring_active, alert_silenced: item.monitoring_active ? true : false })}>{item.monitoring_active ? <MonitorOff size={16} /> : <MonitorCheck size={16} />}</button>
+                  </>}
                 </div>
               </article>
             );

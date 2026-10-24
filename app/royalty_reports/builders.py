@@ -25,6 +25,9 @@ GoogleSheetBuilder = Callable[[object, list[str], str | None, str | None], str]
 
 
 def royalty_report_scope_label(source: str | None, account: str | None) -> str:
+    from app.royalty_scope import is_wml, WML_LABEL
+    if is_wml():
+        return WML_LABEL + ' · Referencias informativas sin aplicación automática'
     source = (source or "").strip().lower() or None
     account = (account or "").strip().lower() or None
     policy = load_distributor_policy_document()

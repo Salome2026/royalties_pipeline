@@ -447,6 +447,8 @@ def list_artist_contracts(conn: Any) -> list[dict[str, Any]]:
 
 
 def active_artist_contracts(conn: Any) -> dict[str, dict[str, Any]]:
+    from app.royalty_scope import is_wml
+    if is_wml():return {}
     return {row["artist_key"]: row for row in list_artist_contracts(conn) if row["is_active"]}
 
 
@@ -530,6 +532,12 @@ def save_artist_contract(
 
 
 def read_split(conn: Any, isrc: str) -> dict[str, Any] | None:
+    from app.royalty_scope import is_wml
+    if is_wml():
+        from app.royalty_workspace_store import records
+        row=records('master_split',conn=conn).get(isrc)
+        if not row:return None
+        return {'isrc':isrc,**row['payload'],'version':row['version'],'updated_by':row['updated_by'],'updated_at':row['updated_at']}
     ensure_sqlite_tables(conn)
     row = conn.execute(
         db_sql(conn, "SELECT * FROM master_contract_splits WHERE isrc = ?"), (isrc,)
@@ -548,6 +556,11 @@ def read_split(conn: Any, isrc: str) -> dict[str, Any] | None:
 
 
 def read_split_statuses(conn: Any) -> dict[str, dict[str, Any]]:
+    from app.royalty_scope import is_wml
+    if is_wml():
+        from app.royalty_workspace_store import records
+        return {key:{'closed':r['payload'].get('closed',False),'future_reports_selected':r['payload'].get('future_reports_selected',False),
+            'version':r['version'],'updated_at':r['updated_at']} for key,r in records('master_split',conn=conn).items()}
     ensure_sqlite_tables(conn)
     rows = conn.execute(
         "SELECT isrc, is_closed, future_reports_selected, version, updated_at FROM master_contract_splits"
@@ -754,6 +767,14 @@ def save_split(
         raise ValueError("Los códigos asociados usan exclusivamente Cloud SQL Postgres.")
     if any(agreement.get("allocation_model") == "pools" for agreement in split.get("agreements") or []) and not is_postgres_connection(conn):
         raise ValueError("Los contratos con bolsas usan exclusivamente Cloud SQL Postgres.")
+    from app.royalty_scope import is_wml
+    if is_wml():
+        from app.royalty_workspace_store import save_record
+        validate_split(split,closed,future_reports_selected)
+        if split.get('code_association_overrides'):raise ValueError('WML conserva cada ISRC; sus referencias no crean asociaciones automáticas.')
+        payload={'split':split,'closed':closed,'future_reports_selected':future_reports_selected}
+        row=save_record('master_split',isrc,payload,expected_version=expected_version,actor=actor,conn=conn)
+        return {'isrc':isrc,**payload,'version':row['version'],'updated_by':row['updated_by'],'updated_at':row['updated_at']}
     ensure_sqlite_tables(conn)
     validate_split(split, closed, future_reports_selected)
     payload = json.dumps(split, ensure_ascii=False, sort_keys=True)

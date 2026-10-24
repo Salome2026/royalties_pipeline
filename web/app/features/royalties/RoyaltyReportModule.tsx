@@ -22,6 +22,7 @@ import {
   type RoyaltyReportPayload,
 } from "./api";
 import styles from "./RoyaltyReportModule.module.css";
+import { selectedRoyaltyScope } from '../wml/WmlScopeControl';
 
 type Message = { type: "ok" | "error"; text: string };
 
@@ -40,6 +41,8 @@ export function RoyaltyReportModule({ onMessage }: Props) {
   const [keywords, setKeywords] = useState("");
   const [period, setPeriod] = useState<PeriodSelection>({ mode: "all" });
   const [periodBasis, setPeriodBasis] = useState<RoyaltyPeriodBasis>("transaction_month");
+  const [wml,setWml] = useState(false);
+  useEffect(() => { if (selectedRoyaltyScope() === 'wml') { setWml(true); setPeriodBasis('statement_period'); } },[]);
   const [matchMode, setMatchMode] = useState<RoyaltyMatchMode>("any");
   const [rawLimit, setRawLimit] = useState("5000");
   const [detailMode, setDetailMode] = useState<RoyaltyDetailMode>("limited");
@@ -346,7 +349,7 @@ export function RoyaltyReportModule({ onMessage }: Props) {
                 <label htmlFor="royalty_pdf_type">Tipo de PDF</label>
                 <select id="royalty_pdf_type" value={executiveMode} onChange={(event) => setExecutiveMode(event.target.value as "income" | "contractual")}>
                   <option value="income">Resumen de ingresos</option>
-                  <option value="contractual">Ingresos y reparto contractual</option>
+                  <option value="contractual" disabled={wml}>Ingresos y reparto contractual</option>
                 </select>
               </div>
             )}
@@ -384,14 +387,15 @@ export function RoyaltyReportModule({ onMessage }: Props) {
                 label="Período"
                 profile="monthly_report"
                 selection={period}
+                frequency={wml && periodBasis === "statement_period" ? "semiannual" : "monthly"}
                 onChange={setPeriod}
-                helperText="Un mes incluye ese mes completo. Un rango incluye ambos meses completos."
+                helperText={wml && periodBasis === 'statement_period' ? 'Cada cierre incluye el semestre completo. Las referencias no se descuentan del importe.' : 'Un mes incluye ese mes completo. Un rango incluye ambos meses completos.'}
               />
             </div>
 
             <div className={styles.field}>
               <label htmlFor="royalty_period_basis">Leer el período por</label>
-              <select id="royalty_period_basis" value={contractual ? "statement_period" : periodBasis} disabled={contractual} onChange={(event) => setPeriodBasis(event.target.value as RoyaltyPeriodBasis)}>
+              <select id="royalty_period_basis" value={contractual ? "statement_period" : periodBasis} disabled={contractual} onChange={(event) => {setPeriodBasis(event.target.value as RoyaltyPeriodBasis); if (wml) setPeriod({mode:"all"});}}>
                 {!contractual && <option value="transaction_month">Mes de consumo / performance</option>}
                 <option value="statement_period">Mes de statement / liquidación</option>
               </select>

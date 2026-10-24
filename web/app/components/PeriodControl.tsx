@@ -21,6 +21,7 @@ type PeriodControlProps = {
   variant?: "range" | "until";
   presets?: PeriodMode[];
   helperText?: string;
+  frequency?: 'monthly' | 'semiannual';
 };
 
 function yearsFor(minMonth?: string | null, maxMonth?: string | null) {
@@ -62,6 +63,7 @@ export function PeriodControl({
   variant = "range",
   presets = ["all"],
   helperText,
+  frequency = 'monthly',
 }: PeriodControlProps) {
   const [open, setOpen] = useState(false);
   const [draftMode, setDraftMode] = useState<PeriodMode>(editableMode(selection.mode, variant));
@@ -125,8 +127,13 @@ export function PeriodControl({
     setActiveBound(mode === "until_month" ? "end" : "start");
   }
 
-  const selectedStart = selection.startMonth ? formatMonth(selection.startMonth) : "Elegir";
-  const selectedEnd = selection.endMonth ? formatMonth(selection.endMonth) : "Elegir";
+  const periodText = (value?: string) => value && frequency === 'semiannual'
+    ? `${value.endsWith('06') ? '1.er' : '2.º'} semestre ${value.slice(0,4)}` : formatMonth(value);
+  const selectedStart = selection.startMonth ? periodText(selection.startMonth) : "Elegir";
+  const selectedEnd = selection.endMonth ? periodText(selection.endMonth) : "Elegir";
+  const displayLabel = frequency !== 'semiannual' || selection.mode === 'all' ? resolved.label
+    : selection.mode === 'single_month' ? periodText(selection.startMonth || selection.endMonth)
+    : selection.mode === 'closed_range' ? `${selectedStart} — ${selectedEnd}` : resolved.label;
 
   return (
     <div className="period-control" ref={rootRef}>
@@ -138,7 +145,7 @@ export function PeriodControl({
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
       >
-        <strong>{resolved.label}</strong>
+        <strong>{displayLabel}</strong>
       </button>
       {helperText && <p className="field-help">{helperText}</p>}
 
@@ -165,7 +172,7 @@ export function PeriodControl({
           {variant === "range" ? (
             <div className="period-mode-row">
               <button type="button" className={draftMode === "single_month" ? "active" : ""} onClick={() => chooseMode("single_month")}>
-                Mes
+                {frequency === 'semiannual' ? 'Semestre' : 'Mes'}
               </button>
               <button type="button" className={draftMode === "closed_range" ? "active" : ""} onClick={() => chooseMode("closed_range")}>
                 Rango
@@ -212,6 +219,7 @@ export function PeriodControl({
 
           <div className="period-month-grid">
             {MONTH_NAMES_SHORT.map((month, index) => {
+              if (frequency === 'semiannual' && index !== 5 && index !== 11) return null;
               const value = `${year}-${String(index + 1).padStart(2, "0")}`;
               const selected = value === selection.startMonth || value === selection.endMonth;
               return (
@@ -222,7 +230,7 @@ export function PeriodControl({
                   className={selected ? "active" : ""}
                   onClick={() => pickMonth(value)}
                 >
-                  {month}
+                  {frequency === 'semiannual' ? (index === 5 ? 'Enero–junio' : 'Julio–diciembre') : month}
                 </button>
               );
             })}

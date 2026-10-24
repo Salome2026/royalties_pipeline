@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { apiConfig } from "../_auth";
+import { apiConfig, royaltyHeaders } from "../_auth";
 
 function stringifyApiError(value: unknown): string {
   if (!value) return "Error desconocido.";
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams.toString();
   const response = await fetch(`${config.apiUrl}/royalties-dashboard${params ? `?${params}` : ""}`, {
     headers: {
-      "X-VPO-API-Key": config.apiKey,
+      ...royaltyHeaders(config),
       "X-VPO-Username": config.user.username,
     },
     cache: "no-store",

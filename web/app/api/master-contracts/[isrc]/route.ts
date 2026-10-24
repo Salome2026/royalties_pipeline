@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { apiConfig } from "../../_auth";
+import { apiConfig, royaltyHeaders } from "../../_auth";
 
 type Context = { params: Promise<{ isrc: string }> };
 
@@ -10,8 +10,7 @@ async function forward(request: NextRequest, context: Context, method: "GET" | "
   const response = await fetch(`${config.apiUrl}/master-contracts/${encodeURIComponent(isrc)}`, {
     method,
     headers: {
-      "X-VPO-API-Key": config.apiKey,
-      "X-VPO-Username": config.user.username,
+      ...royaltyHeaders(config),
       ...(method === "PUT" ? { "Content-Type": "application/json" } : {}),
     },
     body: method === "PUT" ? JSON.stringify(await request.json()) : undefined,

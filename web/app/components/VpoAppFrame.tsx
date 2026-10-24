@@ -27,6 +27,7 @@ import {
   X,
 } from "lucide-react";
 import { APP_NAVIGATION_GROUPS, navigationPresentationForView, type NavigationIcon, type View } from "../shared/navigation/views";
+import { WmlScopeControl } from '../features/wml/WmlScopeControl';
 
 type Icon = ComponentType<{ size?: number; strokeWidth?: number; "aria-hidden"?: boolean }>;
 
@@ -110,6 +111,7 @@ export function VpoAppFrame({ currentView, username, role, eyebrow, title, canSh
         <header className="vpo-app-header">
           <button type="button" className="vpo-app-menu-button" aria-label="Abrir menú" onClick={() => setNavigationOpen(true)}><Menu size={21} /></button>
           <div><span>{eyebrow}</span><h1>{title}</h1></div>
+          <WmlScopeControl view={currentView} />
           <div className="vpo-app-live"><i />Operación viva</div>
         </header>
         {children}

@@ -68,6 +68,8 @@ def published_unassigned_income(release_id: str) -> tuple[list[dict], list[dict]
 
 
 def read_choices(conn: Any) -> dict[str, list[dict]]:
+    from app.royalty_scope import is_wml
+    if is_wml():return {}
     if not is_postgres_connection(conn):
         raise ValueError("Los ingresos asociados usan exclusivamente Cloud SQL Postgres.")
     rows = conn.execute("SELECT isrc, payload_json FROM master_contract_splits").fetchall()

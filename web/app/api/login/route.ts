@@ -43,6 +43,7 @@ export async function POST(request: NextRequest) {
   }
 
   const cookieStore = await cookies();
+  cookieStore.set('vpo_royalty_scope', '', { path: '/', maxAge: 0, sameSite: 'lax' });
   cookieStore.set(SESSION_COOKIE, createSessionToken(user), {
     httpOnly: true,
     sameSite: "lax",

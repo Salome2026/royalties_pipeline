@@ -241,6 +241,8 @@ def validate_choices(choices: list[dict[str, Any]], previous: list[dict[str, Any
 
 
 def read_claims(conn: Any) -> dict[str, str]:
+    from app.royalty_scope import is_wml
+    if is_wml():return {}
     rows = conn.execute("SELECT isrc, payload_json FROM master_contract_splits").fetchall()
     claims: dict[str, str] = {}
     for row in rows:

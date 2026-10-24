@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { apiConfig } from "../_auth";
+import { apiConfig, royaltyHeaders } from "../_auth";
 
 export async function GET() {
   const config = await apiConfig();
   if ("error" in config) return config.error;
   const response = await fetch(`${config.apiUrl}/master-contract-artists`, {
-    headers: { "X-VPO-API-Key": config.apiKey, "X-VPO-Username": config.user.username },
+    headers: { ...royaltyHeaders(config) },
     cache: "no-store",
   });
   const payload = await response.json().catch(() => ({}));
@@ -19,8 +19,7 @@ export async function PUT(request: NextRequest) {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
-      "X-VPO-API-Key": config.apiKey,
-      "X-VPO-Username": config.user.username,
+      ...royaltyHeaders(config),
     },
     body: await request.text(),
     cache: "no-store",

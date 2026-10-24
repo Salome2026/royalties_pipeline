@@ -151,6 +151,8 @@ def decide(row, body, actor):
 
 
 def apply_approved(frame):
+    from app.royalty_scope import is_wml
+    if is_wml():return frame
     """Display-only overlay. Raw identity and financial columns are never touched."""
     _, reviews = read_state()
     if not reviews:

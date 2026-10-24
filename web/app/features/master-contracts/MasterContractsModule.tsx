@@ -1,4 +1,6 @@
 "use client";
+import { selectedRoyaltyScope } from "../wml/WmlScopeControl";
+import { WmlReferences } from "../wml/WmlReferences";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { ArrowLeft, Check, ChevronDown, ChevronLeft, ChevronRight, FilePenLine, Link2, RefreshCw, Search } from "lucide-react";
@@ -93,6 +95,8 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   const [sourceAccount, setSourceAccount] = useState("");
   const [offset, setOffset] = useState(0);
   const [list, setList] = useState<ContractList | null>(null);
+  const [wml,setWml]=useState(false);
+  useEffect(() => setWml(selectedRoyaltyScope() === "wml"),[]);
   const [detail, setDetail] = useState<ContractDetail | null>(null);
   const [draft, setDraft] = useState<Split | null>(null);
   const [openAgreementId, setOpenAgreementId] = useState<string | null>(null);
@@ -329,6 +333,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
           {JSON.stringify(draft.code_association_overrides || []) !== JSON.stringify(detail.split.code_association_overrides || []) && <p className={styles.auditLine}>Asociaciones sin guardar</p>}
         </details>
 
+        {wml && <WmlReferences isrc={detail.isrc} />}
         <ContractAssociationsPanel key={detail.isrc} isrc={detail.isrc} version={detail.version} canEdit={canEditCurrent && !saving}
           choices={draft.code_association_overrides || []} onChange={(choices) => updateDraft({ code_association_overrides: choices })}
           onValidationChange={setAssociationValidation} />
@@ -419,7 +424,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
     <section className={styles.workspace}>
       <header className={styles.listHeader}>
         <div className={styles.heading}><span>Catálogo y distribución</span><h1>Contratos</h1><p>Repartos por ISRC ordenados por ingreso acumulado.</p></div>
-        <button type="button" className={styles.secondaryButton} onClick={() => setMode("artists")}>Contratos de artistas</button>
+        {!wml && <button type="button" className={styles.secondaryButton} onClick={() => setMode("artists")}>Contratos de artistas</button>}
         <button type="button" className={styles.iconButton} title="Actualizar catálogo" aria-label="Actualizar catálogo" disabled={loading} onClick={() => void loadList()}><RefreshCw size={18} /></button>
       </header>
       <form className={styles.toolbar} onSubmit={submitSearch}>

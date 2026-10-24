@@ -517,3 +517,10 @@ porcentaje a partir de un credito. Dashboard, otros reportes y el PDF contractua
 conservan sus motores, datos economicos, periodos y reglas actuales.
 BigQuery recibe las cuatro columnas en `royalty_catalog` sin sustituir hechos
 financieros ni los textos nativos usados para identidad.
+# WML 91230 aislada
+
+El ámbito WML usa catálogo, estados y contratos propios, aunque un ISRC exista
+en regalías habituales. Las referencias informado/deducido/hipótesis nunca
+completan el reparto editable ni alteran importes. Las aprobaciones de metadata
+y contratos generales de artistas del ámbito habitual no se trasladan a WML.
+Véase [WML 91230](wml_pipeline_notes.md).

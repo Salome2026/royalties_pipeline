@@ -122,5 +122,11 @@ export async function apiConfig(minRole: VpoRole = "viewer", allowArtistPortal =
     }
   }
 
-  return { apiUrl: normalizedApiUrl, apiKey, user: auth.user };
+  const royaltyScope=(await cookies()).get('vpo_royalty_scope')?.value || 'regular';
+  if (!['regular','wml'].includes(royaltyScope)) return {error:NextResponse.json({error:'Ámbito inválido.'},{status:400})};
+  return { apiUrl: normalizedApiUrl, apiKey, user: auth.user, royaltyScope };
+}
+
+export function royaltyHeaders(config: {apiKey:string;user:{username:string};royaltyScope:string}) {
+  return {'X-VPO-API-Key':config.apiKey,'X-VPO-Username':config.user.username,'X-VPO-Royalty-Scope':config.royaltyScope};
 }

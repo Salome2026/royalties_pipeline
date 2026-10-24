@@ -1,5 +1,11 @@
 # UI period control policy
 
+WML usa el mismo `PeriodControl` con `frequency="semiannual"` cuando se consulta
+por statement: ofrece H1/H2 y conserva junio/diciembre como límites del cierre.
+Por consumo mantiene el control mensual. Cambiar de base limpia el período
+para evitar arrastrar un mes de consumo como si fuera un cierre semestral.
+Los demás ámbitos conservan su comportamiento. Ver [WML](wml_pipeline_notes.md).
+
 ## Objetivo
 
 Todo selector mensual de reportes o vistas operativas debe usar una unica entidad

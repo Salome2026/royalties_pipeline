@@ -9,6 +9,14 @@ export type SupplementaryAudit = {
 };
 
 export type SourceMonitorItem = {
+  workspace_enabled?: boolean;
+  workspace_version?: number;
+  workspace_installed?: boolean;
+  workspace_ready?: boolean;
+  delivery_lag_months?: number;
+  expected_statement_period?: string;
+  processing_status?: string;
+  processing_error?: string | null;
   supplementary_audits?: SupplementaryAudit[];
   supplementary_audit_error?: string | null;
   id: string;

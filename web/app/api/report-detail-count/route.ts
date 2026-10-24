@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { apiConfig } from "../_auth";
+import { apiConfig, royaltyHeaders } from "../_auth";
 
 export const maxDuration = 120;
 
@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-VPO-API-Key": config.apiKey,
+      ...royaltyHeaders(config),
       "X-VPO-Username": config.user.username,
     },
     body: JSON.stringify(body),

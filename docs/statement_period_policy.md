@@ -70,3 +70,11 @@ Antes de usar liquidaciones definitivas, validar que no existan `statement_perio
 Importante: `statement_period` gobierna liquidaciones, pero el Catalogo General
 usa actividad por `transaction_month`. Por eso el catalogo debe reconstruirse
 despues de cada reingesta aunque el cambio parezca solamente de statements.
+# Excepción WML 91230
+
+WML conserva el cierre semestral en `statement_period` (junio/diciembre),
+`statement_start_period` y `statement_semester` (H1/H2). No se reparte el ingreso
+en seis statements mensuales. `transaction_month` y `receipt_month` conservan
+las fechas originales. El selector común de períodos muestra semestres cuando
+el ámbito WML se lee por statement y meses cuando se lee por consumo.
+Véase [WML 91230](wml_pipeline_notes.md).

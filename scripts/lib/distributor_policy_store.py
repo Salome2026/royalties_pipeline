@@ -69,6 +69,9 @@ def load_distributor_policy_document() -> dict[str, Any]:
     snapshot = _POLICY_SNAPSHOT.get()
     if snapshot is not None:
         return deepcopy(snapshot)
+    from app.royalty_scope import is_wml, wml_policy
+    if is_wml():
+        return wml_policy()
     _require_postgres()
     with operational_connect() as conn:
         settings_row = conn.execute(

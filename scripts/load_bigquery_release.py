@@ -318,9 +318,16 @@ def write_lazy(frame: pl.LazyFrame, path: Path) -> None:
     temporary.replace(path)
 
 
-def build_detail(source: Path, target: Path, release_id: str) -> None:
+def build_detail(source: Path, target: Path, release_id: str, *, overrides: dict[str,pl.Expr] | None = None) -> None:
     frame = pl.scan_parquet(source)
     columns = set(frame.collect_schema().names())
+    def select_detail(expressions):
+        replacement=overrides or {}
+        names={expr.meta.output_name() for expr in expressions}
+        extra=[name for name in replacement if name not in names]
+        expressions=[replacement.get(expr.meta.output_name(),expr).alias(expr.meta.output_name()) for expr in expressions]
+        expressions += [replacement[name].alias(name) for name in extra]
+        return frame.select(expressions).select([*DETAIL_FIELDS,*extra])
     units = (
         pl.col("units").cast(pl.Float64, strict=False)
         if "units" in columns
@@ -334,7 +341,7 @@ def build_detail(source: Path, target: Path, release_id: str) -> None:
             .otherwise(units)
         )
     write_lazy(
-        frame.select(
+        select_detail(
             [
                 pl.lit(release_id).alias("release_id"),
                 month_expr(columns, ["statement_period"]).alias("statement_month"),
@@ -408,7 +415,7 @@ def build_detail(source: Path, target: Path, release_id: str) -> None:
                 text_expr(columns, ["statement_file_name"]).alias("statement_file_name"),
                 text_expr(columns, ["statement_file_hash"]).alias("statement_file_hash"),
             ]
-        ).select(DETAIL_FIELDS),
+        ),
         target,
     )
 
@@ -493,7 +500,7 @@ def build_catalog(source: Path, target: Path, release_id: str) -> None:
                 text_expr(columns, ["external_label"]).alias("external_label"),
                 text_expr(columns, ["label_normalized"]).alias("label_normalized"),
             ]
-        ),
+        ).select(CATALOG_FIELDS),
         target,
     )
 
@@ -587,10 +594,11 @@ def insert_sql(
     manifest_uri: str,
     source_files: int,
     stages: dict[str, str],
+    detail_fields: list[str] | None = None,
 ) -> str:
     qualified = lambda table: f"`{project}.{dataset}.{table}`"
     fields = {
-        "detail": DETAIL_FIELDS,
+        "detail": detail_fields or DETAIL_FIELDS,
         "dashboard": DASHBOARD_FIELDS,
         "song": SONG_FIELDS,
         "catalog": CATALOG_FIELDS,

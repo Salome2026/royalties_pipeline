@@ -1,4 +1,5 @@
 "use client";
+import { WmlReferences } from '../wml/WmlReferences';
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import {
@@ -300,6 +301,7 @@ export function CatalogModule({ canEdit, initialFilter, onMessage }: Props) {
                 <td data-label="Identidad" className={styles.identityCell}>
                   <strong>{item.asset_isrc || item.track_id || "-"}</strong>
                   <small title={item.catalog_key}>{item.catalog_key}</small>
+                  {item.sources === 'wml' && item.asset_isrc && <WmlReferences isrc={item.asset_isrc} />}
                   {item.video_isrcs?.map((code) => <small key={code}>ISRC de video: {code}</small>)}
                   {Boolean(item.catalog_aliases?.length) && <small>Alias: {item.catalog_aliases?.join(" · ")}</small>}
                 </td>

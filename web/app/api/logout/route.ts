@@ -4,6 +4,7 @@ import { SESSION_COOKIE } from "../_auth";
 
 export async function POST() {
   const cookieStore = await cookies();
+  cookieStore.set('vpo_royalty_scope', '', { path: '/', maxAge: 0, sameSite: 'lax' });
   cookieStore.set(SESSION_COOKIE, "", {
     httpOnly: true,
     sameSite: "lax",

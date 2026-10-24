@@ -33,10 +33,22 @@ NON_GENERATION_REVENUE_BASIS = {"transfer", "summary", "share_transfer"}
 
 
 def current_catalog_master_path() -> Path:
+    from app.royalty_scope import is_wml, MARTS
+    if is_wml():
+        path = MARTS.get().get('catalog_master.parquet')
+        if path is None:
+            raise RuntimeError('Falta el catálogo del ámbito WML. No se usa el catálogo habitual.')
+        return path
     return Path(os.environ.get("VPO_CATALOG_MASTER_PATH", CATALOG_MASTER_PATH))
 
 
 def current_catalog_status_path() -> Path:
+    from app.royalty_scope import is_wml, MARTS
+    if is_wml():
+        path = MARTS.get().get('catalog_status.parquet')
+        if path is None:
+            raise RuntimeError('Falta el estado de catálogo WML.')
+        return path
     return Path(os.environ.get("VPO_CATALOG_STATUS_PATH", CATALOG_STATUS_PATH))
 
 
@@ -251,8 +263,10 @@ def catalog_alias_lookup(catalog_path: Path | None = None, *, catalog: pl.DataFr
 
 
 def catalog_status_for_reports(status_path: Path | None = None) -> pl.DataFrame:
+    from app.royalty_scope import is_wml, STATUS
+    override = STATUS.get() if is_wml() else None
     status_path = status_path or current_catalog_status_path()
-    if not status_path.exists():
+    if override is None and not status_path.exists():
         return pl.DataFrame({
             "catalog_key": pl.Series([], dtype=pl.Utf8),
             "catalog_active": pl.Series([], dtype=pl.Boolean),

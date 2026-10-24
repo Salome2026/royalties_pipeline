@@ -30,6 +30,15 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, Response
 from google.cloud import storage
 from pydantic import BaseModel, Field
+from app.royalty_scope import is_wml, MARTS as SCOPE_MARTS, RELEASE as SCOPE_RELEASE, wml_release_prefix, WML_DATASET
+
+def active_bigquery_dataset() -> str:
+    if is_wml():
+        dataset = os.environ.get('VPO_WML_BIGQUERY_DATASET', WML_DATASET)
+        if dataset == VPO_BIGQUERY_DATASET or dataset != WML_DATASET:
+            raise RuntimeError('WML requiere un dataset separado de las regalías habituales.')
+        return dataset
+    return VPO_BIGQUERY_DATASET
 
 from app.operational_db import (
     close_operational_db_pool,
@@ -1465,6 +1474,10 @@ def mart_release_cache() -> MartReleaseCache:
 
 def ensure_marts(refresh_cache: bool = False, filenames: list[str] | None = None) -> dict[str, Path]:
     requested_files = filenames or REQUIRED_MART_FILES
+    if is_wml():
+        from app.wml_workspace import resolve_marts
+        return resolve_marts(requested_files,bucket=GCS_BUCKET,client_factory=gcs_client,
+            cache_dir=VPO_API_CACHE_DIR,local_mode=VPO_LOCAL_MARTS_DIR is not None,refresh=refresh_cache)
 
     if VPO_LOCAL_MARTS_DIR is not None and VPO_LOCAL_MARTS_DIR.exists():
         paths = {filename: VPO_LOCAL_MARTS_DIR / filename for filename in requested_files}
@@ -1486,6 +1499,10 @@ def ensure_marts(refresh_cache: bool = False, filenames: list[str] | None = None
 
 
 def load_catalog_status() -> pl.DataFrame:
+    if is_wml():
+        from app.royalty_workspace_store import records
+        rows=[r['payload'] for r in records('catalog_status').values()]
+        return pl.DataFrame(rows,infer_schema_length=None) if rows else pl.DataFrame()
     if GCS_BUCKET and VPO_CATALOG_STATUS_SYNC_GCS:
         from io import BytesIO
         from google.api_core.exceptions import NotFound
@@ -1534,6 +1551,7 @@ def normalized_label_expr(expr: pl.Expr) -> pl.Expr:
 
 
 def save_catalog_status(df: pl.DataFrame) -> None:
+    if is_wml():raise RuntimeError('Los estados WML se guardan por registro en Cloud SQL.')
     from io import BytesIO
     payload = BytesIO()
     df.write_parquet(payload)
@@ -1545,6 +1563,9 @@ def save_catalog_status(df: pl.DataFrame) -> None:
 
 
 def configure_catalog_report_env(marts: dict[str, Path] | None = None) -> None:
+    if is_wml():
+        SCOPE_MARTS.set({**SCOPE_MARTS.get(),**(marts or {})})
+        return
     if marts and CATALOG_MASTER_FILE in marts:
         os.environ["VPO_CATALOG_MASTER_PATH"] = str(marts[CATALOG_MASTER_FILE])
     os.environ["VPO_CATALOG_STATUS_PATH"] = str(CATALOG_STATUS_PATH)
@@ -7199,6 +7220,13 @@ def source_monitor(x_vpo_api_key: str | None = Header(default=None)):
             "reason": reason,
         })
 
+    from app.royalty_workspace_store import settings as wml_settings
+    from app.wml_workspace import monitor_item, local_release
+    wml_state = wml_settings()
+    wml_local = local_release() if (BASE / 'input_raw/wml').exists() else None
+    wml_item = monitor_item(wml_state,wml_local[0] if wml_local else None)
+    items.append(wml_item)
+    status_counts[wml_item['status']] = status_counts.get(wml_item['status'],0)+1
     return {
         "generated_at": datetime.now().isoformat(timespec="seconds"),
         "items": items,
@@ -7355,6 +7383,12 @@ def canonical_royalty_report_params(
 
     params["source"] = source
     params["account"] = account
+    if is_wml():
+        if params.get("executive_mode") == "contractual":
+            raise HTTPException(400,"WML usa informes al 100%; las referencias no generan un reparto automático.")
+        params['royalty_scope'] = 'wml'
+        params['source'] = 'wml'
+        params['account'] = '91230'
     if request.output == "executive_pdf":
         params["raw_limit"] = 0
         params["detail_mode"] = "limited"
@@ -7405,7 +7439,7 @@ def royalty_report_detail_count(
             source=params["source"],
             account=params["account"],
             project=VPO_BIGQUERY_PROJECT,
-            dataset=VPO_BIGQUERY_DATASET,
+            dataset=active_bigquery_dataset(),
             location=VPO_BIGQUERY_LOCATION,
             maximum_bytes_billed=VPO_BIGQUERY_MAX_BYTES_BILLED,
         )
@@ -7463,8 +7497,14 @@ def create_royalty_report_job(
         input_manifest = build_gcs_input_manifest(
             client=gcs_client(),
             bucket_name=GCS_BUCKET,
-            prefix=GCS_PREFIX,
+            prefix=wml_release_prefix() if is_wml() else GCS_PREFIX,
+            **({'filenames': ('song_level_all_sources.parquet','standardized_raw_all_sources.parquet',
+                'catalog_master.parquet','catalog_status.parquet','wml_isrc_references.parquet')} if is_wml() else {}),
         )
+        if is_wml():
+            from app.royalty_workspace_store import records
+            input_manifest['royalty_scope'] = 'wml'
+            input_manifest['catalog_status_snapshot'] = [row['payload'] for row in records('catalog_status').values()]
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Los datos publicados no estan disponibles.") from exc
 
@@ -7536,7 +7576,8 @@ def recent_royalty_report_jobs(
     return {
         "items": [
             reconcile_report_job_if_stale(job)
-            for job in list_report_jobs(requested_by, limit=limit)
+            for job in list_report_jobs(requested_by, limit=limit,royalty_scope='wml' if is_wml() else 'regular')
+            if (job.get("params") or {}).get("royalty_scope","regular") == ("wml" if is_wml() else "regular")
             if (job.get("params") or {}).get("executive_mode") != "contractual" or permission.get("is_admin") or can_read_contracts
         ]
     }
@@ -8360,6 +8401,12 @@ def write_catalog_status(request: CatalogStatusRequest) -> dict:
         "label_normalized_override": label_override,
         "updated_at": now,
     }])
+    if is_wml():
+        from app.royalty_workspace_store import records, save_record
+        current = records('catalog_status').get(catalog_key)
+        save_record('catalog_status',catalog_key,new_row.to_dicts()[0],
+            expected_version=current['version'] if current else 0,actor=username)
+        return {'ok': True,'catalog_key':catalog_key,'active':bool(request.active),'updated_at':now,'royalty_scope':'wml'}
     if status_df.is_empty():
         final = new_row
     else:
@@ -8372,6 +8419,11 @@ def write_catalog_status(request: CatalogStatusRequest) -> dict:
 
 
 def master_contract_income_baseline() -> pl.DataFrame:
+    if is_wml():
+        path=ensure_marts(filenames=[ROYALTIES_DASHBOARD_SUMMARY_FILE])[ROYALTIES_DASHBOARD_SUMMARY_FILE]
+        return pl.scan_parquet(path).group_by(pl.col('isrc').alias('asset_isrc')).agg(
+            pl.col('amount_usd').sum(),pl.col('statement_period').min().alias('first_statement_month'),
+            pl.col('statement_period').max().alias('last_statement_month')).collect()
     if VPO_ROYALTIES_DASHBOARD_BACKEND == "bigquery":
         try:
             rows = royalty_isrc_income_bigquery(
@@ -8404,6 +8456,9 @@ def master_contract_income_baseline() -> pl.DataFrame:
 
 
 def master_contract_source_accounts() -> pl.DataFrame:
+    if is_wml():
+        path=ensure_marts(filenames=[ROYALTIES_DASHBOARD_SUMMARY_FILE])[ROYALTIES_DASHBOARD_SUMMARY_FILE]
+        return pl.scan_parquet(path).select(pl.col('isrc').alias('asset_isrc'),'source','account').unique().collect()
     if VPO_ROYALTIES_DASHBOARD_BACKEND == "bigquery":
         try:
             rows = royalty_isrc_source_accounts_bigquery(
@@ -8424,6 +8479,10 @@ def master_contract_source_accounts() -> pl.DataFrame:
 
 
 def master_contract_statement_income(isrc: str) -> list[dict[str, Any]]:
+    if is_wml():
+        path=ensure_marts(filenames=[ROYALTIES_DASHBOARD_SUMMARY_FILE])[ROYALTIES_DASHBOARD_SUMMARY_FILE]
+        return pl.scan_parquet(path).filter(pl.col('isrc')==isrc).group_by('statement_period').agg(pl.col('amount_usd').sum()).rename(
+            {'statement_period':'statement_month'}).sort('statement_month').collect().to_dicts()
     if VPO_ROYALTIES_DASHBOARD_BACKEND == "bigquery":
         try:
             return royalty_isrc_statement_income_bigquery(
@@ -8446,6 +8505,7 @@ def master_contract_statement_income(isrc: str) -> list[dict[str, Any]]:
 
 
 def master_contract_associated_income(choices: dict[str, list[dict]]) -> dict[str, dict]:
+    if is_wml():return {}
     try:
         marts = ensure_marts(filenames=[CATALOG_MASTER_FILE])
         load_catalog_status()
@@ -8472,6 +8532,13 @@ def master_contract_associated_income(choices: dict[str, list[dict]]) -> dict[st
 
 
 def master_contract_catalog(associated_income: dict[str, dict] | None = None) -> pl.DataFrame:
+    if is_wml():
+        path=ensure_marts(filenames=[CATALOG_MASTER_FILE])[CATALOG_MASTER_FILE]
+        catalog=pl.read_parquet(path).filter(pl.col('asset_isrc').is_not_null()).unique(subset=['asset_isrc'])
+        return catalog.join(master_contract_income_baseline().rename({'amount_usd':'isrc_amount_usd'}),on='asset_isrc',how='left').with_columns(
+            pl.col('isrc_amount_usd').fill_null(0).alias('amount_usd'),pl.lit(0.0).alias('associated_amount_usd'),
+            pl.col('first_statement_month').alias('_contract_first_statement_month'),pl.col('last_statement_month').alias('_contract_last_statement_month')
+        ).sort('amount_usd',descending=True)
     marts = ensure_marts(filenames=[CATALOG_MASTER_FILE])
     from app.catalog_metadata_review import apply_approved
     catalog = catalog_artist_display(apply_approved(pl.read_parquet(marts[CATALOG_MASTER_FILE])))
@@ -8486,8 +8553,8 @@ def master_contract_catalog(associated_income: dict[str, dict] | None = None) ->
     )
     extra = pl.DataFrame([
         {"asset_isrc": root, "associated_amount_usd": item["amount_usd"],
-         "_associated_first": min((row["statement_month"] for row in item["statement_income"] if row["statement_month"] <= CONTRACT_ANALYSIS_CUTOFF_MONTH), default=None),
-         "_associated_last": max((row["statement_month"] for row in item["statement_income"] if row["statement_month"] <= CONTRACT_ANALYSIS_CUTOFF_MONTH), default=None)}
+         "_associated_first": min((row["statement_month"] for row in item["statement_income"] if is_wml() or row["statement_month"] <= CONTRACT_ANALYSIS_CUTOFF_MONTH), default=None),
+         "_associated_last": max((row["statement_month"] for row in item["statement_income"] if is_wml() or row["statement_month"] <= CONTRACT_ANALYSIS_CUTOFF_MONTH), default=None)}
         for root, item in (associated_income or {}).items()
     ], schema={"asset_isrc": pl.Utf8, "associated_amount_usd": pl.Float64, "_associated_first": pl.Utf8, "_associated_last": pl.Utf8})
     return result.join(extra, on="asset_isrc", how="left").with_columns(
@@ -8607,13 +8674,14 @@ def list_master_contracts(
         "limit": safe_limit,
         "offset": safe_offset,
         "source_accounts": source_accounts,
-        "amount_basis": "dashboard_net_statement_usd",
+        "amount_basis": "wml_contractual_base_100" if is_wml() else "dashboard_net_statement_usd",
         "pool_contracts_supported": True,
         "reports_effective": False,
     }
 
 
 def master_contract_associations(isrc: str, choices: list[dict[str, Any]], claims: dict[str, str]) -> list[dict[str, Any]]:
+    if is_wml():return []
     path = ensure_marts(filenames=[CATALOG_MASTER_FILE])[CATALOG_MASTER_FILE]
     catalog = pl.read_parquet(path)
     matches = catalog.filter(pl.col("asset_isrc") == isrc)
@@ -8662,7 +8730,7 @@ def get_master_contract_associations(
     baseline = master_contract_income_baseline().filter(pl.col("asset_isrc") == clean)
     base_amount = float(baseline["amount_usd"][0] or 0) if not baseline.is_empty() else 0.0
     income = combined_contract_income(base_amount, extras.get(clean), master_contract_statement_income(clean))
-    income["statement_income"] = [row for row in income["statement_income"] if row["statement_month"] <= CONTRACT_ANALYSIS_CUTOFF_MONTH]
+    income["statement_income"] = [row for row in income["statement_income"] if is_wml() or row["statement_month"] <= CONTRACT_ANALYSIS_CUTOFF_MONTH]
     return {"isrc": clean, "items": items, "income": income, "version": (saved or {}).get("version", 0),
             "pending_codes": unresolved_associations(items, choices), "reports_effective": False}
 
@@ -8684,7 +8752,7 @@ def get_master_contract(
         contracts = active_artist_contracts(conn)
         choices = read_contract_association_choices(conn)
         from app.master_contract_participants import read_participant_history
-        participant_history = read_participant_history(conn, clean) if saved and not saved["closed"] and is_postgres_connection(conn) else []
+        participant_history = read_participant_history(conn, clean) if not is_wml() and saved and not saved["closed"] and is_postgres_connection(conn) else []
     extras = master_contract_associated_income(choices)
     matches = master_contract_catalog(extras).filter(pl.col("asset_isrc") == clean)
     if matches.is_empty():
@@ -8709,6 +8777,10 @@ def get_master_contract(
         contracts, first_statement_date, principal_uncertain=bool(suggestions.get("principal_uncertain")),
     )
     participant_proposal = None
+    if is_wml() and not saved:
+        for agreement in proposed.get('agreements') or []:
+            agreement['company_name']='MAWZ'
+            agreement['owners']=[]
     if catalog_row.get("catalog_artists") is not None:
         from app.master_contract_participants import propose_participants
         proposed, participant_proposal = propose_participants(proposed, suggestions["artists"], saved=saved, history=participant_history)
@@ -8721,7 +8793,7 @@ def get_master_contract(
         "first_sale_date": first_sale_date,
         "first_sale_precision": first_sale_precision,
         "first_statement_date": first_statement_date,
-        "statement_income": [row for row in statement_income if row["statement_month"] <= CONTRACT_ANALYSIS_CUTOFF_MONTH],
+        "statement_income": [row for row in statement_income if is_wml() or row["statement_month"] <= CONTRACT_ANALYSIS_CUTOFF_MONTH],
         "amount_usd": float(catalog_row.get("amount_usd") or 0),
         "isrc_amount_usd": income["isrc_amount_usd"],
         "associated_amount_usd": income["associated_amount_usd"],
@@ -8737,7 +8809,7 @@ def get_master_contract(
         "version": saved["version"] if saved else 0,
         "updated_by": saved["updated_by"] if saved else None,
         "updated_at": saved["updated_at"] if saved else None,
-        "amount_basis": "dashboard_net_statement_usd",
+        "amount_basis": "wml_contractual_base_100" if is_wml() else "dashboard_net_statement_usd",
         "pool_contracts_supported": True,
         "reports_effective": False,
     }
@@ -9751,7 +9823,7 @@ def query_royalties_dashboard_from_bigquery(
 ) -> dict[str, Any]:
     from app.catalog_refresh import dashboard_state, enabled
     return query_royalties_dashboard_bigquery(
-        catalog_state=dashboard_state() if enabled() else None,
+        catalog_state=dashboard_state() if enabled() and not is_wml() else None,
         policy_document=load_distributor_policy_document(),
         source=source,
         account=account,
@@ -9764,7 +9836,7 @@ def query_royalties_dashboard_from_bigquery(
         limit=limit,
         artist_scope=artist_scope,
         project=VPO_BIGQUERY_PROJECT,
-        dataset=VPO_BIGQUERY_DATASET,
+        dataset=active_bigquery_dataset(),
         location=VPO_BIGQUERY_LOCATION,
         maximum_bytes_billed=VPO_BIGQUERY_MAX_BYTES_BILLED,
     )
@@ -9837,7 +9909,7 @@ def royalties_dashboard(
     safe_limit = max(3, min(int(limit or 10), 50))
     period_col = "transaction_month" if period_basis == "transaction_month" else "statement_period"
 
-    if VPO_LOCAL_MARTS_DIR is not None and VPO_LOCAL_MARTS_DIR.exists():
+    if not is_wml() and VPO_LOCAL_MARTS_DIR is not None and VPO_LOCAL_MARTS_DIR.exists():
         marts = ensure_marts(refresh_cache=refresh_cache, filenames=[STANDARDIZED_FILE])
         standardized_path = marts[STANDARDIZED_FILE]
         if not standardized_path.exists():
@@ -15157,3 +15229,9 @@ def delete_booking_show(
         conn.execute("DELETE FROM booking_shows WHERE id = ?", (show_id,))
 
     return {"ok": True, "deleted_id": show_id, "db_driver": operational_db_settings().driver}
+
+
+# Register after the ordinary handlers exist; the workspace gate never mutates
+# their global paths or includes isolated marts in the ordinary consolidated set.
+from app.wml_api import install as install_wml_workspace
+install_wml_workspace(sys.modules[__name__])

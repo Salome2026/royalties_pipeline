@@ -1267,6 +1267,28 @@ def report_output_path(
     return output_dir / f"keyword_royalty_report_{slug}{period_slug}_{timestamp}.xlsx"
 
 
+def add_wml_reference_annex(tables: dict, matched_isrcs: set[str]) -> dict:
+    from app.royalty_scope import is_wml, MARTS
+    if is_wml():
+        references_path = MARTS.get().get('wml_isrc_references.parquet')
+        if references_path is None:
+            raise RuntimeError('Faltan las referencias WML fijadas para este reporte.')
+        # A separate annex avoids multiplying economic rows by participants.
+        references = pl.read_parquet(references_path).filter(pl.col('isrc').is_in(sorted(matched_isrcs)))
+        rows = references.to_dicts()
+        status_labels = {'informed':'Informado','deduced':'Deducido','hypothesis':'Hipótesis'}
+        tables['referencias WML'] = pd.DataFrame([{
+            'ISRC':r['isrc'],'Tipo':r['reference_type'],'Participante / contrato':r['participant'],
+            'Porcentaje sobre base 100%':r['percent'],'Evidencia':status_labels.get(r['evidence_status'],r['evidence_status']),
+            'Alcance':r['reference_scope'],'Tipo de uso':r['product_type'],
+            'Statements observados':', '.join(r['statement_periods']),'Archivos':', '.join(r['source_files']),
+            'Notas':r['notes'],'Aplicación automática':'No',
+        } for r in rows])
+        tables['resumen general']['Base del informe'] = 'WML 91230 · Base contractual al 100%; referencias informativas sin aplicación automática'
+
+    return tables
+
+
 def build_report_tables(
     keywords: list[str],
     mode: str,
@@ -1471,7 +1493,9 @@ def build_report_tables(
         if not raw_sample.empty:
             tables["detalle"] = raw_sample
 
-        return tables
+        from app.royalty_scope import is_wml
+        matched=set(statement_base_lf.select('asset_isrc').unique().collect()['asset_isrc'].drop_nulls().to_list()) if is_wml() else set()
+        return add_wml_reference_annex(tables,matched)
     else:
         song = (
             add_report_code(
@@ -1634,7 +1658,10 @@ def build_report_tables(
     if not raw_sample.empty:
         tables["detalle"] = raw_sample
 
-    return tables
+    return add_wml_reference_annex(tables,{
+        value for column in ('asset_isrc','ISRC') if column in song.columns
+        for value in song[column].drop_nulls().to_list()
+    })
 
 
 def build_report(

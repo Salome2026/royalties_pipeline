@@ -179,9 +179,17 @@ def get_report_job_artifact(job_id: int) -> dict[str, Any] | None:
     return _db_retry(read)
 
 
-def list_report_jobs(requested_by: str | None, limit: int = 10) -> list[dict[str, Any]]:
+def list_report_jobs(requested_by: str | None, limit: int = 10, *, royalty_scope: str | None = None) -> list[dict[str, Any]]:
     safe_limit = max(1, min(int(limit or 10), 50))
     with operational_connect() as conn:
+        if royalty_scope is not None:
+            from app.royalty_scope import validate_scope
+            validate_scope(royalty_scope)
+            rows=conn.execute("""SELECT * FROM report_runs
+                WHERE COALESCE(params_json::jsonb->>'royalty_scope','regular')=%s
+                  AND (%s::text IS NULL OR lower(requested_by)=lower(%s))
+                ORDER BY created_at DESC LIMIT %s""",(royalty_scope,requested_by,requested_by,safe_limit)).fetchall()
+            return [report_job_item(row) for row in rows]
         if requested_by:
             rows = conn.execute(
                 """

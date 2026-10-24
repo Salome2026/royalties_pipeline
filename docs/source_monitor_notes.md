@@ -2,6 +2,12 @@
 
 Esta pantalla controla si las distribuidoras fueron revisadas y si los ultimos statements llegaron al sistema.
 
+WML 91230 agrega un control específico de ámbito, separado de los controles
+habituales de monitoreo. Está desactivado por defecto, tiene alertas semestrales
+y procesa/publica exclusivamente sus datos mediante un Cloud Run Job propio.
+Activar/desactivar WML no reconstruye datos ni cambia las regalías habituales.
+Ver [WML 91230](wml_pipeline_notes.md).
+
 ## Regla clave
 
 `monitoring_active = false` significa solamente:

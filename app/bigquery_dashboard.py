@@ -36,6 +36,16 @@ def normalize_search_text(value: object) -> str:
 def sql_string(value: str) -> str:
     return value.replace("\\", "\\\\").replace("'", "\\'")
 
+def scoped_rankings_table(project: str,dataset: str) -> str:
+    # An explicit immutable release prevents GCS/BQ versions crossing during publication.
+    from app.royalty_scope import is_wml,RELEASE
+    if is_wml():
+        release=RELEASE.get()
+        if not release or not re.fullmatch(r'wml-[a-f0-9]{24}',release):
+            raise RuntimeError('Falta la versión WML publicada para consultar BigQuery.')
+        return f"(SELECT * FROM `{project}.{dataset}.royalty_dashboard_rankings` WHERE release_id='{release}')"
+    return f"`{project}.{dataset}.royalty_dashboard_current`"
+
 
 def month_date(value: str | None) -> date | None:
     if not value:
@@ -446,7 +456,7 @@ def royalty_detail_count_bigquery(
         for normalized in [normalize_search_text(value)]
         if normalized
     ]
-    table = f"`{project}.{dataset}.royalty_dashboard_current`"
+    table = scoped_rankings_table(project,dataset)
     sql = rf"""
 WITH scoped AS (
   SELECT
@@ -698,8 +708,15 @@ def royalties_dashboard_bigquery(
     month_limit = 12 if period_mode == "last_12_months" else 6
     query_client = client or dashboard_client(project, location)
     # Resolve a ready snapshot first so clustering can skip historical releases.
+    release_sql=f"SELECT release_id FROM `{project}.{dataset}.current_release`"
+    from app.royalty_scope import is_wml,RELEASE
+    if is_wml():
+        release_id=RELEASE.get()
+        if not release_id or not re.fullmatch(r'wml-[a-f0-9]{24}',release_id):raise RuntimeError('Falta la versión WML publicada.')
+        release_sql=f"SELECT release_id FROM `{project}.{dataset}.analytics_releases` WHERE release_id='{release_id}' AND status='ready'"
+        catalog_state=None
     release_rows = query_client.query(
-        f"SELECT release_id FROM `{project}.{dataset}.current_release`",
+        release_sql,
         job_config=bigquery.QueryJobConfig(maximum_bytes_billed=maximum_bytes_billed),
         location=location,
     ).result()

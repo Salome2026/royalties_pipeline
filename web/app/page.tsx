@@ -13,6 +13,7 @@ import type { CatalogInitialFilter } from "./features/catalog/types";
 import { EmployeesModule } from "./features/employees/EmployeesModule";
 import { RoyaltyReportModule } from "./features/royalties/RoyaltyReportModule";
 import { SourceMonitorModule } from "./features/source-monitor/SourceMonitorModule";
+import { selectedRoyaltyScope } from './features/wml/WmlScopeControl';
 import { StatementReportModule } from "./features/statements/StatementReportModule";
 import digitalStyles from "./features/digital-income/DigitalIncome.module.css";
 import royaltyDashboardStyles from "./features/royalties-dashboard/RoyaltyDashboard.module.css";
@@ -2201,6 +2202,8 @@ export default function Home() {
   const [royaltiesDashboardSource, setRoyaltiesDashboardSource] = useState("");
   const [royaltiesDashboardAccount, setRoyaltiesDashboardAccount] = useState("");
   const [royaltiesDashboardPeriod, setRoyaltiesDashboardPeriod] = useState<PeriodSelection>({ mode: "last_6_months" });
+  const [wmlScope,setWmlScope] = useState(false);
+  useEffect(() => { if (selectedRoyaltyScope() === 'wml') { setWmlScope(true); setRoyaltiesDashboardPeriod({mode:'all'}); } },[]);
   const [royaltiesDashboardPeriodBasis, setRoyaltiesDashboardPeriodBasis] = useState<"statement_period" | "transaction_month">("statement_period");
   const [royaltiesDashboardTab, setRoyaltiesDashboardTab] = useState<"overview" | "youtube">("overview");
   const [distributorConfig, setDistributorConfig] = useState<DistributorConfigData | null>(null);
@@ -6181,7 +6184,7 @@ export default function Home() {
     }
     const amount = parseMoneyInput(bookingAccountForm.amount);
     if (amount <= 0) {
-      setMessage({ type: "error", text: "CargÃ¡ un importe para aplicar al saldo." });
+      setMessage({ type: "error", text: "Cargá un importe para aplicar al saldo." });
       return;
     }
     setBookingLoading(true);
@@ -7764,14 +7767,14 @@ export default function Home() {
                 <select
                   id="royalties_dashboard_basis"
                   value={royaltiesDashboardPeriodBasis}
-                  onChange={(event) => setRoyaltiesDashboardPeriodBasis(event.target.value as "statement_period" | "transaction_month")}
+                  onChange={(event) => {setRoyaltiesDashboardPeriodBasis(event.target.value as "statement_period" | "transaction_month"); if (wmlScope) setRoyaltiesDashboardPeriod({mode:'all'});}}
                 >
                   <option value="statement_period">Statement</option>
                   <option value="transaction_month">Consumo</option>
                 </select>
               </div>
               <div className={digitalStyles.periodField}>
-                <PeriodControl id="royalties_dashboard_period" label="Período" profile="dashboard_period" selection={royaltiesDashboardPeriod} presets={["last_6_months", "last_12_months", "all"]} minMonth={royaltiesDashboard?.options.first_month} maxMonth={royaltiesDashboard?.options.last_month} onChange={setRoyaltiesDashboardPeriod} />
+                <PeriodControl id="royalties_dashboard_period" label="Período" profile="dashboard_period" selection={royaltiesDashboardPeriod} frequency={wmlScope && royaltiesDashboardPeriodBasis === 'statement_period' ? 'semiannual' : 'monthly'} presets={wmlScope ? ['all'] : ["last_6_months", "last_12_months", "all"]} minMonth={royaltiesDashboard?.options.first_month} maxMonth={royaltiesDashboard?.options.last_month} onChange={setRoyaltiesDashboardPeriod} />
               </div>
               <div className={digitalStyles.filterActions}>
                 <button type="button" className={digitalStyles.iconButton} onClick={resetRoyaltiesDashboardFilters} disabled={royaltiesDashboardLoading} aria-label="Limpiar filtros" title="Limpiar filtros">
@@ -7830,14 +7833,14 @@ export default function Home() {
               <>
                 <section className={digitalStyles.trendSection}>
                   <div className={digitalStyles.sectionTitle}>
-                    <h2>Evolución mensual</h2>
-                    <span>USD reportable por {royaltiesDashboardPeriodBasis === "statement_period" ? "mes de statement" : "mes de consumo"}</span>
+                    <h2>{wmlScope && royaltiesDashboardPeriodBasis === 'statement_period' ? 'Evolución semestral' : 'Evolución mensual'}</h2>
+                    <span>USD reportable por {royaltiesDashboardPeriodBasis === "statement_period" ? (wmlScope ? 'semestre de statement' : "mes de statement") : "mes de consumo"}</span>
                   </div>
                   <div className={digitalStyles.trendRows}>
                     {!royaltiesDashboardLoading && !royaltiesDashboard?.monthly.length && <div className={digitalStyles.emptyState}>Sin datos para este filtro.</div>}
                     {(royaltiesDashboard?.monthly || []).map((month) => (
                       <div className={digitalStyles.trendRow} key={month.month}>
-                        <span>{month.month}</span>
+                        <span>{wmlScope && royaltiesDashboardPeriodBasis === 'statement_period' ? `${month.month.slice(0,4)} H${month.month.endsWith('06') ? '1' : '2'}` : month.month}</span>
                         <div className={digitalStyles.trendTrack} aria-hidden="true">
                           <div className={month.amount_usd < 0 ? digitalStyles.negativeBar : digitalStyles.trendBar} style={{ width: `${Math.max(1, Math.abs(month.amount_usd) / royaltiesDashboardMonthlyMax * 100)}%` }} />
                         </div>
@@ -7849,7 +7852,7 @@ export default function Home() {
 
                 <section className={digitalStyles.tableSection}>
                   <div className={digitalStyles.sectionTitle}>
-                    <h2>Meses por distribuidora</h2>
+                    <h2>{wmlScope && royaltiesDashboardPeriodBasis === 'statement_period' ? 'Semestres por distribuidora' : 'Meses por distribuidora'}</h2>
                     <span>{royaltiesDashboard?.matrix.length || 0} cuentas</span>
                   </div>
                   <div className={digitalStyles.tableScroll}>
@@ -7857,7 +7860,7 @@ export default function Home() {
                       <thead>
                         <tr>
                           <th>Distribuidora / cuenta</th>
-                          {(royaltiesDashboard?.period_months || []).map((month) => <th key={month}>{month}</th>)}
+                          {(royaltiesDashboard?.period_months || []).map((month) => <th key={month}>{wmlScope && royaltiesDashboardPeriodBasis === 'statement_period' ? `${month.slice(0,4)} H${month.endsWith('06') ? '1' : '2'}` : month}</th>)}
                           <th>Total</th>
                           <th>Temas</th>
                         </tr>

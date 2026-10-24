@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { apiConfig } from "../_auth";
+import { apiConfig, royaltyHeaders } from "../_auth";
 
 function stringifyApiError(value: unknown): string {
   if (!value) return "Error desconocido.";
@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
 
   const params = request.nextUrl.searchParams.toString();
   const response = await fetch(`${config.apiUrl}/catalog${params ? `?${params}` : ""}`, {
-    headers: { "X-VPO-API-Key": config.apiKey },
+    headers: royaltyHeaders(config),
     cache: "no-store",
   });
 
@@ -50,8 +50,7 @@ export async function PATCH(request: NextRequest) {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
-      "X-VPO-API-Key": config.apiKey,
-      "X-VPO-Username": config.user.username,
+      ...royaltyHeaders(config),
     },
     body: JSON.stringify(body),
   });

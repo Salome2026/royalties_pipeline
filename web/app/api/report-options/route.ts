@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { apiConfig } from "../_auth";
+import { apiConfig, royaltyHeaders } from "../_auth";
 
 export async function GET() {
   const config = await apiConfig();
   if ("error" in config) return config.error;
 
   const response = await fetch(`${config.apiUrl}/reports/royalty/options`, {
-    headers: { "X-VPO-API-Key": config.apiKey },
+    headers: royaltyHeaders(config),
     cache: "no-store",
   });
   if (!response.ok) {

@@ -21,6 +21,7 @@ export type CatalogInitialFilter = {
 };
 
 export type CatalogItem = {
+  royalty_scope?: 'regular'|'wml';
   video_isrcs?: string[];
   catalog_aliases?: string[];
   video_relationships?: CatalogVideoRelationship[];
