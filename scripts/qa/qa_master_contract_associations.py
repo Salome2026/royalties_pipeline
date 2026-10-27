@@ -248,7 +248,9 @@ class ContractAssociationTests(unittest.TestCase):
              patch.object(api, "read_split", return_value={"split": {}, "version": 1, "closed": True}), \
              patch.object(api, "is_postgres_connection", return_value=True), patch.object(api, "db_sql", side_effect=lambda _, sql: sql), \
              patch.object(api, "read_contract_association_claims", return_value={}), \
-             patch.object(api, "master_contract_associations", return_value=[item]) as verify, patch.object(api, "save_split", return_value={}):
+             patch.object(api, "master_contract_associations", return_value=[item]) as verify, \
+             patch("app.master_contract_review.ensure_schema"), patch.object(api, "save_association_review", return_value={}), \
+             patch.object(api, "save_split", return_value={"version": 2}):
             connect.return_value.__enter__.return_value = conn
             catalog.return_value.filter.return_value.is_empty.return_value = False
             api.put_master_contract(ISRC, request, "key", "editor")

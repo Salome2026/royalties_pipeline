@@ -58,7 +58,8 @@ class ContractualAssociationTests(unittest.TestCase):
         ) or (isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name in {
             "canonical_royalty_report_params", "RoyaltyReportJobRequest"})]
         namespace = {"BaseModel": BaseModel, "Field": Field, "Any": Any, "Literal": Literal,
-                     "HTTPException": HTTPException, "normalize_keywords": lambda values: values}
+                     "HTTPException": HTTPException, "normalize_keywords": lambda values: values,
+                     "is_wml": lambda: False}
         exec(compile(ast.Module(body=nodes, type_ignores=[]), "api-month-validation", "exec"), namespace)
         canonical, model = namespace["canonical_royalty_report_params"], namespace["RoyaltyReportJobRequest"]
         model.model_rebuild(_types_namespace=namespace)

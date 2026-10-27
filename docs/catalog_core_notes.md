@@ -517,6 +517,42 @@ porcentaje a partir de un credito. Dashboard, otros reportes y el PDF contractua
 conservan sus motores, datos economicos, periodos y reglas actuales.
 BigQuery recibe las cuatro columnas en `royalty_catalog` sin sustituir hechos
 financieros ni los textos nativos usados para identidad.
+## Revision de asociaciones en Contratos
+
+Los videos sin ISRC pueden proponerse por titulo y creditos completos, incluidas
+diferencias de version (Remix, Live, etc.). Una diferencia de version conserva su
+advertencia y nunca demuestra identidad. Los titulos externos se consultan como
+evidencia solo cuando la respuesta original informa exactamente el mismo ISRC.
+No se cambia el titulo, identidad, ingreso ni contrato del catalogo por esa propuesta.
+Todas las propuestas por metadata, incluso las fuertes, necesitan confirmacion
+humana o descarte. Los identificadores nativos exactos conservan su tratamiento.
+
+La aprobacion economica y la revision de asociaciones son estados separados.
+Un contrato puede conservar su reparto cerrado y mostrar `Revision pendiente`.
+Los nuevos codigos propuestos no participan en su reparto hasta confirmacion;
+el reparto aprobado sigue aplicando a los ingresos identificados. `Por revisar`
+filtra esos contratos. Se pueden guardar decisiones parciales; finalizar la
+revision o cerrar por primera vez exige resolver todos los pendientes actuales.
+Los descartes se conservan por codigo, incluidas otras fuentes/cuentas.
+Las confirmaciones conservan su firma mientras no cambie la evidencia de identidad.
+
+El Job existente `vpo-catalog-refresh`, lanzado por el evento durable de publicacion,
+revisa cada release GCS/BigQuery coincidente aunque el dashboard ya este actualizado.
+Calcula la evidencia una vez por release y version de regla; bajo el mismo bloqueo
+que las decisiones humanas vuelve a leer todos los contratos antes de guardar.
+Solo escribe las tablas Postgres `master_contract_association_reviews`,
+`master_contract_association_review_history` y `master_contract_association_review_runs`.
+Nunca reabre el acuerdo economico, modifica sus porcentajes, ni confirma asociaciones.
+Cambios de importes/meses o reintentos identicos no generan otro evento de revision.
+Un fallo no marca la revision completada: el Job conserva su mecanismo de reintento.
+Los GET no hacen la conciliacion pesada ni confirman decisiones.
+
+Validacion: `qa_master_contract_review.py`, `qa_master_contract_metadata.py`,
+`qa_master_contract_associations.py`, `qa_catalog_refresh.py` y
+`web/scripts/qa_contract_logic.mjs`. Cubren diferencias original/remix, metadata
+externa, confirmacion/descarte, conservacion de decisiones, novedades de statements,
+idempotencia, cierre, guardado parcial y ejecucion con dashboard ya actualizado.
+
 # WML 91230 aislada
 
 El ámbito WML usa catálogo, estados y contratos propios, aunque un ISRC exista

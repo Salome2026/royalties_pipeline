@@ -191,8 +191,15 @@ def run_refresh() -> None:
                 if manifest["release_id"] != release:
                     time.sleep(30)
                     continue
+                from app.master_contract_review import review_published_release
+                review_published_release(client, manifest)
                 _, status = select_dashboard_release(release, state)
                 if status == "ready":
+                    # An event may have arrived while this worker held the lock.
+                    # Its other execution exits; this worker must pick up the latest release.
+                    latest = read_json("release_manifest.json", client).get("release_id")
+                    if latest != release or catalog_generation(client) != state["catalog_generation"]:
+                        continue
                     return
                 generation = state["catalog_generation"]
                 refresh_id = snapshot_id(release, generation)

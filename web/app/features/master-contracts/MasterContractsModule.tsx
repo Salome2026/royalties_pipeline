@@ -35,12 +35,14 @@ type ContractItem = {
   closed: boolean;
   future_reports_selected: boolean;
   version: number;
+  association_review_pending?: boolean;
+  association_pending_count?: number;
 };
 
 type ContractList = {
   items: ContractItem[];
   total: number;
-  summary: { open: number; closed: number };
+  summary: { open: number; closed: number; review?: number };
   offset: number;
   source_accounts: Array<{ source: string; account: string }>;
 };
@@ -91,7 +93,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   const [mode, setMode] = useState<"isrc" | "artists">("isrc");
   const [keyword, setKeyword] = useState("");
   const [appliedKeyword, setAppliedKeyword] = useState("");
-  const [status, setStatus] = useState<"all" | "open" | "closed">("all");
+  const [status, setStatus] = useState<"all" | "open" | "closed" | "review">("all");
   const [sourceAccount, setSourceAccount] = useState("");
   const [offset, setOffset] = useState(0);
   const [list, setList] = useState<ContractList | null>(null);
@@ -235,10 +237,10 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
     });
   }
 
-  async function save(nextClosed = closed, nextSelected = futureSelected) {
+  async function save(nextClosed = closed, nextSelected = futureSelected, completeReview = false) {
     if (!detail || !draft || !canEditCurrent) return;
     if (errors.length) { onMessage({ type: "error", text: errors[0] }); return; }
-    if (nextClosed && associationsIncomplete) {
+    if ((completeReview || (nextClosed && !detail.closed)) && associationsIncomplete) {
       onMessage({ type: "error", text: associationValidation.error || (associationValidation.loading
         ? "Esperá a que termine la validación de códigos asociados."
         : `Hay ${associationValidation.pending} códigos por validar. Incluí o descartá las propuestas antes de cerrar.`) });
@@ -254,6 +256,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
       const saved = await requestJson<{
         split: Split; closed: boolean; future_reports_selected: boolean; version: number;
         updated_by: string; updated_at: string;
+        association_review_pending?: boolean; association_pending_count?: number;
       }>(`/api/master-contracts/${encodeURIComponent(detail.isrc)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -262,6 +265,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
           closed: nextClosed,
           future_reports_selected: nextSelected,
           expected_version: detail.version,
+          complete_association_review: completeReview,
         }),
       });
       setDetail({ ...detail, ...saved, participant_proposal: null });
@@ -307,7 +311,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
             <h1>{detail.title || "Sin título"}</h1>
             <p>{detail.artist_suggestions.artists.join(", ") || "Participantes por confirmar"}</p>
           </div>
-          <span className={`${styles.status} ${closed ? styles.closed : styles.open}`}>{closed ? "Cerrado" : "Abierto"}</span>
+          <span className={`${styles.status} ${closed && !associationValidation.pending ? styles.closed : styles.open}`}>{associationValidation.pending ? "Revisión pendiente" : closed ? "Cerrado" : "Abierto"}</span>
           {canEditCurrent && !openAgreementId && dirty && <button type="button" className={styles.secondaryButton} disabled={saving || errors.length > 0} onClick={() => void save()}><FilePenLine size={16} />{saving ? "Guardando..." : "Guardar"}</button>}
         </header>
 
@@ -334,9 +338,11 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
         </details>
 
         {wml && <WmlReferences isrc={detail.isrc} />}
+        {!wml && closed && associationValidation.pending > 0 && <p className={styles.warning} role="status">Hay {associationValidation.pending} códigos por validar. La revisión de asociaciones está abierta; el reparto aprobado sigue vigente para los ingresos ya identificados.</p>}
         <ContractAssociationsPanel key={detail.isrc} isrc={detail.isrc} version={detail.version} canEdit={canEditCurrent && !saving}
           choices={draft.code_association_overrides || []} onChange={(choices) => updateDraft({ code_association_overrides: choices })}
           onValidationChange={setAssociationValidation} />
+        {!wml && closed && (detail.association_review_pending || dirty) && canEditCurrent && <button type="button" className={styles.primaryButton} disabled={saving || associationsIncomplete || errors.length > 0} onClick={() => void save(closed, futureSelected, true)}>Finalizar revisión de asociaciones</button>}
 
         <div className={`${styles.detailColumns} ${openAgreementId ? "" : styles.detailColumnsSolo}`}>
           <div className={styles.formColumn}>
@@ -435,10 +441,10 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
           {(list?.source_accounts || []).map(({ source, account }) => <option key={`${source}/${account}`} value={`${source}/${account}`}>{source.toUpperCase()} / {accountLabel(account)}</option>)}
         </select>
         <div className={styles.segmented} aria-label="Estado del reparto">
-          {(["all", "open", "closed"] as const).map((value) => <button type="button" key={value} aria-pressed={status === value} className={status === value ? styles.selected : ""} onClick={() => { setStatus(value); setOffset(0); }}>{value === "all" ? "Todos" : value === "open" ? "Abiertos" : "Cerrados"}</button>)}
+          {(["all", "open", "closed", "review"] as const).filter((value) => !wml || value !== "review").map((value) => <button type="button" key={value} aria-pressed={status === value} className={status === value ? styles.selected : ""} onClick={() => { setStatus(value); setOffset(0); }}>{value === "all" ? "Todos" : value === "open" ? "Abiertos" : value === "review" ? "Por revisar" : "Cerrados"}</button>)}
         </div>
       </form>
-      <div className={styles.listMeta}><span>{list ? `${list.total.toLocaleString("es-AR")} ISRC` : "Cargando catálogo..."}</span><span>{list?.summary.open.toLocaleString("es-AR") || "0"} abiertos · {list?.summary.closed.toLocaleString("es-AR") || "0"} cerrados</span></div>
+      <div className={styles.listMeta}><span>{list ? `${list.total.toLocaleString("es-AR")} ISRC` : "Cargando catálogo..."}</span><span>{list?.summary.open.toLocaleString("es-AR") || "0"} abiertos · {list?.summary.closed.toLocaleString("es-AR") || "0"} repartos cerrados{!wml && ` · ${list?.summary.review || 0} por revisar`}</span></div>
       <div className={styles.tableWrap}><table className={styles.table}>
         <thead><tr><th>Tema</th><th>ISRC</th><th>Crédito en catálogo</th><th>Ingreso acumulado</th><th>Estado</th></tr></thead>
         <tbody>
@@ -448,7 +454,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
             <td><button type="button" className={styles.isrcButton} onClick={() => void openDetail(item.isrc)}>{item.isrc}</button></td>
             <td className={styles.artistCell} title={item.artists_informed || ""}>{item.artists_informed || "-"}</td>
             <td className={styles.amountCell}><button type="button" className={styles.incomeButton} title="Ver ingreso del ISRC y asociados" aria-label={`Ingreso de ${item.isrc} y asociados`} onClick={() => void openDetail(item.isrc, true)}>{money(item.amount_usd)}<Link2 size={13} /></button>{Boolean(item.associated_amount_usd) && <small className={styles.incomeExtra}>Asociados: {money(item.associated_amount_usd)}</small>}</td>
-            <td><span className={`${styles.status} ${item.closed ? styles.closed : styles.open}`}>{item.closed ? "Cerrado" : "Abierto"}</span>{item.future_reports_selected && <small className={styles.futureNote}>Futura aplicación</small>}</td>
+            <td><span className={`${styles.status} ${item.closed && !item.association_review_pending ? styles.closed : styles.open}`}>{item.association_review_pending ? "Revisión pendiente" : item.closed ? "Cerrado" : "Abierto"}</span>{item.association_review_pending && <small className={styles.futureNote}>{item.association_pending_count} códigos por validar{item.closed ? " · Reparto aprobado" : ""}</small>}{item.future_reports_selected && <small className={styles.futureNote}>Futura aplicación</small>}</td>
           </tr>)}
         </tbody>
       </table></div>

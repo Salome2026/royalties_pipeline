@@ -163,7 +163,8 @@ def candidates(
         exact = (
             canonical == f"ISRC:{isrc}" or (kind == "TRACK" and observed == [isrc])
         )
-        automatic = not blocked and (exact or (inferred and row.get("inference_status") == "strong"))
+        # Only native, exact identifiers are facts. Every metadata proposal needs a person.
+        automatic = not blocked and exact
         if other_owners:
             reason = f"Incluido en el contrato de {', '.join(sorted(other_owners))}."
         elif row.get("native_ada_product"):
@@ -213,6 +214,7 @@ def candidates(
             "evidence_signature": signature,
             "requires_review": inferred and not exact,
             "inference_rule": row.get("inference_rule") if inferred and not exact else None,
+            "proposed_isrcs": row.get("inferred_isrcs") or [],
             "reference_group": "ugc" if ugc_reference else "associated",
             "content_origins": origins,
         })

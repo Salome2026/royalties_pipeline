@@ -52,8 +52,12 @@ Vigencias inclusivas, statement representado por su primer dia. Hasta vacio usa
 la fecha del pedido en America/New_York. Solo se distribuyen contratos cerrados
 y validos. Contratos abiertos, invalidos, ingresos fuera de vigencia y codigos
 sin contrato permanecen separados, sin inferir ISRC por titulo en el PDF ni perder
-dinero. Las asociaciones fuertes o confirmadas se resuelven en el pedido con las
+dinero. Las asociaciones exactas por identificadores nativos o confirmadas se resuelven en el pedido con las
 reglas compartidas de Contratos.
+Las propuestas por metadata nunca se incluyen sin confirmacion. El pedido fija
+tambien la generacion de metadata externa utilizada como evidencia. Una revision
+de asociaciones pendiente conserva el acuerdo economico aprobado; los nuevos
+codigos permanecen pendientes sin invalidar el reparto de los ingresos identificados.
 
 El calculo replica contractLogic.ts (bolsas, socios, contrato interno y legado)
 con prueba cruzada obligatoria. Se consolidan beneficiarios ANTES del redondeo

@@ -41,6 +41,34 @@ def strip_display_marker(value: str) -> str:
     return value
 
 
+def title_family(value: str) -> str:
+    """Discovery only: a different version is a proposal, never proof of identity."""
+    return " ".join(VERSION_MARKERS.sub(" ", normalized(value)).split())
+
+
+def with_external_titles(catalog: list[dict], metadata: list[dict]) -> list[dict]:
+    titles: dict[str, set[str]] = defaultdict(set)
+    for row in metadata:
+        isrc = str(row.get("lookup_isrc") or "").upper()
+        if row.get("metadata_status") != "found" or not isrc:
+            continue
+        raw = row.get("raw_json") or {}
+        try:
+            decoded = json.loads(raw) if isinstance(raw, str) else raw
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(decoded, dict) or not isinstance(decoded.get("selected"), dict):
+            continue
+        selected = decoded["selected"]
+        identifiers = selected.get("external_ids") or {}
+        if not isinstance(identifiers, dict) or str(identifiers.get("isrc") or "").upper() != isrc:
+            continue
+        if selected.get("name"):
+            titles[isrc].add(selected["name"])
+    return [{**row, "contract_external_titles": sorted(titles.get(row.get("asset_isrc"), set()))}
+            for row in catalog]
+
+
 def complete_performers(block: str, performers: frozenset[str]) -> bool:
     remaining, seen = normalized(block).replace(" ", ""), set()
     while remaining:
@@ -63,6 +91,7 @@ def complete_performers(block: str, performers: frozenset[str]) -> bool:
 def infer_video_evidence(catalog: list[dict], evidence: list[dict]) -> list[dict]:
     """Compare full credits; alternate credits can veto uniqueness, not prove it."""
     by_title: dict[str, list[dict]] = defaultdict(list)
+    by_family: dict[str, list[dict]] = defaultdict(list)
     for row in catalog:
         isrc = str(row.get("asset_isrc") or "")
         if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}[0-9]{7}", isrc):
@@ -72,9 +101,12 @@ def infer_video_evidence(catalog: list[dict], evidence: list[dict]) -> list[dict
         credit_conflict = any(names - primary for names in variants)
         item = {"isrc": isrc, "primary": primary, "variants": variants | {primary},
                 "credit_conflict": credit_conflict, "title": normalized(row.get("track_title"))}
-        for title in {row.get("track_title"), *str(row.get("title_variants") or "").split(" | ")}:
+        for title in {row.get("track_title"), *str(row.get("title_variants") or "").split(" | "),
+                      *(row.get("contract_external_titles") or [])}:
             if normalized(title):
                 by_title[normalized(title)].append(item)
+                if title_family(title):
+                    by_family[title_family(title)].append(item)
 
     videos: dict[str, list[dict]] = defaultdict(list)
     for row in evidence:
@@ -98,7 +130,9 @@ def infer_video_evidence(catalog: list[dict], evidence: list[dict]) -> list[dict
                     pairs.extend((strip_display_marker(title), artist) for artist in artists
                                  if normalized(artist) != normalized(title))
                 for track, block in pairs:
-                    for candidate in by_title.get(normalized(track), []):
+                    exact_titles = by_title.get(normalized(track), [])
+                    related_titles = by_family.get(title_family(track), [])
+                    for candidate in exact_titles + related_titles:
                         if not any(complete_performers(block, names) for names in candidate["variants"]):
                             continue
                         found = True
@@ -115,7 +149,7 @@ def infer_video_evidence(catalog: list[dict], evidence: list[dict]) -> list[dict
         if not matches:
             continue
         status = "strong"
-        note = "Coinciden tema y todos los participantes con un unico ISRC."
+        note = "Coinciden tema y todos los participantes con un unico ISRC; requiere tu confirmacion."
         if len(matches) != 1:
             status, note = "ambiguous", "Tema y participantes coinciden con varios ISRC; requiere elegir el asset correcto."
         elif version_warning:

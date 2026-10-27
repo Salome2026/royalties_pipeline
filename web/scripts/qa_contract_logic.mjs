@@ -15,11 +15,12 @@ const associationSource = readFileSync(new URL("../app/features/master-contracts
 const associationCompiled = ts.transpileModule(associationSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
 const associations = await import(`data:text/javascript;base64,${Buffer.from(associationCompiled).toString("base64")}`);
 const video = { key: JSON.stringify(["VIDEO", "uqY-3RS-V0Y", "fuga", "indyana_records"]), code: "uqY-3RS-V0Y",
-  automatic: true, selectable: true, evidence_signature: "current", requires_review: true };
+  automatic: true, selectable: true, evidence_signature: "current", requires_review: false };
 const selected = { key: video.key, included: true, evidence_signature: "current" };
 assert.equal(associations.associationState(video, []).status, "automatic");
 assert.deepEqual(associations.pendingAssociationCodes([video], []), []);
 const pendingVideo = { ...video, automatic: false };
+assert.equal(associations.associationState({ ...video, requires_review: true }, []).pending, true);
 assert.deepEqual(associations.pendingAssociationCodes([pendingVideo], []), [video.code]);
 assert.deepEqual(associations.pendingAssociationCodes([pendingVideo], [selected]), []);
 assert.deepEqual(associations.pendingAssociationCodes([pendingVideo], [{ ...selected, included: false }]), []);
@@ -27,7 +28,7 @@ assert.equal(associations.associationState({ ...video, evidence_signature: "chan
 const anotherAccount = { ...video, key: JSON.stringify(["VIDEO", video.code, "onerpm", "la_nueva_sangre"]) };
 assert.equal(associations.associationState(anotherAccount, [{ ...selected, included: false }]).status, "excluded");
 assert.deepEqual(associations.pendingAssociationCodes([], [selected]), [video.code]);
-assert.equal(associations.associationState({ ...video, automatic: false, selectable: false }, []).pending, true);
+assert.equal(associations.associationState({ ...video, automatic: false, selectable: false, requires_review: true }, []).pending, true);
 assert.equal(associations.associationState({ ...video, automatic: false, selectable: false, requires_review: false }, []).pending, false);
 console.log("Associated-code automatic validation, explicit discard, changed evidence and close gate: PASS");
 const typedVideo = { ...video, kind: "VIDEO", source: "fuga", account: "indyana_records", titles: ["Tema"], artists: ["Artista"], isrcs: ["ISRC"], reason: "Exact" };

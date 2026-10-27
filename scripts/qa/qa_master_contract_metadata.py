@@ -30,21 +30,24 @@ class ContractMetadataTests(unittest.TestCase):
     def items(self, rows=None, overrides=None, catalog=None, claims=None):
         return candidates(ISRC, self.infer(catalog, rows), {f"VIDEO:{VIDEO}": f"VIDEO:{VIDEO}"}, overrides or [], claims or {})
 
-    def test_strong_video_included_without_catalog_or_evidence_mutation(self):
+    def test_strong_video_requires_confirmation_without_catalog_or_evidence_mutation(self):
         catalog, rows = [recording()], [video()]
         before = copy.deepcopy((catalog, rows))
         inferred = self.infer(catalog, rows)
         item = self.items(rows, catalog=catalog)[0]
         self.assertEqual(inferred[0]["inferred_isrcs"], [ISRC])
-        self.assertEqual(item["status"], "automatic")
-        self.assertTrue(item["included"])
+        self.assertEqual(item["status"], "pending")
+        self.assertFalse(item["included"])
         self.assertEqual((catalog, rows), before)
-        validate_closure([item], [])
+        with self.assertRaises(ValueError):
+            validate_closure([item], [])
+        validate_closure([item], [choice(item)])
 
     def test_normalization_order_accents_and_full_artist_credit(self):
         item = self.items([video(titles=["MC Tota & DJPlaga - MOVIM\u00c9NTO (Official Video)"])],
                           catalog=[recording(title="Movim\u00e9nto")])[0]
-        self.assertTrue(item["automatic"])
+        self.assertFalse(item["automatic"])
+        self.assertTrue(item["selectable"])
 
     def test_partial_artist_variant_not_used_as_proof(self):
         rows = self.infer([recording(artist_variants="DJ Plaga")],
@@ -83,12 +86,14 @@ class ContractMetadataTests(unittest.TestCase):
         rows = self.infer(rows=[video(artists=["Movimento - DJ Plaga, MC Tota (Video Oficial) Set Session 1"])])
         self.assertEqual(rows[0]["inference_status"], "version")
         rows = self.infer(rows=[video(titles=["DJ Plaga, MC Tota - Movimento (Remix)"])])
-        self.assertNotIn("inferred_isrcs", rows[0])
+        self.assertEqual(rows[0]["inference_status"], "version")
+        self.assertEqual(rows[0]["inferred_isrcs"], [ISRC])
 
-    def test_explicit_same_remix_version_can_be_automatic(self):
+    def test_explicit_same_remix_version_still_needs_confirmation(self):
         item = self.items([video(titles=["DJ Plaga, MC Tota - Movimento (Remix) (Video Oficial)"])],
                           catalog=[recording(title="Movimento (Remix)")])[0]
-        self.assertTrue(item["automatic"])
+        self.assertFalse(item["automatic"])
+        self.assertTrue(item["selectable"])
 
     def test_changed_source_title_cannot_silently_reassign(self):
         rows = self.infer(rows=[video(titles=["Movimento - DJ Plaga, MC Tota (Video Oficial)", "Otra Cancion - Otro Artista"])])
@@ -157,12 +162,15 @@ class ContractMetadataTests(unittest.TestCase):
         rows = infer_video_evidence([recording()], [evidence(isrcs=[], titles=["Movimento"], artists=["DJ Plaga and MC Tota"])])
         self.assertNotIn("inferred_isrcs", rows[0])
 
-    def test_automatic_income_counts_once_and_respects_statement_cutoff(self):
+    def test_confirmed_income_counts_once_and_respects_statement_cutoff(self):
         row = {"source": "fuga", "account": "indyana_records", "asset_isrc": "", "video_id": VIDEO,
                "track_id": VIDEO, "product_upc": "", "statement_period": "2026-06", "amount_usd": 10}
         evidence_rows = self.infer()
+        item = self.items()[0]
+        self.assertEqual(consolidate_associated_income([row], evidence_rows,
+            {f"VIDEO:{VIDEO}": f"VIDEO:{VIDEO}"}, {}, {}, "2026-06"), {})
         result = consolidate_associated_income([row, {**row, "statement_period": "2026-07", "amount_usd": 100}],
-            evidence_rows, {f"VIDEO:{VIDEO}": f"VIDEO:{VIDEO}"}, {}, {}, "2026-06")
+            evidence_rows, {f"VIDEO:{VIDEO}": f"VIDEO:{VIDEO}"}, {ISRC: [choice(item)]}, {}, "2026-06")
         self.assertEqual(result[ISRC]["amount_usd"], 10)
         self.assertEqual(sum(group["amount_usd"] for group in result[ISRC]["groups"]), 10)
         item = self.items()[0]

@@ -38,10 +38,10 @@ function AssociationTable({ groups, isrc, choices, canEdit, ugc = false, onDecid
                 <option value="included" disabled={!state.selectable}>Incluir</option><option value="excluded">Descartar</option>
                 {decision === "pending" && state.automatic && <option value="pending" disabled>Por validar</option>}
               </select> : <span className={state.included || state.status === "excluded" ? styles.associationValid : styles.associationPending}>{labels[state.status]}</span>}</td>
-            <td><small>{ugc ? "Video / UGC" : group.kind === "VIDEO" ? artTrack ? "Audio YouTube" : "Video" : group.kind === "TRACK" ? "ID de plataforma" : group.kind}</small><strong>{group.code}</strong></td>
+            <td><small>{ugc ? "Video / UGC" : group.kind === "VIDEO" ? artTrack ? "Audio YouTube" : "Video" : group.kind === "TRACK" ? "ID de plataforma" : group.kind}</small>{group.kind === "VIDEO" ? <a href={`https://www.youtube.com/watch?v=${encodeURIComponent(group.code)}`} target="_blank" rel="noopener noreferrer">{group.code}</a> : <strong>{group.code}</strong>}</td>
             <td>{group.items.map((item) => <div className={styles.associationSource} key={item.key}>{item.source.toUpperCase()}<small>{item.account.replace(/_/g, " ")}</small></div>)}</td>
             <td>{unique(group.items.flatMap((item) => item.titles)).join(" / ") || "Sin título"}<small>{unique(group.items.flatMap((item) => item.artists)).join(" / ")}</small></td>
-            <td>{ugc ? isrcs.map((value) => <small key={value}>{value}</small>) : <>{unique(group.items.map((item) => item.reason)).map((reason) => <small key={reason}>{reason}</small>)}{shared && <small>{isrcs.join(" · ")}</small>}</>}</td>
+            <td>{ugc ? isrcs.map((value) => <small key={value}>{value}</small>) : <>{unique(group.items.map((item) => item.reason)).map((reason) => <small key={reason}>{reason}</small>)}{unique(group.items.flatMap((item) => item.proposed_isrcs || [])).map((value) => <small key={value}>ISRC propuesto: {value}</small>)}{shared && <small>{isrcs.join(" · ")}</small>}</>}</td>
           </tr>;
         })}</tbody>
       </table>
@@ -127,6 +127,7 @@ export function ContractAssociationsPanel({ isrc, version, canEdit, choices, onC
           <label><Search size={14} /><input aria-label="Buscar código asociado" placeholder="Buscar código" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
         </div>
         <h4 className={styles.associationsSectionTitle}>Asociados del contrato</h4>
+        <p className={styles.auditLine}>Las coincidencias de título, versión o participantes son propuestas. Confirmá o descartá cada pendiente; sus ingresos no se asignan por parecido.</p>
         <AssociationTable key={`associated:${tableKey}`} groups={associated} isrc={isrc} choices={choices} canEdit={canEdit} onDecide={decide} />
         {ugcCount > 0 && <div className={styles.associationsUgc}>
           <div className={styles.associationsHeading}>

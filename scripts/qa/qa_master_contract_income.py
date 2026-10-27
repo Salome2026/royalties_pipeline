@@ -19,6 +19,10 @@ def sale(**changes):
 
 
 class ContractIncomeTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(api, "read_association_review_states", return_value={}))
+        self.enterContext(patch("app.catalog_metadata_review.read_state", return_value=({}, {})))
+
     def calculate(self, rows=None, items=None, aliases=None, choices=None, claims=None):
         return consolidate_associated_income(rows or [sale()], items or [evidence()],
             aliases if aliases is not None else {"UPC:8721466047355": f"ISRC:{ISRC}"},

@@ -33,7 +33,7 @@ def published_contract_catalog(client, manifest: dict) -> list[dict]:
 def freeze_contract_associations(snapshot: dict, frame: pl.DataFrame, contracts: list[dict], release_id: str,
                                 *, input_manifest: dict) -> dict:
     from app.master_contract_income import associated_income_isrc, income_association_index, published_unassigned_income
-    from app.master_contract_metadata import infer_video_evidence
+    from app.master_contract_metadata import infer_video_evidence, with_external_titles
     from scripts.lib.catalog_report_filter import catalog_alias_lookup
     from app.royalty_reports.contract_identity import unsafe_ranking_slot_keys
 
@@ -47,7 +47,14 @@ def freeze_contract_associations(snapshot: dict, frame: pl.DataFrame, contracts:
                for row in catalog_alias_lookup(catalog=frame).to_dicts()}
     choices = {row["isrc"]: row["split"].get("code_association_overrides") or [] for row in contracts}
     claims = {choice["key"]: root for root, values in choices.items() for choice in values if choice.get("included")}
-    index = income_association_index(infer_video_evidence(frame.to_dicts(), evidence), aliases, choices, claims)
+    catalog_rows = frame.to_dicts()
+    metadata_entry = input_manifest.get("objects", {}).get("catalog_release_metadata.parquet")
+    if metadata_entry:
+        from google.cloud import storage
+        metadata_bytes = storage.Client().bucket(input_manifest["bucket"]).blob(
+            metadata_entry["object"], generation=int(metadata_entry["generation"])).download_as_bytes()
+        catalog_rows = with_external_titles(catalog_rows, pl.read_parquet(BytesIO(metadata_bytes)).to_dicts())
+    index = income_association_index(infer_video_evidence(catalog_rows, evidence), aliases, choices, claims)
     codes: dict[str, set[tuple[str, str]]] = {}
     for row in evidence:
         if row["kind"] in {"VIDEO", "TRACK"}:

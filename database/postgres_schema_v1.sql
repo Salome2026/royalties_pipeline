@@ -890,6 +890,32 @@ CREATE TABLE IF NOT EXISTS catalog_status (
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+-- The approved economic agreement remains intact when new associations need review.
+CREATE TABLE IF NOT EXISTS master_contract_association_reviews (
+    isrc text PRIMARY KEY,
+    release_id text NOT NULL,
+    contract_version bigint NOT NULL,
+    pending_json jsonb NOT NULL DEFAULT '[]'::jsonb,
+    review_fingerprint text NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS master_contract_association_review_history (
+    id bigserial PRIMARY KEY,
+    isrc text NOT NULL,
+    release_id text NOT NULL,
+    contract_version bigint NOT NULL,
+    pending_json jsonb NOT NULL,
+    review_fingerprint text NOT NULL,
+    changed_by text NOT NULL,
+    changed_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS master_contract_association_review_runs (
+    release_id text NOT NULL,
+    rule_version text NOT NULL,
+    checked_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (release_id, rule_version)
+);
+
 CREATE TABLE IF NOT EXISTS catalog_label_overrides (
     catalog_key text PRIMARY KEY,
     label_normalized_override text,

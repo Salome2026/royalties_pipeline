@@ -74,7 +74,8 @@ from app.master_contract_associations import (
     validate_choices as validate_contract_associations,
     validate_closure as validate_contract_association_closure,
 )
-from app.master_contract_metadata import infer_video_evidence
+from app.master_contract_metadata import infer_video_evidence, with_external_titles
+from app.master_contract_review import read_states as read_association_review_states, save_review as save_association_review
 from app.master_contract_income import (
     combined_income as combined_contract_income,
     consolidate_associated_income,
@@ -408,6 +409,7 @@ class MasterContractSaveRequest(BaseModel):
     closed: bool = False
     future_reports_selected: bool = False
     expected_version: int = Field(default=0, ge=0)
+    complete_association_review: bool = False
 
 
 class MasterArtistContractSaveRequest(BaseModel):
@@ -7496,7 +7498,10 @@ def create_royalty_report_job(
             bucket_name=GCS_BUCKET,
             prefix=wml_release_prefix() if is_wml() else GCS_PREFIX,
             **({'filenames': ('song_level_all_sources.parquet','standardized_raw_all_sources.parquet',
-                'catalog_master.parquet','catalog_status.parquet','wml_isrc_references.parquet')} if is_wml() else {}),
+                'catalog_master.parquet','catalog_status.parquet','wml_isrc_references.parquet')} if is_wml() else
+               {'filenames': ('song_level_all_sources.parquet','standardized_raw_all_sources.parquet',
+                'catalog_master.parquet','catalog_status.parquet',CATALOG_RELEASE_METADATA_FILE)}
+               if request.executive_mode == "contractual" else {}),
         )
         if is_wml():
             from app.royalty_workspace_store import records
@@ -8515,7 +8520,7 @@ def master_contract_associated_income(choices: dict[str, list[dict]]) -> dict[st
             return {}
         aliases = {row["alias_catalog_key"]: row["catalog_key"]
                    for row in catalog_alias_lookup(marts[CATALOG_MASTER_FILE]).to_dicts()}
-        evidence = infer_video_evidence(pl.read_parquet(marts[CATALOG_MASTER_FILE]).to_dicts(), evidence)
+        evidence = infer_video_evidence(contract_metadata_catalog(pl.read_parquet(marts[CATALOG_MASTER_FILE]).to_dicts()), evidence)
         claims = {choice["key"]: root for root, values in choices.items()
                   for choice in values if choice.get("included")}
         schema = {key: pl.Int64 if key == "raw_rows" else pl.Utf8 for key in rows[0] if key != "amount_usd"}
@@ -8604,7 +8609,7 @@ def put_master_contract_artist(
 @app.get("/master-contracts")
 def list_master_contracts(
     keyword: str | None = None,
-    status: Literal["all", "open", "closed"] = "all",
+    status: Literal["all", "open", "closed", "review"] = "all",
     limit: int = 50,
     offset: int = 0,
     source: str | None = None,
@@ -8617,6 +8622,7 @@ def list_master_contracts(
         require_master_contract_user(conn, x_vpo_username, "access")
         states = read_split_statuses(conn)
         choices = read_contract_association_choices(conn)
+        review_states = read_association_review_states(conn)
     catalog = master_contract_catalog(master_contract_associated_income(choices))
     memberships = master_contract_source_accounts().join(catalog.select("asset_isrc"), on="asset_isrc", how="semi")
     source_accounts = memberships.select("source", "account").drop_nulls().unique().sort(["source", "account"]).to_dicts()
@@ -8642,10 +8648,13 @@ def list_master_contracts(
     summary = {
         "open": sum(not states.get(row["asset_isrc"], {}).get("closed", False) for row in all_rows),
         "closed": sum(states.get(row["asset_isrc"], {}).get("closed", False) for row in all_rows),
+        "review": sum(review_states.get(row["asset_isrc"], {}).get("association_review_pending", False) for row in all_rows),
     }
     filtered = [
         row for row in all_rows
-        if status == "all" or bool(states.get(row["asset_isrc"], {}).get("closed", False)) == (status == "closed")
+        if status == "all" or (review_states.get(row["asset_isrc"], {}).get("association_review_pending", False)
+                              if status == "review" else
+                              bool(states.get(row["asset_isrc"], {}).get("closed", False)) == (status == "closed"))
     ]
     safe_offset = max(0, offset)
     safe_limit = max(1, min(limit, 100))
@@ -8661,6 +8670,7 @@ def list_master_contracts(
             "last_month": row["_contract_last_statement_month"],
             "sources": row["sources"],
             **states.get(row["asset_isrc"], {"closed": False, "future_reports_selected": False, "version": 0}),
+            **review_states.get(row["asset_isrc"], {}),
         }
         for row in filtered[safe_offset:safe_offset + safe_limit]
     ]
@@ -8677,6 +8687,13 @@ def list_master_contracts(
     }
 
 
+def contract_metadata_catalog(catalog: list[dict]) -> list[dict]:
+    # External titles are evidence for proposals; they never rewrite the catalog.
+    paths = ensure_marts(filenames=[CATALOG_RELEASE_METADATA_FILE])
+    path = paths.get(CATALOG_RELEASE_METADATA_FILE)
+    return with_external_titles(catalog, pl.read_parquet(path).to_dicts()) if path else catalog
+
+
 def master_contract_associations(isrc: str, choices: list[dict[str, Any]], claims: dict[str, str]) -> list[dict[str, Any]]:
     if is_wml():return []
     path = ensure_marts(filenames=[CATALOG_MASTER_FILE])[CATALOG_MASTER_FILE]
@@ -8689,7 +8706,7 @@ def master_contract_associations(isrc: str, choices: list[dict[str, Any]], claim
         if not release_id:
             raise ValueError("No hay una version publicada disponible.")
         _, published = published_unassigned_income(release_id)
-        inferred = infer_video_evidence(catalog.to_dicts(), published)
+        inferred = infer_video_evidence(contract_metadata_catalog(catalog.to_dicts()), published)
         evidence = contract_identity_evidence(isrc, matches.row(0, named=True), release_id=release_id)
         by_key = {json.dumps([row["kind"], row["code"], row["source"], row["account"]], separators=(",", ":")): row
                   for row in evidence}
@@ -8748,6 +8765,7 @@ def get_master_contract(
         saved = read_split(conn, clean)
         contracts = active_artist_contracts(conn)
         choices = read_contract_association_choices(conn)
+        review = read_association_review_states(conn).get(clean, {})
         from app.master_contract_participants import read_participant_history
         participant_history = read_participant_history(conn, clean) if not is_wml() and saved and not saved["closed"] and is_postgres_connection(conn) else []
     extras = master_contract_associated_income(choices)
@@ -8802,6 +8820,7 @@ def get_master_contract(
         "split": proposed,
         "participant_proposal": participant_proposal,
         "closed": saved["closed"] if saved else False,
+        **review,
         "future_reports_selected": saved["future_reports_selected"] if saved else False,
         "version": saved["version"] if saved else 0,
         "updated_by": saved["updated_by"] if saved else None,
@@ -8829,7 +8848,7 @@ def put_master_contract(
         if master_contract_catalog().filter(pl.col("asset_isrc") == clean).is_empty():
             raise HTTPException(status_code=404, detail="El ISRC no figura en el catálogo publicado.")
         previous = read_split(conn, clean)
-        if bool(previous and previous["closed"]) or request.closed or request.future_reports_selected != bool(previous and previous["future_reports_selected"]):
+        if bool(previous and previous["closed"]) or request.closed or request.complete_association_review or request.future_reports_selected != bool(previous and previous["future_reports_selected"]):
             require_master_contract_user(conn, actor, "approve")
         try:
             split = preserve_contract_associations(request.split.model_dump(), previous)
@@ -8837,7 +8856,8 @@ def put_master_contract(
                 raise ValueError("La ficha cambió desde que la abriste. Actualizala antes de guardar.")
             old_choices = ((previous or {}).get("split") or {}).get("code_association_overrides") or []
             choices = split.get("code_association_overrides") or []
-            if choices != old_choices or request.closed:
+            items = None
+            if choices != old_choices or request.closed or request.complete_association_review:
                 if not is_postgres_connection(conn):
                     raise ValueError("Los códigos asociados usan exclusivamente Cloud SQL Postgres.")
                 # Serialize explicit claims across different contracts, not just each ISRC's version.
@@ -8845,7 +8865,7 @@ def put_master_contract(
                 claims = read_contract_association_claims(conn)
                 items = master_contract_associations(clean, old_choices, claims)
                 validate_contract_associations(choices, old_choices, items)
-                if request.closed:
+                if request.complete_association_review or (request.closed and not (previous or {}).get("closed")):
                     validate_contract_association_closure(items, choices)
             saved = save_split(
                 conn, clean, split,
@@ -8854,6 +8874,11 @@ def put_master_contract(
                 expected_version=request.expected_version,
                 actor=actor,
             )
+            if not is_wml() and items is not None:
+                from app.master_contract_review import ensure_schema as ensure_review_schema
+                ensure_review_schema(conn)
+                saved.update(save_association_review(conn, clean, saved["version"],
+                    mart_release_cache().status().get("active_release_id") or "", items, choices, actor))
         except ValueError as exc:
             status_code = 409 if "cambió desde" in str(exc) else 400
             raise HTTPException(status_code=status_code, detail=str(exc)) from exc

@@ -27,6 +27,9 @@ from app import vpo_corp_api
 
 
 class MasterContractsPilotTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.object(vpo_corp_api, "read_association_review_states", return_value={}))
+
     def test_pool_model_ownership_is_independent_of_participation_and_rules_survive_api(self) -> None:
         allocation = {"principal": "Gusty DJ", "principal_percent": 30, "participants": [],
                       "principal_rule": {"treatment": "direct"}}
@@ -309,7 +312,7 @@ class MasterContractsPilotTests(unittest.TestCase):
                 patch.object(vpo_corp_api, "master_contract_source_accounts", return_value=memberships):
             all_rows = vpo_corp_api.list_master_contracts(x_vpo_username="tester")
             self.assertEqual([item["isrc"] for item in all_rows["items"]], codes)
-            self.assertEqual(all_rows["summary"], {"open": 3, "closed": 1})
+            self.assertEqual(all_rows["summary"], {"open": 3, "closed": 1, "review": 0})
             self.assertEqual(len(all_rows["source_accounts"]), 6)
             for source, account, expected in [
                 ("ada", "indyana_records", codes[2]), ("onerpm", "indyana_records", codes[1]),
@@ -327,7 +330,7 @@ class MasterContractsPilotTests(unittest.TestCase):
             page = vpo_corp_api.list_master_contracts(source="onerpm", status="open", limit=1, offset=1, x_vpo_username="tester")
             self.assertEqual([item["isrc"] for item in page["items"]], [codes[3]])
             self.assertEqual(page["total"], 2)
-            self.assertEqual(page["summary"], {"open": 2, "closed": 1})
+            self.assertEqual(page["summary"], {"open": 2, "closed": 1, "review": 0})
             unknown = vpo_corp_api.list_master_contracts(source="ada", account="henry_remix", x_vpo_username="tester")
             self.assertEqual(unknown["total"], 0)
 
