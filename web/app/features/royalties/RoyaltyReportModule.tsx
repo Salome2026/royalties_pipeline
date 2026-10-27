@@ -192,7 +192,7 @@ export function RoyaltyReportModule({ onMessage }: Props) {
       }
       artists = selection.artists;
     }
-    if (output === "excel" && terms.length === 0) {
+    if (output === "excel" && terms.length === 0 && !wml) {
       onMessage({ type: "error", text: "Ingresá al menos una palabra clave para el Excel detallado." });
       return null;
     }
@@ -370,15 +370,15 @@ export function RoyaltyReportModule({ onMessage }: Props) {
             )}
 
             <div className={styles.field}>
-              <label htmlFor="royalty_keywords">{contractual ? "Tema / ISRC" : "Palabras clave"} {output === "executive_pdf" && <em>Opcional</em>}</label>
+              <label htmlFor="royalty_keywords">{contractual ? "Tema / ISRC" : "Palabras clave"} {(wml || output === "executive_pdf") && <em>Opcional</em>}</label>
               <input
                 id="royalty_keywords"
                 value={keywords}
                 onChange={(event) => setKeywords(event.target.value)}
-                placeholder={contractual ? "Todos los temas o un ISRC puntual" : output === "executive_pdf" ? "Todo el alcance o una búsqueda puntual" : "Ej. Gusty DJ, ISRC, nombre del tema"}
-                required={output === "excel"}
+                placeholder={wml ? "Todo WML o una búsqueda puntual" : contractual ? "Todos los temas o un ISRC puntual" : output === "executive_pdf" ? "Todo el alcance o una búsqueda puntual" : "Ej. Gusty DJ, ISRC, nombre del tema"}
+                required={output === "excel" && !wml}
               />
-              <small>Separá varias búsquedas con coma o punto y coma.</small>
+              <small>{wml ? "Dejá vacío para incluir todo WML, respetando los demás filtros." : "Separá varias búsquedas con coma o punto y coma."}</small>
             </div>
 
             <div className={styles.periodField}>
@@ -447,6 +447,7 @@ export function RoyaltyReportModule({ onMessage }: Props) {
                     onChange={(event) => setRawLimit(event.target.value)}
                   />
                   <small>Ingrese un valor entre 0 y 50.000. Use 0 para generar solo los resúmenes.</small>
+                  {wml && <small>Los resúmenes incluyen todo el alcance elegido. Este límite solo recorta las filas del detalle.</small>}
                 </div>
                 <div className={styles.detailOptions} aria-label="Opciones de detalle">
                   <label className={detailMode === "top_countries" ? styles.detailOptionActive : ""}>

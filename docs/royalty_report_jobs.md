@@ -49,6 +49,11 @@ Excel, Google Sheets y PDF. El valor inicial incluye todas las distribuidoras
 del ámbito elegido. Cambiar distribuidora limpia la cuenta seleccionada.
 Los filtros se conservan en los parámetros del trabajo y se aplican a
 resúmenes, detalle y conteo previo de filas. WML conserva su ámbito separado.
+Solo dentro del ámbito WML, Excel y Google Sheets admiten palabras clave
+vacías para informar todo el catálogo 91230. La API obtiene ese ámbito del
+contexto autenticado; elegir una distribuidora no habilita la excepción en
+royalties habituales. Los demás filtros siguen aplicándose y el límite de
+filas afecta solo al detalle. El detalle completo conserva el máximo de Excel.
 
 ### API operativa `vpo-corp-api`
 

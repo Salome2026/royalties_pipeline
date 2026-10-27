@@ -20,6 +20,22 @@ from lib.distributor_policy_store import use_distributor_policy_snapshot
 
 
 class ReportSourceFilterTests(unittest.TestCase):
+    def test_api_preserves_source_and_account_for_every_output(self):
+        from app import vpo_corp_api as api
+        from app.royalty_scope import use_scope
+        from fastapi import HTTPException
+        policy={'entries':[{'source':'fuga','account':'mawz'}]}
+        for output in ('excel','google_sheet','executive_pdf'):
+            with self.subTest(output=output),use_scope('regular'):
+                params=api.canonical_royalty_report_params(api.RoyaltyReportJobRequest(
+                    output=output,keywords=['tema'],source='FUGA',account='MAWZ'),policy)
+                self.assertEqual((params['source'],params['account']),('fuga','mawz'))
+                for source,account in [(None,'mawz'),('other',None),('fuga','other')]:
+                    with self.assertRaises(HTTPException) as invalid:
+                        api.canonical_royalty_report_params(api.RoyaltyReportJobRequest(
+                            output=output,keywords=['tema'],source=source,account=account),policy)
+                    self.assertEqual(invalid.exception.status_code,400)
+
     def test_distributor_and_account_filter_the_actual_outputs_and_count(self):
         rows = []
         for source, account, amount in [('fuga', 'mawz', 100.0), ('fuga', 'mawz', -10.0),

@@ -44,6 +44,13 @@ y contratos distintos en ambos ámbitos. Los reportes congelan ámbito,
 generaciones de GCS, política y decisiones del catálogo para reproducirlos
 después, incluso si WML se desactiva. Los reportes históricos no se borran.
 
+En Reporte de regalías, dejar Palabras clave vacío incluye todo WML, con los
+filtros de período, distribuidora y cuenta que se hayan elegido. Excel y Google
+Sheets permiten esta excepción únicamente en el ámbito WML. Los resúmenes
+abarcan todos los ingresos seleccionados aunque se limite el detalle; con
+cero filas se generan solo resúmenes y referencias. El detalle completo sigue
+sujeto al máximo de filas de Excel.
+
 Localhost también lee la versión WML publicada en GCS. El directorio local de
 marts habituales no cambia ese comportamiento. `VPO_WML_LOCAL_ROOT` se reserva
 para verificación offline explícita y exige coincidir con el release publicado.

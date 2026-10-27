@@ -49,7 +49,8 @@ class ReportRequest:
         end_month = params.get("end_month") or None
         if start_month and end_month and start_month > end_month:
             raise ValueError("El periodo desde no puede ser mayor que hasta.")
-        if output_format in {"excel", "google_sheet"} and not keywords:
+        royalty_scope = str(params.get('royalty_scope') or 'regular')
+        if output_format in {"excel", "google_sheet"} and not keywords and royalty_scope != 'wml':
             raise ValueError("El reporte requiere al menos una palabra clave.")
         executive_mode = str(params.get("executive_mode") or "income")
         if executive_mode not in {"income", "contractual"}:
@@ -77,7 +78,7 @@ class ReportRequest:
             source=(str(params.get("source") or "").strip().lower() or None),
             account=(str(params.get("account") or "").strip().lower() or None),
             executive_mode=executive_mode,
-            royalty_scope=str(params.get('royalty_scope') or 'regular'),
+            royalty_scope=royalty_scope,
         )
 
 

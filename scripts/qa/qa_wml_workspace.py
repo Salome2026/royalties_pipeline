@@ -102,6 +102,39 @@ class WmlFinancialTests(unittest.TestCase):
                 self.assertFalse(statement['referencias WML'].empty)
                 self.assertAlmostEqual(float(statement['resumen general']['Ingresos USD'].iloc[0]),10)
 
+    def test_whole_catalog_without_keywords_and_with_period_filter(self):
+        import openpyxl
+        from app.royalty_reports.builders import build_keyword_excel,build_google_sheet
+        from app.royalty_reports.contracts import ReportInputs,ReportRequest
+        with tempfile.TemporaryDirectory() as raw:
+            root=Path(raw);inputs=root/'inputs';inputs.mkdir()
+            sample(inputs/'Statement_91230_1_91230_20251231.txt',[{'Start Period':'2025-07','End Period':'2025-12',
+                'Repdate Month ID':'2025-11','Recdate Month ID':'2025-12'}])
+            sample(inputs/'Statement_91230_1_91230_20260630.txt',[{'Product Title':'OTRO TEMA','ISRC':'USWL12000002',
+                'Royalty Base':'2','Royalty Payable':'5'}])
+            manifest=ingest(inputs,root/'output');folder=root/'output/releases'/manifest['release_id']
+            report_inputs=ReportInputs(folder/'song_level_all_sources.parquet',folder/'standardized_raw_all_sources.parquet',
+                folder/'catalog_master.parquet',root/'reports')
+            with use_scope('wml',marts={name:folder/name for name in WML_FILES}):
+                for start,end,total in [(None,None,30.0),('2026-06','2026-06',20.0)]:
+                    params={'royalty_scope':'wml','keywords':[],'raw_limit':0,'period_basis':'statement_period',
+                        'source':'wml','account':'91230','start_month':start,'end_month':end}
+                    request=ReportRequest.from_job({'id':1,'report_key':'royalty_keyword','output_format':'excel',
+                        'params':params},keywords=[])
+                    result=build_keyword_excel(request,report_inputs)
+                    workbook=openpyxl.load_workbook(result.output_path,data_only=True)
+                    try:
+                        rows=list(workbook['resumen general'].values)
+                        self.assertAlmostEqual(rows[1][rows[0].index('Ingresos USD')],total)
+                        self.assertNotIn('detalle',workbook.sheetnames)
+                    finally:workbook.close()
+                    captured=[]
+                    request=ReportRequest.from_job({'id':2,'report_key':'royalty_google_sheet','output_format':'google_sheet',
+                        'params':params},keywords=[])
+                    build_google_sheet(request,report_inputs,lambda tables,*_:captured.append(tables) or 'https://sheets.example/test')
+                    self.assertAlmostEqual(float(captured[0]['resumen general']['Ingresos USD'].iloc[0]),total)
+                    self.assertIn('referencias WML',captured[0])
+
     def test_real_release_financial_totals_and_rates(self):
         release=local_release()
         if not release:self.skipTest('Sin datos WML locales')
@@ -124,6 +157,26 @@ class WmlFinancialTests(unittest.TestCase):
             self.assertEqual(r['reference_scope'],'song_family_pending_asset_confirmation')
 
 class WmlIsolationTests(unittest.TestCase):
+    def test_only_wml_allows_reports_without_keywords_at_api_and_worker(self):
+        from app import vpo_corp_api as api
+        from app.royalty_reports.contracts import ReportRequest
+        from fastapi import HTTPException
+        for output,key in [('excel','royalty_keyword'),('google_sheet','royalty_google_sheet')]:
+            request=api.RoyaltyReportJobRequest(output=output,keywords=[])
+            with use_scope('wml'):
+                params=api.canonical_royalty_report_params(request,wml_policy())
+            self.assertEqual(params['keywords'],[])
+            self.assertEqual((params['royalty_scope'],params['source'],params['account']),('wml','wml','91230'))
+            job={'id':1,'report_key':key,'output_format':output,'params':params}
+            self.assertEqual(ReportRequest.from_job(job,keywords=[]).royalty_scope,'wml')
+            with use_scope('regular'),self.assertRaises(HTTPException) as denied:
+                api.canonical_royalty_report_params(api.RoyaltyReportJobRequest(
+                    output=output,keywords=[],source='wml',account='91230'),wml_policy())
+            self.assertEqual(denied.exception.status_code,400)
+            job['params']={**params,'royalty_scope':'regular'}
+            with self.assertRaisesRegex(ValueError,'palabra clave'):
+                ReportRequest.from_job(job,keywords=[])
+
     def test_bigquery_dataset_and_release_are_isolated_from_catalog_refresh(self):
         from app import vpo_corp_api as api
         from app import bigquery_dashboard as bq
@@ -139,8 +192,10 @@ class WmlIsolationTests(unittest.TestCase):
             with patch.object(api,'require_api_key'),patch.object(api,'require_module_permission'),\
                  patch.object(api,'operational_connect',return_value=nullcontext(None)),\
                  patch.object(api,'query_royalty_detail_count_bigquery',return_value=1) as count:
-                api.royalty_report_detail_count(api.RoyaltyReportJobRequest(keywords=['FLEXIN']),x_vpo_username='tester')
+                api.royalty_report_detail_count(api.RoyaltyReportJobRequest(keywords=[]),x_vpo_username='tester')
                 self.assertEqual(count.call_args.kwargs['dataset'],'royalties_wml')
+                self.assertEqual(count.call_args.kwargs['keywords'],[])
+                self.assertEqual(count.call_args.kwargs['source'],'wml')
             fake=SimpleNamespace(query=lambda *a,**kw:SimpleNamespace(result=lambda:iter([{'release_id':release}])))
             with patch.object(bq,'query_rows',return_value=[]) as rows:
                 bq.royalties_dashboard_bigquery(policy_document=wml_policy(),project='test-project',dataset='royalties_wml',

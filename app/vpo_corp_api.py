@@ -7348,7 +7348,7 @@ def canonical_royalty_report_params(
 ) -> dict[str, Any]:
     params = request.model_dump(exclude={"output", "executive_mode", "contract_artists"})
     params["keywords"] = normalize_keywords(params.get("keywords") or [])
-    if request.output in {"excel", "google_sheet"} and not params["keywords"]:
+    if request.output in {"excel", "google_sheet"} and not params["keywords"] and not is_wml():
         raise HTTPException(status_code=400, detail="Ingresa al menos una palabra clave.")
     if request.start_month and request.end_month and request.start_month > request.end_month:
         raise HTTPException(status_code=400, detail="El periodo desde no puede ser mayor que hasta.")
@@ -7365,10 +7365,7 @@ def canonical_royalty_report_params(
 
     source = str(params.get("source") or "").strip().lower() or None
     account = str(params.get("account") or "").strip().lower() or None
-    if request.output != "executive_pdf":
-        source = None
-        account = None
-    elif account and not source:
+    if account and not source:
         raise HTTPException(status_code=400, detail="La cuenta requiere una distribuidora.")
 
     entries = policy_snapshot.get("entries") or []
