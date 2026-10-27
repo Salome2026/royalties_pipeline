@@ -61,6 +61,8 @@ def build_keyword_excel(request: ReportRequest, inputs: ReportInputs) -> BuiltRe
         song_path=inputs.song_path,
         standardized_path=inputs.standardized_path,
         output_dir=inputs.output_dir,
+        source=request.source,
+        account=request.account,
     )
     return BuiltReport(
         output_path=Path(output_path),
@@ -109,6 +111,8 @@ def build_google_sheet(
         period_basis=request.period_basis,
         song_path=inputs.song_path,
         standardized_path=inputs.standardized_path,
+        source=request.source,
+        account=request.account,
     )
     result_url = create_google_sheet(
         tables,

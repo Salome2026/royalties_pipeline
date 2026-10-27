@@ -406,10 +406,26 @@ export function RoyaltyReportModule({ onMessage }: Props) {
           <aside className={styles.secondaryFields}>
             <div className={styles.sectionTitle}>
               <SlidersHorizontal size={18} aria-hidden="true" />
-              <div><strong>{output === "excel" ? "Detalle del Excel" : "Alcance del PDF"}</strong><span>Solo aparecen las opciones necesarias para este formato.</span></div>
+              <div><strong>{output === "excel" ? "Filtros y detalle" : "Alcance del PDF"}</strong><span>Solo aparecen las opciones necesarias para este formato.</span></div>
             </div>
 
-            {output === "excel" ? (
+            <div className={styles.field}>
+              <label htmlFor="royalty_source">Distribuidora</label>
+              <select id="royalty_source" value={source} onChange={(event) => { setSource(event.target.value); setAccount(""); }}>
+                <option value="">Todas las distribuidoras</option>
+                {(options?.sources || []).map((item) => <option value={item} key={item}>{item.toUpperCase()}</option>)}
+              </select>
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="royalty_account">Cuenta</label>
+              <select id="royalty_account" value={account} disabled={!source} onChange={(event) => setAccount(event.target.value)}>
+                <option value="">Todas</option>
+                {accountOptions.map((item) => <option value={item.account} key={`${item.source}:${item.account}`}>{item.display_name}</option>)}
+              </select>
+              <small>Elegí una distribuidora para filtrar también por cuenta.</small>
+            </div>
+
+            {output === "excel" && (
               <>
                 <div className={styles.field}>
                   <label htmlFor="royalty_match_mode">Coincidencia</label>
@@ -457,24 +473,6 @@ export function RoyaltyReportModule({ onMessage }: Props) {
                       <small>Genera el detalle completo, sin aplicar el límite indicado arriba.</small>
                     </span>
                   </label>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className={styles.field}>
-                  <label htmlFor="royalty_source">Distribuidora</label>
-                  <select id="royalty_source" value={source} onChange={(event) => { setSource(event.target.value); setAccount(""); }}>
-                    <option value="">Todas</option>
-                    {(options?.sources || []).map((item) => <option value={item} key={item}>{item.toUpperCase()}</option>)}
-                  </select>
-                </div>
-                <div className={styles.field}>
-                  <label htmlFor="royalty_account">Cuenta</label>
-                  <select id="royalty_account" value={account} disabled={!source} onChange={(event) => setAccount(event.target.value)}>
-                    <option value="">Todas</option>
-                    {accountOptions.map((item) => <option value={item.account} key={`${item.source}:${item.account}`}>{item.display_name}</option>)}
-                  </select>
-                  <small>Sin distribuidora seleccionada, el PDF considera todas las cuentas.</small>
                 </div>
               </>
             )}

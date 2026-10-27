@@ -44,6 +44,12 @@ No se crea una copia operativa en SQLite, JSON local o filesystem de Vercel.
 
 ## Componentes definitivos
 
+En Reporte de regalías, Distribuidora y Cuenta son filtros compartidos por
+Excel, Google Sheets y PDF. El valor inicial incluye todas las distribuidoras
+del ámbito elegido. Cambiar distribuidora limpia la cuenta seleccionada.
+Los filtros se conservan en los parámetros del trabajo y se aplican a
+resúmenes, detalle y conteo previo de filas. WML conserva su ámbito separado.
+
 ### API operativa `vpo-corp-api`
 
 Responsabilidades:

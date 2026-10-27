@@ -1676,6 +1676,8 @@ def build_report(
     output_dir: Path = REPORTS,
     exclude_isrcs: list[str] | None = None,
     detail_mode: str = DETAIL_MODE_LIMITED,
+    source: str | None = None,
+    account: str | None = None,
 ) -> Path:
     output_path = report_output_path(keywords, start_month, end_month, output_dir)
     tables = build_report_tables(
@@ -1689,6 +1691,8 @@ def build_report(
         song_path=song_path,
         standardized_path=standardized_path,
         exclude_isrcs=exclude_isrcs,
+        source=source,
+        account=account,
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
