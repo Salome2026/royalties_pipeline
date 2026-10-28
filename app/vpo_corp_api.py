@@ -8765,6 +8765,7 @@ def get_master_contract_associations(
     isrc: str,
     x_vpo_api_key: str | None = Header(default=None),
     x_vpo_username: str | None = Header(default=None),
+    include_income: bool = True,
 ):
     require_api_key(x_vpo_api_key)
     try:
@@ -8775,16 +8776,19 @@ def get_master_contract_associations(
         require_master_contract_user(conn, x_vpo_username, "access")
         saved = read_split(conn, clean)
         claims = read_contract_association_claims(conn)
-        all_choices = read_contract_association_choices(conn)
+        all_choices = read_contract_association_choices(conn) if include_income else None
     choices = ((saved or {}).get("split") or {}).get("code_association_overrides") or []
     items = master_contract_associations(clean, choices, claims)
-    extras = master_contract_associated_income(all_choices)
-    baseline = master_contract_income_baseline().filter(pl.col("asset_isrc") == clean)
-    base_amount = float(baseline["amount_usd"][0] or 0) if not baseline.is_empty() else 0.0
-    income = combined_contract_income(base_amount, extras.get(clean), master_contract_statement_income(clean))
-    income["statement_income"] = [row for row in income["statement_income"] if is_wml() or row["statement_month"] <= CONTRACT_ANALYSIS_CUTOFF_MONTH]
-    return {"isrc": clean, "items": items, "income": income, "version": (saved or {}).get("version", 0),
-            "pending_codes": unresolved_associations(items, choices), "reports_effective": False}
+    result = {"isrc": clean, "items": items, "version": (saved or {}).get("version", 0),
+              "pending_codes": unresolved_associations(items, choices), "reports_effective": False}
+    if include_income:
+        extras = master_contract_associated_income(all_choices)
+        baseline = master_contract_income_baseline().filter(pl.col("asset_isrc") == clean)
+        base_amount = float(baseline["amount_usd"][0] or 0) if not baseline.is_empty() else 0.0
+        income = combined_contract_income(base_amount, extras.get(clean), master_contract_statement_income(clean))
+        income["statement_income"] = [row for row in income["statement_income"] if is_wml() or row["statement_month"] <= CONTRACT_ANALYSIS_CUTOFF_MONTH]
+        result["income"] = income
+    return result
 
 
 @app.get("/master-contracts/{isrc}")

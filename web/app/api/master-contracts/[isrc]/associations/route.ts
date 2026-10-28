@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { apiConfig, royaltyHeaders } from "../../../_auth";
 
-export async function GET(_request: NextRequest, context: { params: Promise<{ isrc: string }> }) {
+export async function GET(request: NextRequest, context: { params: Promise<{ isrc: string }> }) {
   const config = await apiConfig();
   if ("error" in config) return config.error;
   const { isrc } = await context.params;
-  const response = await fetch(`${config.apiUrl}/master-contracts/${encodeURIComponent(isrc)}/associations`, {
+  const url = new URL(`${config.apiUrl}/master-contracts/${encodeURIComponent(isrc)}/associations`);
+  const includeIncome = request.nextUrl.searchParams.get("include_income");
+  if (includeIncome !== null) url.searchParams.set("include_income", includeIncome);
+  const response = await fetch(url, {
     headers: { ...royaltyHeaders(config) },
     cache: "no-store",
   });

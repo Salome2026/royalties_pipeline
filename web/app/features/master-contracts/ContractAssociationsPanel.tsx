@@ -68,7 +68,7 @@ export function ContractAssociationsPanel({ isrc, version, canEdit, choices, onC
     setLoading(true);
     setError("");
     setItems([]);
-    void fetch(`/api/master-contracts/${encodeURIComponent(isrc)}/associations`, { cache: "no-store", signal: controller.signal })
+    void fetch(`/api/master-contracts/${encodeURIComponent(isrc)}/associations?include_income=false`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         const body = await response.json();
         if (!response.ok) throw new Error(body.error || "No se pudieron verificar los códigos.");
