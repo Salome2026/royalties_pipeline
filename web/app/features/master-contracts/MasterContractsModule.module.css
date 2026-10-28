@@ -8,8 +8,14 @@
 }
 
 .workspace * { letter-spacing: 0; }
-.unidentifiedTable { min-width: 1050px; }
-.unidentifiedTable td { vertical-align: top; overflow-wrap: anywhere; }
+.table.unidentifiedTable { min-width: 1100px; }
+.table.unidentifiedTable td { vertical-align: top; overflow-wrap: anywhere; }
+.table.unidentifiedTable th:nth-child(1) { width: 25%; }
+.table.unidentifiedTable th:nth-child(2) { width: 14%; }
+.table.unidentifiedTable th:nth-child(3) { width: 13%; }
+.table.unidentifiedTable th:nth-child(4) { width: 13%; }
+.table.unidentifiedTable th:nth-child(5) { width: 12%; }
+.table.unidentifiedTable th:nth-child(6) { width: 23%; }
 .unidentifiedTable small { display: block; margin-top: 4px; color: #a6bebc; font-size: .7rem; }
 .unidentifiedTable a { color: #77e4c9; }
 .unidentifiedCandidate + .unidentifiedCandidate { margin-top: 12px; }
