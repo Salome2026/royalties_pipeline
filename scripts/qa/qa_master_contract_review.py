@@ -140,10 +140,12 @@ class ContractReviewTests(unittest.TestCase):
              patch("app.catalog_refresh.select_dashboard_release", return_value=("ready", "ready")), \
              patch("app.royalty_reports.manifests.build_gcs_input_manifest", return_value={"release_id": "release-a"}), \
              patch("app.master_contract_review.review_published_release") as review, \
+             patch("app.catalog_participant_review.review_published_participants") as participant_review, \
              patch.dict("os.environ", {"GCS_BUCKET": "bucket"}):
             connect.return_value.__enter__.return_value = conn
             run_refresh()
             review.assert_called_once()
+            participant_review.assert_called_once()
 
     def test_list_review_filter_keeps_closed_economic_state_and_income(self):
         import polars as pl

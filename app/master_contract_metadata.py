@@ -47,9 +47,16 @@ def title_family(value: str) -> str:
 
 
 def with_external_titles(catalog: list[dict], metadata: list[dict]) -> list[dict]:
+    import polars as pl
+    from scripts.lib.catalog_identity_corrections import correct_release_metadata
+    fields = ("lookup_isrc", "lookup_upc", "lookup_artist", "lookup_title")
+    identifiers = pl.DataFrame([{name: row.get(name) for name in fields} for row in metadata],
+        schema={name: pl.String for name in fields})
+    canonical_codes = correct_release_metadata(identifiers)["lookup_isrc"].to_list()
     titles: dict[str, set[str]] = defaultdict(set)
-    for row in metadata:
-        isrc = str(row.get("lookup_isrc") or "").upper()
+    for row, canonical_code in zip(metadata, canonical_codes):
+        isrc = str(canonical_code or "").upper()
+        reported_isrc = str(row.get("lookup_isrc") or "").upper()
         if row.get("metadata_status") != "found" or not isrc:
             continue
         raw = row.get("raw_json") or {}
@@ -61,7 +68,7 @@ def with_external_titles(catalog: list[dict], metadata: list[dict]) -> list[dict
             continue
         selected = decoded["selected"]
         identifiers = selected.get("external_ids") or {}
-        if not isinstance(identifiers, dict) or str(identifiers.get("isrc") or "").upper() != isrc:
+        if not isinstance(identifiers, dict) or str(identifiers.get("isrc") or "").upper() != reported_isrc:
             continue
         if selected.get("name"):
             titles[isrc].add(selected["name"])

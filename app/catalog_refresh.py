@@ -191,6 +191,8 @@ def run_refresh() -> None:
                 if manifest["release_id"] != release:
                     time.sleep(30)
                     continue
+                from app.catalog_participant_review import review_published_participants
+                review_published_participants(client, manifest)
                 from app.master_contract_review import review_published_release
                 review_published_release(client, manifest)
                 _, status = select_dashboard_release(release, state)

@@ -113,10 +113,16 @@ def upload_to_gcs(
     bucket = client.bucket(bucket_name)
 
     if {item.local_path.name for item in uploads} == set(DEFAULT_FILES):
-        release = publish_mart_release(
+        import sys
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from app.catalog_participant_review import publish_with_participant_review
+        from app.operational_db import operational_connect
+        release = publish_with_participant_review(
             bucket,
             prefix,
             [(item.local_path.name, item.local_path) for item in uploads],
+            publisher=publish_mart_release,
+            connection_factory=operational_connect,
         )
         for filename, entry in release["files"].items():
             print(

@@ -185,6 +185,13 @@ def artist_suggestions(
     isrc: str, raw_path: Path | None, fallback: str | None,
     catalog_artists: list[str] | None = None, catalog_artist_evidence: str | None = None,
 ) -> dict[str, Any]:
+    from scripts.lib.catalog_artist_extensions import contract_credit_base
+    base = contract_credit_base(isrc, catalog_artists, catalog_artist_evidence)
+    if base is not None:
+        result = artist_suggestions(isrc, raw_path, fallback, base["artists"], base["evidence"])
+        result["artists"] = catalog_artists
+        result["evidence"] = [*result.get("evidence", []), *base["title_evidence"]]
+        return result
     raw_result = None
     if raw_path and raw_path.exists():
         try:
@@ -206,24 +213,27 @@ def artist_suggestions(
     if catalog_artists is not None:
         result = dict(raw_result or result)
         evidence = json.loads(catalog_artist_evidence or "[]")
+        from scripts.lib.catalog_artist_extensions import canonical, credit_identity_evidence
+        evidence = credit_identity_evidence(evidence)
+        identity_artists = [canonical(name) for name in catalog_artists]
         track_credits = [entry["artists"] for entry in evidence
                          if entry.get("field") == "Asset Artist" and entry.get("artists")]
         principal_keys = {artist_key(names[0]) for names in track_credits}
         result["artists"] = catalog_artists
-        proposed_principal = {artist_key(catalog_artists[0])} if catalog_artists else set()
+        proposed_principal = {artist_key(identity_artists[0])} if identity_artists else set()
         result["principal_uncertain"] = (
             bool(result.get("principal_uncertain")) or len(principal_keys) != 1 or principal_keys != proposed_principal
         )
         from app.master_contract_participants import onerpm_principal
-        source_principal = onerpm_principal(evidence, catalog_artists, bool((raw_result or {}).get("principal_uncertain")))
+        source_principal = onerpm_principal(evidence, identity_artists, bool((raw_result or {}).get("principal_uncertain")))
         if source_principal is not None:
             result["principal_uncertain"] = source_principal
         from app.master_contract_participants import ada_principal
-        ada_uncertain = ada_principal(evidence, catalog_artists)
+        ada_uncertain = ada_principal(evidence, identity_artists)
         if ada_uncertain is not None:
             result["principal_uncertain"] = ada_uncertain
         from app.master_contract_participants import orchard_principal
-        orchard_uncertain = orchard_principal(evidence, catalog_artists,
+        orchard_uncertain = orchard_principal(evidence, identity_artists,
             bool((raw_result or {}).get("principal_uncertain")), isrc=isrc)
         if orchard_uncertain is not None:
             result["principal_uncertain"] = orchard_uncertain
@@ -232,11 +242,11 @@ def artist_suggestions(
             "artists": catalog_artists, "used": True,
         }]
         from app.master_contract_participants import soundon_suggestions
-        soundon_result = soundon_suggestions(result, evidence, catalog_artists, raw_result, isrc=isrc)
+        soundon_result = soundon_suggestions(result, evidence, identity_artists, raw_result, isrc=isrc)
         if soundon_result is not None:
             result = soundon_result
         from app.master_contract_participants import dashgo_suggestions
-        dashgo_result = dashgo_suggestions(result, evidence, catalog_artists, raw_result, isrc=isrc)
+        dashgo_result = dashgo_suggestions(result, evidence, identity_artists, raw_result, isrc=isrc)
         if dashgo_result is not None:
             result = dashgo_result
     return result

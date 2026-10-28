@@ -17,6 +17,7 @@ from lib.fx import get_monthly_fx
 from lib.identity import valid_youtube_video_id_expr
 from lib.statement_period import from_fuga_filename, fuga_correction
 from lib.fuga_extended import audit_directory
+from lib.catalog_identity_corrections import correct_recording_identity
 
 
 # =========================
@@ -294,7 +295,7 @@ def standardize_fuga_file(
         pl.lit(ingested_at).alias("ingested_at"),
     ])
 
-    return df
+    return correct_recording_identity(df)
 
 
 # =========================

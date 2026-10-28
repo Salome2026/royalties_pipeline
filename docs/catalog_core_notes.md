@@ -1,5 +1,20 @@
 # Catalogo general core
 
+## Identidades corregidas y participantes: adopcion 2026-10-28
+
+Lectura obligatoria: `catalogo_identidad_reapertura_adopcion_20261028.md` y
+`scripts/lib/catalog_identity_corrections.json`. Dormun/El Farsante se resuelve
+como ARDL12600160; ARDL12400078 queda para Somos 3/Lit Killah y Nicki Nicole.
+No hacer un reemplazo ni alias global del ISRC reutilizado. Conservar los
+codigos nativos y cada movimiento, sin duplicar ni eliminar ventas.
+
+Cambios reales de integrantes reabren el contrato para revision con los nuevos
+participantes sin porcentaje, conservando asignaciones, periodos, asociados y
+descartes del usuario. Mientras este abierto no aplica a nuevos repartos
+contractuales. Alias aprobados, acentos u orden no causan reapertura. La misma
+regla se usa al publicar por API o comando, con reintento durable e idempotente.
+El dashboard general sigue sin splits; los reportes congelados no se reescriben.
+
 El catalogo general es una capa maestra del sistema. No reemplaza los crudos ni los
 marts de ingresos; los organiza por obra para poder controlar contratos, actividad,
 release dates, reportes especiales y filtros de negocio.

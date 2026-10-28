@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "corrections": [
+    {
+      "id": "DORMUN-EL-FARSANTE-ISRC-20261027",
+      "source": "fuga",
+      "account": "indyana_records",
+      "reported_isrc": "ARDL12400078",
+      "canonical_isrc": "ARDL12600160",
+      "native_asset_reference": "1001863737555",
+      "artist": "Dormun",
+      "title": "El Farsante",
+      "upcs": ["8721093907237"],
+      "video_ids": ["vBW2vx8zlVg"],
+      "confirmed_by": "Ruben",
+      "confirmed_on": "2026-10-27",
+      "reason": "Confirmed platform upload error. The legacy ISRC remains assigned to Somos 3 by Lit Killah and Nicki Nicole. Old and new Dormun sales identify one recording."
+    }
+  ]
+}

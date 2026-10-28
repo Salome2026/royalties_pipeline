@@ -17,6 +17,8 @@ from .fuga_recording_lookup import RecordingLookup, normalized, artist_names, re
 
 
 def resolve_extended(catalog: pl.DataFrame, metadata: pl.DataFrame, decisions: dict, lookup=None) -> tuple[pl.DataFrame, list[dict]]:
+    from .catalog_identity_corrections import correct_extended_identity, corrected_legacy_is_not_video_alias
+    metadata = correct_extended_identity(metadata)
     decisions = {**decisions, "entries": list(decisions["entries"])}
     known = {entry["video_isrc"] for entry in decisions["entries"]}
     rows = {row["catalog_key"]: row for row in catalog.to_dicts()}
@@ -30,6 +32,8 @@ def resolve_extended(catalog: pl.DataFrame, metadata: pl.DataFrame, decisions: d
             if row["economic_role"] == "supplementary_metadata_only" and re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}[0-9]{7}", code):
                 groups.setdefault(code, []).append(row)
         for code, evidence in sorted(groups.items()):
+            if corrected_legacy_is_not_video_alias(code, evidence):
+                continue
             if code in known:
                 continue
             videos = sorted({(r["YouTube Video ID"] or "").strip() for r in evidence} - {""})

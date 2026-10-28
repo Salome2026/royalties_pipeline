@@ -92,6 +92,8 @@ def parse_catalog_credit(text: str) -> list[str]:
 
 
 def collect_fuga_artists(frame: pl.LazyFrame) -> dict[str, dict[str, Any]]:
+    from .catalog_identity_corrections import correct_recording_identity
+    frame = correct_recording_identity(frame)
     schema = set(frame.collect_schema().names())
     required = {"source", "asset_isrc", "Asset Artist", "Product Artist", "Product Reference", "Asset Reference"}
     if not required <= schema:

@@ -16,6 +16,8 @@ from lib.ada_catalog_artists import METADATA_FILE as ADA_METADATA_FILE, enrich_a
 from lib.orchard_catalog_artists import enrich_orchard_catalog_file
 from lib.soundon_catalog_artists import enrich_soundon_catalog_file
 from lib.dashgo_catalog_artists import enrich_dashgo_catalog_file
+from lib.catalog_artist_extensions import enrich_catalog_artist_extensions_file
+from lib.catalog_identity_corrections import correct_recording_identity, correct_release_metadata
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -211,7 +213,7 @@ def standardized_identity_frame(path: Path) -> pl.LazyFrame | None:
     if not path.exists():
         return None
 
-    lf = pl.scan_parquet(path)
+    lf = correct_recording_identity(pl.scan_parquet(path))
     schema = set(lf.collect_schema().names())
 
     source = coalesce_text(schema, ["source"])
@@ -459,7 +461,7 @@ def build_release_lookup() -> pl.DataFrame:
             "external_metadata_status": pl.Series([], dtype=pl.Utf8),
         })
 
-    metadata = pl.read_parquet(RELEASE_METADATA_PATH)
+    metadata = correct_release_metadata(pl.read_parquet(RELEASE_METADATA_PATH))
     if metadata.is_empty():
         return pl.DataFrame({
             "catalog_key": pl.Series([], dtype=pl.Utf8),
@@ -530,7 +532,7 @@ def build_catalog_master() -> pl.DataFrame:
     if not SONG_LEVEL_PATH.exists():
         raise FileNotFoundError(f"No existe {SONG_LEVEL_PATH}")
 
-    lf = pl.scan_parquet(SONG_LEVEL_PATH)
+    lf = correct_recording_identity(pl.scan_parquet(SONG_LEVEL_PATH))
     schema = set(lf.collect_schema().names())
 
     source = coalesce_text(schema, ["source"])
@@ -733,6 +735,7 @@ def build_catalog_master() -> pl.DataFrame:
     catalog = enrich_orchard_catalog_file(catalog, MARTS_DIR / "standardized_raw_orchard.parquet")
     catalog = enrich_soundon_catalog_file(catalog, MARTS_DIR / "standardized_raw_soundon.parquet")
     catalog = enrich_dashgo_catalog_file(catalog, MARTS_DIR / "standardized_raw_dashgo.parquet")
+    catalog = enrich_catalog_artist_extensions_file(catalog, MARTS_DIR / ADA_METADATA_FILE)
     return catalog.sort("amount_usd", descending=True)
 
 

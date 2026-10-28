@@ -240,6 +240,12 @@ def read_participant_history(conn: Any, isrc: str) -> list[dict]:
 
 
 def propose_participants(initial: dict, artists: list[str], *, saved: dict | None, history: list[dict]) -> tuple[dict, dict]:
+    review = ((saved or {}).get("split") or {}).get("catalog_participant_review") or {}
+    if saved and not saved["closed"] and review.get("status") == "pending":
+        from app.catalog_participant_review import pending_review_projection
+        projected = pending_review_projection(saved["split"])
+        return projected, {"status": "catalog_reopened", "added": review.get("added") or {},
+            "capacity_exceeded": any(len(allocation.get("participants") or []) > 10 for _, allocation in allocations(projected))}
     if saved and (saved["closed"] or any(row["is_closed"] for row in history)):
         return saved["split"], {"status": "closed_or_previously_closed", "added": {}, "capacity_exceeded": False}
     removed: dict[str, set[str]] = {}

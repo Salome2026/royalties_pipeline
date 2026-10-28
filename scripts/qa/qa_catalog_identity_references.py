@@ -130,7 +130,7 @@ class IdentityTests(unittest.TestCase):
                     "build_release_lookup": lambda: pl.DataFrame(),
                     "apply_catalog_manual_metadata": manual,
                     **{name: (lambda frame, *args: frame) for name in [
-                        "enrich_fuga_catalog_file", "apply_automatic_extended", "enrich_ada_catalog_file",
+                        "enrich_fuga_catalog_file", "apply_automatic_extended", "enrich_ada_catalog_file", "enrich_catalog_artist_extensions_file",
                         "enrich_orchard_catalog_file", "enrich_soundon_catalog_file", "enrich_dashgo_catalog_file"]}}.items():
                     stack.enter_context(patch.object(builder, name, value))
                 result = builder.build_catalog_master()

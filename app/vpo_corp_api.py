@@ -2023,7 +2023,9 @@ def publish_required_marts_to_gcs() -> dict:
             "size_bytes": local_path.stat().st_size,
             "size_mb": round(local_path.stat().st_size / 1024 / 1024, 2),
         })
-    release = publish_mart_release(bucket, prefix, uploads)
+    from app.catalog_participant_review import publish_with_participant_review
+    release = publish_with_participant_review(bucket, prefix, uploads,
+        publisher=publish_mart_release, connection_factory=operational_connect)
 
     return {
         "ok": True,
@@ -8888,6 +8890,8 @@ def put_master_contract(
             require_master_contract_user(conn, actor, "approve")
         try:
             split = preserve_contract_associations(request.split.model_dump(), previous)
+            from app.catalog_participant_review import preserve_review
+            split = preserve_review(split, previous, closed=request.closed, actor=actor)
             if request.expected_version != (previous or {}).get("version", 0):
                 raise ValueError("La ficha cambió desde que la abriste. Actualizala antes de guardar.")
             old_choices = ((previous or {}).get("split") or {}).get("code_association_overrides") or []
