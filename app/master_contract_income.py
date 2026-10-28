@@ -78,7 +78,8 @@ def read_choices(conn: Any) -> dict[str, list[dict]]:
 
 def income_association_index(
     evidence: list[dict], aliases: dict[str, str], choices: dict[str, list[dict]], claims: dict[str, str],
-) -> dict[str, dict[str, list[str]]]:
+    *, with_candidates: bool = False,
+) -> dict[str, Any]:
     scopes: dict[tuple, list[dict]] = defaultdict(list)
     for item in evidence:
         scope = (item["kind"], item["code"])
@@ -102,14 +103,21 @@ def income_association_index(
                 target_evidence[root][key] = item
     included: dict[str, set[str]] = defaultdict(set)
     excluded: dict[str, set[str]] = defaultdict(set)
+    proposed: dict[str, dict] = defaultdict(dict)
     for root, items in target_evidence.items():
         for item in candidates(root, list(items.values()), aliases, choices.get(root, []), claims):
+            if with_candidates:
+                proposed[item["key"]][root] = {"status": item["status"], "reason": item["reason"],
+                    "included": item["included"], "selectable": item["selectable"]}
             if item["included"]:
                 included[item["key"]].add(root)
             if item["status"] == "excluded":
                 excluded[item["key"]].add(root)
-    return {"included": {key: sorted(roots) for key, roots in included.items()},
-            "excluded": {key: sorted(roots) for key, roots in excluded.items()}}
+    result = {"included": {key: sorted(roots) for key, roots in included.items()},
+              "excluded": {key: sorted(roots) for key, roots in excluded.items()}}
+    if with_candidates:
+        result["proposed"] = dict(proposed)
+    return result
 
 
 def associated_income_isrc(row: dict, index: dict) -> str | None:

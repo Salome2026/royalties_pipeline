@@ -45,6 +45,31 @@ derived contract relationship, not an inferred ISRC in a statement or catalog.
 
 ## Human decisions and closing
 
+### Sin identificar
+
+Contracts has an additional read-only `Sin identificar` view. It lists published
+catalog generation/correction income without an ISRC whose current effective
+association does not resolve to a valid catalog contract. It covers all published
+months, including external reference accounts; it is not a new contractual report
+and does not apply its June cutoff or report deductions. Catalog-view policy
+controls admission; transfers are excluded, so Shares are not counted again.
+Existing report/governance filters and totals are not changed.
+
+The effective destination uses the same association index, evidence signatures,
+exclusion and ownership checks as Contracts. Proposals and explicit discards stay
+visible. A valid automatic or confirmed inclusion removes the assigned income;
+stale/contradictory evidence returns it to the list. An exclusion in one contract
+does not undo a valid destination in another. Contract closure is independent.
+
+Subtract assigned rows before grouping the remaining rows. Keep native identifiers
+together so a row with video+UPC+track ID is counted once. Group videos/UPCs across
+accounts, scope platform IDs and native ADA products by source/account, and retain
+provenance and negative adjustments. No-money metadata is omitted, but offsetting
+nonzero monthly movements remain visible. Embedded IDs in old text provide links,
+not financial associations. Candidate links open the existing contract editor;
+the choices and save/permission rules are unchanged. Search and pagination filter
+visibility only, never global ownership. WML remains isolated.
+
 - Choices are Automatic, Include or Discard; absence of a choice for a doubtful
   proposal means Pending, not Discard.
 - A decision groups the same video/UPC across its source accounts. Platform

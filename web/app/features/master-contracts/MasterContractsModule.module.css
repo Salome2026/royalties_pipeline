@@ -8,6 +8,11 @@
 }
 
 .workspace * { letter-spacing: 0; }
+.unidentifiedTable { min-width: 1050px; }
+.unidentifiedTable td { vertical-align: top; overflow-wrap: anywhere; }
+.unidentifiedTable small { display: block; margin-top: 4px; color: #a6bebc; font-size: .7rem; }
+.unidentifiedTable a { color: #77e4c9; }
+.unidentifiedCandidate + .unidentifiedCandidate { margin-top: 12px; }
 .amountCell .incomeButton { display: inline-flex; align-items: center; justify-content: flex-end; gap: 7px; width: auto; margin: 0; padding: 4px 0; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; font-variant-numeric: tabular-nums; box-shadow: none; transform: none; }
 .amountCell .incomeButton:hover { background: transparent; color: #77e4c9; transform: none; }
 .incomeExtra { display: block; color: #a6bebc; font-size: .7rem; white-space: nowrap; }

@@ -2,13 +2,14 @@
 import { selectedRoyaltyScope } from "../wml/WmlScopeControl";
 import { WmlReferences } from "../wml/WmlReferences";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, Check, ChevronDown, ChevronLeft, ChevronRight, FilePenLine, Link2, RefreshCw, Search } from "lucide-react";
 import styles from "./MasterContractsModule.module.css";
 import { ArtistContractsPanel, artistBeneficiaries, type ArtistContract } from "./ArtistContractsPanel";
 import { MasterAgreementsEditor, visibleAgreements, type MasterAgreement } from "./MasterAgreementsEditor";
 import { PoolsAllocationEditor } from "./PoolsAllocationEditor";
 import { ContractAssociationsPanel, type AssociationChoice, type AssociationValidation } from "./ContractAssociationsPanel";
+import { UnidentifiedIncomeTable, type UnidentifiedIncome } from "./UnidentifiedIncomeTable";
 import { simpleMasterAgreement, agreementAllocation, agreementIncome, allocationTotals, contractErrors, previewAllocation, type Allocation, type StatementIncome } from "./contractLogic";
 
 type Split = Allocation & {
@@ -45,6 +46,8 @@ type ContractList = {
   summary: { open: number; closed: number; review?: number };
   offset: number;
   source_accounts: Array<{ source: string; account: string }>;
+  unidentified_items?: UnidentifiedIncome[];
+  unidentified_summary?: { amount_usd: number; with_candidates: number; without_candidates: number };
 };
 
 type ContractDetail = ContractItem & {
@@ -93,10 +96,13 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   const [mode, setMode] = useState<"isrc" | "artists">("isrc");
   const [keyword, setKeyword] = useState("");
   const [appliedKeyword, setAppliedKeyword] = useState("");
-  const [status, setStatus] = useState<"all" | "open" | "closed" | "review">("all");
+  const [status, setStatus] = useState<"all" | "open" | "closed" | "review" | "unidentified">("all");
   const [sourceAccount, setSourceAccount] = useState("");
   const [offset, setOffset] = useState(0);
   const [list, setList] = useState<ContractList | null>(null);
+  const [listError, setListError] = useState("");
+  const listRequest = useRef(0);
+  const unidentified = status === "unidentified";
   const [wml,setWml]=useState(false);
   useEffect(() => setWml(selectedRoyaltyScope() === "wml"),[]);
   const [detail, setDetail] = useState<ContractDetail | null>(null);
@@ -111,7 +117,10 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   const [associationValidation, setAssociationValidation] = useState<AssociationValidation>({ loading: true, pending: 0, error: "" });
 
   const loadList = useCallback(async () => {
+    const requestId = ++listRequest.current;
     setLoading(true);
+    setList(null);
+    setListError("");
     try {
       const params = new URLSearchParams({ status, limit: String(PAGE_SIZE), offset: String(offset) });
       if (appliedKeyword) params.set("keyword", appliedKeyword);
@@ -120,11 +129,16 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
         params.set("source", source);
         params.set("account", account);
       }
-      setList(await requestJson<ContractList>(`/api/master-contracts?${params}`));
+      const result = await requestJson<ContractList>(`/api/master-contracts?${params}`);
+      if (requestId === listRequest.current) setList(result);
     } catch (error) {
-      onMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo cargar Contratos." });
+      if (requestId === listRequest.current) {
+        const message = error instanceof Error ? error.message : "No se pudo cargar Contratos.";
+        setListError(message);
+        onMessage({ type: "error", text: message });
+      }
     } finally {
-      setLoading(false);
+      if (requestId === listRequest.current) setLoading(false);
     }
   }, [appliedKeyword, offset, onMessage, sourceAccount, status]);
 
@@ -434,17 +448,23 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
         <button type="button" className={styles.iconButton} title="Actualizar catálogo" aria-label="Actualizar catálogo" disabled={loading} onClick={() => void loadList()}><RefreshCw size={18} /></button>
       </header>
       <form className={styles.toolbar} onSubmit={submitSearch}>
-        <div className={styles.searchBox}><Search size={18} /><input aria-label="Buscar tema, artista o ISRC" value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="Buscar tema, artista o ISRC" /></div>
+        <div className={styles.searchBox}><Search size={18} /><input aria-label={unidentified ? "Buscar tema, artista o código" : "Buscar tema, artista o ISRC"} value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder={unidentified ? "Buscar tema, artista o código" : "Buscar tema, artista o ISRC"} /></div>
         <button type="submit" className={styles.secondaryButton}>Buscar</button>
         <select className={styles.sourceFilter} aria-label="Distribuidora y cuenta" title="Distribuidora y cuenta" value={sourceAccount} disabled={loading} onChange={(event) => { setSourceAccount(event.target.value); setOffset(0); }}>
           <option value="">Distribuidoras: todas</option>
           {(list?.source_accounts || []).map(({ source, account }) => <option key={`${source}/${account}`} value={`${source}/${account}`}>{source.toUpperCase()} / {accountLabel(account)}</option>)}
         </select>
         <div className={styles.segmented} aria-label="Estado del reparto">
-          {(["all", "open", "closed", "review"] as const).filter((value) => !wml || value !== "review").map((value) => <button type="button" key={value} aria-pressed={status === value} className={status === value ? styles.selected : ""} onClick={() => { setStatus(value); setOffset(0); }}>{value === "all" ? "Todos" : value === "open" ? "Abiertos" : value === "review" ? "Por revisar" : "Cerrados"}</button>)}
+          {(["all", "open", "closed", "review", "unidentified"] as const).filter((value) => !wml || (value !== "review" && value !== "unidentified")).map((value) => <button type="button" key={value} aria-pressed={status === value} className={status === value ? styles.selected : ""} onClick={() => { setStatus(value); setOffset(0); }}>{value === "all" ? "Todos" : value === "open" ? "Abiertos" : value === "review" ? "Por revisar" : value === "unidentified" ? "Sin identificar" : "Cerrados"}</button>)}
         </div>
       </form>
-      <div className={styles.listMeta}><span>{list ? `${list.total.toLocaleString("es-AR")} ISRC` : "Cargando catálogo..."}</span><span>{list?.summary.open.toLocaleString("es-AR") || "0"} abiertos · {list?.summary.closed.toLocaleString("es-AR") || "0"} repartos cerrados{!wml && ` · ${list?.summary.review || 0} por revisar`}</span></div>
+      {unidentified ? <>
+        <p className={styles.auditLine}>Ingresos del historial publicado sin destino válido. Las propuestas y los descartes siguen aquí hasta una inclusión válida. Los importes son los informados en el catálogo, en USD.</p>
+        {listError && <p className={styles.warning} role="alert">{listError}</p>}
+        <div className={styles.listMeta} aria-live="polite"><span>{list ? `${list.total.toLocaleString("es-AR")} referencias sin identificar` : listError ? "No se pudo verificar la lista" : "Verificando ingresos..."}</span>
+          {list?.unidentified_summary && <span>{money(list.unidentified_summary.amount_usd)} · {list.unidentified_summary.with_candidates} con posibles destinos · {list.unidentified_summary.without_candidates} sin coincidencia</span>}</div>
+        <UnidentifiedIncomeTable items={list?.unidentified_items || []} loading={loading || !list} onOpen={(isrc) => void openDetail(isrc)} />
+      </> : <><div className={styles.listMeta}><span>{list ? `${list.total.toLocaleString("es-AR")} ISRC` : "Cargando catálogo..."}</span><span>{list?.summary.open.toLocaleString("es-AR") || "0"} abiertos · {list?.summary.closed.toLocaleString("es-AR") || "0"} repartos cerrados{!wml && ` · ${list?.summary.review || 0} por revisar`}</span></div>
       <div className={styles.tableWrap}><table className={styles.table}>
         <thead><tr><th>Tema</th><th>ISRC</th><th>Crédito en catálogo</th><th>Ingreso acumulado</th><th>Estado</th></tr></thead>
         <tbody>
@@ -457,11 +477,11 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
             <td><span className={`${styles.status} ${item.closed && !item.association_review_pending ? styles.closed : styles.open}`}>{item.association_review_pending ? "Revisión pendiente" : item.closed ? "Cerrado" : "Abierto"}</span>{item.association_review_pending && <small className={styles.futureNote}>{item.association_pending_count} códigos por validar{item.closed ? " · Reparto aprobado" : ""}</small>}{item.future_reports_selected && <small className={styles.futureNote}>Futura aplicación</small>}</td>
           </tr>)}
         </tbody>
-      </table></div>
+      </table></div></>}
       <div className={styles.pagination}>
-        <span>{list ? `${list.offset + (list.items.length ? 1 : 0)}–${list.offset + list.items.length} de ${list.total}` : ""}</span>
-        <button type="button" className={styles.iconButton} title="Página anterior" aria-label="Página anterior" disabled={loading || offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}><ChevronLeft size={18} /></button>
-        <button type="button" className={styles.iconButton} title="Página siguiente" aria-label="Página siguiente" disabled={loading || !list || offset + PAGE_SIZE >= list.total} onClick={() => setOffset(offset + PAGE_SIZE)}><ChevronRight size={18} /></button>
+        <span>{list ? `${list.offset + ((unidentified ? list.unidentified_items?.length : list.items.length) ? 1 : 0)}–${list.offset + (unidentified ? list.unidentified_items?.length || 0 : list.items.length)} de ${list.total}` : ""}</span>
+        <button type="button" className={styles.iconButton} title="Página anterior" aria-label="Página anterior" disabled={loading || (list?.offset ?? offset) === 0} onClick={() => setOffset(Math.max(0, (list?.offset ?? offset) - PAGE_SIZE))}><ChevronLeft size={18} /></button>
+        <button type="button" className={styles.iconButton} title="Página siguiente" aria-label="Página siguiente" disabled={loading || !list || list.offset + PAGE_SIZE >= list.total} onClick={() => setOffset((list?.offset ?? offset) + PAGE_SIZE)}><ChevronRight size={18} /></button>
       </div>
     </section>
   );

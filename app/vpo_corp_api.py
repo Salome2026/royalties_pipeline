@@ -8609,7 +8609,7 @@ def put_master_contract_artist(
 @app.get("/master-contracts")
 def list_master_contracts(
     keyword: str | None = None,
-    status: Literal["all", "open", "closed", "review"] = "all",
+    status: Literal["all", "open", "closed", "review", "unidentified"] = "all",
     limit: int = 50,
     offset: int = 0,
     source: str | None = None,
@@ -8623,6 +8623,11 @@ def list_master_contracts(
         states = read_split_statuses(conn)
         choices = read_contract_association_choices(conn)
         review_states = read_association_review_states(conn)
+    if status == "unidentified":
+        if is_wml():
+            raise HTTPException(status_code=400, detail="Sin identificar corresponde al catálogo habitual.")
+        return master_contract_unidentified_income(choices, keyword=keyword or "", source=source,
+            account=account, offset=offset, limit=limit)
     catalog = master_contract_catalog(master_contract_associated_income(choices))
     memberships = master_contract_source_accounts().join(catalog.select("asset_isrc"), on="asset_isrc", how="semi")
     source_accounts = memberships.select("source", "account").drop_nulls().unique().sort(["source", "account"]).to_dicts()
@@ -8685,6 +8690,37 @@ def list_master_contracts(
         "pool_contracts_supported": True,
         "reports_effective": False,
     }
+
+
+def master_contract_unidentified_income(choices: dict, **filters) -> dict:
+    from app.master_contract_unidentified import unidentified_income
+    from lib.catalog_report_filter import with_distributor_policy, GENERATION_REVENUE_BASIS, LEGACY_GENERATION_REVENUE_BASIS
+    try:
+        marts = ensure_marts(filenames=[CATALOG_MASTER_FILE])
+        release_id = mart_release_cache().status().get("active_release_id")
+        if not release_id:
+            raise ValueError("No hay una versión publicada disponible.")
+        catalog = contract_metadata_catalog(pl.read_parquet(marts[CATALOG_MASTER_FILE]).to_dicts())
+        rows, evidence = published_unassigned_income(release_id)
+        # This is catalog visibility, including reference accounts and inactive
+        # assets, not cash or a new royalty report. Never admit transfers again.
+        if rows:
+            schema = {key: pl.Int64 if key == "raw_rows" else pl.String for key in rows[0] if key != "amount_usd"}
+            frame = pl.DataFrame(rows, schema_overrides=schema).lazy()
+            eligible = with_distributor_policy(frame).filter(
+                pl.when(pl.col("_policy_matched"))
+                .then(pl.col("policy_catalog_view").fill_null(False)
+                      & pl.col("_effective_revenue_basis").is_in(GENERATION_REVENUE_BASIS))
+                .otherwise(pl.col("_effective_revenue_basis").is_in(
+                    GENERATION_REVENUE_BASIS | LEGACY_GENERATION_REVENUE_BASIS)))
+            rows = eligible.select(list(schema) + ["amount_usd"]).collect().to_dicts()
+        aliases = {r["alias_catalog_key"]: r["catalog_key"]
+                   for r in catalog_alias_lookup(marts[CATALOG_MASTER_FILE]).to_dicts()}
+        return {**unidentified_income(rows, infer_video_evidence(catalog, evidence), catalog, aliases,
+            choices, **filters), "release_id": release_id}
+    except Exception as exc:
+        raise HTTPException(status_code=503,
+            detail="No se pudieron verificar los ingresos sin identificar. Volvé a intentar.") from exc
 
 
 def contract_metadata_catalog(catalog: list[dict]) -> list[dict]:
