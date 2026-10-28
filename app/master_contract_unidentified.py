@@ -31,7 +31,7 @@ def reference(row):
 
 
 def unidentified_income(rows, evidence, catalog, aliases, choices, *, keyword="", source=None,
-                        account=None, offset=0, limit=50):
+                        account=None, offset=0, limit=50, reference_id=None):
     """Subtract actual assignments first, then group remaining money once.
 
     Candidate discovery/exclusion is not allocation. Use the same current
@@ -97,6 +97,8 @@ def unidentified_income(rows, evidence, catalog, aliases, choices, *, keyword=""
             "source_accounts": [{"source": s, "account": a} for s, a in sorted(value["accounts"])],
             "first_month": min(value["periods"], default=None), "last_month": max(value["periods"], default=None),
             "candidates": candidates}
+        if reference_id is not None and item["id"] != reference_id:
+            continue
         text = normalized(" ".join([*item["titles"], *item["artists"], key[1], *[c["isrc"] for c in candidates], *[c["title"] for c in candidates]]))
         if all(token in text for token in normalized(keyword).split()):
             items.append(item)

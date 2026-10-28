@@ -149,11 +149,13 @@ def candidates(
         kind, code = row["kind"], row["code"]
         source, account = row["source"], row["account"]
         key = association_key(kind, code, source, account)
+        choice = choices.get(key)
+        manual = bool(choice and choice.get("manual"))
         scope = (kind, code, source, account) if kind == "TRACK" else (kind, code)
         observed = sorted(all_isrcs[scope])
         canonical = aliases.get(f"{kind}:{code}") if kind != "TRACK" else None
         inferred = isrc in (row.get("inferred_isrcs") or [])
-        standalone_video = kind == "VIDEO" and canonical == f"VIDEO:{code}" and inferred
+        standalone_video = kind == "VIDEO" and canonical == f"VIDEO:{code}" and (inferred or manual)
         blocked = bool(set(observed) - {isrc}) or bool(row.get("native_ada_product"))
         if canonical and canonical != f"ISRC:{isrc}" and not standalone_video:
             blocked = True
@@ -175,18 +177,21 @@ def candidates(
             reason = "El catálogo lo identifica como otro asset."
         elif automatic:
             reason = "Asociación exacta y única al ISRC." if exact else row["inference_reason"]
+        elif manual:
+            reason = "Asociacion manual confirmada desde Sin identificar."
         elif inferred:
             reason = row["inference_reason"]
         else:
             reason = "Sin asociación única confirmada en el catálogo; requiere validación."
         identity = [isrc, kind, code, source, account, observed, canonical, bool(row.get("native_ada_product"))]
-        if inferred and not exact:
+        if manual:
+            identity.append("manual-reference-v1")
+        elif inferred and not exact:
             identity.append(row["inference_signature"])
         signature = hashlib.sha256(json.dumps(
             identity,
             sort_keys=True, separators=(",", ":"),
         ).encode()).hexdigest()
-        choice = choices.get(key)
         included = automatic
         status = "automatic" if automatic else "pending"
         if choice:
@@ -217,6 +222,7 @@ def candidates(
             "proposed_isrcs": row.get("inferred_isrcs") or [],
             "reference_group": "ugc" if ugc_reference else "associated",
             "content_origins": origins,
+            **({"manual": True} if manual else {}),
         })
     pending_codes = set(unresolved_associations(items, overrides))
     return sorted(items, key=lambda item: (item["code"] not in pending_codes,
@@ -236,6 +242,8 @@ def validate_choices(choices: list[dict[str, Any]], previous: list[dict[str, Any
         if item is None:
             raise ValueError("El código asociado ya no está disponible. Actualizá la ficha.")
         if choice["included"]:
+            if bool(choice.get("manual")) != bool(item.get("manual")):
+                raise ValueError("Las asociaciones manuales se confirman desde Sin identificar.")
             if not item["selectable"]:
                 raise ValueError(item["reason"])
             if choice.get("evidence_signature") != item["evidence_signature"]:

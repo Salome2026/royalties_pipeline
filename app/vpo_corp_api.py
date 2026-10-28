@@ -388,6 +388,14 @@ class MasterCodeAssociationChoice(BaseModel):
     key: str = Field(..., min_length=1, max_length=1000)
     included: bool
     evidence_signature: str = Field(..., pattern=r"^[a-f0-9]{64}$")
+    manual: bool = False
+
+
+class MasterUnidentifiedLinkRequest(BaseModel):
+    isrc: str = Field(..., min_length=12, max_length=12)
+    expected_version: int = Field(..., ge=0)
+    release_id: str = Field(..., min_length=1, max_length=100)
+    reference_signature: str = Field(..., pattern=r"^[a-f0-9]{64}$")
 
 
 class MasterContractSplit(MasterContractAllocation):
@@ -8732,6 +8740,108 @@ def contract_metadata_catalog(catalog: list[dict]) -> list[dict]:
     return with_external_titles(catalog, pl.read_parquet(path).to_dicts()) if path else catalog
 
 
+@app.get("/master-contract-unidentified/destinations")
+def master_contract_link_destinations(keyword: str = "", x_vpo_api_key: str | None = Header(default=None),
+                                      x_vpo_username: str | None = Header(default=None)):
+    require_api_key(x_vpo_api_key)
+    with operational_connect() as conn:
+        require_master_contract_user(conn, x_vpo_username, "access")
+    if is_wml():
+        raise HTTPException(400, "Esta operacion corresponde al catalogo habitual.")
+    path = ensure_marts(filenames=[CATALOG_MASTER_FILE])[CATALOG_MASTER_FILE]
+    catalog = pl.read_parquet(path).filter(pl.col("asset_isrc").str.contains(r"^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$"))
+    tokens = normalize_search_text(keyword).split()
+    if not tokens:
+        return {"items": []}
+    for token in tokens:
+        catalog = catalog.filter(contains_search_expr(pl.col("asset_isrc"), token)
+            | contains_search_expr(pl.col("track_title"), token)
+            | contains_search_expr(pl.col("artist_statement"), token))
+    return {"items": [{"isrc": row["asset_isrc"], "title": row.get("track_title") or row["asset_isrc"],
+        "artists": row.get("artist_statement") or ""} for row in catalog.head(30).to_dicts()]}
+
+
+def prepare_unidentified_link(conn, reference_id, isrc):
+    from app.master_contract_link import prepare_link, validate_row_destinations
+    from app.master_contract_income import income_association_index
+    from lib.distributor_policy_store import load_document_in_transaction, use_distributor_policy_snapshot
+    choices = read_contract_association_choices(conn)
+    # Reuse this transaction's policy read instead of waiting for another pooled connection.
+    with use_distributor_policy_snapshot(load_document_in_transaction(conn)):
+        document = master_contract_unidentified_income(choices, reference_id=reference_id)
+    references = document["unidentified_items"]
+    if not references:
+        raise HTTPException(409, "La referencia ya fue asociada o cambio. Actualiza la lista.")
+    saved = read_split(conn, isrc)
+    path = ensure_marts(filenames=[CATALOG_MASTER_FILE])[CATALOG_MASTER_FILE]
+    catalog = pl.read_parquet(path)
+    target = catalog.filter(pl.col("asset_isrc") == isrc)
+    if target.is_empty():
+        raise HTTPException(404, "El ISRC no figura en el catalogo publicado.")
+    rows, evidence = published_unassigned_income(document["release_id"])
+    aliases = {row["alias_catalog_key"]: row["catalog_key"] for row in catalog_alias_lookup(path).to_dicts()}
+    claims = read_contract_association_claims(conn)
+    prepared = prepare_link(references[0], isrc, evidence, aliases, claims,
+        ((saved or {}).get("split") or {}).get("code_association_overrides") or [],
+        document["release_id"], (saved or {}).get("version", 0))
+    inferred = infer_video_evidence(contract_metadata_catalog(catalog.to_dicts()), evidence)
+    updated = {**choices, isrc: prepared["choices"]}
+    next_claims = {choice["key"]: root for root, values in updated.items() for choice in values if choice.get("included")}
+    validate_row_destinations(rows, income_association_index(inferred, aliases, choices, claims),
+        income_association_index(inferred, aliases, updated, next_claims), prepared["keys"], isrc)
+    row = target.row(0, named=True)
+    return {**prepared, "reference": references[0], "release_id": document["release_id"],
+        "target": {"isrc": isrc, "title": row.get("track_title"), "artists": row.get("artist_statement"),
+                   "version": (saved or {}).get("version", 0), "closed": bool(saved and saved["closed"])}}, saved
+
+
+@app.get("/master-contract-unidentified/{reference_id}/association")
+def get_unidentified_link(reference_id: str, isrc: str, x_vpo_api_key: str | None = Header(default=None),
+                          x_vpo_username: str | None = Header(default=None)):
+    require_api_key(x_vpo_api_key)
+    try:
+        clean = clean_isrc(isrc)
+        with operational_connect() as conn:
+            require_master_contract_user(conn, x_vpo_username, "access")
+            if is_wml():
+                raise HTTPException(400, "Esta operacion corresponde al catalogo habitual.")
+            prepared, _ = prepare_unidentified_link(conn, reference_id, clean)
+        return {key: value for key, value in prepared.items() if key not in {"choices", "keys"}}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.post("/master-contract-unidentified/{reference_id}/association")
+def post_unidentified_link(reference_id: str, request: MasterUnidentifiedLinkRequest,
+                           x_vpo_api_key: str | None = Header(default=None), x_vpo_username: str | None = Header(default=None)):
+    require_api_key(x_vpo_api_key)
+    try:
+        clean = clean_isrc(request.isrc)
+        template = get_master_contract(clean, x_vpo_api_key, x_vpo_username)["split"] if request.expected_version == 0 else None
+        with operational_connect() as conn:
+            actor = require_master_contract_user(conn, x_vpo_username, "edit")
+            if is_wml() or not is_postgres_connection(conn):
+                raise HTTPException(400, "Las asociaciones usan el catalogo habitual en Cloud SQL.")
+            conn.execute(db_sql(conn, "SELECT pg_advisory_xact_lock(?, ?)"), (20261009, 1)).fetchone()
+            prepared, previous = prepare_unidentified_link(conn, reference_id, clean)
+            if previous and previous["closed"]:
+                require_master_contract_user(conn, actor, "approve")
+            if request.expected_version != prepared["target"]["version"] or request.release_id != prepared["release_id"] or request.reference_signature != prepared["reference_signature"]:
+                raise HTTPException(409, "La referencia o el contrato cambio. Volve a elegir el destino antes de confirmar.")
+            if previous:
+                from copy import deepcopy
+                split = deepcopy(previous["split"])
+            else:
+                from copy import deepcopy
+                split = deepcopy(template)
+            split["code_association_overrides"] = prepared["choices"]
+            saved = save_split(conn, clean, split, closed=False, future_reports_selected=False,
+                expected_version=request.expected_version, actor=actor)
+        return {"isrc": clean, "version": saved["version"], "closed": False, "associated": True}
+    except ValueError as exc:
+        raise HTTPException(409 if "cambió desde" in str(exc) else 400, str(exc)) from exc
+
+
 def master_contract_associations(isrc: str, choices: list[dict[str, Any]], claims: dict[str, str]) -> list[dict[str, Any]]:
     if is_wml():return []
     path = ensure_marts(filenames=[CATALOG_MASTER_FILE])[CATALOG_MASTER_FILE]
@@ -8894,6 +9004,8 @@ def put_master_contract(
             require_master_contract_user(conn, actor, "approve")
         try:
             split = preserve_contract_associations(request.split.model_dump(), previous)
+            if request.split.code_association_overrides is not None:
+                split["code_association_overrides"] = [choice.model_dump(exclude_defaults=True) for choice in request.split.code_association_overrides]
             from app.catalog_participant_review import preserve_review
             split = preserve_review(split, previous, closed=request.closed, actor=actor)
             if request.expected_version != (previous or {}).get("version", 0):

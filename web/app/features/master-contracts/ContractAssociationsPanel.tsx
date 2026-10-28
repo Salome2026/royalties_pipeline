@@ -92,7 +92,7 @@ export function ContractAssociationsPanel({ isrc, version, canEdit, choices, onC
     const next = choices.filter((choice) => associationScope(choice.key) !== scope);
     if (decision === "included" || decision === "excluded") {
       for (const row of items.filter((value) => associationScope(value.key) === scope)) {
-        next.push({ key: row.key, included: decision === "included", evidence_signature: row.evidence_signature });
+        next.push({ key: row.key, included: decision === "included", evidence_signature: row.evidence_signature, ...(row.manual ? { manual: true } : {}) });
       }
     }
     onChange(next);

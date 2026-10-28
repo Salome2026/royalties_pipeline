@@ -1,6 +1,7 @@
 "use client";
 
 import styles from "./MasterContractsModule.module.css";
+import { Link2 } from "lucide-react";
 
 export type UnidentifiedIncome = {
   id: string; kind: string; code: string | null; title: string; artist: string;
@@ -10,13 +11,14 @@ export type UnidentifiedIncome = {
 };
 const money = (value: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value);
 
-export function UnidentifiedIncomeTable({ items, loading, onOpen }: {
+export function UnidentifiedIncomeTable({ items, loading, onOpen, onAssociate }: {
   items: UnidentifiedIncome[]; loading: boolean; onOpen: (isrc: string) => void;
+  onAssociate?: (item: UnidentifiedIncome) => void;
 }) {
   return <div className={styles.tableWrap}><table className={`${styles.table} ${styles.unidentifiedTable}`}>
-    <thead><tr><th>Tema / referencia</th><th>Artista informado</th><th>Código</th><th>Ingreso informado (USD)</th><th>Distribuidora / cuenta</th><th>Posibles destinos</th></tr></thead>
+    <thead><tr><th>Tema / referencia</th><th>Artista informado</th><th>Código</th><th>Ingreso informado (USD)</th><th>Distribuidora / cuenta</th><th>Posibles destinos</th>{onAssociate && <th aria-label="Acciones" />}</tr></thead>
     <tbody>
-      {!loading && items.length === 0 && <tr><td colSpan={6} className={styles.empty}>No hay ingresos sin identificar para este filtro.</td></tr>}
+      {!loading && items.length === 0 && <tr><td colSpan={onAssociate ? 7 : 6} className={styles.empty}>No hay ingresos sin identificar para este filtro.</td></tr>}
       {items.map((item) => <tr key={item.id}>
         <td>{item.title}<small>{item.first_month || ""}{item.last_month && item.last_month !== item.first_month ? ` a ${item.last_month}` : ""}</small></td>
         <td>{item.artist}</td>
@@ -29,6 +31,7 @@ export function UnidentifiedIncomeTable({ items, loading, onOpen }: {
           <small>{candidate.isrc}</small>
           <small className={styles.associationPending}>{candidate.statuses.includes("excluded") ? "No incluido en este tema" : candidate.statuses.every((status) => status === "blocked") ? "Revisar destino" : "Por validar"}</small>
         </div>) : <span className={styles.associationsCount}>Sin coincidencia encontrada</span>}</td>
+        {onAssociate && <td><button type="button" className={styles.secondaryButton} onClick={() => onAssociate(item)}><Link2 size={14} />Asociar</button></td>}
       </tr>)}
     </tbody>
   </table></div>;

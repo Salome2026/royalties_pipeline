@@ -1,4 +1,4 @@
-export type AssociationChoice = { key: string; included: boolean; evidence_signature: string };
+export type AssociationChoice = { key: string; included: boolean; evidence_signature: string; manual?: boolean };
 export type Association = AssociationChoice & {
   kind: string; code: string; source: string; account: string; titles: string[]; artists: string[];
   isrcs: string[]; automatic: boolean; status: string; selectable: boolean; reason: string;

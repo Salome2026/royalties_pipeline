@@ -81,6 +81,12 @@ def income_association_index(
     *, with_candidates: bool = False,
 ) -> dict[str, Any]:
     scopes: dict[tuple, list[dict]] = defaultdict(list)
+    manual_roots: dict[tuple, set[str]] = defaultdict(set)
+    for root, decisions in choices.items():
+        for decision in decisions:
+            if decision.get("manual"):
+                kind, code, source, account = json.loads(decision["key"])
+                manual_roots[(kind, code, source, account) if kind == "TRACK" else (kind, code)].add(root)
     for item in evidence:
         scope = (item["kind"], item["code"])
         if item["kind"] == "TRACK":
@@ -89,6 +95,7 @@ def income_association_index(
     target_evidence: dict[str, dict[str, dict]] = defaultdict(dict)
     for scope, items in scopes.items():
         roots = {value for item in items for value in item.get("isrcs") or []}
+        roots.update(manual_roots.get(scope, ()))
         roots.update(value for item in items for value in item.get("inferred_isrcs") or [])
         canonical = aliases.get(f"{scope[0]}:{scope[1]}")
         if canonical and canonical.startswith("ISRC:"):

@@ -19,6 +19,24 @@
 .unidentifiedTable small { display: block; margin-top: 4px; color: #a6bebc; font-size: .7rem; }
 .unidentifiedTable a { color: #77e4c9; }
 .unidentifiedCandidate + .unidentifiedCandidate { margin-top: 12px; }
+.unidentifiedTable td:last-child .secondaryButton { min-height: 32px; font-size: .73rem; white-space: nowrap; }
+.linkDialog { width: min(680px, calc(100vw - 28px)); max-height: 90dvh; box-sizing: border-box; overflow: auto; padding: 22px; border: 1px solid rgba(164,188,199,.32); border-radius: 8px; color: #edf4f5; background: rgba(15,23,24,.94); backdrop-filter: blur(18px); box-shadow: 0 22px 70px rgba(0,0,0,.45); }
+.linkDialog::backdrop { background: rgba(0,0,0,.5); backdrop-filter: blur(4px); }
+.linkHeader { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.linkHeader h2 { margin: 0; font-size: 1.05rem; }
+.linkReference { display: grid; gap: 6px; padding: 18px 0; margin-bottom: 14px; border-bottom: 1px solid rgba(164,188,199,.2); font-size: .82rem; overflow-wrap: anywhere; }
+.linkReference small, .linkReference > span { color: #a6bebc; font-size: .75rem; }
+.linkReference > span:last-child { display: flex; justify-content: space-between; gap: 14px; margin-top: 6px; }
+.linkSearch { display: flex; gap: 8px; }
+.linkSearch .searchBox { display: flex; align-items: center; gap: 8px; max-width: none; flex: 1; height: 40px; padding: 0 11px; font-size: .8rem; font-weight: 500; }
+.linkSearch .searchBox svg { position: static; left: auto; top: auto; flex: 0 0 16px; transform: none; }
+.linkSearch .searchBox input { flex: 1; min-width: 0; width: 100%; height: 38px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; box-shadow: none; }
+.linkSearch .iconButton { flex: 0 0 40px; width: 40px; height: 40px; }
+.linkResults { max-height: 260px; overflow: auto; margin-top: 12px; }
+.linkDestination { display: grid; gap: 5px; margin-top: 16px; padding-top: 14px; border-top: 1px solid rgba(164,188,199,.2); font-size: .8rem; overflow-wrap: anywhere; }
+.linkDestination span, .linkDestination small, .linkDestination p { color: #a6bebc; font-size: .75rem; }
+.linkDestination p { margin: 7px 0; }
+.linkActions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
 .amountCell .incomeButton { display: inline-flex; align-items: center; justify-content: flex-end; gap: 7px; width: auto; margin: 0; padding: 4px 0; border: 0; border-radius: 0; background: transparent; color: inherit; font: inherit; font-variant-numeric: tabular-nums; box-shadow: none; transform: none; }
 .amountCell .incomeButton:hover { background: transparent; color: #77e4c9; transform: none; }
 .incomeExtra { display: block; color: #a6bebc; font-size: .7rem; white-space: nowrap; }

@@ -10,6 +10,7 @@ import { MasterAgreementsEditor, visibleAgreements, type MasterAgreement } from 
 import { PoolsAllocationEditor } from "./PoolsAllocationEditor";
 import { ContractAssociationsPanel, type AssociationChoice, type AssociationValidation } from "./ContractAssociationsPanel";
 import { UnidentifiedIncomeTable, type UnidentifiedIncome } from "./UnidentifiedIncomeTable";
+import { AssociateIncomeDialog } from "./AssociateIncomeDialog";
 import { simpleMasterAgreement, agreementAllocation, agreementIncome, allocationTotals, contractErrors, previewAllocation, type Allocation, type StatementIncome } from "./contractLogic";
 
 type Split = Allocation & {
@@ -114,6 +115,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   const [saving, setSaving] = useState(false);
   const [editingArtist, setEditingArtist] = useState<string | null>(null);
   const [incomeOpen, setIncomeOpen] = useState(false);
+  const [associating, setAssociating] = useState<UnidentifiedIncome | null>(null);
   const [associationValidation, setAssociationValidation] = useState<AssociationValidation>({ loading: true, pending: 0, error: "" });
 
   const loadList = useCallback(async () => {
@@ -463,7 +465,11 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
         {listError && <p className={styles.warning} role="alert">{listError}</p>}
         <div className={styles.listMeta} aria-live="polite"><span>{list ? `${list.total.toLocaleString("es-AR")} referencias sin identificar` : listError ? "No se pudo verificar la lista" : "Verificando ingresos..."}</span>
           {list?.unidentified_summary && <span>{money(list.unidentified_summary.amount_usd)} · {list.unidentified_summary.with_candidates} con posibles destinos · {list.unidentified_summary.without_candidates} sin coincidencia</span>}</div>
-        <UnidentifiedIncomeTable items={list?.unidentified_items || []} loading={loading || !list} onOpen={(isrc) => void openDetail(isrc)} />
+        <UnidentifiedIncomeTable items={list?.unidentified_items || []} loading={loading || !list} onOpen={(isrc) => void openDetail(isrc)}
+          onAssociate={canEdit ? setAssociating : undefined} />
+        {associating && <AssociateIncomeDialog reference={associating} canApprove={canApprove} onClose={() => setAssociating(null)} onSaved={(isrc) => {
+          setAssociating(null); onMessage({ type: "ok", text: `Referencia asociada a ${isrc}. Contrato abierto para revision.` }); void loadList();
+        }} />}
       </> : <><div className={styles.listMeta}><span>{list ? `${list.total.toLocaleString("es-AR")} ISRC` : "Cargando catálogo..."}</span><span>{list?.summary.open.toLocaleString("es-AR") || "0"} abiertos · {list?.summary.closed.toLocaleString("es-AR") || "0"} repartos cerrados{!wml && ` · ${list?.summary.review || 0} por revisar`}</span></div>
       <div className={styles.tableWrap}><table className={styles.table}>
         <thead><tr><th>Tema</th><th>ISRC</th><th>Crédito en catálogo</th><th>Ingreso acumulado</th><th>Estado</th></tr></thead>
