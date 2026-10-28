@@ -13,6 +13,7 @@ import zipfile
 import polars as pl
 
 from .catalog_manual_metadata import CORRECTIONS_PATH
+from .catalog_identity_references import materialize_identity_references
 from .fuga_catalog_artists import ARTIST_COLUMNS, parse_catalog_credit
 
 
@@ -255,3 +256,20 @@ def enrich_onerpm_catalog_file(catalog: pl.DataFrame, path: Path) -> pl.DataFram
     if not path.exists():
         raise FileNotFoundError("Falta metadata ONErpm: ejecutar su ingesta antes de reconstruir el catalogo")
     return enrich_onerpm_catalog(catalog, pl.read_parquet(path))
+
+
+def materialize_onerpm_identity_file(catalog: pl.DataFrame, path: Path) -> pl.DataFrame:
+    """Consume all native ISRC observations, even Shares excluded from money.
+
+    read_onerpm_metadata runs on every ingestion independently of load_shares_as_rows.
+    Artist-credit ambiguity must not discard an otherwise explicit recording ISRC.
+    """
+    if not path.exists():
+        raise FileNotFoundError("Falta metadata ONErpm: ejecutar su ingesta antes de reconstruir el catalogo")
+    native = pl.read_parquet(path)
+    references = []
+    for item in native.iter_rows(named=True):
+        for observation in json.loads(item["evidence"]):
+            references.append({**observation, "source": "onerpm", "isrc": item["asset_isrc"],
+                "recording_artists": item["catalog_artists"] if item["status"] == "resolved" else []})
+    return materialize_identity_references(catalog, references)

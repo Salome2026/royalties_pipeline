@@ -35,6 +35,37 @@ El catalogo usa dos capas:
 
 ## Clave canonica
 
+### Identidad nativa independiente del tratamiento economico
+
+La admision de importes y la lectura de identidad son decisiones separadas. Una
+hoja de participaciones/transferencias puede aportar un ISRC, titulo y creditos
+validos aunque su importe no deba sumarse como generacion de regalias.
+
+ONErpm ya conserva observaciones de `Masters` y `Shares In & Out` en
+`catalog_onerpm_artists.parquet` en cada ingesta, incluso para las cuentas que
+no cargan Shares como filas economicas. La reconstruccion consume ahora esas
+observaciones antes de incorporar metadata externa y correcciones manuales.
+Cada ISRC nativo de nivel track que falta obtiene su propia ficha de referencia,
+con importes/unidades en cero, procedencia de archivo/hoja/fila y creditos
+resueltos por el lector de roles. El pagador/receptor no es el interprete, y los
+writers/producers no se convierten en interpretes.
+
+La materializacion es general por evidencia, sin listas de excepciones por
+cancion o ISRC. No cambia las politicas de dinero ni vuelve a ingresar Shares.
+No une ISRC distintos por titulo ni por UPC. Los UPC nativos quedan conservados
+en la evidencia y `catalog_identity_upcs`, fuera de los campos que conceden una
+asociacion automatica de ingresos; un Parent ID tambien puede ser un album.
+Las fichas existentes y sus aliases quedan intactos. Las correcciones manuales
+se aplican despues, tambien a las nuevas fichas de referencia.
+
+La presencia de una ficha no confirma un video: se mantienen las opciones y la
+validacion actual de Codigos asociados. Dos ISRC para el mismo titulo permanecen
+como dos referencias hasta determinar su relacion.
+
+Control de regresion: `scripts/qa/qa_catalog_identity_references.py` verifica la
+reconstruccion de una futura ingesta, preservacion de dinero y metadata manual,
+repeticion sin duplicados, creditos por rol y multiples ISRC por titulo.
+
 La clave canonica se decide asi:
 
 1. ISRC valido si existe.

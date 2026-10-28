@@ -11,7 +11,7 @@ from lib.ada_identity import ada_catalog_key_expr
 from lib.catalog_manual_metadata import apply_catalog_manual_metadata
 from lib.fuga_catalog_artists import enrich_fuga_catalog_file
 from lib.fuga_video_automatic import apply_automatic_extended
-from lib.onerpm_catalog_artists import METADATA_FILE, enrich_onerpm_catalog_file
+from lib.onerpm_catalog_artists import METADATA_FILE, enrich_onerpm_catalog_file, materialize_onerpm_identity_file
 from lib.ada_catalog_artists import METADATA_FILE as ADA_METADATA_FILE, enrich_ada_catalog_file
 from lib.orchard_catalog_artists import enrich_orchard_catalog_file
 from lib.soundon_catalog_artists import enrich_soundon_catalog_file
@@ -669,6 +669,10 @@ def build_catalog_master() -> pl.DataFrame:
                 pl.coalesce(["artist_variants", "identity_artist_variants"]).alias("artist_variants"),
             ])
         )
+
+    # Native metadata and admission of money are separate. Shares-only ISRCs
+    # must exist before release metadata/manual corrections/artist enrichment.
+    catalog = materialize_onerpm_identity_file(catalog, MARTS_DIR / METADATA_FILE)
 
     release_lookup = build_release_lookup()
     if not release_lookup.is_empty():
