@@ -377,6 +377,7 @@ class MasterAgreement(BaseModel):
     contract_kind: Literal["simple", "project"] = "simple"
     master_pool_percent: float | None = Field(default=None, ge=0, le=100)
     company_name: str = Field(default="Indyana", max_length=200)
+    distribution_recipients: list[MasterAgreementOwner] | None = Field(default=None, min_length=1, max_length=12)
     owner_split_mode: Literal["percent", "equal"] = "percent"
     owners: list[MasterAgreementOwner] = Field(default_factory=list, max_length=12)
     effective_from: str | None = None
@@ -8971,6 +8972,7 @@ def get_master_contract(
         "accounts": catalog_row.get("accounts"),
         "split": proposed,
         "participant_proposal": participant_proposal,
+        "distribution_recipients_supported": True,
         "closed": saved["closed"] if saved else False,
         **review,
         "future_reports_selected": saved["future_reports_selected"] if saved else False,
@@ -9004,6 +9006,9 @@ def put_master_contract(
             require_master_contract_user(conn, actor, "approve")
         try:
             split = preserve_contract_associations(request.split.model_dump(), previous)
+            for agreement in split.get("agreements") or []:
+                if agreement.get("distribution_recipients") is None:
+                    agreement.pop("distribution_recipients", None)
             if request.split.code_association_overrides is not None:
                 split["code_association_overrides"] = [choice.model_dump(exclude_defaults=True) for choice in request.split.code_association_overrides]
             from app.catalog_participant_review import preserve_review

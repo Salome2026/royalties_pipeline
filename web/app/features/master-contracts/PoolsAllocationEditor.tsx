@@ -3,15 +3,16 @@
 import { Divide, FilePenLine, Plus, Trash2 } from "lucide-react";
 import styles from "./MasterContractsModule.module.css";
 import { artistBeneficiaries, type ArtistContract } from "./ArtistContractsPanel";
-import { beneficiaryKey, simpleMasterAgreement, ownershipTotal, participantExclusions, poolAgreement, type Allocation, type MasterAgreement, type ParticipationRule } from "./contractLogic";
+import { beneficiaryKey, distributionRecipients, withDistributionRecipients, simpleMasterAgreement, ownershipTotal, participantExclusions, poolAgreement, type Allocation, type MasterAgreement, type ParticipationRule } from "./contractLogic";
 
 const numberOrNull = (value: string) => value.trim() === "" ? null : Number(value);
 const percent = (value: number) => value.toLocaleString("es-AR", { maximumFractionDigits: 4 });
 
-export function PoolsAllocationEditor({ agreement, allocation, canEdit, artistOptions, artistContracts, onChange, onEditArtist }: {
+export function PoolsAllocationEditor({ agreement, allocation, canEdit, artistOptions, artistContracts, onChange, onEditArtist, distributionRecipientsSupported }: {
   agreement: MasterAgreement;
   allocation: Allocation;
   canEdit: boolean;
+  distributionRecipientsSupported: boolean;
   artistOptions: string[];
   artistContracts: ArtistContract[];
   onChange: (agreement: MasterAgreement) => void;
@@ -23,6 +24,10 @@ export function PoolsAllocationEditor({ agreement, allocation, canEdit, artistOp
   const rows = [{ artist: allocation.principal, percent: allocation.principal_percent, rule: allocation.principal_rule }, ...allocation.participants];
   const remaining = agreement.master_pool_percent == null ? null : 100 - agreement.master_pool_percent;
   const participation = rows.reduce((sum, row) => sum + (row.percent || 0), 0);
+  const recipients = distributionRecipients(agreement);
+  function updateRecipient(index: number, patch: Partial<typeof recipients[number]>) {
+    onChange(withDistributionRecipients(agreement, recipients.map((row, position) => position === index ? { ...row, ...patch } : row)));
+  }
 
   function update(patch: Partial<MasterAgreement>) { onChange({ ...agreement, ...patch }); }
   function updateAllocation(patch: Partial<Allocation>) { update({ allocation: { ...allocation, ...patch } }); }
@@ -111,7 +116,21 @@ export function PoolsAllocationEditor({ agreement, allocation, canEdit, artistOp
           onChange={(event) => update({ master_pool_percent: numberOrNull(event.target.value) })} /></label>
         <label>Bolsa participaciones %<input aria-label="Bolsa participaciones porcentaje" type="number" min="0" max="100" step="any" disabled={!canEdit} value={remaining ?? ""}
           onChange={(event) => update({ master_pool_percent: event.target.value === "" ? null : 100 - Number(event.target.value) })} /></label>
-        {!isMaster && <label>Destinatario<input list={optionsId} disabled={!canEdit} value={agreement.company_name || "Indyana"} onChange={(event) => update({ company_name: event.target.value })} /></label>}
+        {!isMaster && <div className={styles.distributionRecipients}>
+          {recipients.map((recipient, index) => <div key={index} className={`${styles.distributionRow} ${recipients.length === 1 ? styles.distributionSingle : ""}`}>
+            <label>{recipients.length === 1 ? "Destinatario" : `Destinatario ${index + 1}`}<input list={optionsId} disabled={!canEdit}
+              value={recipient.name} onChange={event => updateRecipient(index, { name: event.target.value })} /></label>
+            {recipients.length > 1 && <label>% del ingreso total<input aria-label={`Porcentaje destinatario ${index + 1}`} type="number" min="0" max={agreement.master_pool_percent ?? 100}
+              step="any" inputMode="decimal" disabled={!canEdit} value={recipient.percent ?? ""}
+              onChange={event => updateRecipient(index, { percent: numberOrNull(event.target.value) })} /></label>}
+            <div className={styles.distributionActions}>
+              {canEdit && distributionRecipientsSupported && agreement.commercialization === "distribution" && index === 0 && <button type="button" className={styles.iconButton} title="Agregar destinatario" aria-label="Agregar destinatario"
+                disabled={recipients.length >= 12} onClick={() => onChange(withDistributionRecipients(agreement, [...recipients, { name: "", percent: null }]))}><Plus size={16} /></button>}
+              {canEdit && recipients.length > 1 && <button type="button" className={styles.iconButton} title={`Quitar destinatario ${index + 1}`} aria-label={`Quitar destinatario ${index + 1}`}
+                onClick={() => onChange(withDistributionRecipients(agreement, recipients.filter((_, position) => position !== index)))}><Trash2 size={16} /></button>}
+            </div>
+          </div>)}
+        </div>}
       </div>
     </section>
 

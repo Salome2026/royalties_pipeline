@@ -610,6 +610,8 @@ def validate_split(split: dict[str, Any], closed: bool, future_reports_selected:
             ids.add(agreement_id)
             label = str(agreement.get("label") or f"Contrato {index}").strip()
             commercialization = agreement.get("commercialization")
+            if agreement.get("distribution_recipients") is not None:
+                distribution_recipient_rows(agreement, closed=closed)
             if closed and commercialization not in {"distribution", "master"}:
                 raise ValueError(f"{label}: elegí Distribución o Master.")
             start = agreement.get("effective_from")
@@ -652,6 +654,37 @@ def validate_split(split: dict[str, Any], closed: bool, future_reports_selected:
         _validate_allocation(split, [], "distribution", closed, "Reparto")
 
 
+def distribution_recipient_rows(agreement: dict[str, Any], *, closed: bool = True) -> list[dict[str, Any]]:
+    recipients = agreement.get("distribution_recipients")
+    pool = agreement.get("master_pool_percent")
+    if recipients is None:
+        return [{"name": agreement.get("company_name") or "Indyana", "percent": float(pool or 0)}]
+    if agreement.get("commercialization") != "distribution" or agreement.get("allocation_model") != "pools":
+        raise ValueError("Los destinatarios multiples corresponden a distribucion con reparto inicial.")
+    if pool is not None and (not math.isfinite(float(pool)) or not 0 <= float(pool) <= 100):
+        raise ValueError("El porcentaje de comercializacion debe estar entre 0 y 100.")
+    if not isinstance(recipients, list) or not 1 <= len(recipients) <= 12 or any(not isinstance(row, dict) for row in recipients):
+        raise ValueError("Se admiten entre uno y doce destinatarios de distribucion.")
+    names = [artist_key(str(row.get("name") or "")) for row in recipients]
+    named = [name for name in names if name]
+    if len(named) != len(set(named)):
+        raise ValueError("Hay destinatarios de distribucion repetidos.")
+    for row in recipients:
+        value = row.get("percent")
+        if value is not None and (not math.isfinite(float(value)) or not 0 <= float(value) <= 100):
+            raise ValueError("Los porcentajes de los destinatarios deben estar entre 0 y 100.")
+    if len(recipients) == 1:
+        rows = [{"name": str(recipients[0].get("name") or ""), "percent": pool}]
+    else:
+        rows = recipients
+        if pool is not None and sum(float(row.get("percent") or 0) for row in rows) > float(pool) + .0001:
+            raise ValueError("Los destinatarios superan el porcentaje de comercializacion.")
+    if closed and (any(not name for name in names) or pool is None or any(row.get("percent") is None for row in rows)
+                   or abs(sum(float(row.get("percent") or 0) for row in rows) - float(pool)) > .0001):
+        raise ValueError("Completa los destinatarios; sus porcentajes deben sumar exactamente el porcentaje de comercializacion.")
+    return [{"name": row.get("name") or "", "percent": row.get("percent")} for row in rows]
+
+
 def _validate_pool_allocation(agreement: dict[str, Any], allocation: dict[str, Any], closed: bool, label: str) -> None:
     def check_percent(value: Any) -> None:
         if value is not None and (not math.isfinite(float(value)) or not 0 <= float(value) <= 100):
@@ -659,7 +692,7 @@ def _validate_pool_allocation(agreement: dict[str, Any], allocation: dict[str, A
 
     pool = agreement.get("master_pool_percent")
     check_percent(pool)
-    if closed and agreement.get("commercialization") == "distribution" and not str(agreement.get("company_name", "Indyana")).strip():
+    if closed and agreement.get("commercialization") == "distribution" and agreement.get("distribution_recipients") is None and not str(agreement.get("company_name", "Indyana")).strip():
         raise ValueError(f"{label}: completá el destinatario de la comercialización.")
     owners = agreement.get("owners") or []
     if len(owners) > 12:

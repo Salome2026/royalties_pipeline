@@ -7,7 +7,7 @@ import unicodedata
 from collections import defaultdict
 from typing import Any
 
-from app.master_contracts import validate_split, _period_start, _period_end
+from app.master_contracts import validate_split, _period_start, _period_end, distribution_recipient_rows
 
 
 def beneficiary_key(value: str) -> str:
@@ -59,7 +59,8 @@ def allocation_rows(agreement: dict, split: dict) -> list[dict]:
         if agreement.get("commercialization") == "master":
             distribute(pool, "Titular del master")
         else:
-            add(agreement.get("company_name") or "Indyana", pool, "Distribución", True)
+            for recipient in distribution_recipient_rows(agreement):
+                add(recipient["name"], float(recipient["percent"] or 0), "Distribución", True)
         participants = [{"artist": allocation["principal"], "percent": allocation["principal_percent"], "rule": allocation.get("principal_rule")}, *(allocation.get("participants") or [])]
         for item in participants:
             base = float(item.get("percent") or 0)

@@ -1,0 +1,43 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import ts from "typescript";
+const file = new URL("../app/features/master-contracts/contractLogic.ts", import.meta.url);
+const source = ts.transpileModule(fs.readFileSync(file, "utf8"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+const { distributionRecipients, withDistributionRecipients, distributionRecipientErrors, previewAllocation, contractErrors } = await import("data:text/javascript;base64," + Buffer.from(source).toString("base64"));
+const allocation = { principal: "Artista", principal_percent: 70, indyana_percent: null, apply_guest_contracts: false, participants: [] };
+const original = { id: "principal", label: "Contrato principal", commercialization: "distribution", allocation_model: "pools", contract_kind: "simple",
+  master_pool_percent: 30, company_name: "Indyana", owners: [], effective_from: "2026-01-01", effective_until: null, allocation };
+const before = JSON.stringify(original);
+assert.deepEqual(distributionRecipients(original), [{ name: "Indyana", percent: 30 }]);
+const single = previewAllocation(original, allocation, 100);
+assert.deepEqual(single.map(row => [row.artist, row.amount]), [["Indyana", 30], ["Artista", 70]]);
+const rows = [{ name: "Indyana", percent: 20 }, { name: "Socio", percent: 10 }];
+const multi = withDistributionRecipients(original, rows);
+assert.deepEqual(distributionRecipientErrors(multi, true), []);
+assert.deepEqual(previewAllocation(multi, allocation, 100).map(row => [row.artist, row.amount]), [["Indyana", 20], ["Socio", 10], ["Artista", 70]]);
+assert.equal(JSON.stringify(original), before);
+const removed = withDistributionRecipients(multi, [rows[1]]);
+assert.equal(removed.company_name, "Socio");
+assert.equal(removed.distribution_recipients, undefined);
+assert.deepEqual(distributionRecipients(removed), [{ name: "Socio", percent: 30 }]);
+assert.deepEqual(distributionRecipients({ ...removed, master_pool_percent: 35 }), [{ name: "Socio", percent: 35 }]);
+assert.deepEqual(distributionRecipients({ ...multi, master_pool_percent: 35 }), rows);
+const over = { ...multi, distribution_recipients: [{ name: "Indyana", percent: 20 }, { name: "Socio", percent: 11 }] };
+assert.ok(contractErrors([over], allocation).some(error => error.includes("superan")));
+assert.equal(previewAllocation(over, allocation, 100), null);
+const under = { ...multi, distribution_recipients: [{ name: "Indyana", percent: 20 }, { name: "Socio", percent: 5 }] };
+assert.deepEqual(distributionRecipientErrors(under), []);
+assert.ok(distributionRecipientErrors(under, true).length);
+assert.equal(previewAllocation(under, allocation, 100), null);
+for (const amount of [100.07, -.03, -100.07, .01, 0]) {
+  const preview = previewAllocation(multi, allocation, amount);
+  assert.ok(Math.abs(preview.reduce((sum, row) => sum + row.amount, 0) - amount) < .00001);
+}
+assert.ok(distributionRecipientErrors({ ...multi, distribution_recipients: [{ name: "Indyana", percent: 20 }, { name: " INDYANA ", percent: 10 }] }).length);
+assert.ok(distributionRecipientErrors({ ...multi, master_pool_percent: 20 }).length);
+assert.ok(distributionRecipientErrors({ ...multi, commercialization: "master" }).length);
+const editor = fs.readFileSync(new URL("../app/features/master-contracts/PoolsAllocationEditor.tsx", import.meta.url), "utf8");
+assert.match(editor, /Agregar destinatario/);
+assert.match(editor, /Quitar destinatario/);
+assert.doesNotMatch(editor, /Total destinatarios|distributionTotal|distributionCounter/);
+console.log("Distribution recipients: implicit single, absolute shares, add/remove, changing pool, invalid sums, complete preview and cent conservation: PASS");

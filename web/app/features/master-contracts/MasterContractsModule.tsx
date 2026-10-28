@@ -70,6 +70,7 @@ type ContractDetail = ContractItem & {
   reports_effective: false;
   pool_contracts_supported?: boolean;
   participant_proposal?: { status: string; added: Record<string, string[]>; capacity_exceeded: boolean } | null;
+  distribution_recipients_supported?: boolean;
 };
 
 type Message = { type: "ok" | "error"; text: string };
@@ -199,7 +200,9 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   const allocation = draft ? agreementAllocation(activeAgreement, draft) : null;
   const totals = allocation ? allocationTotals(activeAgreement, allocation) : { master: 0, participation: 0, general: 0 };
   const errors = draft ? [...contractErrors(agreements, draft), ...(agreements.some((agreement) => agreementAllocation(agreement, draft).participants.length > 10)
-    ? ["La ficha supera diez participantes adicionales. Quitá los que no correspondan antes de guardar."] : [])] : [];
+    ? ["La ficha supera diez participantes adicionales. Quitá los que no correspondan antes de guardar."] : []),
+    ...(detail?.distribution_recipients_supported !== true && agreements.some(agreement => agreement.distribution_recipients != null)
+      ? ["La version del servicio no admite estos destinatarios. Volve a abrir la ficha antes de guardar."] : [])] : [];
   const associationsIncomplete = associationValidation.loading || !!associationValidation.error || associationValidation.pending > 0;
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
   const periodIncome = detail ? agreementIncome(activeAgreement, detail.statement_income || [], today) : null;
@@ -380,6 +383,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
                 {canEditCurrent && <button type="button" className={styles.secondaryButton} onClick={() => applyPrincipalContract(contractFor(allocation.principal)!)}>Usar propuesta</button>}
               </div>}
               {activeAgreement && <PoolsAllocationEditor agreement={activeAgreement} allocation={allocation} canEdit={canEditCurrent}
+                distributionRecipientsSupported={detail.distribution_recipients_supported === true}
                 artistOptions={artistOptions} artistContracts={detail.artist_contracts} onEditArtist={setEditingArtist}
                 onChange={(next) => updateDraft({ agreements: agreements.map((item) => item.id === next.id ? next : item) })} />}
               <div className={styles.totalsGrid}>

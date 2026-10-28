@@ -34,6 +34,7 @@ export type MasterAgreement = {
   contract_kind?: "simple" | "project";
   master_pool_percent?: number | null;
   company_name?: string;
+  distribution_recipients?: ContractBeneficiary[] | null;
   owner_split_mode?: "percent" | "equal";
   owners: Array<{ name: string; percent: number | null }>;
   effective_from: string | null;
@@ -88,6 +89,36 @@ export function ownershipTotal(agreement: MasterAgreement): number {
     : agreement.owners.reduce((sum, owner) => sum + (owner.percent || 0), 0);
 }
 
+export function distributionRecipients(agreement: MasterAgreement): ContractBeneficiary[] {
+  const rows = agreement.distribution_recipients;
+  if (rows == null) return [{ name: agreement.company_name ?? "Indyana", percent: agreement.master_pool_percent ?? null }];
+  return rows.length === 1 ? [{ name: rows[0].name, percent: agreement.master_pool_percent ?? null }] : rows;
+}
+
+export function withDistributionRecipients(agreement: MasterAgreement, rows: ContractBeneficiary[]): MasterAgreement {
+  if (rows.length === 1) return { ...agreement, company_name: rows[0].name, distribution_recipients: undefined };
+  return { ...agreement, distribution_recipients: rows };
+}
+
+export function distributionRecipientErrors(agreement: MasterAgreement, complete = false): string[] {
+  if (agreement.distribution_recipients == null) return [];
+  if (agreement.commercialization !== "distribution" || agreement.allocation_model !== "pools")
+    return ["Los destinatarios multiples corresponden a distribucion con reparto inicial."];
+  const rows = distributionRecipients(agreement), pool = agreement.master_pool_percent;
+  if (pool != null && (!Number.isFinite(pool) || pool < 0 || pool > 100))
+    return ["El porcentaje de comercializacion debe estar entre 0 y 100."];
+  if (rows.length < 1 || rows.length > 12) return ["Se admiten entre uno y doce destinatarios de distribucion."];
+  const names = rows.map(row => beneficiaryKey(row.name)).filter(Boolean);
+  if (new Set(names).size !== names.length) return ["Hay destinatarios de distribucion repetidos."];
+  if (rows.some(row => row.percent != null && (!Number.isFinite(row.percent) || row.percent < 0 || row.percent > 100)))
+    return ["Los porcentajes de los destinatarios deben estar entre 0 y 100."];
+  const total = rows.reduce((sum, row) => sum + (row.percent || 0), 0);
+  if (pool != null && total > pool + tolerance) return ["Los destinatarios superan el porcentaje de comercializacion."];
+  if (complete && (rows.some(row => !row.name.trim() || row.percent == null) || pool == null || Math.abs(total - pool) > tolerance))
+    return ["Completa los destinatarios; sus porcentajes deben sumar exactamente el porcentaje de comercializacion."];
+  return [];
+}
+
 export function poolAgreement(agreement: MasterAgreement, allocation: Allocation): MasterAgreement {
   if (agreement.allocation_model === "pools") return agreement;
   const pool = agreement.commercialization === "master"
@@ -133,6 +164,7 @@ export function contractErrors(agreements: MasterAgreement[], fallback: Allocati
   const intervals: Array<{ start: string; end: string; label: string }> = [];
   for (const agreement of agreements) {
     const label = agreement.label || "Contrato";
+    errors.push(...distributionRecipientErrors(agreement).map(error => `${label}: ${error}`));
     const start = periodBoundary(agreement.effective_from);
     const end = periodBoundary(agreement.effective_until, true);
     if ((agreement.effective_from && !start) || (agreement.effective_until && !end)) errors.push(`${label}: fecha inválida.`);
@@ -217,7 +249,8 @@ export function previewAllocation(agreement: MasterAgreement, allocation: Alloca
 function previewPools(agreement: MasterAgreement, allocation: Allocation, amount: number): PreviewRow[] | null {
   if (agreement.master_pool_percent == null || (agreement.commercialization === "master"
     && Math.abs(ownershipTotal(agreement) - 100) > tolerance)) return null;
-  if (agreement.commercialization === "distribution" && !((agreement.company_name ?? "Indyana").trim())) return null;
+  if (agreement.commercialization === "distribution" && (agreement.distribution_recipients == null
+    ? !((agreement.company_name ?? "Indyana").trim()) : distributionRecipientErrors(agreement, true).length > 0)) return null;
   const rows: Array<{ artist: string; percent: number; label: string }> = [];
   function owners(base: number, label: string) {
     const total = ownershipTotal(agreement);
@@ -225,7 +258,8 @@ function previewPools(agreement: MasterAgreement, allocation: Allocation, amount
       percent: base * (agreement.owner_split_mode === "equal" ? 1 / agreement.owners.length : (owner.percent || 0) / total) }));
   }
   if (agreement.commercialization === "master") owners(agreement.master_pool_percent, "Titular del master");
-  else rows.push({ artist: agreement.company_name || "Indyana", percent: agreement.master_pool_percent, label: "Distribución" });
+  else distributionRecipients(agreement).forEach(recipient => rows.push({ artist: recipient.name,
+    percent: recipient.percent || 0, label: "Distribución" }));
   const participants = [{ artist: allocation.principal, percent: allocation.principal_percent, rule: allocation.principal_rule }, ...allocation.participants];
   for (const row of participants) {
     const base = row.percent || 0;

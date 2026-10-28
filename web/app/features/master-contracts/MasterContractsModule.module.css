@@ -85,6 +85,18 @@
 .associationValid { color: #77e4c9; }
 .associationPending { color: #f5c47a; }
 .poolFields, .ruleFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.distributionRecipients { grid-column: 1 / -1; display: grid; gap: 10px; min-width: 0; }
+.distributionRow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(98px, 140px) 72px; gap: 9px; align-items: end; min-width: 0; }
+.distributionSingle { grid-template-columns: minmax(0, 1fr) 72px; }
+.distributionActions { display: flex; gap: 6px; min-height: 39px; align-items: center; }
+.distributionActions .iconButton { width: 32px; height: 34px; flex: 0 0 32px; }
+.distributionRecipients label { min-width: 0; }
+@media (max-width: 430px) {
+  .distributionRow { grid-template-columns: minmax(0, 1fr) 96px; gap: 7px; }
+  .distributionActions { grid-column: 1 / -1; justify-content: flex-end; min-height: 34px; }
+  .distributionSingle { grid-template-columns: minmax(0, 1fr) 34px; }
+  .distributionSingle .distributionActions { grid-column: auto; }
+}
 .poolFields label, .ruleFields label, .participantRows label { display: grid; gap: 6px; min-width: 0; color: #bad0d3; font-size: .72rem; font-weight: 700; }
 .poolFields input, .ruleFields input, .participantRows input, .participantRows select, .ownerRows output {
   width: 100%; min-width: 0; height: 39px; margin: 0; padding: 8px 10px; box-sizing: border-box;

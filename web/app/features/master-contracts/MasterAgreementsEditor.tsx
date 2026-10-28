@@ -98,6 +98,7 @@ export function MasterAgreementsEditor({ agreements, fallbackAllocation, canEdit
                     const resetProject = commercialization === "distribution" && (allocation.principal_rule?.treatment === "project_owners" || allocation.participants.some((row) => row.rule?.treatment === "project_owners"));
                     if (resetProject && !window.confirm("En distribución, las participaciones entre socios pasarán a cobro directo. ¿Continuar?")) return;
                     update(index, { commercialization,
+                      ...(commercialization !== "distribution" ? { distribution_recipients: undefined } : {}),
                       ...(resetProject ? { contract_kind: "simple", allocation: { ...allocation,
                         principal_rule: allocation.principal_rule?.treatment === "project_owners" ? { treatment: "direct" } : allocation.principal_rule,
                         participants: allocation.participants.map((row) => row.rule?.treatment === "project_owners" ? { ...row, rule: { treatment: "direct" } } : row),
