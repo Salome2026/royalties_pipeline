@@ -382,6 +382,27 @@
 .guestReference { grid-column: 1 / -1; margin: -2px 0 8px 16px; }
 
 .agreementList { border-top: 1px solid rgba(164, 188, 199, .2); }
+.bulkToolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; margin: 16px 0; color: #d7ebe9; font-size: .82rem; }
+.bulkToolbar label { display: flex; align-items: center; gap: 8px; }
+.bulkToolbar input, .bulkTable input[type="checkbox"] { accent-color: #65d9c8; width: 17px; height: 17px; flex-shrink: 0; }
+.bulkPreview { display: flex; flex-wrap: wrap; gap: 12px 22px; padding: 18px 0; color: #d7ebe9; font-size: .85rem; }
+.bulkPreview strong { flex-basis: 100%; }
+.bulkTable { min-width: 1150px; }
+.table.selectTable th:nth-child(1) { width: 60px; }
+.table.selectTable th:nth-child(2) { width: 25%; }
+.table.selectTable th:nth-child(3) { width: 16%; }
+.table.selectTable th:nth-child(4) { width: 27%; text-align: left; }
+.table.selectTable th:nth-child(5) { width: 16%; text-align: right; }
+.table.selectTable th:nth-child(6) { width: 16%; }
+.table.bulkTable th:nth-child(1) { width: 65px; }
+.table.bulkTable th:nth-child(2) { width: 23%; }
+.table.bulkTable th:nth-child(3) { width: 18%; }
+.table.bulkTable th:nth-child(4), .table.bulkTable th:nth-child(5) { width: 145px; text-align: left; }
+.table.bulkTable th:nth-child(6) { width: auto; }
+.bulkTable td { vertical-align: top; }
+.bulkTable select, .bulkTable input[type="date"] { min-height: 36px; max-width: 220px; padding: 6px; border: 1px solid #536c71; border-radius: 5px; color: #f7fbfb; background: var(--contract-control); color-scheme: dark; }
+.bulkTable td small { display: block; margin-top: 6px; line-height: 1.5; }
+.bulkTable td label { display: flex; align-items: start; gap: 7px; line-height: 1.5; }
 .agreementItem { border-bottom: 1px solid rgba(164, 188, 199, .2); }
 .agreementRow { display: flex; align-items: center; gap: 8px; }
 .agreementToggle { display: flex; align-items: center; gap: 11px; width: 100%; min-width: 0; min-height: 53px; margin: 0; padding: 8px 4px; border: 0; border-radius: 0; background: transparent; color: #eef8f7; text-align: left; box-shadow: none; transform: none; }

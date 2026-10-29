@@ -11,9 +11,10 @@ import { PoolsAllocationEditor } from "./PoolsAllocationEditor";
 import { ContractAssociationsPanel, type AssociationChoice, type AssociationValidation } from "./ContractAssociationsPanel";
 import { UnidentifiedIncomeTable, type UnidentifiedIncome } from "./UnidentifiedIncomeTable";
 import { AssociateIncomeDialog } from "./AssociateIncomeDialog";
+import { BulkContractsPanel } from "./BulkContractsPanel";
 import { simpleMasterAgreement, agreementAllocation, agreementIncome, allocationTotals, contractErrors, previewAllocation, type Allocation, type StatementIncome } from "./contractLogic";
 
-type Split = Allocation & {
+export type Split = Allocation & {
   code_association_overrides?: AssociationChoice[] | null;
   agreements?: MasterAgreement[];
   master_type: "pending" | "indyana_master" | "distribution" | "mawz_master" | "distribution_mawz" | "indyana_and_other" | "mawz_and_other";
@@ -24,7 +25,7 @@ type Split = Allocation & {
   notes: string;
 };
 
-type ContractItem = {
+export type ContractItem = {
   isrc: string;
   title: string;
   artists_informed: string | null;
@@ -51,7 +52,7 @@ type ContractList = {
   unidentified_summary?: { amount_usd: number; with_candidates: number; without_candidates: number };
 };
 
-type ContractDetail = ContractItem & {
+export type ContractDetail = ContractItem & {
   associated_income_groups: Array<{ codes: Array<{ kind: string; code: string; source: string; account: string }>; amount_usd: number }>;
   accounts: string | null;
   artist_suggestions: {
@@ -118,6 +119,10 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   const [incomeOpen, setIncomeOpen] = useState(false);
   const [associating, setAssociating] = useState<UnidentifiedIncome | null>(null);
   const [associationValidation, setAssociationValidation] = useState<AssociationValidation>({ loading: true, pending: 0, error: "" });
+  const [selectedIsrcs, setSelectedIsrcs] = useState<string[]>([]);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const selectable = canEdit && !wml && status === "open";
+  useEffect(() => { setSelectedIsrcs([]); }, [appliedKeyword, sourceAccount, status, offset]);
 
   const loadList = useCallback(async () => {
     const requestId = ++listRequest.current;
@@ -318,6 +323,9 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   }
 
   if (mode === "artists") return <ArtistContractsPanel canEdit={canEdit} onBack={() => setMode("isrc")} onMessage={onMessage} />;
+  if (bulkOpen) return <BulkContractsPanel items={(list?.items || []).filter((item) => selectedIsrcs.includes(item.isrc))}
+    canApprove={canApprove} onBack={() => { setBulkOpen(false); setSelectedIsrcs([]); void loadList(); }}
+    onOpen={(isrc) => { setBulkOpen(false); void openDetail(isrc); }} />;
 
   if (detail && draft && allocation) {
     const artistOptions = [...new Set([...detail.artist_suggestions.artists, ...detail.artist_contracts.map((item) => item.artist_name)])];
@@ -475,11 +483,19 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
           setAssociating(null); onMessage({ type: "ok", text: `Referencia asociada a ${isrc}. Contrato abierto para revision.` }); void loadList();
         }} />}
       </> : <><div className={styles.listMeta}><span>{list ? `${list.total.toLocaleString("es-AR")} ISRC` : "Cargando catálogo..."}</span><span>{list?.summary.open.toLocaleString("es-AR") || "0"} abiertos · {list?.summary.closed.toLocaleString("es-AR") || "0"} repartos cerrados{!wml && ` · ${list?.summary.review || 0} por revisar`}</span></div>
-      <div className={styles.tableWrap}><table className={styles.table}>
-        <thead><tr><th>Tema</th><th>ISRC</th><th>Crédito en catálogo</th><th>Ingreso acumulado</th><th>Estado</th></tr></thead>
+      {selectable && <div className={styles.bulkToolbar}>
+        <label><input type="checkbox" aria-label="Seleccionar todos los temas visibles" disabled={loading || !list?.items.length}
+          checked={!!list?.items.length && list.items.every((item) => selectedIsrcs.includes(item.isrc))}
+          onChange={(event) => setSelectedIsrcs(event.target.checked ? (list?.items || []).map((item) => item.isrc) : [])} />Seleccionar los visibles</label>
+        <span>{selectedIsrcs.length} seleccionados</span>
+        <button type="button" className={styles.primaryButton} disabled={loading || selectedIsrcs.length < 2} onClick={() => setBulkOpen(true)}>Aplicar contrato a seleccionados</button>
+      </div>}
+      <div className={styles.tableWrap}><table className={`${styles.table} ${selectable ? styles.selectTable : ""}`}>
+        <thead><tr>{selectable && <th>Elegir</th>}<th>Tema</th><th>ISRC</th><th>Crédito en catálogo</th><th>Ingreso acumulado</th><th>Estado</th></tr></thead>
         <tbody>
-          {!loading && list?.items.length === 0 && <tr><td colSpan={5} className={styles.empty}>No hay ISRC para este filtro.</td></tr>}
+          {!loading && list?.items.length === 0 && <tr><td colSpan={selectable ? 6 : 5} className={styles.empty}>No hay ISRC para este filtro.</td></tr>}
           {(list?.items || []).map((item) => <tr key={item.isrc}>
+            {selectable && <td><input type="checkbox" aria-label={`Seleccionar ${item.title || item.isrc}`} checked={selectedIsrcs.includes(item.isrc)} onChange={(event) => setSelectedIsrcs((current) => event.target.checked ? [...current, item.isrc] : current.filter((isrc) => isrc !== item.isrc))} /></td>}
             <td><button type="button" className={styles.titleButton} onClick={() => void openDetail(item.isrc)}>{item.title || "Sin título"}</button></td>
             <td><button type="button" className={styles.isrcButton} onClick={() => void openDetail(item.isrc)}>{item.isrc}</button></td>
             <td className={styles.artistCell} title={item.artists_informed || ""}>{item.artists_informed || "-"}</td>
