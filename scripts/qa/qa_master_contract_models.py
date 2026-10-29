@@ -36,7 +36,6 @@ class ContractModelTests(unittest.TestCase):
         with patch.object(api, "require_api_key") as key, patch.object(api, "require_master_contract_user") as access, \
              patch.object(api, "operational_connect", connection), patch.object(api, "is_postgres_connection", return_value=True), \
              patch.object(api, "is_wml", return_value=False), patch.object(api, "db_sql", side_effect=lambda c, q: q), \
-             patch.object(api, "db_bool", side_effect=lambda c, v: v), \
              patch.object(api, "master_contract_catalog") as catalog, \
              patch.object(api, "master_contract_associations") as associations, \
              patch.object(api, "master_contract_associated_income") as income:
