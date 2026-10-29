@@ -88,7 +88,7 @@ def allocations(split: dict) -> list[tuple[str, dict]]:
 def soundon_suggestions(result: dict, evidence: list[dict], artists: list[str], raw: dict | None, *, isrc: str) -> dict | None:
     import re
     from lib.soundon_catalog_artists import EVIDENCE_VERSION, RULE_VERSION, credit_parts
-    from lib.soundon_identity import artist_key as native_key
+    from scripts.lib.catalog_artist_dictionary import comparison_key as native_key
 
     records = [entry for entry in evidence if entry.get("source") == "soundon"
                and entry.get("adapter_version") == EVIDENCE_VERSION]
@@ -115,7 +115,9 @@ def soundon_suggestions(result: dict, evidence: list[dict], artists: list[str], 
                 and isinstance(row.get("standardized_rows"), list) and bool(row["standardized_rows"])
                 and all(isinstance(index, int) and index > 0 for index in row["standardized_rows"])
                 and row.get("locator_kind") == "standardized_soundon_subset_row"
-                and isinstance(row.get("Track Artists"), str) and row.get("artists") == credit_parts(row["Track Artists"]))
+                and isinstance(row.get("Track Artists"), str) and isinstance(row.get("artists"), list)
+                and all(isinstance(name, str) for name in row["artists"])
+                and list(map(native_key, row["artists"])) == list(map(native_key, credit_parts(row["Track Artists"]))))
             if not valid:
                 break
         observed = {native_key(name) for row in observations for name in row.get("artists", [])} if valid else set()

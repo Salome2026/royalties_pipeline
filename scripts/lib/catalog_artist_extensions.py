@@ -5,29 +5,17 @@ from collections import defaultdict
 import json
 from pathlib import Path
 import re
-import unicodedata
 
 import polars as pl
 
+from .catalog_artist_dictionary import ALIASES, canonical, key, unique
+
 RULE = "ADA-FEAT-TITLE-TRIAL-1"
 ISRC = re.compile(r"[A-Z]{2}[A-Z0-9]{3}\d{7}")
-ALIASES = {
-    "matias mareco": "Matias Mareco", "matias mareco dj": "Matias Mareco",
-    "alan gomez": "Alan Gomez", "dj alan gomez": "Alan Gomez",
-}
 FEAT = re.compile(r"\((?:feat\.?|featuring|ft\.?)\s+([^()]+)\)", re.I)
 PENDING_KEYS = frozenset()
 ARTIST_COLUMNS = {"catalog_artists": pl.List(pl.String), "catalog_artist_statement": pl.String,
                   "catalog_artist_rule": pl.String, "catalog_artist_evidence": pl.String}
-
-
-def key(value):
-    value = unicodedata.normalize("NFKD", str(value or ""))
-    return re.sub(r"\s+", " ", "".join(c for c in value if not unicodedata.combining(c))).strip().casefold()
-
-
-def canonical(value):
-    return ALIASES.get(key(value), value)
 
 
 def credit_identity_evidence(value):
@@ -42,16 +30,6 @@ def credit_identity_evidence(value):
             result[name] = [canonical(artist) if isinstance(artist, str) else artist for artist in value[name]]
     if isinstance(value.get("principal_proposed"), str):
         result["principal_proposed"] = canonical(value["principal_proposed"])
-    return result
-
-
-def unique(names):
-    result, seen = [], set()
-    for raw in names:
-        name = canonical(raw)
-        if key(name) and key(name) not in seen:
-            seen.add(key(name))
-            result.append(name)
     return result
 
 

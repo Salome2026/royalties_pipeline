@@ -12,6 +12,7 @@ from typing import Any
 import polars as pl
 
 from app.operational_db import db_sql, is_postgres_connection
+from scripts.lib.catalog_artist_dictionary import unique as unique_credit_names
 
 
 ISRC_PATTERN = re.compile(r"^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$")
@@ -148,7 +149,7 @@ def _artist_suggestions(isrc: str, raw_path: str, file_mtime_ns: int) -> dict[st
             if warning and used:
                 warnings.append(warning)
             if artists and used:
-                candidates.append((artists, warning is None))
+                candidates.append((unique_credit_names(artists), warning is None))
             evidence_key = (source, field, raw)
             if evidence_key not in evidence_seen:
                 evidence.append({"source": source, "field": field, "raw": raw, "artists": artists, "used": used})

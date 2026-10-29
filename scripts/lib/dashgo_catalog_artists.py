@@ -10,7 +10,7 @@ import re
 import polars as pl
 
 from .catalog_manual_metadata import CORRECTIONS_PATH
-from .soundon_identity import artist_key
+from .catalog_artist_dictionary import comparison_key as artist_key
 
 RULE_VERSION = "DASHGO-LECTURA-1"
 EVIDENCE_VERSION = "DASHGO-CAT003-adapter-1"
@@ -143,7 +143,9 @@ def valid_dashgo_evidence(entry: dict, isrc: str) -> bool:
         if (normalized_isrc(row.get("asset_isrc")) != isrc or normalized_isrc(row.get("ISRC")) != isrc
                 or not isinstance(row.get("Track Artist"), (str, type(None)))
                 or not isinstance(row.get("Artist Name"), (str, type(None)))
-                or row.get("artists") != native_names(row.get("Track Artist"))
+                or not isinstance(row.get("artists"), list)
+                or any(not isinstance(name, str) for name in row["artists"])
+                or list(map(artist_key, row["artists"])) != list(map(artist_key, native_names(row.get("Track Artist"))))
                 or row.get("locator_kind") != "standardized_dashgo_subset_row"
                 or not isinstance(positions, list) or not positions
                 or any(type(index) is not int or index < 1 for index in positions)):

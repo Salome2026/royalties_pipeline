@@ -9,7 +9,8 @@ import re
 import polars as pl
 
 from .catalog_manual_metadata import CORRECTIONS_PATH
-from .soundon_identity import ISRC_PATTERN, REFERENCE_PATH, artist_key
+from .soundon_identity import ISRC_PATTERN, REFERENCE_PATH
+from .catalog_artist_dictionary import comparison_key as artist_key
 
 RULE_VERSION = "SOUNDON-LECTURA-1"
 EVIDENCE_VERSION = "SOUNDON-CAT003-adapter-1"

@@ -10,6 +10,7 @@ import unicodedata
 import polars as pl
 
 from .catalog_manual_metadata import CORRECTIONS_PATH
+from .catalog_artist_dictionary import canonical
 
 RULE_VERSION = "ORCHARD-LECTURA-1"
 EVIDENCE_VERSION = "ORCHARD-CAT003-adapter-1"
@@ -19,6 +20,7 @@ ISRC = re.compile(r"^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$")
 
 
 def name_key(value: str) -> str:
+    value = canonical(value)
     text = unicodedata.normalize("NFKD", value)
     return re.sub(r"\s+", " ", "".join(c for c in text if not unicodedata.combining(c))).strip().casefold()
 

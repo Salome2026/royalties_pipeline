@@ -12,6 +12,7 @@ from pathlib import Path
 import polars as pl
 
 from .catalog_manual_metadata import CORRECTIONS_PATH
+from .catalog_artist_dictionary import canonical
 
 RULE_VERSION = "ADA-LECTURA-1"
 EVIDENCE_VERSION = "ADA-CAT003-adapter-1"
@@ -20,6 +21,7 @@ ARTIST_COLUMNS = {"catalog_artists": pl.List(pl.String), "catalog_artist_stateme
                   "catalog_artist_rule": pl.String, "catalog_artist_evidence": pl.String}
 
 def name_key(value: str) -> str:
+    value = canonical(value)
     s = unicodedata.normalize("NFKD", value)
     return re.sub(r"\s+", " ", "".join(c for c in s if not unicodedata.combining(c))).strip().casefold()
 

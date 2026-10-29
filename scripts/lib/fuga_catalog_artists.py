@@ -8,6 +8,7 @@ from typing import Any
 import polars as pl
 
 from .catalog_manual_metadata import CORRECTIONS_PATH
+from .catalog_artist_dictionary import canonical
 
 
 RULE_VERSION = "FUGA-ARTISTS-2"
@@ -21,6 +22,7 @@ ARTIST_COLUMNS = {
 
 
 def name_key(value: str) -> str:
+    value = canonical(value)
     return re.sub(r"\s+", " ", value.strip()).casefold()
 
 

@@ -13,6 +13,7 @@ import zipfile
 import polars as pl
 
 from .catalog_manual_metadata import CORRECTIONS_PATH
+from .catalog_artist_dictionary import canonical
 from .catalog_identity_references import materialize_identity_references
 from .fuga_catalog_artists import ARTIST_COLUMNS, parse_catalog_credit
 
@@ -26,6 +27,7 @@ XML_NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 
 
 def name_key(value: str) -> str:
+    value = canonical(value)
     text = unicodedata.normalize("NFKD", " ".join(value.split())).casefold()
     return "".join(char for char in text if not unicodedata.combining(char))
 
@@ -227,7 +229,7 @@ def enrich_onerpm_catalog(catalog: pl.DataFrame, native: pl.DataFrame, *, correc
             if active:
                 added = [name for name in item["catalog_artists"] if name_key(name) not in a]
                 output["catalog_artists"] = before + added
-                if added:
+                if added or row.get("catalog_artists") is None:
                     output["catalog_artist_statement"] = " / ".join(before + added)
                 rules = [rule for rule in str(output["catalog_artist_rule"] or "").split(" | ") if rule]
                 if RULE_VERSION not in rules:
