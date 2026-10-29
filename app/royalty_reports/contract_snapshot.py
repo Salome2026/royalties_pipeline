@@ -31,7 +31,7 @@ def published_contract_catalog(client, manifest: dict) -> list[dict]:
 
 
 def freeze_contract_associations(snapshot: dict, frame: pl.DataFrame, contracts: list[dict], release_id: str,
-                                *, input_manifest: dict) -> dict:
+                                *, input_manifest: dict, ranking_guard: frozenset[str] | None = None) -> dict:
     from app.master_contract_income import associated_income_isrc, income_association_index, published_unassigned_income
     from app.master_contract_metadata import infer_video_evidence, with_external_titles
     from scripts.lib.catalog_report_filter import catalog_alias_lookup
@@ -84,7 +84,7 @@ def freeze_contract_associations(snapshot: dict, frame: pl.DataFrame, contracts:
               if len(values) == 1 and next(iter(values)) in selected}
     if owners:
         include_upc = any(json.loads(key)[4] == "UPC" for key in owners)
-        unsafe = unsafe_ranking_slot_keys(input_manifest["bucket"], entry["object"], int(entry["generation"]), include_upc=include_upc)
+        unsafe = ranking_guard if ranking_guard is not None else unsafe_ranking_slot_keys(input_manifest["bucket"], entry["object"], int(entry["generation"]), include_upc=include_upc)
         owners = {key: value for key, value in owners.items() if key not in unsafe}
     return {**snapshot, "schema_version": 2,
             "associations": {"release_id": release_id, "ranking_layout": "artist-title-isrc-upc-id-v1",

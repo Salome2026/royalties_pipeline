@@ -249,3 +249,10 @@
   .trendRow { grid-template-columns: 70px minmax(0, 1fr) minmax(95px, auto); gap: 8px; }
   .loginPanel { padding: 26px 20px; }
 }
+.rankName { color:inherit; background:transparent; border:0; padding:0; font:inherit; font-weight:700; text-align:left; text-decoration:underline; text-underline-offset:4px; }
+.rankName:hover { color:#79cbb6; }
+.cellButton { border:0; background:transparent; color:inherit; font:inherit; padding:0; text-align:inherit; }
+.cellButton:hover { color:#79cbb6; text-decoration:underline; }
+.trendButton { width:100%; border:0; background:transparent; color:inherit; font:inherit; text-align:left; }
+.trendButton:not(:disabled):hover { background:rgba(121,203,182,.07); }
+.trendButton:disabled { opacity:1; }

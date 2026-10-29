@@ -10067,6 +10067,77 @@ def log_dashboard_backend_event(**payload: Any) -> None:
     print(json.dumps({"event": "royalties_dashboard_backend", **payload}, sort_keys=True), flush=True)
 
 
+def royalty_explorer_access(api_key: str | None, username: str | None):
+    require_api_key(api_key)
+    if not clean_username(username or ""):
+        raise HTTPException(401, "Usuario requerido.")
+    with operational_connect() as conn:
+        permission = require_module_permission(conn, username, "royalties_dashboard", "access")
+        if is_wml() or not is_postgres_connection(conn):
+            raise HTTPException(400, "La vista contractual corresponde al catálogo habitual.")
+        from app.royalty_explorer import registry_rows
+        contracts = registry_rows(conn)
+    return contracts, permission.get("scope")
+
+
+@app.get("/royalties-dashboard/explorer-options")
+def royalty_explorer_options(x_vpo_api_key: str | None = Header(default=None), x_vpo_username: str | None = Header(default=None)):
+    contracts, scope = royalty_explorer_access(x_vpo_api_key, x_vpo_username)
+    from app.royalty_explorer import read_options
+    try:
+        return read_options(contracts, scope)
+    except RuntimeError as exc:
+        raise HTTPException(503, "El catálogo se está preparando. Volvé a intentar en unos instantes.") from exc
+
+
+def royalty_explorer_request(*, detail: bool, measure: str, beneficiary: str | None, source: str | None, account: str | None,
+                            keyword: str | None, period_basis: str, period_mode: str, start_month: str | None,
+                            end_month: str | None, drill: str | None, track_key: str | None, track_title: str | None,
+                            api_key: str | None, username: str | None):
+    contracts, scope = royalty_explorer_access(api_key, username)
+    from app import royalty_explorer
+    try:
+        filters = json.loads(drill) if drill else {}
+        if not isinstance(filters, dict):
+            raise ValueError("Filtro de exploración inválido.")
+        args = dict(beneficiary=beneficiary, source=source, account=account, keyword=keyword or "", period_basis=period_basis,
+                    period_mode=period_mode, start_month=start_month, end_month=end_month, drill=filters)
+        policy = load_distributor_policy_document()
+        if detail:
+            return royalty_explorer.detail(contracts, policy, scope, track_key=track_key, track_title=track_title, **args)
+        return royalty_explorer.dashboard(contracts, policy, scope, measure=measure, **args)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, "La vista contractual se está preparando. Volvé a intentar en unos instantes.") from exc
+
+
+@app.get("/royalties-dashboard/explore")
+def royalty_explorer_dashboard(measure: Literal["income", "contractual"] = "income", beneficiary: str | None = None,
+    source: str | None = None, account: str | None = None, keyword: str | None = None,
+    period_basis: Literal["statement_period", "transaction_month"] = "statement_period",
+    period_mode: Literal["last_6_months", "last_12_months", "all", "single_month", "closed_range"] = "last_6_months",
+    start_month: str | None = None, end_month: str | None = None, drill: str | None = None,
+    x_vpo_api_key: str | None = Header(default=None), x_vpo_username: str | None = Header(default=None)):
+    return royalty_explorer_request(detail=False, measure=measure, beneficiary=beneficiary, source=source, account=account,
+        keyword=keyword, period_basis=period_basis, period_mode=period_mode, start_month=start_month, end_month=end_month,
+        drill=drill, track_key=None, track_title=None, api_key=x_vpo_api_key, username=x_vpo_username)
+
+
+@app.get("/royalties-dashboard/track")
+def royalty_explorer_track(beneficiary: str | None = None, track_key: str | None = None, track_title: str | None = None,
+    source: str | None = None, account: str | None = None, keyword: str | None = None,
+    period_basis: Literal["statement_period", "transaction_month"] = "statement_period",
+    period_mode: Literal["last_6_months", "last_12_months", "all", "single_month", "closed_range"] = "last_6_months",
+    start_month: str | None = None, end_month: str | None = None, drill: str | None = None,
+    x_vpo_api_key: str | None = Header(default=None), x_vpo_username: str | None = Header(default=None)):
+    return royalty_explorer_request(detail=True, measure="income", beneficiary=beneficiary, source=source, account=account,
+        keyword=keyword, period_basis=period_basis, period_mode=period_mode, start_month=start_month, end_month=end_month,
+        drill=drill, track_key=track_key, track_title=track_title, api_key=x_vpo_api_key, username=x_vpo_username)
+
+
 @app.get("/royalties-dashboard")
 def royalties_dashboard(
     response: Response,

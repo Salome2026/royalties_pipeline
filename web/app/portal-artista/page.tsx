@@ -15,8 +15,11 @@ import { PeriodControl } from "../components/PeriodControl";
 import { PeriodSelection, resolvePeriod } from "../lib/period";
 import { useSession } from "../shared/auth/useSession";
 import styles from "./portal-artista.module.css";
+import { RoyaltyExplorerControls, RoyaltyExplorerTrail, RoyaltyExplorerPending, RoyaltyTrackDrawer, initialExplorer, explorerActive, explorerParams, type ExplorerState, type ExplorerRank, type ExplorerInfo } from "../features/royalties-dashboard/RoyaltyExplorer";
 
 type Rank = {
+  identity_key?: string;
+  pending_amount_usd?: number;
   name: string;
   amount_usd: number;
   units: number;
@@ -25,6 +28,7 @@ type Rank = {
 };
 
 type DashboardData = {
+  explorer?: ExplorerInfo;
   period_months: string[];
   totals: {
     amount_usd: number;
@@ -84,7 +88,7 @@ function money(value: number) {
   }).format(value || 0);
 }
 
-function RankList({ title, rows, loading }: { title: string; rows: Rank[]; loading: boolean }) {
+function RankList({ title, rows, loading, onSelect }: { title: string; rows: Rank[]; loading: boolean; onSelect?: (row: Rank) => void }) {
   return (
     <section className={styles.rankSection}>
       <div className={styles.rankHeader}>
@@ -98,11 +102,11 @@ function RankList({ title, rows, loading }: { title: string; rows: Rank[]; loadi
           <div className={styles.rankRow} key={`${title}-${row.name}-${index}`}>
             <span className={styles.rankIndex}>{index + 1}</span>
             <div className={styles.rankMain}>
-              <strong>{row.name || "-"}</strong>
+              {onSelect ? <button className={styles.rankName} type="button" disabled={loading} onClick={() => onSelect(row)}>{row.name || "-"}</button> : <strong>{row.name || "-"}</strong>}
               <small>{Math.round(row.units || 0).toLocaleString("es-AR")} unidades</small>
             </div>
             <div className={styles.rankValue}>
-              <strong>{money(row.amount_usd)}</strong>
+              <strong>{row.pending_amount_usd && !row.amount_usd ? "Por validar" : money(row.amount_usd)}</strong>
               <span>{(row.percentage || 0).toLocaleString("es-AR", { maximumFractionDigits: 2 })}%</span>
             </div>
             <div className={styles.rankBar} aria-hidden="true">
@@ -139,6 +143,10 @@ export default function ArtistPortal() {
   const [periodBasis, setPeriodBasis] = useState<"statement_period" | "transaction_month">("statement_period");
   const [period, setPeriod] = useState<PeriodSelection>({ mode: "last_6_months" });
   const [tab, setTab] = useState<"overview" | "youtube">("overview");
+  const [explorer, setExplorer] = useState<ExplorerState>(initialExplorer);
+  const [appliedQuery, setAppliedQuery] = useState("");
+  const [selectedTrack, setSelectedTrack] = useState<ExplorerRank | null>(null);
+  const requestId = useRef(0);
   const activeUsernameRef = useRef<string | undefined>(currentUser?.username);
 
   const permission = permissions?.find((item) => item.module_key === "royalties_dashboard");
@@ -166,6 +174,10 @@ export default function ArtistPortal() {
   useEffect(() => {
     activeUsernameRef.current = currentUser?.username;
     setDashboard(null);
+    requestId.current++;
+    setExplorer(initialExplorer);
+    setAppliedQuery("");
+    setSelectedTrack(null);
     setLoading(false);
     setDisplayName("");
     setError("");
@@ -183,7 +195,11 @@ export default function ArtistPortal() {
     account?: string;
     period?: PeriodSelection;
     periodBasis?: "statement_period" | "transaction_month";
+    explorer?: ExplorerState;
+    query?: string;
+    clearKeyword?: boolean;
   }) => {
+    const id = ++requestId.current;
     const requestUsername = activeUsernameRef.current;
     setLoading(true);
     setError("");
@@ -205,18 +221,38 @@ export default function ArtistPortal() {
       if (resolved.startMonth) params.set("start_month", resolved.startMonth);
       if (resolved.endMonth) params.set("end_month", resolved.endMonth);
 
-      const response = await fetch(`/api/royalties-dashboard?${params.toString()}`, { cache: "no-store" });
+      const query = overrides?.query !== undefined ? new URLSearchParams(overrides.query) : params;
+      for (const name of ["measure", "beneficiary", "drill"]) query.delete(name);
+      if (overrides?.clearKeyword) query.delete("keyword");
+      const nextExplorer = overrides?.explorer || explorer;
+      const enhanced = explorerActive(nextExplorer);
+      if (enhanced) explorerParams(query, nextExplorer);
+      const response = await fetch(`/api/royalties-dashboard${enhanced ? "/explore" : ""}?${query}`, { cache: "no-store" });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "No se pudo cargar el dashboard.");
-      if (activeUsernameRef.current !== requestUsername) return;
+      if (activeUsernameRef.current !== requestUsername || id !== requestId.current) return;
       setDashboard(payload);
+      setAppliedQuery(query.toString());
     } catch (loadError) {
-      if (activeUsernameRef.current !== requestUsername) return;
+      if (activeUsernameRef.current !== requestUsername || id !== requestId.current) return;
       setError(loadError instanceof Error ? loadError.message : "No se pudo cargar el dashboard.");
+      setDashboard(null);
     } finally {
-      if (activeUsernameRef.current === requestUsername) setLoading(false);
+      if (activeUsernameRef.current === requestUsername && id === requestId.current) setLoading(false);
     }
-  }, [account, keyword, period, periodBasis, source]);
+  }, [account, keyword, period, periodBasis, source, explorer]);
+
+  function applyExplorer(next: ExplorerState, clearKeyword = false) {
+    setExplorer(next); setSelectedTrack(null); if (clearKeyword) setKeyword("");
+    setDashboard(null);
+    void loadDashboard({ explorer: next, query: appliedQuery, clearKeyword });
+  }
+  function drill(values: Record<string, string>) {
+    if (tab === "youtube") values = { dsp: "YouTube", ...values };
+    const filters = { ...explorer.drill }, remove = Object.entries(values).every(([key, value]) => filters[key] === value);
+    for (const [key, value] of Object.entries(values)) { if (remove) delete filters[key]; else filters[key] = value; }
+    applyExplorer({ ...explorer, drill: filters });
+  }
 
   useEffect(() => {
     if (!authenticated || !hasPortalAccess) return;
@@ -233,8 +269,8 @@ export default function ArtistPortal() {
   }, [authenticated, currentUser?.username, hasPortalAccess]);
 
   useEffect(() => {
-    if (authenticated && hasPortalAccess && !dashboard && !loading) void loadDashboard();
-  }, [authenticated, dashboard, hasPortalAccess, loadDashboard, loading]);
+    if (authenticated && hasPortalAccess && !dashboard && !loading && !error) void loadDashboard();
+  }, [authenticated, dashboard, hasPortalAccess, loadDashboard, loading, error]);
 
   async function submitLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -252,7 +288,8 @@ export default function ArtistPortal() {
     setAccount("");
     setPeriodBasis("statement_period");
     setPeriod(nextPeriod);
-    void loadDashboard({ keyword: "", source: "", account: "", period: nextPeriod, periodBasis: "statement_period" });
+    const nextExplorer = { ...explorer, drill: {} }; setExplorer(nextExplorer); setSelectedTrack(null);
+    void loadDashboard({ keyword: "", source: "", account: "", period: nextPeriod, periodBasis: "statement_period", explorer: nextExplorer });
   }
 
   if (checkingSession) {
@@ -358,8 +395,10 @@ export default function ArtistPortal() {
 
         {error && <div className={styles.alert}>{error}</div>}
 
+        <RoyaltyExplorerControls key={currentUser?.username} state={explorer} keyword={keyword} restricted loading={loading} onChange={applyExplorer} />
+        <RoyaltyExplorerTrail state={explorer} loading={loading} onChange={applyExplorer} />
         <div className={styles.metricBand} aria-live="polite">
-          <div className={styles.primaryMetric}><span>Ingreso reportable</span><strong>{money(dashboard?.totals.amount_usd || 0)}</strong></div>
+          <div className={styles.primaryMetric}><span>{explorer.measure === "contractual" ? "Tu parte según contrato" : "Ingreso reportable"}</span><strong>{loading ? "Calculando…" : dashboard ? money(dashboard.totals.amount_usd) : "—"}</strong></div>
           <div><span>Unidades</span><strong>{Math.round(dashboard?.totals.units || 0).toLocaleString("es-AR")}</strong></div>
           <div><span>Temas</span><strong>{(dashboard?.totals.titles || 0).toLocaleString("es-AR")}</strong></div>
           <div><span>Distribuidoras</span><strong>{dashboard?.totals.sources || 0}</strong></div>
@@ -384,11 +423,11 @@ export default function ArtistPortal() {
               <div className={styles.trendRows}>
                 {!loading && !dashboard?.monthly.length && <div className={styles.empty}>Sin datos para este filtro.</div>}
                 {(dashboard?.monthly || []).map((month) => (
-                  <div className={styles.trendRow} key={month.month}>
+                  <button type="button" className={`${styles.trendRow} ${styles.trendButton}`} key={month.month} disabled={loading} aria-label={`Explorar ${month.month}`} onClick={() => drill({ month: month.month })}>
                     <span>{month.month}</span>
                     <div className={styles.trendTrack}><div className={month.amount_usd < 0 ? styles.negativeBar : styles.trendBar} style={{ width: `${Math.max(1, Math.abs(month.amount_usd) / monthlyMax * 100)}%` }} /></div>
                     <strong className={month.amount_usd < 0 ? styles.negativeAmount : undefined}>{money(month.amount_usd)}</strong>
-                  </div>
+                  </button>
                 ))}
               </div>
             </section>
@@ -397,12 +436,12 @@ export default function ArtistPortal() {
               <div className={styles.sectionTitle}><h2>Meses por distribuidora</h2><span>{dashboard?.matrix.length || 0} cuentas</span></div>
               <div className={styles.tableScroll}>
                 <table className={styles.table}>
-                  <thead><tr><th>Distribuidora / cuenta</th>{(dashboard?.period_months || []).map((month) => <th key={month}>{month}</th>)}<th>Total</th><th>Temas</th></tr></thead>
+                  <thead><tr><th>Distribuidora / cuenta</th>{(dashboard?.period_months || []).map((month) => <th key={month}><button type="button" className={styles.cellButton} disabled={loading} onClick={() => drill({ month })}>{month}</button></th>)}<th>Total</th><th>Temas</th></tr></thead>
                   <tbody>
                     {loading && <tr><td className={styles.emptyCell} colSpan={(dashboard?.period_months.length || 0) + 3}>Cargando dashboard...</td></tr>}
                     {!loading && dashboard?.matrix.length === 0 && <tr><td className={styles.emptyCell} colSpan={(dashboard?.period_months.length || 0) + 3}>Sin datos para este filtro.</td></tr>}
                     {(dashboard?.matrix || []).map((item) => (
-                      <tr key={`${item.source}-${item.account}`}><td><strong>{item.source}</strong><span>{item.account}</span></td>{dashboard?.period_months.map((month) => <td key={month}>{money(item.months[month] || 0)}</td>)}<td className={styles.totalCell}>{money(item.amount_usd)}</td><td>{item.titles.toLocaleString("es-AR")}</td></tr>
+                      <tr key={`${item.source}-${item.account}`}><td><button type="button" className={styles.cellButton} disabled={loading} onClick={() => drill({ source: item.source, account: item.account })}><strong>{item.source}</strong><span>{item.account}</span></button></td>{dashboard?.period_months.map((month) => <td key={month}><button type="button" className={styles.cellButton} disabled={loading} onClick={() => drill({ source: item.source, account: item.account, month })}>{money(item.months[month] || 0)}</button></td>)}<td className={styles.totalCell}>{money(item.amount_usd)}</td><td>{item.titles.toLocaleString("es-AR")}</td></tr>
                     ))}
                   </tbody>
                 </table>
@@ -410,10 +449,10 @@ export default function ArtistPortal() {
             </section>
 
             <div className={styles.rankGrid}>
-              <RankList title="Ingresos por tema" rows={dashboard?.rankings.title || []} loading={loading} />
-              <RankList title="Ingresos por artista" rows={dashboard?.rankings.artist || []} loading={loading} />
-              <RankList title="Ingresos por plataforma" rows={dashboard?.rankings.dsp || []} loading={loading} />
-              <RankList title="Territorios" rows={dashboard?.rankings.territory || []} loading={loading} />
+              <RankList title="Ingresos por tema" rows={dashboard?.rankings.title || []} loading={loading} onSelect={setSelectedTrack} />
+              <RankList title={explorer.measure === "contractual" ? "Tu participación por artista del catálogo" : "Ingresos por artista"} rows={dashboard?.rankings.artist || []} loading={loading} onSelect={(r) => drill({ artist: r.name })} />
+              <RankList title="Ingresos por plataforma" rows={dashboard?.rankings.dsp || []} loading={loading} onSelect={(r) => drill({ dsp: r.name })} />
+              <RankList title="Territorios" rows={dashboard?.rankings.territory || []} loading={loading} onSelect={(r) => drill({ territory: r.name })} />
             </div>
           </>
         )}
@@ -426,13 +465,15 @@ export default function ArtistPortal() {
               <div><span>Videos / assets</span><strong>{(dashboard?.youtube.totals.titles || 0).toLocaleString("es-AR")}</strong></div>
             </div>
             <div className={styles.rankGrid}>
-              <RankList title="Monetización" rows={dashboard?.youtube.monetization || []} loading={loading} />
-              <RankList title="Origen del contenido" rows={dashboard?.youtube.content_origin || []} loading={loading} />
-              <RankList title="Territorios" rows={dashboard?.youtube.territory || []} loading={loading} />
-              <RankList title="Assets de YouTube" rows={dashboard?.youtube.title || []} loading={loading} />
+              <RankList title="Monetización" rows={dashboard?.youtube.monetization || []} loading={loading} onSelect={(r) => drill({ monetization: r.name })} />
+              <RankList title="Origen del contenido" rows={dashboard?.youtube.content_origin || []} loading={loading} onSelect={(r) => drill({ content_origin: r.name })} />
+              <RankList title="Territorios" rows={dashboard?.youtube.territory || []} loading={loading} onSelect={(r) => drill({ territory: r.name })} />
+              <RankList title="Assets de YouTube" rows={dashboard?.youtube.title || []} loading={loading} onSelect={setSelectedTrack} />
             </div>
           </>
         )}
+        <RoyaltyExplorerPending info={dashboard?.explorer} onOpen={setSelectedTrack} />
+        <RoyaltyTrackDrawer selection={selectedTrack} params={tab === "youtube" ? explorerParams(new URLSearchParams(appliedQuery), { ...explorer, drill: { ...explorer.drill, dsp: "YouTube" } }).toString() : appliedQuery} onClose={() => setSelectedTrack(null)} />
       </section>
     </main>
   );

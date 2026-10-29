@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, CircleDollarSign, FileDown, LayoutDashboard, Pencil, Printer, RefreshCw, RotateCcw, Save, Search, ShieldCheck, SlidersHorizontal, Table2, Trash2, Rows3, Youtube } from "lucide-react";
 import { PeriodControl } from "./components/PeriodControl";
 import { BookingDashboard, type BookingAgendaEvent } from "./components/BookingDashboard";
@@ -17,6 +17,7 @@ import { selectedRoyaltyScope } from './features/wml/WmlScopeControl';
 import { StatementReportModule } from "./features/statements/StatementReportModule";
 import digitalStyles from "./features/digital-income/DigitalIncome.module.css";
 import royaltyDashboardStyles from "./features/royalties-dashboard/RoyaltyDashboard.module.css";
+import { RoyaltyExplorerControls, RoyaltyExplorerTrail, RoyaltyExplorerPending, RoyaltyTrackDrawer, initialExplorer, explorerActive, explorerParams, type ExplorerState, type ExplorerRank, type ExplorerInfo } from "./features/royalties-dashboard/RoyaltyExplorer";
 import SelectionMenu, { type SelectionIntent } from "./features/digital-income/SelectionMenu";
 import type { DigitalIncomeReportScope } from "./features/digital-income/exportPdf";
 import {
@@ -999,6 +1000,8 @@ function digitalIncomeAccountPairs(keys: string[]) {
 }
 
 type RoyaltiesDashboardRank = {
+  identity_key?: string;
+  pending_amount_usd?: number;
   name: string;
   amount_usd: number;
   units: number;
@@ -1018,6 +1021,7 @@ type RoyaltiesDashboardMatrixRow = {
 };
 
 type RoyaltiesDashboardData = {
+  explorer?: ExplorerInfo;
   catalog_refresh?: { status: "ready" | "pending" };
   report_personalization: {
     enabled: boolean;
@@ -2206,6 +2210,18 @@ export default function Home() {
   useEffect(() => { if (selectedRoyaltyScope() === 'wml') { setWmlScope(true); setRoyaltiesDashboardPeriod({mode:'all'}); } },[]);
   const [royaltiesDashboardPeriodBasis, setRoyaltiesDashboardPeriodBasis] = useState<"statement_period" | "transaction_month">("statement_period");
   const [royaltiesDashboardTab, setRoyaltiesDashboardTab] = useState<"overview" | "youtube">("overview");
+  const [royaltiesExplorer, setRoyaltiesExplorer] = useState<ExplorerState>(initialExplorer);
+  const [royaltiesDashboardQuery, setRoyaltiesDashboardQuery] = useState("");
+  const [royaltiesTrack, setRoyaltiesTrack] = useState<ExplorerRank | null>(null);
+  const royaltiesDashboardRequest = useRef(0);
+  useEffect(() => {
+    royaltiesDashboardRequest.current++;
+    setRoyaltiesDashboard(null);
+    setRoyaltiesDashboardLoading(false);
+    setRoyaltiesExplorer(initialExplorer);
+    setRoyaltiesDashboardQuery("");
+    setRoyaltiesTrack(null);
+  }, [currentUser?.username]);
   const [distributorConfig, setDistributorConfig] = useState<DistributorConfigData | null>(null);
   const [distributorConfigLoading, setDistributorConfigLoading] = useState(false);
   const [distributorConfigSource, setDistributorConfigSource] = useState("");
@@ -4067,7 +4083,11 @@ export default function Home() {
     account?: string;
     period?: PeriodSelection;
     periodBasis?: "statement_period" | "transaction_month";
+    explorer?: ExplorerState;
+    query?: string;
+    clearKeyword?: boolean;
   }) {
+    const requestId = ++royaltiesDashboardRequest.current;
     setRoyaltiesDashboardLoading(true);
     try {
       const keyword = filters?.keyword ?? royaltiesDashboardKeyword;
@@ -4085,20 +4105,46 @@ export default function Home() {
       params.set("period_mode", dashboardPeriod.mode);
       params.set("period_basis", periodBasis);
       params.set("limit", "10");
-
-      const response = await fetch(`/api/royalties-dashboard?${params.toString()}`, { cache: "no-store" });
+      const query = filters?.query !== undefined ? new URLSearchParams(filters.query) : params;
+      for (const name of ["measure", "beneficiary", "drill"]) query.delete(name);
+      if (filters?.clearKeyword) query.delete("keyword");
+      const selection = filters?.explorer || royaltiesExplorer;
+      const enhanced = !wmlScope && explorerActive(selection);
+      if (enhanced) explorerParams(query, selection);
+      const response = await fetch(`/api/royalties-dashboard${enhanced ? "/explore" : ""}?${query}`, { cache: "no-store" });
+      if (requestId !== royaltiesDashboardRequest.current) return;
       if (!response.ok) {
         const payload = await response.json().catch(() => ({ error: "No se pudo cargar dashboard de regalias." }));
         setMessage({ type: "error", text: payload.error || "No se pudo cargar dashboard de regalias." });
+        if (enhanced) setRoyaltiesDashboard(null);
         return;
       }
       const data = await response.json();
+      if (requestId !== royaltiesDashboardRequest.current) return;
       setRoyaltiesDashboard(data);
+      setRoyaltiesDashboardQuery(query.toString());
     } catch {
+      if (requestId !== royaltiesDashboardRequest.current) return;
+      setRoyaltiesDashboard(null);
       setMessage({ type: "error", text: "No se pudo cargar dashboard de regalias." });
     } finally {
-      setRoyaltiesDashboardLoading(false);
+      if (requestId === royaltiesDashboardRequest.current) setRoyaltiesDashboardLoading(false);
     }
+  }
+
+  function applyRoyaltiesExplorer(next: ExplorerState, clearKeyword = false) {
+    setRoyaltiesExplorer(next); setRoyaltiesTrack(null);
+    setRoyaltiesDashboard(null);
+    if (clearKeyword) setRoyaltiesDashboardKeyword("");
+    void loadRoyaltiesDashboard({ explorer: next, query: royaltiesDashboardQuery, clearKeyword });
+  }
+
+  function drillRoyalties(values: Record<string, string>) {
+    if (royaltiesDashboardTab === "youtube") values = { dsp: "YouTube", ...values };
+    const drill = { ...royaltiesExplorer.drill };
+    const remove = Object.entries(values).every(([key, value]) => drill[key] === value);
+    for (const [key, value] of Object.entries(values)) { if (remove) delete drill[key]; else drill[key] = value; }
+    applyRoyaltiesExplorer({ ...royaltiesExplorer, drill });
   }
 
   useEffect(() => {
@@ -6408,7 +6454,9 @@ export default function Home() {
     setRoyaltiesDashboardAccount("");
     setRoyaltiesDashboardPeriodBasis("statement_period");
     setRoyaltiesDashboardPeriod(period);
+    setRoyaltiesExplorer(initialExplorer); setRoyaltiesTrack(null);
     void loadRoyaltiesDashboard({
+      explorer: initialExplorer,
       keyword: "",
       source: "",
       account: "",
@@ -7372,7 +7420,7 @@ export default function Home() {
     setMessage({ type: "ok", text: "Bloque cerrado: el sistema compenso saldos cruzados y aplico el pago/cobro real." });
   }
 
-  function renderRoyaltiesRankTable(title: string, rows: RoyaltiesDashboardRank[], emptyText = "Sin datos para este filtro.") {
+  function renderRoyaltiesRankTable(title: string, rows: RoyaltiesDashboardRank[], dimension?: string, emptyText = "Sin datos para este filtro.") {
     return (
       <section className={royaltyDashboardStyles.rankSection}>
         <div className={royaltyDashboardStyles.rankHeader}>
@@ -7386,11 +7434,11 @@ export default function Home() {
             <div className={royaltyDashboardStyles.rankRow} key={`${title}-${row.name}-${idx}`}>
               <span className={royaltyDashboardStyles.rankIndex}>{idx + 1}</span>
               <div className={royaltyDashboardStyles.rankMain}>
-                <strong>{row.name || "-"}</strong>
+                {!wmlScope && dimension ? <button type="button" className={royaltyDashboardStyles.rankName} disabled={royaltiesDashboardLoading} onClick={() => dimension === "title" ? setRoyaltiesTrack(row) : drillRoyalties({ [dimension]: row.name })}>{row.name || "-"}</button> : <strong>{row.name || "-"}</strong>}
                 <small>{Math.round(row.units || 0).toLocaleString("es-AR")} unidades</small>
               </div>
               <div className={royaltyDashboardStyles.rankValue}>
-                <strong>{moneyCents(row.amount_usd || 0)}</strong>
+                <strong>{royaltiesExplorer.measure === "contractual" && row.pending_amount_usd && !row.amount_usd ? "Por validar" : moneyCents(row.amount_usd || 0)}</strong>
                 <span>{(row.percentage || 0).toLocaleString("es-AR", { maximumFractionDigits: 2 })}%</span>
               </div>
               <div className={royaltyDashboardStyles.rankBar} aria-hidden="true">
@@ -7787,10 +7835,12 @@ export default function Home() {
               </div>
             </form>
 
+            {!wmlScope && <><RoyaltyExplorerControls key={currentUser?.username} state={royaltiesExplorer} keyword={royaltiesDashboardKeyword} loading={royaltiesDashboardLoading} onChange={applyRoyaltiesExplorer} />
+              <RoyaltyExplorerTrail state={royaltiesExplorer} loading={royaltiesDashboardLoading} onChange={applyRoyaltiesExplorer} /></>}
             <div className={`${digitalStyles.metricBand} ${royaltyDashboardStyles.metricBand}`} aria-live="polite">
               <div className={digitalStyles.primaryMetric}>
-                <span>Ingreso reportable</span>
-                <strong>{moneyCents(royaltiesDashboard?.totals.amount_usd || 0)}</strong>
+                <span>{royaltiesExplorer.measure === "contractual" && !wmlScope ? `Parte de ${royaltiesExplorer.beneficiary} según contrato` : "Ingreso reportable"}</span>
+                <strong>{royaltiesDashboardLoading ? "Calculando…" : !royaltiesDashboard && explorerActive(royaltiesExplorer) ? "—" : moneyCents(royaltiesDashboard?.totals.amount_usd || 0)}</strong>
               </div>
               <div>
                 <span>Unidades</span>
@@ -7839,13 +7889,13 @@ export default function Home() {
                   <div className={digitalStyles.trendRows}>
                     {!royaltiesDashboardLoading && !royaltiesDashboard?.monthly.length && <div className={digitalStyles.emptyState}>Sin datos para este filtro.</div>}
                     {(royaltiesDashboard?.monthly || []).map((month) => (
-                      <div className={digitalStyles.trendRow} key={month.month}>
+                      <button type="button" disabled={royaltiesDashboardLoading || wmlScope} className={`${digitalStyles.trendRow} ${royaltyDashboardStyles.trendButton}`} key={month.month} onClick={() => drillRoyalties({ month: month.month })} aria-label={`Explorar ${month.month}`}>
                         <span>{wmlScope && royaltiesDashboardPeriodBasis === 'statement_period' ? `${month.month.slice(0,4)} H${month.month.endsWith('06') ? '1' : '2'}` : month.month}</span>
                         <div className={digitalStyles.trendTrack} aria-hidden="true">
                           <div className={month.amount_usd < 0 ? digitalStyles.negativeBar : digitalStyles.trendBar} style={{ width: `${Math.max(1, Math.abs(month.amount_usd) / royaltiesDashboardMonthlyMax * 100)}%` }} />
                         </div>
                         <strong className={month.amount_usd < 0 ? digitalStyles.negativeAmount : undefined}>{moneyCents(month.amount_usd)}</strong>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 </section>
@@ -7860,7 +7910,7 @@ export default function Home() {
                       <thead>
                         <tr>
                           <th>Distribuidora / cuenta</th>
-                          {(royaltiesDashboard?.period_months || []).map((month) => <th key={month}>{wmlScope && royaltiesDashboardPeriodBasis === 'statement_period' ? `${month.slice(0,4)} H${month.endsWith('06') ? '1' : '2'}` : month}</th>)}
+                          {(royaltiesDashboard?.period_months || []).map((month) => <th key={month}><button type="button" className={royaltyDashboardStyles.cellButton} disabled={royaltiesDashboardLoading || wmlScope} onClick={() => drillRoyalties({ month })}>{wmlScope && royaltiesDashboardPeriodBasis === 'statement_period' ? `${month.slice(0,4)} H${month.endsWith('06') ? '1' : '2'}` : month}</button></th>)}
                           <th>Total</th>
                           <th>Temas</th>
                         </tr>
@@ -7870,9 +7920,9 @@ export default function Home() {
                         {!royaltiesDashboardLoading && royaltiesDashboard?.matrix.length === 0 && <tr><td className={digitalStyles.emptyCell} colSpan={(royaltiesDashboard?.period_months.length || 0) + 3}>Sin datos para este filtro.</td></tr>}
                         {royaltiesDashboard?.matrix.map((item) => (
                           <tr key={`${item.source}-${item.account}`}>
-                            <td className={digitalStyles.accountCell}><strong>{item.source}</strong><span>{item.account}</span></td>
-                            {royaltiesDashboard.period_months.map((month) => <td key={month}>{moneyCents(item.months[month] || 0)}</td>)}
-                            <td className={digitalStyles.totalCell}>{moneyCents(item.amount_usd || 0)}</td>
+                            <td className={digitalStyles.accountCell}><button type="button" className={royaltyDashboardStyles.cellButton} disabled={royaltiesDashboardLoading || wmlScope} onClick={() => drillRoyalties({ source: item.source, account: item.account })}><strong>{item.source}</strong><span>{item.account}</span></button></td>
+                            {royaltiesDashboard.period_months.map((month) => <td key={month}><button type="button" className={royaltyDashboardStyles.cellButton} disabled={royaltiesDashboardLoading || wmlScope} onClick={() => drillRoyalties({ source: item.source, account: item.account, month })}>{moneyCents(item.months[month] || 0)}</button></td>)}
+                            <td className={digitalStyles.totalCell}><button type="button" className={royaltyDashboardStyles.cellButton} disabled={royaltiesDashboardLoading || wmlScope} onClick={() => drillRoyalties({ source: item.source, account: item.account })}>{moneyCents(item.amount_usd || 0)}</button></td>
                             <td>{item.titles.toLocaleString("es-AR")}</td>
                           </tr>
                         ))}
@@ -7882,13 +7932,13 @@ export default function Home() {
                 </section>
 
                 <div className={royaltyDashboardStyles.rankGrid}>
-                  {renderRoyaltiesRankTable("Ingresos por tema", royaltiesDashboard?.rankings.title || [])}
-                  {renderRoyaltiesRankTable("Ingresos por artista", royaltiesDashboard?.rankings.artist || [])}
-                  {renderRoyaltiesRankTable("Ingresos por plataforma", royaltiesDashboard?.rankings.dsp || [])}
-                  {renderRoyaltiesRankTable("Monetización", royaltiesDashboard?.rankings.monetization || [])}
-                  {renderRoyaltiesRankTable("Origen del contenido", royaltiesDashboard?.rankings.content_origin || [])}
-                  {renderRoyaltiesRankTable("Territorios", royaltiesDashboard?.rankings.territory || [])}
-                  {renderRoyaltiesRankTable("Sellos", royaltiesDashboard?.rankings.label || [])}
+                  {renderRoyaltiesRankTable("Ingresos por tema", royaltiesDashboard?.rankings.title || [], "title")}
+                  {renderRoyaltiesRankTable(royaltiesExplorer.measure === "contractual" ? `Participación de ${royaltiesExplorer.beneficiary} por artista del catálogo` : "Ingresos por artista", royaltiesDashboard?.rankings.artist || [], "artist")}
+                  {renderRoyaltiesRankTable("Ingresos por plataforma", royaltiesDashboard?.rankings.dsp || [], "dsp")}
+                  {renderRoyaltiesRankTable("Monetización", royaltiesDashboard?.rankings.monetization || [], "monetization")}
+                  {renderRoyaltiesRankTable("Origen del contenido", royaltiesDashboard?.rankings.content_origin || [], "content_origin")}
+                  {renderRoyaltiesRankTable("Territorios", royaltiesDashboard?.rankings.territory || [], "territory")}
+                  {renderRoyaltiesRankTable("Sellos", royaltiesDashboard?.rankings.label || [], "label")}
                 </div>
               </>
             )}
@@ -7914,16 +7964,20 @@ export default function Home() {
                   </div>
                 </div>
                 <div className={royaltyDashboardStyles.rankGrid}>
-                  {renderRoyaltiesRankTable("Monetización", royaltiesDashboard?.youtube.monetization || [])}
-                  {renderRoyaltiesRankTable("Origen del contenido", royaltiesDashboard?.youtube.content_origin || [])}
-                  {renderRoyaltiesRankTable("Territorios", royaltiesDashboard?.youtube.territory || [])}
-                  {renderRoyaltiesRankTable("Assets de YouTube", royaltiesDashboard?.youtube.title || [])}
+                  {renderRoyaltiesRankTable("Monetización", royaltiesDashboard?.youtube.monetization || [], "monetization")}
+                  {renderRoyaltiesRankTable("Origen del contenido", royaltiesDashboard?.youtube.content_origin || [], "content_origin")}
+                  {renderRoyaltiesRankTable("Territorios", royaltiesDashboard?.youtube.territory || [], "territory")}
+                  {renderRoyaltiesRankTable("Assets de YouTube", royaltiesDashboard?.youtube.title || [], "title")}
                 </div>
               </>
             )}
           </section>
         )}
 
+        {view === "royalties-dashboard" && !wmlScope && <>
+          <RoyaltyExplorerPending info={royaltiesDashboard?.explorer} onOpen={setRoyaltiesTrack} />
+          <RoyaltyTrackDrawer selection={royaltiesTrack} params={royaltiesDashboardTab === "youtube" ? explorerParams(new URLSearchParams(royaltiesDashboardQuery), { ...royaltiesExplorer, drill: { ...royaltiesExplorer.drill, dsp: "YouTube" } }).toString() : royaltiesDashboardQuery} onClose={() => setRoyaltiesTrack(null)} />
+        </>}
         {view === "digital-income" && (
           <section className={digitalStyles.workspace}>
             <header className={digitalStyles.header}>

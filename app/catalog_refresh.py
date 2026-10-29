@@ -202,6 +202,8 @@ def run_refresh() -> None:
                     latest = read_json("release_manifest.json", client).get("release_id")
                     if latest != release or catalog_generation(client) != state["catalog_generation"]:
                         continue
+                    from app.royalty_reports.contract_identity import publish_ranking_guard
+                    publish_ranking_guard(manifest, client)
                     return
                 generation = state["catalog_generation"]
                 refresh_id = snapshot_id(release, generation)
@@ -253,6 +255,8 @@ COMMIT TRANSACTION;""", location=location).result()
                     bucket(client).blob(object_name("catalog_dashboard_ready.json")).upload_from_string(json.dumps(ready), content_type="application/json")
                     print(json.dumps({"event": "catalog_refresh_completed", **ready}), flush=True)
                     if catalog_generation(client) == generation:
+                        from app.royalty_reports.contract_identity import publish_ranking_guard
+                        publish_ranking_guard(manifest, client)
                         return
             raise RuntimeError("El catalogo sigue cambiando; la conciliacion programada retomara la ultima version.")
         finally:

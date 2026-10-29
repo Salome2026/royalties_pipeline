@@ -4,10 +4,53 @@ from __future__ import annotations
 from functools import lru_cache
 import json
 import re
+import hashlib
 
 from google.cloud import storage
 import polars as pl
 import pyarrow.parquet as pq
+from google.api_core.exceptions import NotFound, PreconditionFailed
+
+GUARD_ALGORITHM = "native-fact-v1"
+
+
+def guard_object(manifest: dict) -> tuple[str, dict]:
+    entry = manifest["objects"]["standardized_raw_all_sources.parquet"]
+    identity = {"bucket": manifest["bucket"], "object": entry["object"], "generation": int(entry["generation"]), "algorithm": GUARD_ALGORITHM}
+    digest = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+    prefix = manifest.get("prefix", "marts").strip("/")
+    return f"{prefix}/contract_identity_guards/{digest}.json", identity
+
+
+def cached_ranking_guard(manifest: dict, client=None) -> frozenset[str] | None:
+    name, identity = guard_object(manifest)
+    blob = (client or storage.Client()).bucket(manifest["bucket"]).blob(name)
+    try:
+        doc = json.loads(blob.download_as_bytes())
+    except NotFound:
+        return None
+    if doc.get("identity") != identity or doc.get("complete") is not True or not isinstance(doc.get("keys"), list):
+        raise RuntimeError("La validación de identidades publicada no coincide con la versión de datos.")
+    for value in doc["keys"]:
+        row = json.loads(value)
+        if not isinstance(row, list) or len(row) != 6 or any(not isinstance(v, str) for v in row) or row[4] not in {"ID", "UPC"}:
+            raise RuntimeError("La validación de identidades publicada está incompleta.")
+    return frozenset(doc["keys"])
+
+
+def publish_ranking_guard(manifest: dict, client=None) -> frozenset[str]:
+    client = client or storage.Client()
+    current = cached_ranking_guard(manifest, client)
+    if current is not None:
+        return current
+    name, identity = guard_object(manifest)
+    keys = unsafe_ranking_slot_keys(identity["bucket"], identity["object"], identity["generation"], include_upc=True)
+    doc = {"identity": identity, "complete": True, "keys": sorted(keys)}
+    try:
+        client.bucket(manifest["bucket"]).blob(name).upload_from_string(json.dumps(doc), content_type="application/json", if_generation_match=0)
+    except PreconditionFailed:
+        return cached_ranking_guard(manifest, client)
+    return keys
 
 
 # Track ISRC is not retained by the producer's needed_columns projection.
