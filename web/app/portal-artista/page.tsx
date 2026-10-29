@@ -468,12 +468,12 @@ export default function ArtistPortal() {
               <RankList title="Monetización" rows={dashboard?.youtube.monetization || []} loading={loading} onSelect={(r) => drill({ monetization: r.name })} />
               <RankList title="Origen del contenido" rows={dashboard?.youtube.content_origin || []} loading={loading} onSelect={(r) => drill({ content_origin: r.name })} />
               <RankList title="Territorios" rows={dashboard?.youtube.territory || []} loading={loading} onSelect={(r) => drill({ territory: r.name })} />
-              <RankList title="Assets de YouTube" rows={dashboard?.youtube.title || []} loading={loading} onSelect={setSelectedTrack} />
+              <RankList title="Assets de YouTube" rows={dashboard?.youtube.title || []} loading={loading} onSelect={(row) => setSelectedTrack({ ...row, youtube_only: true })} />
             </div>
           </>
         )}
         <RoyaltyExplorerPending info={dashboard?.explorer} onOpen={setSelectedTrack} />
-        <RoyaltyTrackDrawer selection={selectedTrack} params={tab === "youtube" ? explorerParams(new URLSearchParams(appliedQuery), { ...explorer, drill: { ...explorer.drill, dsp: "YouTube" } }).toString() : appliedQuery} onClose={() => setSelectedTrack(null)} />
+        <RoyaltyTrackDrawer selection={selectedTrack} params={selectedTrack?.youtube_only ? explorerParams(new URLSearchParams(appliedQuery), { ...explorer, drill: { ...explorer.drill, dsp: "YouTube" } }).toString() : appliedQuery} onClose={() => setSelectedTrack(null)} />
       </section>
     </main>
   );

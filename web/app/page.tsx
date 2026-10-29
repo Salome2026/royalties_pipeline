@@ -7434,7 +7434,7 @@ export default function Home() {
             <div className={royaltyDashboardStyles.rankRow} key={`${title}-${row.name}-${idx}`}>
               <span className={royaltyDashboardStyles.rankIndex}>{idx + 1}</span>
               <div className={royaltyDashboardStyles.rankMain}>
-                {!wmlScope && dimension ? <button type="button" className={royaltyDashboardStyles.rankName} disabled={royaltiesDashboardLoading} onClick={() => dimension === "title" ? setRoyaltiesTrack(row) : drillRoyalties({ [dimension]: row.name })}>{row.name || "-"}</button> : <strong>{row.name || "-"}</strong>}
+                {!wmlScope && dimension ? <button type="button" className={royaltyDashboardStyles.rankName} disabled={royaltiesDashboardLoading} onClick={() => dimension === "title" ? setRoyaltiesTrack({ ...row, youtube_only: royaltiesDashboardTab === "youtube" }) : drillRoyalties({ [dimension]: row.name })}>{row.name || "-"}</button> : <strong>{row.name || "-"}</strong>}
                 <small>{Math.round(row.units || 0).toLocaleString("es-AR")} unidades</small>
               </div>
               <div className={royaltyDashboardStyles.rankValue}>
@@ -7976,7 +7976,7 @@ export default function Home() {
 
         {view === "royalties-dashboard" && !wmlScope && <>
           <RoyaltyExplorerPending info={royaltiesDashboard?.explorer} onOpen={setRoyaltiesTrack} />
-          <RoyaltyTrackDrawer selection={royaltiesTrack} params={royaltiesDashboardTab === "youtube" ? explorerParams(new URLSearchParams(royaltiesDashboardQuery), { ...royaltiesExplorer, drill: { ...royaltiesExplorer.drill, dsp: "YouTube" } }).toString() : royaltiesDashboardQuery} onClose={() => setRoyaltiesTrack(null)} />
+          <RoyaltyTrackDrawer selection={royaltiesTrack} params={royaltiesTrack?.youtube_only ? explorerParams(new URLSearchParams(royaltiesDashboardQuery), { ...royaltiesExplorer, drill: { ...royaltiesExplorer.drill, dsp: "YouTube" } }).toString() : royaltiesDashboardQuery} onClose={() => setRoyaltiesTrack(null)} />
         </>}
         {view === "digital-income" && (
           <section className={digitalStyles.workspace}>

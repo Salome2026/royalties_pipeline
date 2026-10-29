@@ -5,7 +5,7 @@ import styles from "./RoyaltyExplorer.module.css";
 
 export type ExplorerState = { measure: "income" | "contractual"; beneficiary: string; drill: Record<string, string> };
 export const initialExplorer: ExplorerState = { measure: "income", beneficiary: "", drill: {} };
-export type ExplorerRank = { name: string; identity_key?: string; amount_usd: number; pending_amount_usd?: number };
+export type ExplorerRank = { name: string; identity_key?: string; amount_usd: number; pending_amount_usd?: number; youtube_only?: boolean };
 export type ExplorerInfo = { measure: string; beneficiary: string | null; restricted: boolean; base_amount_usd: number;
   pending_amount_usd: number; pending_tracks: number; registry_revision: string;
   pending: Array<{ title: string; identity_key: string; reason: string; amount_usd: number }> };
