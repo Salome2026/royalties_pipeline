@@ -77,6 +77,13 @@ La autorizacion se vuelve a verificar en historial, estado y descarga.
 Resultados: GCS reports/jobs/<id>, descarga firmada, retencion de 30 dias.
 La plantilla permanece en codigo; un resultado expirado debe generarse de nuevo.
 
+El proxy web de inicio admite 300 segundos para recibir el ID del trabajo,
+incluyendo la validacion del snapshot contractual en frio. No procesa el PDF:
+el calculo sigue en Cloud Run Jobs. El corte anterior de 60 segundos podia
+mostrar un error aunque la API aceptara el pedido y terminara el informe.
+`web/scripts/qa_report_start.mjs` controla el presupuesto y conserva parametros,
+autorizacion, validaciones y descarga del reporte existente.
+
 ## Validacion
 
 scripts/qa/qa_contractual_executive.py cubre permisos, snapshot, negativos,
