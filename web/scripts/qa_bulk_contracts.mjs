@@ -9,7 +9,7 @@ const logicUrl = uri(compile(source("contractLogic.ts")));
 const editor = source("MasterAgreementsEditor.tsx");
 const visible = editor.slice(editor.indexOf("export function visibleAgreements"), editor.indexOf("export function MasterAgreementsEditor"));
 const bulkUrl = uri(compile(source("bulkContractLogic.ts")).replace('"./contractLogic"', JSON.stringify(logicUrl)).replace('"./MasterAgreementsEditor"', JSON.stringify(uri(compile(visible)))));
-const { applyContractModel, closingErrors, participantDifference, modelErrors } = await import(bulkUrl);
+const { applyContractModel, closingErrors, participantDifference, modelErrors, participantSignature, matchingModelPeriods } = await import(bulkUrl);
 const allocation = { principal: "La Juntada", principal_percent: 20, indyana_percent: 70, apply_guest_contracts: false,
   participants: [{ artist: "Sergio Torres", percent: 10, internal_contract_indyana_percent: null }] };
 const agreement = { id: "original", label: "Contrato individual", commercialization: "distribution", owners: [], effective_from: "2025-01-01", effective_until: null, allocation };
@@ -48,4 +48,19 @@ assert.deepEqual(copiedDistribution.agreements[1].distribution_recipients, distr
 assert.deepEqual(closingErrors(copiedDistribution), []);
 const copiedFlat = applyContractModel(detail, 0, { ...target, split: copiedDistribution }, 1, "2025-06-01", null);
 assert.equal(copiedFlat.agreements[1].distribution_recipients, undefined);
+// No pre-existing saved contract is required when defining a group contract.
+const fresh = { ...structuredClone(detail), version: 0, closed: false };
+assert.deepEqual(modelErrors(fresh, 0, true), []);
+assert(modelErrors(fresh, 0).length);
+const closed = { ...structuredClone(detail), isrc: "CLOSED-OUTSIDE-SELECTION", closed: true };
+const reordered = structuredClone(target);
+reordered.artist_suggestions.artists = ["SERGIO TÓRRES", "la juntada"];
+assert.equal(participantSignature(reordered, 1), participantSignature(closed));
+assert.deepEqual(matchingModelPeriods(closed, participantSignature(reordered, 1)), [0]);
+assert.deepEqual(matchingModelPeriods({ ...closed, closed: false }, participantSignature(reordered, 1)), []);
+assert.deepEqual(matchingModelPeriods(closed, participantSignature(additional, 1)), []);
+const otherProject = structuredClone(closed); otherProject.split.principal = "Otro proyecto";
+otherProject.split.agreements[0].allocation.principal = "Otro proyecto";
+assert.deepEqual(matchingModelPeriods(otherProject, participantSignature(target, 1)), []);
+assert.deepEqual(applyContractModel(fresh, 0, target, 1, "2025-06-01", null).code_association_overrides, target.split.code_association_overrides);
 console.log("Bulk contracts: isolated economics, individual associations and notes, period preservation, participant mismatch, closure gates and saved model: PASS");

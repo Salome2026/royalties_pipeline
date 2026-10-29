@@ -34,7 +34,7 @@ export function visibleAgreements(agreements: MasterAgreement[] | undefined, spl
   }];
 }
 
-export function MasterAgreementsEditor({ agreements, fallbackAllocation, canEdit, artistOptions, firstStatementDate, openId, onOpenChange, onChange }: {
+export function MasterAgreementsEditor({ agreements, fallbackAllocation, canEdit, artistOptions, firstStatementDate, openId, onOpenChange, onChange, canAdd = true }: {
   agreements: MasterAgreement[];
   fallbackAllocation: Allocation;
   canEdit: boolean;
@@ -43,6 +43,7 @@ export function MasterAgreementsEditor({ agreements, fallbackAllocation, canEdit
   openId: string | null;
   onOpenChange: (id: string | null) => void;
   onChange: (agreements: MasterAgreement[]) => void;
+  canAdd?: boolean;
 }) {
 
   function update(index: number, patch: Partial<MasterAgreement>) {
@@ -81,7 +82,7 @@ export function MasterAgreementsEditor({ agreements, fallbackAllocation, canEdit
                 <strong>{agreement.label || (index === 0 ? "Contrato principal" : `Contrato ${index + 1}`)}</strong>
                 <span>{agreement.commercialization === "master" ? "Master" : agreement.commercialization === "distribution" ? "Distribución" : "Por definir"}</span>
               </button>
-              {canEdit && index === 0 && <button type="button" className={styles.iconButton} title="Agregar contrato" aria-label="Agregar contrato" disabled={agreements.length >= 20} onClick={addAgreement}><Plus size={18} /></button>}
+              {canEdit && canAdd && index === 0 && <button type="button" className={styles.iconButton} title="Agregar contrato" aria-label="Agregar contrato" disabled={agreements.length >= 20} onClick={addAgreement}><Plus size={18} /></button>}
               {canEdit && index > 0 && <button type="button" className={styles.iconButton} title={`Quitar ${agreement.label}`} aria-label={`Quitar ${agreement.label}`} onClick={() => {
                 if (!window.confirm(`¿Quitar ${agreement.label}?`)) return;
                 onChange(agreements.filter((_, position) => position !== index));

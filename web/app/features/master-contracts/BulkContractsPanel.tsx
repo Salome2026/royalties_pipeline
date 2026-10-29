@@ -4,8 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import type { ContractDetail, ContractItem, Split } from "./MasterContractsModule";
 import { pendingAssociationCodes, type Association } from "./associationLogic";
-import { agreementAllocation, contractErrors, previewAllocation } from "./contractLogic";
-import { applyContractModel, closingErrors, detailAgreements, modelErrors, participantDifference } from "./bulkContractLogic";
+import { agreementAllocation, beneficiaryKey, contractErrors, previewAllocation, type MasterAgreement } from "./contractLogic";
+import { applyContractModel, closingErrors, detailAgreements, matchingModelPeriods, modelErrors, participantDifference, participantSignature, type ContractModel } from "./bulkContractLogic";
+import { MasterAgreementsEditor } from "./MasterAgreementsEditor";
+import { PoolsAllocationEditor } from "./PoolsAllocationEditor";
+import { ArtistContractsPanel } from "./ArtistContractsPanel";
 import styles from "./MasterContractsModule.module.css";
 
 type Selection = { index: number; from: string; until: string; accepted: boolean; enabled: boolean };
@@ -33,6 +36,12 @@ export function BulkContractsPanel({ items, canApprove, onBack, onOpen }: {
   const [loadErrors, setLoadErrors] = useState<string[]>([]);
   const [modelIsrc, setModelIsrc] = useState("");
   const [modelIndex, setModelIndex] = useState(0);
+  const [choice, setChoice] = useState<"define" | "existing" | null>(null);
+  const [definedModel, setDefinedModel] = useState<ContractDetail | null>(null);
+  const [closedModels, setClosedModels] = useState<ContractModel[]>([]);
+  const [modelsLoaded, setModelsLoaded] = useState(false);
+  const [editorOpen, setEditorOpen] = useState<string | null>(null);
+  const [editingArtist, setEditingArtist] = useState<string | null>(null);
   const [selection, setSelection] = useState<Record<string, Selection>>({});
   const [reviews, setReviews] = useState<Review[] | null>(null);
   const [results, setResults] = useState<Result[] | null>(null);
@@ -51,7 +60,6 @@ export function BulkContractsPanel({ items, canApprove, onBack, onOpen }: {
       if (!mounted.current) return;
       const data = loaded.flatMap((r) => r.detail ? [r.detail] : []);
       setDetails(data); setLoadErrors(loaded.flatMap((r) => r.error ? [r.error] : []));
-      setModelIsrc(data.find((d) => !modelErrors(d, 0).length)?.isrc || data[0]?.isrc || "");
       setSelection(Object.fromEntries(data.map((d) => { const a = detailAgreements(d)[0]; return [d.isrc,
         { index: 0, from: a.effective_from || "", until: a.effective_until || "", accepted: false, enabled: !d.closed }]; })));
       setBusy(false);
@@ -61,20 +69,52 @@ export function BulkContractsPanel({ items, canApprove, onBack, onOpen }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    if (!busy) return;
+    if (!busy || !saving.current) return;
     const block = (event: BeforeUnloadEvent) => { event.preventDefault(); };
     window.addEventListener("beforeunload", block);
     return () => window.removeEventListener("beforeunload", block);
   }, [busy]);
-  const model = details.find((d) => d.isrc === modelIsrc);
+  const targets = details.filter((d) => selection[d.isrc]?.enabled && !d.closed);
+  const signature = targets.length ? participantSignature(targets[0], selection[targets[0].isrc].index) : "";
+  const mixedParticipants = targets.some((d) => participantSignature(d, selection[d.isrc].index) !== signature);
+  const model = choice === "define" ? definedModel : closedModels.find((d) => d.isrc === modelIsrc);
   const source = model ? detailAgreements(model)[modelIndex] : undefined;
-  const sourceErrors = model ? modelErrors(model, modelIndex) : [];
+  const sourceErrors = model ? [...modelErrors(model, modelIndex, choice === "define"),
+    ...(choice === "existing" && !matchingModelPeriods(model, signature).includes(modelIndex) ? ["Elegí de nuevo un contrato compatible con los participantes seleccionados."] : [])] : [];
   const preview = model && source ? previewAllocation(source, agreementAllocation(source, model.split), 100) : null;
   function update(isrc: string, patch: Partial<Selection>) {
     setSelection((value) => ({ ...value, [isrc]: { ...value[isrc], ...patch } })); setReviews(null); setConfirmed(false);
   }
+  function defineContract() {
+    if (!targets.length || mixedParticipants || busy) return;
+    const reference = targets[0], index = selection[reference.isrc].index;
+    const agreement = { ...structuredClone(detailAgreements(reference)[index]),
+      effective_from: selection[reference.isrc].from || null, effective_until: selection[reference.isrc].until || null };
+    setDefinedModel({ ...structuredClone(reference), split: { ...structuredClone(reference.split), agreements: [agreement] } });
+    setChoice("define"); setModelIndex(0); setEditorOpen(agreement.id); setReviews(null); setConfirmed(false); setError("");
+  }
+  function editModel(agreement: MasterAgreement) {
+    if (!definedModel) return;
+    const previous = detailAgreements(definedModel)[0];
+    setDefinedModel({ ...definedModel, split: { ...definedModel.split, agreements: [agreement] } });
+    // Dates edited in the reference's contract apply only to that reference.
+    if (previous.effective_from !== agreement.effective_from || previous.effective_until !== agreement.effective_until)
+      update(definedModel.isrc, { from: agreement.effective_from || "", until: agreement.effective_until || "" });
+    else { setReviews(null); setConfirmed(false); }
+  }
+  async function findModels() {
+    if (!signature || mixedParticipants || busy) return;
+    setChoice("existing"); setBusy(true); setError(""); setModelsLoaded(false); setReviews(null); setConfirmed(false); setModelIsrc(""); setClosedModels([]);
+    try {
+      const loaded = await request<{ items: ContractModel[] }>("/api/master-contract-models");
+      const matches = loaded.items.filter((d) => matchingModelPeriods(d, signature).length > 0);
+      setClosedModels(matches); setModelsLoaded(true);
+      if (matches.length) { setModelIsrc(matches[0].isrc); setModelIndex(matchingModelPeriods(matches[0], signature)[0]); }
+    } catch (e) { setError(e instanceof Error ? e.message : "No se pudieron cargar los contratos cerrados. Volvé a intentar."); }
+    finally { setBusy(false); }
+  }
   async function prepare() {
-    if (!model || sourceErrors.length || busy) return;
+    if (!model || sourceErrors.length || mixedParticipants || busy) return;
     setBusy(true); setError(""); setReviews(null); setConfirmed(false);
     try {
       const targets = details.filter((d) => selection[d.isrc]?.enabled && !d.closed);
@@ -108,6 +148,7 @@ export function BulkContractsPanel({ items, canApprove, onBack, onOpen }: {
     try {
       const current = await request<ContractDetail>(endpoint(model.isrc));
       if (current.version !== model.version) throw new Error("El modelo cambió desde la revisión. Volvé a preparar la selección.");
+      if (choice === "existing" && (!current.closed || !matchingModelPeriods(current, signature).includes(modelIndex))) throw new Error("El modelo ya no es un contrato cerrado compatible. Volvé a elegirlo.");
       for (const row of reviews) {
         setProgress(`${done.length + 1} de ${reviews.length}: ${row.detail.title}`);
         if (row.error) { done.push({ isrc: row.detail.isrc, title: row.detail.title, state: "error", message: row.error }); continue; }
@@ -138,7 +179,7 @@ export function BulkContractsPanel({ items, canApprove, onBack, onOpen }: {
   return <section className={styles.workspace} aria-label="Aplicar contrato a seleccionados">
     <button type="button" className={styles.secondaryButton} disabled={busy} onClick={onBack}><ArrowLeft size={16} />Volver al catálogo</button>
     <div className={styles.heading}><h1>Aplicar contrato a seleccionados</h1></div>
-    <p className={styles.auditLine}>Elegí un contrato guardado como modelo. Revisá el reparto y las vigencias de cada tema antes de confirmar.</p>
+    <p className={styles.auditLine}>Definí un contrato para el grupo o elegí uno cerrado con los mismos participantes. Revisá las vigencias de cada tema antes de confirmar.</p>
     {error && <p className={styles.warning} role="alert">{error}</p>}
     {loadErrors.map((e) => <p key={e} className={styles.warning}>{e}</p>)}
     <p role="status" aria-live="polite">{progress || (busy ? "Cargando y verificando contratos…" : "")}</p>
@@ -146,11 +187,30 @@ export function BulkContractsPanel({ items, canApprove, onBack, onOpen }: {
       {!busy && <p role="status">{results.filter((r) => r.state !== "error").length} contratos aplicados: {results.filter((r) => r.state === "closed").length} cerrados y {results.filter((r) => r.state === "open").length} abiertos. {results.filter((r) => r.state === "error").length} sin aplicar.</p>}
       <div className={styles.tableWrap}><table className={styles.table}><thead><tr><th>Tema</th><th>ISRC</th><th>Resultado</th></tr></thead><tbody>{results.map((r) => <tr key={r.isrc}><td><button className={styles.titleButton} disabled={busy} onClick={() => onOpen(r.isrc)}>{r.title}</button></td><td>{r.isrc}</td><td>{r.message}</td></tr>)}</tbody></table></div>
     </> : <>
-      <div className={styles.agreementFields}>
-        <label>Usar como modelo<select value={modelIsrc} disabled={busy} onChange={(e) => { setModelIsrc(e.target.value); setModelIndex(0); setReviews(null); setConfirmed(false); setSelection((values) => Object.fromEntries(Object.entries(values).map(([k, v]) => [k, { ...v, accepted: false }]))); }}>{details.map((d) => <option key={d.isrc} value={d.isrc}>{d.title} · {d.isrc}</option>)}</select></label>
-        {model && <label>Contrato del modelo<select value={modelIndex} disabled={busy} onChange={(e) => { setModelIndex(Number(e.target.value)); setReviews(null); setConfirmed(false); setSelection((values) => Object.fromEntries(Object.entries(values).map(([k, v]) => [k, { ...v, accepted: false }]))); }}>{detailAgreements(model).map((a, i) => <option key={a.id} value={i}>{a.label || `Contrato ${i + 1}`}</option>)}</select></label>}
+      <div className={styles.bulkToolbar}>
+        <button className={styles.primaryButton} disabled={busy || !targets.length || mixedParticipants} onClick={defineContract}>Definir contrato</button>
+        <button className={styles.secondaryButton} disabled={busy || !targets.length || mixedParticipants} onClick={() => void findModels()}>Usar uno existente</button>
       </div>
-      {model && sourceErrors.length > 0 && <p className={styles.warning}>{sourceErrors.join(" ")} <button className={styles.titleButton} disabled={busy} onClick={() => onOpen(model.isrc)}>Abrir tema para definir el modelo</button></p>}
+      {mixedParticipants && <p className={styles.warning} role="alert">La selección mezcla participantes distintos. Ajustá el grupo antes de definir o elegir un contrato.</p>}
+      {choice === "existing" && !busy && modelsLoaded && !closedModels.length && <p className={styles.warning}>No hay contratos cerrados con exactamente los mismos participantes. Podés elegir «Definir contrato».</p>}
+      {choice === "existing" && closedModels.length > 0 && <div className={styles.agreementFields}>
+        <label>Contrato cerrado compatible<select value={modelIsrc} disabled={busy} onChange={(e) => { const next = closedModels.find((d) => d.isrc === e.target.value)!; setModelIsrc(next.isrc); setModelIndex(matchingModelPeriods(next, signature)[0]); setReviews(null); setConfirmed(false); }}>{closedModels.map((d) => <option key={d.isrc} value={d.isrc}>{d.title} · {d.isrc}</option>)}</select></label>
+        {model && <label>Período del contrato modelo<select value={modelIndex} disabled={busy} onChange={(e) => { setModelIndex(Number(e.target.value)); setReviews(null); setConfirmed(false); }}>{matchingModelPeriods(model, signature).map((i) => { const a = detailAgreements(model)[i]; return <option key={a.id} value={i}>{a.label || `Contrato ${i + 1}`} · {a.effective_from || "Sin fecha"} a {a.effective_until || "actual"}</option>; })}</select></label>}
+      </div>}
+      {choice === "define" && definedModel && source && <section className={styles.band}>
+        <div className={styles.sectionHeading}><h2>Contrato para el grupo</h2><span>Referencia: {definedModel.title}</span></div>
+        <p className={styles.auditLine}>Configurá el contrato una vez. Los códigos pendientes de esta referencia no afectan el cierre de los demás temas.</p>
+        <MasterAgreementsEditor agreements={[source]} fallbackAllocation={definedModel.split} canEdit={!busy} canAdd={false}
+          artistOptions={definedModel.artist_suggestions.artists} firstStatementDate={definedModel.first_statement_date}
+          openId={editorOpen} onOpenChange={setEditorOpen} onChange={(agreements) => editModel(agreements[0])} />
+        {editorOpen && <>
+          <PoolsAllocationEditor agreement={source} allocation={agreementAllocation(source, definedModel.split)} canEdit={!busy}
+            distributionRecipientsSupported={definedModel.distribution_recipients_supported === true}
+            artistOptions={[...new Set([...definedModel.artist_suggestions.artists, ...definedModel.artist_contracts.map((c) => c.artist_name)])]}
+            artistContracts={definedModel.artist_contracts} onChange={editModel} onEditArtist={setEditingArtist} />
+        </>}
+      </section>}
+      {model && sourceErrors.length > 0 && <p className={styles.warning}>{sourceErrors.join(" ")}</p>}
       {preview && <div className={styles.bulkPreview}><strong>Reparto que se aplicará · {source?.commercialization === "master" ? "Master" : "Distribución"}</strong>{preview.map((r) => <span key={r.artist}>{r.artist}: {r.percent.toLocaleString("es-AR", { maximumFractionDigits: 4 })}%</span>)}</div>}
       <div className={styles.tableWrap}><table className={`${styles.table} ${styles.bulkTable}`}><thead><tr><th>Aplicar</th><th>Tema / ISRC</th><th>Contrato a reemplazar</th><th>Vigencia desde</th><th>Hasta</th><th>Revisión</th></tr></thead><tbody>
         {details.map((d) => { const s = selection[d.isrc]; if (!s) return null; const diff = model ? participantDifference(model, modelIndex, d, s.index) : { missing: [], extra: [] }; const review = reviews?.find((r) => r.detail.isrc === d.isrc);
@@ -163,11 +223,16 @@ export function BulkContractsPanel({ items, canApprove, onBack, onOpen }: {
           </tr>;
         })}
       </tbody></table></div>
-      <div className={styles.bulkToolbar}><button className={styles.secondaryButton} disabled={busy || !model || !!sourceErrors.length} onClick={() => void prepare()}>Revisar aplicación</button>
+      <div className={styles.bulkToolbar}><button className={styles.secondaryButton} disabled={busy || !model || !!sourceErrors.length || mixedParticipants} onClick={() => void prepare()}>Revisar aplicación a los seleccionados</button>
         {reviews && <><label><input type="checkbox" checked={confirmed} disabled={busy} onChange={(e) => setConfirmed(e.target.checked)} />Confirmo el reparto y las vigencias de los temas seleccionados.</label>
           <button className={styles.secondaryButton} disabled={busy || !confirmed || reviews.every((r) => !!r.error)} onClick={() => void apply(false)}>Guardar abiertos</button>
           {canApprove && <button className={styles.primaryButton} disabled={busy || !confirmed || reviews.every((r) => !!r.error)} onClick={() => void apply(true)}>Guardar y cerrar los completos</button>}</>}
       </div>
     </>}
+    {editingArtist && model && <div className={styles.modalBackdrop}><div className={styles.artistModal} role="dialog" aria-modal="true" aria-label={`Contrato de ${editingArtist}`}>
+      <ArtistContractsPanel canEdit={!busy} initialArtist={editingArtist} onBack={() => setEditingArtist(null)}
+        onMessage={(message) => { if (message?.type === "error") setError(message.text); }}
+        onSaved={(contracts) => { if (definedModel) setDefinedModel({ ...definedModel, artist_contracts: contracts }); setEditingArtist(null); setReviews(null); setConfirmed(false); }} />
+    </div></div>}
   </section>;
 }

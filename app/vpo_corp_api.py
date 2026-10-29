@@ -8637,6 +8637,24 @@ def put_master_contract_artist(
     return {**saved, "reports_effective": False}
 
 
+@app.get("/master-contract-models")
+def list_master_contract_models(
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+):
+    require_api_key(x_vpo_api_key)
+    with operational_connect() as conn:
+        require_master_contract_user(conn, x_vpo_username, "access")
+        if is_wml() or not is_postgres_connection(conn):
+            raise HTTPException(400, "Los modelos de contratos corresponden al catálogo habitual en Postgres.")
+        saved = [dict(row) for row in conn.execute(db_sql(conn,
+            "SELECT isrc, payload_json, is_closed, version FROM master_contract_splits WHERE is_closed = ?"),
+            (db_bool(conn, True),)).fetchall()]
+    from app.master_contract_models import closed_models
+    items = closed_models(master_contract_catalog().to_dicts(), saved)
+    return {"items": items, "total": len(items), "reports_effective": False}
+
+
 @app.get("/master-contracts")
 def list_master_contracts(
     keyword: str | None = None,

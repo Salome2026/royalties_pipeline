@@ -2,12 +2,16 @@ import { agreementAllocation, beneficiaryKey, contractErrors, previewAllocation,
 import { visibleAgreements } from "./MasterAgreementsEditor";
 import type { ContractDetail, Split } from "./MasterContractsModule";
 
-export function detailAgreements(detail: ContractDetail) {
+export type ContractModel = Pick<ContractDetail, "isrc" | "title" | "split" | "version" | "closed" | "first_statement_date" | "participant_proposal"> & {
+  artist_suggestions: Pick<ContractDetail["artist_suggestions"], "artists">;
+};
+
+export function detailAgreements(detail: ContractModel) {
   return visibleAgreements(detail.split.agreements, detail.split, detail.first_statement_date);
 }
 
 // Only economic terms travel. Identity, associations, notes, periods and other agreements belong to the target.
-export function applyContractModel(model: ContractDetail, modelIndex: number, target: ContractDetail, targetIndex: number,
+export function applyContractModel(model: ContractModel, modelIndex: number, target: ContractDetail, targetIndex: number,
   from: string | null, until: string | null): Split {
   const source = detailAgreements(model)[modelIndex];
   const agreements = structuredClone(detailAgreements(target));
@@ -26,21 +30,34 @@ export function applyContractModel(model: ContractDetail, modelIndex: number, ta
   return { ...structuredClone(target.split), agreements, agreement_confirmed: true };
 }
 
-export function modelErrors(model: ContractDetail, index: number): string[] {
+export function modelErrors(model: ContractModel, index: number, draft = false): string[] {
   const agreement = detailAgreements(model)[index];
-  if (!model.version) return ["Guardá primero el contrato que querés usar como modelo."];
-  if (Object.keys(model.participant_proposal?.added || {}).length) return ["Revisá y guardá los participantes del modelo antes de aplicarlo."];
+  if (!draft && !model.version) return ["Guardá primero el contrato que querés usar como modelo."];
+  if (!draft && Object.keys(model.participant_proposal?.added || {}).length) return ["Revisá y guardá los participantes del modelo antes de aplicarlo."];
   if (!agreement || !previewAllocation(agreement, agreementAllocation(agreement, model.split), 100))
     return ["El modelo debe tener un reparto completo que sume 100%."];
   return contractErrors([agreement], model.split);
 }
 
-export function participantDifference(model: ContractDetail, modelIndex: number, target: ContractDetail, targetIndex: number) {
+export function participantSignature(detail: ContractModel, index = 0): string {
+  const allocation = agreementAllocation(detailAgreements(detail)[index], detail.split);
+  const exclusions = new Set((allocation.catalog_participant_exclusions || []).map(beneficiaryKey));
+  return JSON.stringify([...new Set([...(detail.artist_suggestions?.artists || []), allocation.principal,
+    ...allocation.participants.map((p) => p.artist)].map(beneficiaryKey).filter((name) => name && !exclusions.has(name)))].sort());
+}
+
+export function matchingModelPeriods(model: ContractModel, signature: string): number[] {
+  if (!model.closed) return [];
+  return detailAgreements(model).flatMap((_, index) => participantSignature(model, index) === signature && !modelErrors(model, index).length ? [index] : []);
+}
+
+export function participantDifference(model: ContractModel, modelIndex: number, target: ContractDetail, targetIndex: number) {
   const source = agreementAllocation(detailAgreements(model)[modelIndex], model.split);
   const current = agreementAllocation(detailAgreements(target)[targetIndex], target.split);
   const names = [current.principal, ...current.participants.map((p) => p.artist), ...(target.artist_suggestions?.artists || [])];
   const exclusions = new Set((current.catalog_participant_exclusions || []).map(beneficiaryKey));
-  const proposed = new Set([source.principal, ...source.participants.map((p) => p.artist)].map(beneficiaryKey));
+  const proposed = new Set([source.principal, ...source.participants.map((p) => p.artist),
+    ...detailAgreements(model)[modelIndex].owners.map((owner) => owner.name)].map(beneficiaryKey));
   const missing = [...new Set(names.filter((name) => name && !exclusions.has(beneficiaryKey(name)) && !proposed.has(beneficiaryKey(name))))];
   const known = new Set(names.map(beneficiaryKey));
   const extra = [source.principal, ...source.participants.map((p) => p.artist)].filter((name) => name && !known.has(beneficiaryKey(name)));
