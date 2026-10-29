@@ -35,6 +35,16 @@ DIMENSIONS = {"dsp": "dsp", "monetization": "monetization", "content_origin": "c
               "territory": "territory", "artist": "artist", "label": "label", "source": "source",
               "account": "account", "month": "period_month"}
 _LOCK = threading.RLock()
+# Historical portal permission labels are separate from economic beneficiaries.
+# This explicit equivalence preserves the existing Candu login without granting
+# access by substring, or renaming recipients in any saved contract.
+PORTAL_SCOPE_LABELS = {"candu": "candu dominguez"}
+
+
+def scope_keys(scope: set[str] | None) -> set[str] | None:
+    if scope is None:
+        return None
+    return {PORTAL_SCOPE_LABELS.get(beneficiary_key(name), beneficiary_key(name)) for name in scope}
 
 
 def registry_rows(conn) -> list[dict]:
@@ -56,7 +66,7 @@ def participant_names(catalog: list[dict], contracts: list[dict]) -> dict[str, s
 
 def authorize_beneficiary(value: str | None, names: dict[str, str], scope: set[str] | None) -> str | None:
     key = beneficiary_key(value or "")
-    allowed = None if scope is None else {beneficiary_key(name) for name in scope}
+    allowed = scope_keys(scope)
     if allowed is not None:
         if not key and len(allowed) == 1:
             key = next(iter(allowed))
@@ -90,7 +100,7 @@ def catalog_data(manifest_json: str) -> tuple[list[dict], list[dict]]:
 def read_options(contracts: list[dict], scope: set[str] | None) -> dict:
     catalog, _ = catalog_data(current_manifest())
     names = participant_names(catalog, contracts)
-    allowed = None if scope is None else {beneficiary_key(name) for name in scope}
+    allowed = scope_keys(scope)
     return {"beneficiaries": sorted([name for key, name in names.items() if allowed is None or key in allowed], key=beneficiary_key),
             "restricted": scope is not None}
 

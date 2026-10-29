@@ -65,6 +65,14 @@ class ExplorerTests(unittest.TestCase):
             with self.assertRaises(PermissionError): ex.detail([], {}, {"Artista"}, beneficiary="Socio", track_key="foreign")
             query.assert_not_called()
 
+    def test_historical_candu_portal_label_does_not_use_substring_matching(self):
+        names = {"candu dominguez": "Candu Domínguez", "candu otra": "Candu Otra", "indyana": "Indyana"}
+        self.assertEqual(ex.authorize_beneficiary(None, names, {"Candu"}), "Candu Domínguez")
+        for foreign in ["Candu Otra", "Indyana"]:
+            with self.assertRaises(PermissionError): ex.authorize_beneficiary(foreign, names, {"Candu"})
+        with patch.object(ex, "catalog_data", return_value=([], [])), patch.object(ex, "current_manifest", return_value="pinned"), patch.object(ex, "participant_names", return_value=names):
+            self.assertEqual(ex.read_options([], {"Candu"})["beneficiaries"], ["Candu Domínguez"])
+
     def test_detail_money_conservation_private_projection_and_adjustments(self):
         for amount in [100, -100, 0, .01, 100.005]:
             with patch.object(ex, "get_context", return_value=context()), patch.object(ex, "_job", return_value=[income(amount)]):
