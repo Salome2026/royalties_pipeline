@@ -8649,7 +8649,7 @@ def list_master_contract_models(
             raise HTTPException(400, "Los modelos de contratos corresponden al catálogo habitual en Postgres.")
         saved = [dict(row) for row in conn.execute(db_sql(conn,
             "SELECT isrc, payload_json, is_closed, version FROM master_contract_splits WHERE is_closed = ?"),
-            (db_bool(True),)).fetchall()]
+            (1,)).fetchall()]
     from app.master_contract_models import closed_models
     items = closed_models(master_contract_catalog().to_dicts(), saved)
     return {"items": items, "total": len(items), "reports_effective": False}

@@ -46,7 +46,8 @@ class ContractModelTests(unittest.TestCase):
             query, params = conn.execute.call_args.args
             self.assertTrue(query.startswith("SELECT "))
             self.assertIn("WHERE is_closed = ?", query)
-            self.assertEqual(params, (True,))
+            self.assertEqual(params, (1,))
+            self.assertIs(type(params[0]), int)
             associations.assert_not_called()
             income.assert_not_called()
 
