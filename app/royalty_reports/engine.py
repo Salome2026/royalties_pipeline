@@ -71,7 +71,12 @@ class ReportEngine:
             standardized_path=marts[self.runtime.standardized_filename],
             catalog_master_path=marts[self.runtime.catalog_master_filename],
             output_dir=self.runtime.output_dir,
+            contract_snapshot=(job.get("input_manifest") or {}).get("excel_contract_snapshot") if request.include_contracts else None,
         )
+        if request.include_contracts:
+            snapshot = inputs.contract_snapshot or {}
+            if snapshot.get("release_id") != (job.get("input_manifest") or {}).get("release_id"):
+                raise ValueError("Los contratos y los ingresos del Excel no tienen la misma version publicada.")
 
         policy_snapshot = dict(job.get("policy_snapshot") or {})
         if not policy_snapshot:

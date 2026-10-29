@@ -12,11 +12,14 @@ export type RoyaltyReportSourceAccount = {
 };
 
 export type RoyaltyReportOptions = {
+  excel_contracts_supported?: boolean;
   sources: string[];
   source_accounts: RoyaltyReportSourceAccount[];
 };
 
 export type RoyaltyReportPayload = {
+  include_contracts?: boolean;
+  contract_columns?: "matching" | "all";
   executive_mode?: "income" | "contractual";
   contract_artists?: string[];
   keywords: string[];
@@ -75,10 +78,15 @@ export async function requestContractReportArtists(): Promise<string[]> {
 }
 
 export async function createRoyaltyReportJob(payload: RoyaltyReportPayload, output: RoyaltyReportJobOutput) {
+  const body = { ...payload, output };
+  if (output !== "excel") {
+    delete body.include_contracts;
+    delete body.contract_columns;
+  }
   const response = await fetch("/api/report", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...payload, output }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) throw await responseError(response, "No se pudo iniciar el reporte.");
   const data = await response.json();

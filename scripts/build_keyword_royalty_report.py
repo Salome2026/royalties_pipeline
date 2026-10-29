@@ -464,9 +464,7 @@ def _summary_text_expr(columns: set[str], names: list[str]) -> pl.Expr:
     return pl.coalesce(candidates)
 
 
-def build_track_summary_lf(base_lf: pl.LazyFrame) -> pl.LazyFrame:
-    """Build one economic row per resolved catalog identity."""
-    columns = set(base_lf.collect_schema().names())
+def report_identity_expr(columns: set[str]) -> pl.Expr:
     title = _summary_text_expr(columns, ["track_statement_style", "asset_title_statement"])
     raw_artist = _summary_text_expr(columns, ["artist_statement_style", "asset_artist_statement"])
     artist = (
@@ -505,6 +503,20 @@ def build_track_summary_lf(base_lf: pl.LazyFrame) -> pl.LazyFrame:
             normalized_artist,
         ]))
     )
+    return pl.coalesce([catalog_key, fallback_identity]).alias("_report_identity")
+
+
+def build_track_summary_lf(base_lf: pl.LazyFrame, *, include_identity: bool = False) -> pl.LazyFrame:
+    """Build one economic row per resolved catalog identity."""
+    columns = set(base_lf.collect_schema().names())
+    title = _summary_text_expr(columns, ["track_statement_style", "asset_title_statement"])
+    raw_artist = _summary_text_expr(columns, ["artist_statement_style", "asset_artist_statement"])
+    artist = pl.when(
+        raw_artist.fill_null("").str.to_lowercase().str.replace_all(r"\s+", " ").str.strip_chars()
+        == title.fill_null("").str.to_lowercase().str.replace_all(r"\s+", " ").str.strip_chars()
+    ).then(None).otherwise(raw_artist)
+    report_code = _summary_text_expr(columns, ["report_code"])
+    report_code_source = _summary_text_expr(columns, ["report_code_source"])
     trusted_code = (
         pl.when(
             report_code.is_not_null()
@@ -517,7 +529,7 @@ def build_track_summary_lf(base_lf: pl.LazyFrame) -> pl.LazyFrame:
     grouped = (
         base_lf
         .with_columns([
-            pl.coalesce([catalog_key, fallback_identity]).alias("_report_identity"),
+            report_identity_expr(columns),
             title.alias("_summary_title"),
             artist.alias("_summary_artist"),
             trusted_code.alias("_trusted_original_code"),
@@ -599,6 +611,7 @@ def build_track_summary_lf(base_lf: pl.LazyFrame) -> pl.LazyFrame:
             "report_code",
         ])
         .select([
+            *(["_report_identity"] if include_identity else []),
             "track_statement_style",
             "artist_statement_style",
             "report_code",
@@ -1302,6 +1315,8 @@ def build_report_tables(
     source: str | None = None,
     account: str | None = None,
     detail_mode: str = DETAIL_MODE_LIMITED,
+    contract_snapshot: dict | None = None,
+    contract_columns: str = "all",
 ) -> dict[str, pd.DataFrame]:
     period_column = "statement_period" if period_basis == "statement_period" else "transaction_month"
     period_label = PERIOD_BASIS_LABELS.get(period_column, period_column)
@@ -1371,6 +1386,8 @@ def build_report_tables(
                     "revenue_basis",
                     "catalog_key",
                     "catalog_business_status",
+                    *(["product_upc", "UPC Code", "UPC", "video_id", "Video ID", "VideoId", "track_id",
+                       "Label Track ID", "Track ID", "gpid", "source_asset_id", "catalog_number"] if contract_snapshot is not None else []),
                 ]
                 if col in standardized_cols or col in {"store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory", "catalog_key", "catalog_business_status"}
             ])
@@ -1417,7 +1434,7 @@ def build_report_tables(
             .sort("report_territory")
         )
 
-        track_summary_lf = build_track_summary_lf(statement_base_lf)
+        track_summary_lf = build_track_summary_lf(statement_base_lf, include_identity=contract_snapshot is not None)
 
         raw_matches_lf, raw_detail_columns = build_filtered_raw_detail_lf(
             keywords=keywords,
@@ -1487,8 +1504,12 @@ def build_report_tables(
             "resumen mensual": display_dataframe(monthly_summary.to_pandas()),
             "resumen por store": display_dataframe(store_summary.to_pandas()),
             "resumen por territorio": display_dataframe(territory_summary.to_pandas()),
-            "resumen por tema": display_dataframe(track_summary.to_pandas()),
+            "resumen por tema": display_dataframe(track_summary.drop("_report_identity", strict=False).to_pandas()),
         }
+
+        if contract_snapshot is not None:
+            from app.royalty_reports.excel_contracts import enrich_tables
+            enrich_tables(tables, track_summary, statement_base_lf, contract_snapshot, keywords, contract_columns)
 
         if not raw_sample.empty:
             tables["detalle"] = raw_sample
@@ -1560,7 +1581,7 @@ def build_report_tables(
         .sort("period_month")
     )
 
-    track_summary = build_track_summary_lf(song.lazy()).collect()
+    track_summary = build_track_summary_lf(song.lazy(), include_identity=contract_snapshot is not None).collect()
 
     raw_sample = pd.DataFrame()
     store_summary = pl.DataFrame()
@@ -1652,8 +1673,14 @@ def build_report_tables(
         "resumen mensual": display_dataframe(monthly_summary.to_pandas()),
         "resumen por store": display_dataframe(store_summary.to_pandas()),
         "resumen por territorio": display_dataframe(territory_summary.to_pandas()),
-        "resumen por tema": display_dataframe(track_summary.to_pandas()),
+        "resumen por tema": display_dataframe(track_summary.drop("_report_identity", strict=False).to_pandas()),
     }
+
+    if contract_snapshot is not None:
+        from app.royalty_reports.excel_contracts import enrich_tables
+        if not standardized_path.exists():
+            raise ValueError("Falta el detalle publicado para verificar las vigencias de los contratos.")
+        enrich_tables(tables, track_summary, raw_matches_lf, contract_snapshot, keywords, contract_columns)
 
     if not raw_sample.empty:
         tables["detalle"] = raw_sample
@@ -1678,6 +1705,8 @@ def build_report(
     detail_mode: str = DETAIL_MODE_LIMITED,
     source: str | None = None,
     account: str | None = None,
+    contract_snapshot: dict | None = None,
+    contract_columns: str = "all",
 ) -> Path:
     output_path = report_output_path(keywords, start_month, end_month, output_dir)
     tables = build_report_tables(
@@ -1693,6 +1722,7 @@ def build_report(
         exclude_isrcs=exclude_isrcs,
         source=source,
         account=account,
+        **({"contract_snapshot": contract_snapshot, "contract_columns": contract_columns} if contract_snapshot is not None else {}),
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1702,6 +1732,11 @@ def build_report(
             dataframe.to_excel(writer, index=False, sheet_name=sheet_name)
 
         style_workbook(writer)
+        if contract_snapshot is not None and "resumen por tema" in tables:
+            ws = writer.book["resumen por tema"]
+            for column, number_format in tables["resumen por tema"].attrs.get("contract_formats", {}).items():
+                for row in ws.iter_rows(min_row=2, min_col=column, max_col=column):
+                    row[0].number_format = number_format
 
     return output_path
 

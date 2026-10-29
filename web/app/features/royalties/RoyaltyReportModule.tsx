@@ -33,6 +33,8 @@ type Props = {
 export function RoyaltyReportModule({ onMessage }: Props) {
   const [output, setOutput] = useState<RoyaltyReportOutput>("excel");
   const [executiveMode, setExecutiveMode] = useState<"income" | "contractual">("income");
+  const [includeContracts, setIncludeContracts] = useState(false);
+  const [contractColumns, setContractColumns] = useState<"matching" | "all">("all");
   const [contractArtists, setContractArtists] = useState<string[]>([]);
   const [artistOptions, setArtistOptions] = useState<string[]>([]);
   const [artistSearch, setArtistSearch] = useState("");
@@ -183,6 +185,10 @@ export function RoyaltyReportModule({ onMessage }: Props) {
       return null;
     }
     const terms = keywords.split(/[;,]/).map((item) => item.trim()).filter(Boolean);
+    if (output === "excel" && !wml && includeContracts && !options?.excel_contracts_supported) {
+      onMessage({ type: "error", text: "La opción de contratos todavía no está disponible. Recargá la pantalla." });
+      return null;
+    }
     let artists = contractArtists;
     if (contractual) {
       const selection = prepareContractArtists(contractArtists, artistSearch, artistOptions);
@@ -215,6 +221,7 @@ export function RoyaltyReportModule({ onMessage }: Props) {
       end_month: resolved.endMonth,
       period_basis: contractual ? "statement_period" : periodBasis,
       ...(contractual ? { executive_mode: "contractual" as const, contract_artists: artists } : {}),
+      ...(output === "excel" && !wml && includeContracts ? { include_contracts: true, contract_columns: contractColumns } : {}),
       mode: matchMode,
       raw_limit: Number.isFinite(parsedRawLimit) ? parsedRawLimit : 0,
       detail_mode: output === "excel" ? detailMode : "limited",
@@ -401,6 +408,26 @@ export function RoyaltyReportModule({ onMessage }: Props) {
               </select>
               {!contractual && <small>Statement sirve para liquidaciones; consumo sirve para analizar cuándo ocurrió la actividad.</small>}
             </div>
+            {output === "excel" && !wml && (
+              <>
+                <div className={styles.field}>
+                  <label htmlFor="royalty_include_contracts">Incluir contratos</label>
+                  <select id="royalty_include_contracts" value={includeContracts ? "yes" : "no"} onChange={(event) => setIncludeContracts(event.target.value === "yes")}>
+                    <option value="no">No</option>
+                    <option value="yes" disabled={!options?.excel_contracts_supported}>Sí</option>
+                  </select>
+                </div>
+                {includeContracts && (
+                  <div className={styles.field}>
+                    <label htmlFor="royalty_contract_columns">Mostrar reparto</label>
+                    <select id="royalty_contract_columns" value={contractColumns} onChange={(event) => setContractColumns(event.target.value as "matching" | "all")}>
+                      <option value="all">Todos los involucrados</option>
+                      <option value="matching">Coincidentes con la búsqueda</option>
+                    </select>
+                  </div>
+                )}
+              </>
+            )}
           </div>
 
           <aside className={styles.secondaryFields}>

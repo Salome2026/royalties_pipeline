@@ -50,6 +50,11 @@ def royalty_report_scope_label(source: str | None, account: str | None) -> str:
 
 
 def build_keyword_excel(request: ReportRequest, inputs: ReportInputs) -> BuiltReport:
+    extra = {}
+    if request.include_contracts:
+        from app.royalty_reports.excel_contracts import require_snapshot
+        require_snapshot(inputs.contract_snapshot)
+        extra = {"contract_snapshot": inputs.contract_snapshot, "contract_columns": request.contract_columns}
     output_path = build_report(
         keywords=list(request.keywords),
         mode=request.mode,
@@ -63,6 +68,7 @@ def build_keyword_excel(request: ReportRequest, inputs: ReportInputs) -> BuiltRe
         output_dir=inputs.output_dir,
         source=request.source,
         account=request.account,
+        **extra,
     )
     return BuiltReport(
         output_path=Path(output_path),

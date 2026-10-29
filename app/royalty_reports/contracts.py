@@ -31,6 +31,8 @@ class ReportRequest:
     account: str | None
     executive_mode: str = "income"
     royalty_scope: str = 'regular'
+    include_contracts: bool = False
+    contract_columns: str = "all"
 
     @classmethod
     def from_job(cls, job: dict[str, Any], *, keywords: list[str]) -> "ReportRequest":
@@ -58,6 +60,12 @@ class ReportRequest:
         if executive_mode == "contractual":
             if output_format != "executive_pdf" or params.get("period_basis") != "statement_period":
                 raise ValueError("El reparto contractual usa PDF y exclusivamente fecha de statement.")
+        include_contracts = params.get("include_contracts", False)
+        contract_columns = params.get("contract_columns", "all")
+        if not isinstance(include_contracts, bool) or contract_columns not in {"matching", "all"}:
+            raise ValueError("La seleccion de contratos del Excel no es valida.")
+        if include_contracts and (output_format != "excel" or royalty_scope != "regular" or executive_mode != "income"):
+            raise ValueError("Las columnas contractuales solo estan disponibles en el Excel de regalias.")
 
         detail_mode_value = str(params.get("detail_mode") or "limited")
         if detail_mode_value not in {"limited", "top_countries", "full"}:
@@ -79,6 +87,8 @@ class ReportRequest:
             account=(str(params.get("account") or "").strip().lower() or None),
             executive_mode=executive_mode,
             royalty_scope=royalty_scope,
+            include_contracts=include_contracts,
+            contract_columns=contract_columns,
         )
 
 
@@ -88,6 +98,7 @@ class ReportInputs:
     standardized_path: Path
     catalog_master_path: Path
     output_dir: Path
+    contract_snapshot: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
