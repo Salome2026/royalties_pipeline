@@ -20,6 +20,7 @@ from lib.catalog_artist_extensions import enrich_catalog_artist_extensions_file
 from lib.catalog_identity_corrections import correct_recording_identity, correct_release_metadata
 from lib.ingestion_controls import controlled_ingestion
 from lib.catalog_ingestion_review import save_controls
+from lib.catalog_artist_evidence import enrich_checked
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -730,14 +731,14 @@ def build_catalog_master() -> pl.DataFrame:
     ])
 
     catalog = apply_catalog_manual_metadata(catalog)
-    catalog = enrich_fuga_catalog_file(catalog, MARTS_DIR / "standardized_raw_fuga.parquet")
+    catalog = enrich_checked(catalog, "fuga", enrich_fuga_catalog_file, MARTS_DIR / "standardized_raw_fuga.parquet")
     catalog = apply_automatic_extended(catalog, MARTS_DIR.parent.parent)
-    catalog = enrich_onerpm_catalog_file(catalog, MARTS_DIR / METADATA_FILE)
-    catalog = enrich_ada_catalog_file(catalog, MARTS_DIR / ADA_METADATA_FILE, MARTS_DIR / "standardized_raw_orchard.parquet")
-    catalog = enrich_orchard_catalog_file(catalog, MARTS_DIR / "standardized_raw_orchard.parquet")
-    catalog = enrich_soundon_catalog_file(catalog, MARTS_DIR / "standardized_raw_soundon.parquet")
-    catalog = enrich_dashgo_catalog_file(catalog, MARTS_DIR / "standardized_raw_dashgo.parquet")
-    catalog = enrich_catalog_artist_extensions_file(catalog, MARTS_DIR / ADA_METADATA_FILE)
+    catalog = enrich_checked(catalog, "onerpm", enrich_onerpm_catalog_file, MARTS_DIR / METADATA_FILE)
+    catalog = enrich_checked(catalog, "ada", enrich_ada_catalog_file, MARTS_DIR / ADA_METADATA_FILE, MARTS_DIR / "standardized_raw_orchard.parquet")
+    catalog = enrich_checked(catalog, "orchard", enrich_orchard_catalog_file, MARTS_DIR / "standardized_raw_orchard.parquet")
+    catalog = enrich_checked(catalog, "soundon", enrich_soundon_catalog_file, MARTS_DIR / "standardized_raw_soundon.parquet")
+    catalog = enrich_checked(catalog, "dashgo", enrich_dashgo_catalog_file, MARTS_DIR / "standardized_raw_dashgo.parquet")
+    catalog = enrich_checked(catalog, "ada", enrich_catalog_artist_extensions_file, MARTS_DIR / ADA_METADATA_FILE)
     return catalog.sort("amount_usd", descending=True)
 
 

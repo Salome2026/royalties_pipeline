@@ -10,6 +10,25 @@ steps:
       - -f
       - Dockerfile
 
+  - id: Catalogue cross-source evidence regression
+    name: gcr.io/cloud-builders/docker
+    args:
+      - run
+      - --rm
+      - --network=none
+      - --read-only
+      - --tmpfs
+      - /tmp:rw,size=536870912
+      - ${_IMAGE_REPOSITORY}/vpo-corp-platform:${COMMIT_SHA}
+      - python
+      - -m
+      - unittest
+      - scripts.qa.qa_catalog_artist_evidence
+      - scripts.qa.qa_fuga_catalog_artists
+      - scripts.qa.qa_soundon_catalog_artists
+      - scripts.qa.qa_ingestion_controls
+      - -q
+
   - id: Push
     name: gcr.io/cloud-builders/docker
     args:

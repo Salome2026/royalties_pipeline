@@ -1,5 +1,14 @@
 # Catalogo general core
 
+## Integridad entre lectores
+
+Lectura obligatoria: `catalog_artist_evidence_integrity_20261030.md`.
+Cada lector conserva la evidencia de las otras fuentes. La reconstruccion
+se detiene si una etapa la elimina o reescribe. Los integrantes nativos que
+todavia no aparecen en la ficha se informan en el monitor, sin porcentajes
+automaticos ni perdida de ingresos. Un control financiero correcto no
+certifica por si solo la preservacion o interpretacion de participantes.
+
 ## Controles de futuras ingestas
 
 Lectura obligatoria: `catalog_ingestion_controls_20261030.md`. La admision

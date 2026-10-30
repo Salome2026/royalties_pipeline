@@ -9,6 +9,7 @@ import polars as pl
 
 from .ingestion_controls import CONTROL_FILE, SOURCES, VERSION, validate_no_failed_batches
 from .catalog_manual_metadata import CORRECTIONS_PATH
+from .catalog_artist_dictionary import comparison_key
 
 SCHEMA = {name: pl.String for name in ("row_type", "source", "account", "code", "identity", "details", "base_release_id", "rule")}
 BAD_STATUSES = {"contradictory", "conflicting_participants", "reference_mismatch", "tokenization_unresolved", "ambiguous_serialization"}
@@ -46,6 +47,18 @@ def reading_incidents(catalog: pl.DataFrame) -> list[dict]:
                     add(source, account, "UNKNOWN_ROLE", identity, {**entry, "raw": credit.get("role_original")})
             if entry.get("manual_protected") or row.get("catalog_manual_correction_id"):
                 return
+            native = entry.get("native_artists")
+            if native is None and entry.get("source") == "onerpm" and entry.get("field") == "Artists":
+                native = entry.get("artists")
+            if (isinstance(native, list) and row.get("catalog_artists") is not None
+                    and entry.get("identity_status") == "resolved"
+                    and entry.get("native_resolution_status") in {"resolved", "as_reported"}
+                    and entry.get("field") != "Product Artist"):
+                known = {comparison_key(name) for name in row["catalog_artists"]}
+                missing = [name for name in native if comparison_key(name) not in known]
+                if missing:
+                    add(source, account, "PARTICIPANTS_DIFFERENCE", identity,
+                        {**entry, "raw": " / ".join(missing)})
             statuses = {entry.get(key) for key in ("participant_resolution_status", "native_resolution_status", "status", "grammar_status")}
             bad = statuses & (BAD_STATUSES | {"ambiguous", "ambiguous_grammar"})
             if not row.get("catalog_artists") and row.get("asset_isrc") and "incomplete" in statuses:
