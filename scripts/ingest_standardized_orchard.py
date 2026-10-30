@@ -279,6 +279,7 @@ def main():
     ensure_dirs()
 
     parts = []
+    errors = []
     files = sorted(ORCHARD_INPUT_DIR.glob("*.csv"))
 
     print("Orchard standardized ingest")
@@ -304,6 +305,7 @@ def main():
 
         except Exception as e:
             print(f"  ERROR: {e}")
+            errors.append(f"{file_path.name}: {e}")
 
     if ALTAFONTE_LEGACY_FILE.exists():
         print(f"\nProcesando legacy Altafonte: {ALTAFONTE_LEGACY_FILE.name}")
@@ -319,8 +321,12 @@ def main():
 
         except Exception as e:
             print(f"  ERROR legacy Altafonte: {e}")
+            errors.append(f"{ALTAFONTE_LEGACY_FILE.name}: {e}")
     else:
         print("\nNo existe archivo Altafonte legacy. Se omite.")
+
+    if errors:
+        raise ValueError("Orchard no se actualizo porque hubo errores: " + " | ".join(errors))
 
     if not parts:
         print("No se generaron datos")
@@ -329,7 +335,9 @@ def main():
     print("\nConsolidando...")
 
     final = pl.concat([pl.read_parquet(part) for part in parts], how="diagonal_relaxed")
-    final.write_parquet(OUTPUT_PATH)
+    temporary = OUTPUT_PATH.with_suffix(".parquet.tmp")
+    final.write_parquet(temporary)
+    temporary.replace(OUTPUT_PATH)
 
     print("\nListo.")
     print(f"Archivo: {OUTPUT_PATH}")

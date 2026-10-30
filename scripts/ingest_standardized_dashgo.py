@@ -242,6 +242,7 @@ def main():
         return
 
     part_paths = []
+    errors = []
 
     for file_path in csv_files:
         print(f"\nProcesando: {file_path.name}")
@@ -265,7 +266,11 @@ def main():
 
         except Exception as e:
             print(f"  ERROR: {e}")
+            errors.append(f"{file_path.name}: {e}")
             continue
+
+    if errors:
+        raise ValueError("DashGo no se actualizo porque hubo errores: " + " | ".join(errors))
 
     if not part_paths:
         print("\nNo se generaron partes.")
@@ -276,7 +281,9 @@ def main():
     frames = [pl.read_parquet(p) for p in part_paths]
     final_df = pl.concat(frames, how="diagonal_relaxed")
 
-    final_df.write_parquet(OUTPUT_PATH)
+    temporary = OUTPUT_PATH.with_suffix(".parquet.tmp")
+    final_df.write_parquet(temporary)
+    temporary.replace(OUTPUT_PATH)
 
     print("\nListo.")
     print(f"Archivo generado: {OUTPUT_PATH}")

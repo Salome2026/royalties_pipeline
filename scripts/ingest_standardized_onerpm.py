@@ -642,12 +642,13 @@ def standardize_youtube_channels(df: pl.DataFrame, file_path: Path, account: str
 
 
 def read_excel_sheet(file_path: Path, sheet_name: str) -> pl.DataFrame:
-    return pl.read_excel(file_path, sheet_name=sheet_name)
+    return pl.read_excel(file_path, sheet_name=sheet_name, raise_if_empty=False)
 
 
 def process_account(account: str, config: dict) -> list[Path]:
     input_dir = INPUT_ROOT / account
     account_parts = []
+    errors = []
 
     if not input_dir.exists():
         print(f"\nNo existe carpeta ONErpm {account}: {input_dir}")
@@ -666,29 +667,36 @@ def process_account(account: str, config: dict) -> list[Path]:
         print(f"  Procesando: {file_path.name}")
         file_hash = sha256_file(file_path)
         frames = []
+        file_errors = []
 
         df_shares_raw = None
 
         if config["use_shares_as_flags"]:
             try:
                 df_shares_raw = read_excel_sheet(file_path, SHEET_SHARES)
-            except Exception:
+            except Exception as e:
+                print(f"    Shares flags ERROR: {e}")
+                file_errors.append(f"Shares In & Out (flags): {e}")
                 df_shares_raw = pl.DataFrame()
 
         if config["load_masters"]:
             try:
                 df_masters = read_excel_sheet(file_path, SHEET_MASTERS)
-                df_masters = standardize_masters(
-                    df=df_masters,
-                    file_path=file_path,
-                    account=account,
-                    file_hash=file_hash,
-                    df_shares_for_flags=df_shares_raw,
-                )
-                frames.append(df_masters)
-                print(f"    Masters OK: {df_masters.height}")
+                if df_masters.is_empty() and "Net" not in clean_column_names(df_masters).columns:
+                    print("    Masters vacio")
+                else:
+                    df_masters = standardize_masters(
+                        df=df_masters,
+                        file_path=file_path,
+                        account=account,
+                        file_hash=file_hash,
+                        df_shares_for_flags=df_shares_raw,
+                    )
+                    frames.append(df_masters)
+                    print(f"    Masters OK: {df_masters.height}")
             except Exception as e:
                 print(f"    Masters ERROR: {e}")
+                file_errors.append(f"Masters: {e}")
 
         if config["load_youtube_channels"]:
             try:
@@ -706,6 +714,7 @@ def process_account(account: str, config: dict) -> list[Path]:
                     print("    Youtube Channels vacio")
             except Exception as e:
                 print(f"    Youtube Channels ERROR: {e}")
+                file_errors.append(f"Youtube Channels: {e}")
 
         if config["load_shares_as_rows"]:
             try:
@@ -718,6 +727,11 @@ def process_account(account: str, config: dict) -> list[Path]:
                     print("    Shares vacio")
             except Exception as e:
                 print(f"    Shares ERROR: {e}")
+                file_errors.append(f"Shares In & Out: {e}")
+
+        if file_errors:
+            errors.append(f"{account}/{file_path.name}: " + "; ".join(file_errors))
+            continue
 
         if not frames:
             print("    Sin datos utiles")
@@ -728,6 +742,9 @@ def process_account(account: str, config: dict) -> list[Path]:
         part_path.parent.mkdir(parents=True, exist_ok=True)
         file_df.write_parquet(part_path)
         account_parts.append(part_path)
+
+    if errors:
+        raise ValueError("ONErpm no se actualizo porque hubo errores: " + " | ".join(errors))
 
     return account_parts
 
