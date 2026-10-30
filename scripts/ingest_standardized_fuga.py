@@ -15,9 +15,10 @@ sys.path.append(str(SCRIPT_DIR))
 
 from lib.fx import get_monthly_fx
 from lib.identity import valid_youtube_video_id_expr
-from lib.statement_period import from_fuga_filename, fuga_correction
+from lib.statement_period import from_fuga_filename, fuga_correction, FUGA_CORRECTION_STATEMENT_PERIOD as CORRECTION_STATEMENT_PERIOD
 from lib.fuga_extended import audit_directory
 from lib.catalog_identity_corrections import correct_recording_identity
+from lib.ingestion_controls import controlled_ingestion, select_inputs, validate_amounts, stage_controls
 
 
 # =========================
@@ -34,7 +35,6 @@ SOURCE = "fuga"
 ACCOUNT = "indyana_records"
 
 # Del script de correction recuperado
-CORRECTION_STATEMENT_PERIOD = "2025-12"
 
 
 # =========================
@@ -295,13 +295,16 @@ def standardize_fuga_file(
         pl.lit(ingested_at).alias("ingested_at"),
     ])
 
-    return correct_recording_identity(df)
+    df = correct_recording_identity(df)
+    validate_amounts(df, source=SOURCE, path=file_path, field="Net Amount in EUR / USD")
+    return df
 
 
 # =========================
 # MAIN
 # =========================
 
+@controlled_ingestion(SOURCE)
 def main():
     ensure_dirs()
 
@@ -317,6 +320,8 @@ def main():
     for supplementary in discovered_files:
         if supplementary not in all_files:
             print(f"Complemento fuera de ingesta economica: {supplementary.name}")
+
+    all_files = select_inputs(all_files, SOURCE, ACCOUNT)
 
     regular_files = [
         p for p in all_files
@@ -433,6 +438,7 @@ def main():
 
     temporary = OUTPUT_PATH.with_suffix(".parquet.tmp")
     final_df.sink_parquet(temporary, engine="streaming")
+    stage_controls(temporary)
     temporary.replace(OUTPUT_PATH)
     result = pl.scan_parquet(OUTPUT_PATH)
 

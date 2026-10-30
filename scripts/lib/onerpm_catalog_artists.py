@@ -147,13 +147,16 @@ def read_file_metadata(path: Path, account: str) -> list[dict]:
     return observations
 
 
-def read_onerpm_metadata(input_root: Path, *, allowed_accounts: set[str] | None = None) -> pl.DataFrame:
+def read_onerpm_metadata(input_root: Path, *, allowed_accounts: set[str] | None = None, selected_paths: list[Path] | None = None) -> pl.DataFrame:
     groups, scopes, hashes = defaultdict(list), {}, {}
     unsupported = sorted(path for path in input_root.rglob("*") if path.is_file()
                          and not path.name.startswith("~$") and path.suffix.lower() in {".xls", ".xlsm", ".xlsb"})
     if unsupported:
         raise ValueError(f"ONErpm: formato no certificado ({unsupported[0].name}); exportar el statement como XLSX")
-    paths = sorted(path for path in input_root.rglob("*.xlsx") if not path.name.startswith("~$"))
+    if selected_paths is None:
+        from .ingestion_controls import select_inputs
+        selected_paths = select_inputs((path for path in input_root.rglob("*.xlsx") if not path.name.startswith("~$")), "onerpm")
+    paths = sorted(selected_paths)
     if not paths:
         raise ValueError("ONErpm: no hay statements para construir la metadata de artistas")
     for path in paths:

@@ -18,6 +18,7 @@ from lib.ada_identity import ada_isrc_expr, ada_native_code_expr, add_ada_artist
 from lib.ada_release_codes import add_ada_release_codes
 from lib.ada_statement_reader import read_operational_package
 from lib.ada_catalog_artists import METADATA_FILE, metadata_observations
+from lib.ingestion_controls import controlled_ingestion, select_inputs, stage_controls
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -233,6 +234,7 @@ def standardize(
     ])
 
 
+@controlled_ingestion(SOURCE)
 def main() -> None:
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     if TEMP_DIR.exists():
@@ -249,7 +251,7 @@ def main() -> None:
 
     for account, config in ACCOUNTS.items():
         input_dir = INPUT_ROOT / str(config["input_directory"])
-        files = select_statement_files(input_dir)
+        files = select_inputs(select_statement_files(input_dir), SOURCE, account)
         if not files:
             raise FileNotFoundError(f"No hay statements ADA/{account} en {input_dir}")
 
@@ -304,6 +306,7 @@ def main() -> None:
     audit_path = OUTPUT_PATH.with_name("ada_native_evidence.parquet")
     audit_temp = audit_path.with_suffix(".tmp.parquet")
     pl.concat([pl.scan_parquet(path) for path in native_parts], how="diagonal_relaxed").sink_parquet(audit_temp)
+    stage_controls(temporary_output)
     metadata_temp.replace(metadata_path)
     audit_temp.replace(audit_path)
     temporary_output.replace(OUTPUT_PATH)

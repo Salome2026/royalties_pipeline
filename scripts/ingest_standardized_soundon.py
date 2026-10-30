@@ -8,6 +8,7 @@ import polars as pl
 
 from lib.statement_period import from_column
 from lib.soundon_identity import ISRC_PATTERN, add_artist_reference, add_consumption_dates
+from lib.ingestion_controls import controlled_ingestion, select_inputs, stage_controls
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -223,10 +224,11 @@ def standardize_summary_file(df: pl.DataFrame, file_path: Path, statement_type: 
     ])
 
 
+@controlled_ingestion(SOURCE)
 def main():
     ensure_dirs()
 
-    files = sorted(INPUT_DIR.glob("*.csv"))
+    files = select_inputs(INPUT_DIR.glob("*.csv"), SOURCE, ACCOUNT)
 
     print("SoundOn standardized ingest")
     print(f"Archivos: {len(files)}")
@@ -275,9 +277,10 @@ def main():
     final = pl.concat([pl.read_parquet(part) for part in parts], how="diagonal_relaxed")
     final = add_artist_reference(final)
     from audit_soundon import validate_raw_totals
-    validate_raw_totals(final, INPUT_DIR)
+    validate_raw_totals(final, INPUT_DIR, files=files)
     temporary = OUTPUT_PATH.with_suffix(".tmp.parquet")
     final.write_parquet(temporary)
+    stage_controls(temporary)
     temporary.replace(OUTPUT_PATH)
 
     print("\nListo.")

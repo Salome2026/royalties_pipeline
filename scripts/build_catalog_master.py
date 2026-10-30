@@ -18,6 +18,8 @@ from lib.soundon_catalog_artists import enrich_soundon_catalog_file
 from lib.dashgo_catalog_artists import enrich_dashgo_catalog_file
 from lib.catalog_artist_extensions import enrich_catalog_artist_extensions_file
 from lib.catalog_identity_corrections import correct_recording_identity, correct_release_metadata
+from lib.ingestion_controls import controlled_ingestion
+from lib.catalog_ingestion_review import save_controls
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -739,10 +741,14 @@ def build_catalog_master() -> pl.DataFrame:
     return catalog.sort("amount_usd", descending=True)
 
 
+@controlled_ingestion("catalog")
 def main() -> None:
     MARTS_DIR.mkdir(parents=True, exist_ok=True)
     catalog = build_catalog_master()
-    catalog.write_parquet(OUTPUT_PATH)
+    temporary = OUTPUT_PATH.with_suffix(".tmp.parquet")
+    catalog.write_parquet(temporary)
+    save_controls(MARTS_DIR, catalog)
+    temporary.replace(OUTPUT_PATH)
     print("Catalog master generado")
     print(f"Filas: {catalog.height}")
     print(f"Output: {OUTPUT_PATH}")

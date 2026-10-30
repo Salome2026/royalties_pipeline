@@ -1852,13 +1852,19 @@ def count_onerpm_monitor_rows(path: Path) -> dict:
     }
 
 
-def classify_raw_file(source: str, path: Path, mart_names: set[str]) -> dict:
+def classify_raw_file(source: str, path: Path, mart_names: set[str], fingerprint_records=None) -> dict:
     name = path.name
     lower_name = name.lower()
 
     # Supplemental files never become economic files, even if an old mart named one.
     if source == "fuga" and is_fuga_extended(path):
         return fuga_extended_inventory_item(BASE, path)
+
+    if fingerprint_records:
+        from app.source_ingestion_controls import classify_fingerprint
+        classified = classify_fingerprint(source, path, fingerprint_records)
+        if classified:
+            return classified
 
     if name in mart_names:
         return {"file_name": name, "status": "loaded_to_mart", "reason": "Cargado en mart nuevo."}
@@ -1935,7 +1941,7 @@ def classify_raw_file(source: str, path: Path, mart_names: set[str]) -> dict:
     return {"file_name": name, "status": "pending_real", "reason": "No aparece en el mart nuevo."}
 
 
-def build_raw_inventory(source: str, input_path: str, mart_names: set[str]) -> dict:
+def build_raw_inventory(source: str, input_path: str, mart_names: set[str], fingerprint_records=None) -> dict:
     folder = (BASE / input_path).resolve()
     try:
         folder.relative_to(BASE.resolve())
@@ -1946,7 +1952,7 @@ def build_raw_inventory(source: str, input_path: str, mart_names: set[str]) -> d
         return {"items": [], "summary": {}}
 
     items = [
-        classify_raw_file(source, path, mart_names)
+        classify_raw_file(source, path, mart_names, fingerprint_records)
         for path in sorted([item for item in folder.iterdir() if item.is_file()], key=lambda item: item.name.lower())
     ]
     summary: dict[str, int] = {}
@@ -2011,7 +2017,10 @@ def publish_required_marts_to_gcs() -> dict:
     if not GCS_BUCKET:
         raise HTTPException(status_code=500, detail="GCS_BUCKET no esta configurado.")
 
+    from lib.ingestion_controls import CONTROL_FILE, validate_no_failed_batches
+    validate_no_failed_batches(BASE / "warehouse" / "marts", ignore={"catalog"})
     preparation = prepare_analytics_package_for_publish()
+    validate_no_failed_batches(BASE / "warehouse" / "marts")
     validation = validate_analytics_package_for_publish()
 
     client = gcs_client()
@@ -2019,7 +2028,7 @@ def publish_required_marts_to_gcs() -> dict:
     prefix = GCS_PREFIX.strip("/")
     uploads = []
     uploaded = []
-    optional_fuga = [FUGA_EXTENDED_AUDIT_FILE, FUGA_EXTENDED_METADATA_FILE]
+    optional_fuga = [FUGA_EXTENDED_AUDIT_FILE, FUGA_EXTENDED_METADATA_FILE, CONTROL_FILE]
     publication_files = [*REQUIRED_MART_FILES, *[
         filename for filename in optional_fuga
         if (BASE / "warehouse" / "marts" / filename).exists()
@@ -2333,9 +2342,16 @@ def statement_summary_for_files(standardized_path: Path, source: str, account: s
     return frame.to_dicts()
 
 
+def source_monitor_ingestion_controls():
+    from app.source_ingestion_controls import load_controls
+    local = VPO_LOCAL_MARTS_DIR if VPO_LOCAL_MARTS_DIR is not None and VPO_LOCAL_MARTS_DIR.exists() else None
+    return load_controls(client=None if local else gcs_client(), bucket_name=GCS_BUCKET, prefix=GCS_PREFIX, local_marts=local)
+
+
 def get_source_monitor_item(monitor_id: str) -> dict | None:
     marts = ensure_marts(refresh_cache=False, filenames=[STANDARDIZED_FILE])
     mart_summary = source_monitor_mart_summary(marts[STANDARDIZED_FILE])
+    controls = source_monitor_ingestion_controls()
     for config in load_source_monitor_config():
         item_id = config.get("id") or source_monitor_id(str(config.get("source") or ""), str(config.get("account") or ""))
         if item_id != monitor_id:
@@ -2345,7 +2361,10 @@ def get_source_monitor_item(monitor_id: str) -> dict | None:
         raw_info = latest_raw_file_info(str(config.get("input_path") or ""))
         mart_info = mart_summary.get((source, account), {})
         mart_names = set(mart_info.get("mart_file_names") or [])
-        raw_inventory = build_raw_inventory(source, str(config.get("input_path") or ""), mart_names)
+        from app.source_ingestion_controls import source_controls
+        reading = source_controls(controls, source, account)
+        mart_names.update(row["file_name"] for row in reading["files"] if row.get("status") == "selected")
+        raw_inventory = build_raw_inventory(source, str(config.get("input_path") or ""), mart_names, reading["files"])
         pending_real_files = [
             str(item.get("file_name"))
             for item in raw_inventory["items"]
@@ -7121,6 +7140,7 @@ def source_monitor(x_vpo_api_key: str | None = Header(default=None)):
     marts = ensure_marts(refresh_cache=False, filenames=[monitor_mart_file])
     mart_summary = source_monitor_mart_summary(marts[monitor_mart_file])
     config_items = load_source_monitor_config()
+    controls = source_monitor_ingestion_controls()
 
     configured_keys = {(item.get("source"), item.get("account")) for item in config_items}
     for source, account in sorted(mart_summary):
@@ -7157,7 +7177,10 @@ def source_monitor(x_vpo_api_key: str | None = Header(default=None)):
         monitoring_active = bool(config.get("monitoring_active", True))
         alert_silenced = bool(config.get("alert_silenced", False))
         mart_names = set(mart_info.get("mart_file_names") or [])
-        raw_inventory = build_raw_inventory(source, str(config.get("input_path") or ""), mart_names)
+        from app.source_ingestion_controls import source_controls
+        reading = source_controls(controls, source, account)
+        mart_names.update(row["file_name"] for row in reading["files"] if row.get("status") == "selected")
+        raw_inventory = build_raw_inventory(source, str(config.get("input_path") or ""), mart_names, reading["files"])
         raw_inventory_summary = raw_inventory["summary"]
         supplemental = source_monitor_fuga_audits() if source == "fuga" else {"items": [], "error": None}
         unprocessed_raw_files = [
@@ -7182,6 +7205,10 @@ def source_monitor(x_vpo_api_key: str | None = Header(default=None)):
             status = "attention"
             alert = not alert_silenced
             reason = "Hay archivos raw que no figuran en el mart nuevo."
+        elif reading["incidents"]:
+            status = "attention"
+            alert = not alert_silenced
+            reason = f"Hay {len(reading['incidents'])} causa(s) de lectura del catalogo para revisar. Los importes se conservan."
         elif supplemental["error"] or any(item.get("status") != "validated" for item in supplemental["items"]):
             status = "attention"
             alert = not alert_silenced
@@ -7221,6 +7248,7 @@ def source_monitor(x_vpo_api_key: str | None = Header(default=None)):
             "raw_inventory_summary": raw_inventory_summary,
             "supplementary_audits": supplemental["items"],
             "supplementary_audit_error": supplemental["error"],
+            "reading_incidents": reading["incidents"],
             "ignored_raw_count": sum(
                 count
                 for status, count in raw_inventory_summary.items()

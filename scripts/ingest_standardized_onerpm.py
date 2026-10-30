@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 import polars as pl
+from lib.ingestion_controls import controlled_ingestion, select_inputs, validate_amounts, stage_controls
 
 from lib.fx import get_monthly_fx, normalize_currency
 from lib.identity import (
@@ -476,9 +477,12 @@ def add_view_flags(df: pl.DataFrame, account: str, source_sheet: str) -> pl.Data
 
 
 def finalize_amounts(df: pl.DataFrame) -> pl.DataFrame:
-    return df.with_columns(
+    result = df.with_columns(
         pl.coalesce([pl.col("net_amount_usd"), pl.col("net_amount")]).alias("amount_usd")
     )
+    path = Path(result["statement_file_name"][0]) if result.height else Path("empty")
+    validate_amounts(result, source=SOURCE, path=path, field="Net")
+    return result
 
 
 def standardize_masters(
@@ -645,7 +649,7 @@ def read_excel_sheet(file_path: Path, sheet_name: str) -> pl.DataFrame:
     return pl.read_excel(file_path, sheet_name=sheet_name, raise_if_empty=False)
 
 
-def process_account(account: str, config: dict) -> list[Path]:
+def process_account(account: str, config: dict, selected_files: list[Path] | None = None) -> list[Path]:
     input_dir = INPUT_ROOT / account
     account_parts = []
     errors = []
@@ -654,12 +658,12 @@ def process_account(account: str, config: dict) -> list[Path]:
         print(f"\nNo existe carpeta ONErpm {account}: {input_dir}")
         return account_parts
 
-    files = sorted([
+    files = selected_files if selected_files is not None else select_inputs([
         path for path in input_dir.iterdir()
         if path.is_file()
         and path.suffix.lower() in [".xlsx", ".xlsm"]
         and not path.name.startswith("~$")
-    ])
+    ], SOURCE, account)
 
     print(f"\nONErpm {account}: {len(files)} archivo(s)")
 
@@ -749,9 +753,11 @@ def process_account(account: str, config: dict) -> list[Path]:
     return account_parts
 
 
+@controlled_ingestion(SOURCE)
 def main():
     ensure_dirs()
-    artist_metadata = read_onerpm_metadata(INPUT_ROOT, allowed_accounts=set(ACCOUNTS))
+    selected = select_inputs((path for path in INPUT_ROOT.rglob("*.xlsx") if not path.name.startswith("~$")), SOURCE)
+    artist_metadata = read_onerpm_metadata(INPUT_ROOT, allowed_accounts=set(ACCOUNTS), selected_paths=selected)
 
     print("ONErpm standardized ingest")
     print("Output:", OUTPUT_PATH)
@@ -759,7 +765,7 @@ def main():
     parts = []
 
     for account, config in ACCOUNTS.items():
-        parts.extend(process_account(account, config))
+        parts.extend(process_account(account, config, [path for path in selected if path.parent.name == account]))
 
     if not parts:
         print("\nNo se generaron datos.")
@@ -772,6 +778,7 @@ def main():
     metadata_output = OUTPUT_PATH.parent / METADATA_FILE
     metadata_temp = metadata_output.with_suffix(".tmp.parquet")
     artist_metadata.write_parquet(metadata_temp)
+    stage_controls(temp_output)
     temp_output.replace(OUTPUT_PATH)
     metadata_temp.replace(metadata_output)
 
