@@ -209,6 +209,32 @@ class IngestionControlsTests(unittest.TestCase):
             "catalog_artist_evidence": json.dumps(observations or [{"source": "onerpm", "account": "mawzrecords", "status": "resolved",
                 "credits": [{"name": "Guest", "role": "unknown", "role_original": "featured_artist"}]}])}])
 
+    def test_console_publication_rejects_failed_batches_before_creating_client(self):
+        from unittest.mock import patch
+        from publish_marts_to_gcs import UploadItem, upload_to_gcs
+        output = self.root / "warehouse/marts/out.parquet"
+        batch = Batch("fuga", output)
+        batch.failed(IngestionControlError("INVALID_AMOUNT", "No se publica el lote"))
+        with patch("google.cloud.storage.Client.from_service_account_json") as client:
+            with self.assertRaisesRegex(ValueError, "Publicacion bloqueada"):
+                upload_to_gcs("private", "not-read.json", "marts", [UploadItem(output, "marts/out.parquet", 1)])
+            client.assert_not_called()
+
+    def test_console_full_publication_carries_control_in_same_release(self):
+        from unittest.mock import Mock, patch
+        from publish_marts_to_gcs import DEFAULT_FILES, UploadItem, upload_to_gcs
+        from lib.ingestion_controls import CONTROL_FILE
+        marts = self.root / "warehouse/marts"
+        marts.mkdir(parents=True)
+        control = marts / CONTROL_FILE
+        control.write_bytes(b"audit fixture")
+        inputs = [UploadItem(marts / name, "marts/" + name, 1) for name in DEFAULT_FILES]
+        result = {"files": {}, "manifest_object_name": "marts/release_manifest.json", "manifest_generation": "1"}
+        with patch("google.cloud.storage.Client.from_service_account_json", return_value=Mock()), patch(
+                "app.catalog_participant_review.publish_with_participant_review", return_value=result) as publish:
+            self.assertEqual(upload_to_gcs("private", "not-read.json", "marts", inputs), result)
+        self.assertIn((CONTROL_FILE, control), publish.call_args.args[2])
+
     def test_unknown_roles_are_visible_even_with_a_known_performer(self):
         frame = self.metadata()
         before = frame.clone()
