@@ -66,8 +66,11 @@ def activate(candidate_uri: str, *, project='vpo-corp-royalties', dataset='royal
             raise RuntimeError('El candidato preparado no es inmutable.')
         uri = f'gs://{bucket.name}/{blob.name}'
         stage = f'{project}.{dataset}.{stages[key]}'
-        bq.load_table_from_uri(uri, stage, location='US', job_config=bigquery.LoadJobConfig(
-            source_format='PARQUET', write_disposition='WRITE_TRUNCATE')).result()
+        options = bigquery.ParquetOptions()
+        options.enable_list_inference = True
+        config = bigquery.LoadJobConfig(source_format='PARQUET', write_disposition='WRITE_TRUNCATE')
+        config.parquet_options = options
+        bq.load_table_from_uri(uri, stage, location='US', job_config=config).result()
         amount = 'total_usd' if key == 'digital' else 'amount_usd'
         checked = query(f'SELECT COUNT(*) n, COALESCE(SUM({amount}),0) amount FROM `{stage}`')[0]
         expected = candidate['expected'][key]
