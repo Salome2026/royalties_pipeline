@@ -9115,44 +9115,8 @@ def put_master_contract(
     return {**saved, "reports_effective": False}
 
 
-def build_royalties_dashboard_summary_mart(
-    standardized_path: Path,
-    refresh_cache: bool = False,
-    *,
-    output_path: Path | None = None,
-    partition_large_input: bool = True,
-) -> Path:
-    target_path = output_path or ROYALTIES_DASHBOARD_SUMMARY_PATH
-    if (
-        not refresh_cache
-        and target_path.exists()
-        and target_path.stat().st_mtime >= standardized_path.stat().st_mtime
-    ):
-        return target_path
-
-    if partition_large_input and standardized_path.stat().st_size > 256 * 1024 * 1024:
-        return build_partitioned_royalties_dashboard_summary_mart(
-            standardized_path=standardized_path,
-            output_path=target_path,
-        )
-
-    lf = pl.scan_parquet(standardized_path)
-    schema = lf.collect_schema()
-    columns = set(schema.names())
-    required_store_dimensions = {
-        "dsp_normalized",
-        "monetization_normalized",
-        "content_origin_normalized",
-        "classification_status",
-        "store_report_label",
-    }
-    missing_store_dimensions = sorted(required_store_dimensions - columns)
-    if missing_store_dimensions:
-        raise ValueError(
-            "El mart consolidado no cumple el contrato de Store/DSP normalizado. "
-            f"Faltan: {', '.join(missing_store_dimensions)}"
-        )
-    needed_columns = {
+def royalties_dashboard_input_columns() -> set[str]:
+    return {
         "source",
         "Fuente",
         "SOURCE",
@@ -9275,6 +9239,46 @@ def build_royalties_dashboard_summary_mart(
         "LABEL",
         "label",
     }
+
+
+def build_royalties_dashboard_summary_mart(
+    standardized_path: Path,
+    refresh_cache: bool = False,
+    *,
+    output_path: Path | None = None,
+    partition_large_input: bool = True,
+) -> Path:
+    target_path = output_path or ROYALTIES_DASHBOARD_SUMMARY_PATH
+    if (
+        not refresh_cache
+        and target_path.exists()
+        and target_path.stat().st_mtime >= standardized_path.stat().st_mtime
+    ):
+        return target_path
+
+    if partition_large_input and standardized_path.stat().st_size > 256 * 1024 * 1024:
+        return build_partitioned_royalties_dashboard_summary_mart(
+            standardized_path=standardized_path,
+            output_path=target_path,
+        )
+
+    lf = pl.scan_parquet(standardized_path)
+    schema = lf.collect_schema()
+    columns = set(schema.names())
+    required_store_dimensions = {
+        "dsp_normalized",
+        "monetization_normalized",
+        "content_origin_normalized",
+        "classification_status",
+        "store_report_label",
+    }
+    missing_store_dimensions = sorted(required_store_dimensions - columns)
+    if missing_store_dimensions:
+        raise ValueError(
+            "El mart consolidado no cumple el contrato de Store/DSP normalizado. "
+            f"Faltan: {', '.join(missing_store_dimensions)}"
+        )
+    needed_columns = royalties_dashboard_input_columns()
     selected_columns = [column for column in sorted(needed_columns) if column in columns]
     if selected_columns:
         lf = lf.select(selected_columns)
@@ -9552,77 +9556,39 @@ def build_partitioned_royalties_dashboard_summary_mart(
     standardized_path: Path,
     output_path: Path,
 ) -> Path:
-    import pyarrow as pa
-    import pyarrow.compute as pc
-    import pyarrow.parquet as pq
+    from tempfile import TemporaryDirectory
 
-    raw_parts_dir = BASE / "staging" / "royalties_dashboard_raw_periods"
-    summary_parts_dir = BASE / "staging" / "royalties_dashboard_compact_periods"
-    temporary_output = output_path.with_name(f"{output_path.name}.tmp")
-
-    for path in [raw_parts_dir, summary_parts_dir]:
-        if path.exists():
-            shutil.rmtree(path)
-        path.mkdir(parents=True, exist_ok=True)
-    if temporary_output.exists():
-        temporary_output.unlink()
-
-    parquet_file = pq.ParquetFile(standardized_path)
-    statement_period_index = parquet_file.schema_arrow.get_field_index("statement_period")
-    if statement_period_index < 0:
+    source = pl.scan_parquet(standardized_path)
+    columns = set(source.collect_schema().names())
+    if "statement_period" not in columns:
         raise ValueError("El mart consolidado no contiene statement_period.")
-
-    writers: dict[str, pq.ParquetWriter] = {}
-    try:
-        for batch in parquet_file.iter_batches(batch_size=100_000):
-            statement_periods = batch.column(statement_period_index)
-            for scalar in pc.unique(statement_periods):
-                if not scalar.is_valid:
-                    continue
-                statement_period = str(scalar.as_py()).strip()
-                if not statement_period:
-                    continue
-                mask = pc.equal(
-                    statement_periods,
-                    pa.scalar(scalar.as_py(), type=statement_periods.type),
-                )
-                table = pa.Table.from_batches([batch]).filter(mask)
-                writer = writers.get(statement_period)
-                if writer is None:
-                    part_path = raw_parts_dir / f"{statement_period}.parquet"
-                    writer = pq.ParquetWriter(part_path, table.schema, compression="zstd")
-                    writers[statement_period] = writer
-                writer.write_table(table)
-    finally:
-        for writer in writers.values():
-            writer.close()
-
-    raw_parts = sorted(raw_parts_dir.rglob("*.parquet"))
-    if not raw_parts:
+    selected = sorted(columns & royalties_dashboard_input_columns())
+    periods = source.select(pl.col("statement_period").cast(pl.String).str.strip_chars()).unique().collect()["statement_period"].drop_nulls().sort().to_list()
+    periods = [period for period in periods if period]
+    if not periods:
         raise ValueError("No se generaron particiones mensuales para el dashboard de regalias.")
-
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_output = output_path.with_name(f"{output_path.name}.tmp")
     try:
-        for index, raw_part in enumerate(raw_parts):
-            summary_part = summary_parts_dir / f"{index:03d}.parquet"
-            build_royalties_dashboard_summary_mart(
-                standardized_path=raw_part,
-                refresh_cache=True,
-                output_path=summary_part,
-                partition_large_input=False,
-            )
-
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        (
-            pl.scan_parquet(summary_parts_dir / "*.parquet")
-            .sink_parquet(temporary_output, compression="zstd", engine="streaming")
-        )
-        temporary_output.replace(output_path)
+        with TemporaryDirectory(prefix="dashboard-periods-", dir=output_path.parent) as directory:
+            root = Path(directory)
+            raw_part = root / "raw.parquet"
+            # One projected month at a time. Holding a ParquetWriter for every
+            # month retains buffers for hundreds of unrelated native columns.
+            for index, period in enumerate(periods):
+                print(json.dumps({"event": "royalties_dashboard_period", "period": period,
+                                  "part": index + 1, "total": len(periods)}), flush=True)
+                source.filter(pl.col("statement_period").cast(pl.String).str.strip_chars() == period).select(selected).sink_parquet(raw_part, compression="zstd", engine="streaming")
+                build_royalties_dashboard_summary_mart(
+                    raw_part, refresh_cache=True, output_path=root / f"summary-{index:03d}.parquet",
+                    partition_large_input=False,
+                )
+                raw_part.unlink()
+            pl.scan_parquet(root / "summary-*.parquet").sink_parquet(temporary_output, compression="zstd", engine="streaming")
+            temporary_output.replace(output_path)
     finally:
-        shutil.rmtree(raw_parts_dir, ignore_errors=True)
-        shutil.rmtree(summary_parts_dir, ignore_errors=True)
         if temporary_output.exists():
             temporary_output.unlink()
-
     return output_path
 
 
