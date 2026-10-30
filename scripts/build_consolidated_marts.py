@@ -4,6 +4,7 @@ import polars as pl
 
 from lib.store_taxonomy import add_store_dimensions
 from lib.catalog_identity_corrections import correct_recording_identity
+from lib.video_context import preserve_video_context
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -59,7 +60,7 @@ def consolidate(paths: list[Path], output_path: Path, add_reporting_dimensions: 
 
     print(f"  - Consolidando {len(parts)} parte(s)...")
 
-    final = correct_recording_identity(pl.concat(parts, how="diagonal_relaxed"))
+    final = preserve_video_context(correct_recording_identity(pl.concat(parts, how="diagonal_relaxed")))
     if add_reporting_dimensions:
         final = add_store_dimensions(final, set(final.collect_schema().names()))
     temporary_path = output_path.with_name(f"{output_path.name}.tmp")

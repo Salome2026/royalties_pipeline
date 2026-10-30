@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS `{project}.{dataset}.royalty_statement_fact` (
   product_upc_source STRING,
   product_upc_status STRING,
   video_id STRING,
+  video_id_source STRING,
   channel_id STRING,
   label STRING,
   dsp STRING,
@@ -135,6 +136,7 @@ CREATE TABLE IF NOT EXISTS `{project}.{dataset}.royalty_song_level` (
   units FLOAT64,
   content_type STRING,
   video_id STRING,
+  video_id_source STRING,
   channel_id STRING,
   statement_type STRING
 )
@@ -232,6 +234,10 @@ CREATE TABLE IF NOT EXISTS `{project}.{dataset}.analytics_reconciliation_results
 PARTITION BY period_month
 CLUSTER BY release_id, period_basis, source, account
 OPTIONS(description = 'Resultado de conciliacion por fuente, cuenta y mes');
+
+ALTER TABLE `{project}.{dataset}.royalty_statement_fact` ADD COLUMN IF NOT EXISTS video_id_source STRING;
+ALTER TABLE `{project}.{dataset}.royalty_transaction_fact` ADD COLUMN IF NOT EXISTS video_id_source STRING;
+ALTER TABLE `{project}.{dataset}.royalty_song_level` ADD COLUMN IF NOT EXISTS video_id_source STRING;
 
 CREATE OR REPLACE VIEW `{project}.{dataset}.current_release` AS
 SELECT *

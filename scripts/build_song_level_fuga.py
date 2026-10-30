@@ -1,5 +1,6 @@
 from pathlib import Path
 import polars as pl
+from lib.video_context import preserve_video_context, video_group_keys
 
 
 BASE = Path(r"C:\royalties_pipeline")
@@ -51,9 +52,11 @@ def main():
     # GROUP BY SONG LEVEL
     # =========================
 
+    df = preserve_video_context(df)
+
     song_level = (
         df
-        .group_by([
+        .group_by(video_group_keys([
             "source",
             "account",
             "source_sheet",
@@ -70,12 +73,13 @@ def main():
             "asset_title_statement",
             "asset_artist_statement",
             "transaction_month",
-        ])
+        ]))
         .agg([
             pl.sum("amount_usd").alias("amount_usd"),
             pl.sum("net_amount_eur").alias("amount_eur"),
             pl.sum("asset_quantity_num").alias("streams"),
-            pl.col("video_id_source").drop_nulls().first().alias("video_id_source"),
+            pl.sum("units").alias("units"),
+
         ])
     )
 
