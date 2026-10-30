@@ -1,5 +1,6 @@
 import argparse
 import re
+from copy import copy
 from datetime import datetime
 from pathlib import Path
 
@@ -7,8 +8,10 @@ import pandas as pd
 import polars as pl
 try:
     from lib.video_context import source_units_expr, preserve_video_context, separate_channel_video_expr
+    from lib.report_presentation import YOUTUBE_CHANNEL_LABEL, youtube_video_url
 except ModuleNotFoundError:
     from scripts.lib.video_context import source_units_expr, preserve_video_context, separate_channel_video_expr
+    from scripts.lib.report_presentation import YOUTUBE_CHANNEL_LABEL, youtube_video_url
 
 try:
     from lib.ada_identity import ada_isrc_expr, ada_native_code_expr, ada_native_code_type_expr, ada_source_expr
@@ -529,6 +532,10 @@ def build_track_summary_lf(base_lf: pl.LazyFrame, *, include_identity: bool = Fa
         .then(report_code)
         .otherwise(None)
     )
+    channel_video = (
+        (_summary_text_expr(columns, ["dsp_normalized"]) == "YouTube")
+        & (_summary_text_expr(columns, ["content_origin_normalized"]) == "Video / Channel")
+    ).fill_null(False)
 
     grouped = (
         base_lf
@@ -539,9 +546,11 @@ def build_track_summary_lf(base_lf: pl.LazyFrame, *, include_identity: bool = Fa
             trusted_code.alias("_trusted_original_code"),
             report_code_source.alias("_summary_code_source"),
             _summary_text_expr(columns, ["content_type"]).alias("_summary_content_type"),
+            channel_video.alias("_summary_channel_video"),
         ])
         .group_by("_report_identity")
         .agg([
+            pl.col("_summary_channel_video").all().alias("_all_channel_video"),
             pl.col("_summary_title")
             .sort_by(pl.col("amount_usd").abs(), descending=True)
             .drop_nulls()
@@ -580,6 +589,16 @@ def build_track_summary_lf(base_lf: pl.LazyFrame, *, include_identity: bool = Fa
             pl.max("period_month").alias("last_month"),
         ])
         .with_columns([
+            pl.when(pl.col("_all_channel_video"))
+            .then(
+                pl.when(pl.col("content_types").fill_null("") == "")
+                .then(pl.lit(YOUTUBE_CHANNEL_LABEL))
+                .otherwise(pl.concat_str([
+                    pl.lit(YOUTUBE_CHANNEL_LABEL), pl.col("content_types")
+                ], separator=" | "))
+            )
+            .otherwise(pl.col("content_types"))
+            .alias("content_types"),
             pl.when(pl.col("_report_identity").str.starts_with("ISRC:"))
             .then(pl.col("_report_identity").str.replace(r"^ISRC:", ""))
             .when(pl.col("_report_identity").str.starts_with("VIDEO:"))
@@ -1268,6 +1287,20 @@ def build_report_detail(
 def style_workbook(writer):
     for ws in writer.book.worksheets:
         prepare_sheet(ws)
+        if ws.title != "resumen por tema":
+            continue
+        headers = {cell.value: cell.column - 1 for cell in ws[1]}
+        if not {"Codigo", "Tipo codigo"}.issubset(headers):
+            continue
+        for row in ws.iter_rows(min_row=2):
+            cell = row[headers["Codigo"]]
+            url = youtube_video_url(cell.value, row[headers["Tipo codigo"]].value)
+            if url:
+                cell.hyperlink = url
+                font = copy(cell.font)
+                font.color = "0563C1"
+                font.underline = "single"
+                cell.font = font
 
 
 def report_output_path(
