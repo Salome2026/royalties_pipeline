@@ -350,6 +350,18 @@ No se declara terminado mientras ambos circuitos convivan.
 
 ## Video ID en el resumen por tema
 
+La presentacion es compartida por todas las distribuidoras, sin nuevas ingestas
+ni reglas por fuente. Cuando todas las operaciones de una fila ya tienen DSP
+`YouTube` y origen `Video / Channel`, `Tipo de contenido` agrega
+`YouTube · video/canal`, conservando los tipos anteriores. Las filas mixtas o
+sin evidencia suficiente conservan su texto habitual. Esta etiqueta no cambia
+claves de agrupacion, importes, unidades, policies ni participantes.
+En Excel y Google Sheets, un `Codigo` cuyo `Tipo codigo` ya es `Video ID`
+se enlaza a YouTube si es valido, sin reemplazar el identificador por una URL
+ni agregar columnas o filas. Un enlace identifica la publicacion; por si solo
+no declara que todo el ingreso de la fila sea ingreso del canal.
+WML conserva su ambito aislado y sus referencias informativas existentes.
+
 La identidad nativa del video se conserva aun cuando el statement informe un ISRC.
 En el resumen por tema, los ingresos clasificados por la fuente como `Video / Channel`
 y con un Video ID valido se agrupan por ese ID a lo largo de todos los meses. El
