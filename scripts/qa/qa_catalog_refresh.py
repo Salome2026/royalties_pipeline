@@ -65,6 +65,20 @@ class CatalogRefreshTests(unittest.TestCase):
                     result = api.build_royalties_dashboard_summary_mart(source, refresh_cache=True,
                         output_path=root / "summary.parquet", partition_large_input=False)
                     self.assertAlmostEqual(pl.read_parquet(result)["amount_usd"].sum(), expected)
+                    # The bounded-memory path must retain the same governance,
+                    # money, quantities and classifications as the single scan.
+                    multi = pl.concat([pl.DataFrame(rows), pl.DataFrame(rows).with_columns(
+                        pl.lit('2026-02').alias('statement_period'),
+                        (-pl.col('amount_usd')).alias('amount_usd'),
+                        pl.lit(7, dtype=pl.Int64).alias('units'))])
+                    multi.with_columns(pl.lit('unrelated payload').alias('unrelated_native_field')).write_parquet(source)
+                    direct = api.build_royalties_dashboard_summary_mart(source, refresh_cache=True,
+                        output_path=root / 'direct.parquet', partition_large_input=False)
+                    partitioned = api.build_partitioned_royalties_dashboard_summary_mart(source, root / 'partitioned.parquet')
+                    left, right = pl.read_parquet(direct), pl.read_parquet(partitioned)
+                    self.assertEqual(left.columns, right.columns)
+                    self.assertEqual(sorted(left.rows()), sorted(right.rows()))
+                    pl.DataFrame(rows).write_parquet(source)
 
 
 if __name__ == "__main__":
