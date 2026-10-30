@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from scripts.lib.video_context import preserve_video_context
 from scripts.lib.bigquery_source_integrity import validate_detail_source
-from scripts.load_bigquery_release import build_detail, build_song
+from scripts.load_bigquery_release import build_detail, build_detail_batches, build_song
 from scripts.build_keyword_royalty_report import report_identity_expr, build_track_summary_lf
 
 
@@ -60,6 +60,10 @@ class VideoContextTests(unittest.TestCase):
             build_detail(source, target, 'test')
             good = pl.read_parquet(target)
             self.assertEqual(good['units'].to_list(), [123., 17.])
+            batched = Path(d)/'batched.parquet'
+            build_detail_batches(source, batched, 'test', batch_size=1)
+            from polars.testing import assert_frame_equal
+            assert_frame_equal(good, pl.read_parquet(batched))
             for corruption in [pl.lit(0.).alias('units'), pl.lit(None, dtype=pl.String).alias('video_id')]:
                 good.with_columns(corruption).write_parquet(target)
                 with self.assertRaisesRegex(ValueError, 'fuente'):
