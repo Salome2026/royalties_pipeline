@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import polars as pl
+from lib.video_context import preserve_video_context, video_group_keys
 
 from lib.ada_identity import ada_native_code_expr
 
@@ -13,9 +14,11 @@ OUTPUT_PATH = BASE / "warehouse" / "marts" / "song_level_ada.parquet"
 def main() -> None:
     frame = pl.read_parquet(INPUT_PATH).filter(pl.col("amount_usd").is_not_null())
 
+    frame = preserve_video_context(frame)
+
     song_level = (
         frame
-        .group_by([
+        .group_by(video_group_keys([
             "source",
             "account",
             "source_sheet",
@@ -40,7 +43,7 @@ def main() -> None:
             "artist_credit_status",
             "artist_credit_evidence_file",
             "transaction_month",
-        ])
+        ]))
         .agg([
             pl.sum("amount_usd").alias("amount_usd"),
             pl.sum("net_amount").alias("net_amount"),

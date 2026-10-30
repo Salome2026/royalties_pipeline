@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import Any
 
 import polars as pl
+try:
+    from lib.video_context import native_video_exprs, native_channel_expr, source_units_expr
+except ModuleNotFoundError:
+    from scripts.lib.video_context import native_video_exprs, native_channel_expr, source_units_expr
 from google.api_core.exceptions import PreconditionFailed
 from google.cloud import storage
 
@@ -74,6 +78,7 @@ DETAIL_FIELDS = [
     "gross_royalty_usd",
     "deductible_fees_usd",
     "video_id",
+    "video_id_source",
     "channel_id",
     "label",
     "dsp",
@@ -138,6 +143,7 @@ SONG_FIELDS = [
     "units",
     "content_type",
     "video_id",
+    "video_id_source",
     "channel_id",
     "statement_type",
 ]
@@ -328,11 +334,7 @@ def build_detail(source: Path, target: Path, release_id: str, *, overrides: dict
         expressions=[replacement.get(expr.meta.output_name(),expr).alias(expr.meta.output_name()) for expr in expressions]
         expressions += [replacement[name].alias(name) for name in extra]
         return frame.select(expressions).select([*DETAIL_FIELDS,*extra])
-    units = (
-        pl.col("units").cast(pl.Float64, strict=False)
-        if "units" in columns
-        else pl.lit(None, dtype=pl.Float64)
-    )
+    units = source_units_expr(columns)
     if "Quantity" in columns:
         # ONErpm keeps its original quantity independently of business-view flags.
         units = (
@@ -391,8 +393,9 @@ def build_detail(source: Path, target: Path, release_id: str, *, overrides: dict
                 *[pl.when(text_expr(columns, ["source"]) == "ada").then(float_expr(columns, name))
                   .otherwise(pl.lit(None).cast(pl.Float64)).alias(name)
                   for name in ["gross_royalty_usd", "deductible_fees_usd"]],
-                text_expr(columns, ["video_id", "Video ID", "VideoId"]).alias("video_id"),
-                text_expr(columns, ["channel_id", "Channel ID", "ChannelId"]).alias("channel_id"),
+                native_video_exprs(columns)[0].alias("video_id"),
+                native_video_exprs(columns)[1].alias("video_id_source"),
+                native_channel_expr(columns).alias("channel_id"),
                 text_expr(
                     columns,
                     ["label_normalized", "label_normalized_auto", "label_statement_style", "Product Label", "Label Name"],
@@ -418,6 +421,13 @@ def build_detail(source: Path, target: Path, release_id: str, *, overrides: dict
         ),
         target,
     )
+
+    if overrides is None:
+        try:
+            from lib.bigquery_source_integrity import validate_detail_source
+        except ModuleNotFoundError:
+            from scripts.lib.bigquery_source_integrity import validate_detail_source
+        validate_detail_source(source, target)
 
 
 def build_dashboard(source: Path, target: Path, release_id: str) -> None:
@@ -464,7 +474,8 @@ def build_song(source: Path, target: Path, release_id: str) -> None:
                 float_expr(columns, "amount_usd").alias("amount_usd"),
                 float_expr(columns, "units").alias("units"),
                 text_expr(columns, ["content_type"]).alias("content_type"),
-                text_expr(columns, ["video_id"]).alias("video_id"),
+                native_video_exprs(columns)[0].alias("video_id"),
+                native_video_exprs(columns)[1].alias("video_id_source"),
                 text_expr(columns, ["channel_id"]).alias("channel_id"),
                 text_expr(columns, ["statement_type"]).alias("statement_type"),
             ]
@@ -700,6 +711,14 @@ def detail_context_schema_sql(project: str, dataset: str) -> str:
     return "\n".join(statements)
 
 
+def video_context_schema_sql(project: str, dataset: str) -> str:
+    alterations = "\n".join(
+        f"ALTER TABLE `{project}.{dataset}.{table}` ADD COLUMN IF NOT EXISTS video_id_source STRING;"
+        for table in ["royalty_statement_fact", "royalty_transaction_fact", "royalty_song_level"]
+    )
+    return alterations + f"\nCREATE OR REPLACE VIEW `{project}.{dataset}.royalty_report_detail` AS SELECT fact.* FROM `{project}.{dataset}.royalty_statement_fact` AS fact WHERE fact.release_id = (SELECT release_id FROM `{project}.{dataset}.current_release`);"
+
+
 def catalog_artist_schema_sql(project: str, dataset: str) -> str:
     return (
         f"ALTER TABLE `{project}.{dataset}.royalty_catalog` "
@@ -780,7 +799,9 @@ def main() -> None:
     suffix = re.sub(r"[^a-zA-Z0-9]", "", release_id)[-20:].lower()
     stages = {key: f"_stage_{key}_{suffix}" for key in prepared}
     bq = executable("bq")
-    schema_sql = detail_context_schema_sql(args.project, args.dataset) + "\n" + catalog_artist_schema_sql(args.project, args.dataset)
+    schema_sql = "\n".join([detail_context_schema_sql(args.project, args.dataset),
+                            video_context_schema_sql(args.project, args.dataset),
+                            catalog_artist_schema_sql(args.project, args.dataset)])
     run([bq, f"--project_id={args.project}", "query", f"--location={args.location}", "--use_legacy_sql=false"], input_text=schema_sql)
     for key, table in stages.items():
         bq_load(
