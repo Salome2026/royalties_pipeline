@@ -62,3 +62,15 @@ La evidencia del ensayo, la comparacion de las 3.125 fichas y la adopcion se
 registra en `staging/catalogo_lectura/20261030_catalog_evidence_repair`.
 No extender este cierre a todo CAT-003, los lectores economicos ampliados ni
 a formatos nuevos que no hayan sido certificados.
+
+## Lectura acotada de asociados
+
+La certificacion en produccion encontro un bloqueo previo a la proyeccion:
+la consulta de asociados podia exceder el tope de 5 GB con mas versiones
+financieras almacenadas. Se conserva ese tope y el camino rapido original.
+Solo ante `bytesBilledLimitExceeded` se leen ventanas anuales disjuntas, o
+mensuales si un anio no entra. Las filas sin fecha se conservan como evidencia.
+Las semillas de codigos se buscan siempre en el periodo completo: un UPC o
+video sin ISRC en un mes puede enlazar con un ISRC de otro mes. Las listas de
+evidencia se reunen por codigo, fuente y cuenta, sin repartir ni multiplicar
+ingresos. Otros errores no se silencian. Esta regresion tambien bloquea CI.

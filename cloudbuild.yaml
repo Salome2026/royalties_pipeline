@@ -27,6 +27,7 @@ steps:
       - scripts.qa.qa_fuga_catalog_artists
       - scripts.qa.qa_soundon_catalog_artists
       - scripts.qa.qa_ingestion_controls
+      - scripts.qa.qa_contract_income_budget
       - -q
 
   - id: Push
