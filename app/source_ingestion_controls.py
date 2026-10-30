@@ -76,7 +76,7 @@ def load_controls(*, client, bucket_name, prefix, local_marts=None):
         data = blob.download_as_bytes(if_generation_match=blob.generation)
     frame = pl.read_parquet(io.BytesIO(data))
     if not entry and frame.height and set(frame["base_release_id"].drop_nulls().unique().to_list()) != {document["release_id"]}:
-        return None
+        raise ValueError("El control de ingesta pertenece a otra version publicada; completar la publicacion del catalogo.")
     return frame
 
 

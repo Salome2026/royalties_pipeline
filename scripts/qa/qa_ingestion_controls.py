@@ -146,6 +146,63 @@ class IngestionControlsTests(unittest.TestCase):
         batch.completed()
         validate_no_failed_batches(output.parent)
 
+    def test_running_or_interrupted_batch_cannot_be_published_as_complete(self):
+        output = self.root / "warehouse/marts/out.parquet"
+        batch = Batch("fuga", output)
+        batch.started()
+        with self.assertRaisesRegex(ValueError, "sigue en proceso"):
+            validate_no_failed_batches(output.parent)
+        batch.completed()
+        validate_no_failed_batches(output.parent)
+
+    def test_removing_a_previously_loaded_month_does_not_silently_erase_history(self):
+        from lib.ingestion_controls import _CURRENT, FILE_SCHEMA
+        first, second = self.file(), self.file(month=7)
+        output = self.root / "warehouse/marts/out.parquet"
+        output.parent.mkdir(parents=True)
+        prior = [{"source": "fuga", "account": "indyana_records", "period": month, "kind": "regular", "file_name": path.name,
+            "file_hash": checksum(path), "status": "selected", "duplicate_of": "", "rule": "test", "reader_sha256": ""} for path, month in [(first, "2026-06"), (second, "2026-07")]]
+        pl.DataFrame(prior, schema=FILE_SCHEMA).write_parquet(output.parent / "ingestion_control_fuga.parquet")
+        batch = Batch("fuga", output)
+        token = _CURRENT.set(batch)
+        try:
+            select_inputs([second], "fuga", "indyana_records")
+            with self.assertRaises(IngestionControlError) as error:
+                batch.stage()
+            self.assertEqual(error.exception.code, "MISSING_PRIOR_STATEMENT")
+        finally:
+            _CURRENT.reset(token)
+
+    def test_file_changed_during_read_is_not_committed(self):
+        from lib.ingestion_controls import _CURRENT
+        path = self.file()
+        output = self.root / "warehouse/marts/out.parquet"
+        output.parent.mkdir(parents=True)
+        batch = Batch("fuga", output)
+        token = _CURRENT.set(batch)
+        try:
+            select_inputs([path], "fuga", "indyana_records")
+            path.write_text("changed while reading", encoding="utf-8")
+            with self.assertRaises(IngestionControlError) as error:
+                batch.stage()
+            self.assertEqual(error.exception.code, "INPUT_CHANGED_DURING_READ")
+        finally:
+            _CURRENT.reset(token)
+
+    def test_actual_publication_stops_before_preparing_or_uploading_a_failed_source(self):
+        import ast
+        batch = Batch("fuga", self.root / "warehouse/marts/out.parquet")
+        batch.failed(IngestionControlError("UNKNOWN_LAYOUT", "Formato nuevo no certificado"))
+        api = Path(__file__).resolve().parents[2] / "app/vpo_corp_api.py"
+        node = next(item for item in ast.parse(api.read_text(encoding="utf-8")).body if isinstance(item, ast.FunctionDef) and item.name == "publish_required_marts_to_gcs")
+        node.decorator_list = []
+        def forbidden():
+            self.fail("No debe preparar ni subir un paquete con una fuente fallida")
+        namespace = {"GCS_BUCKET": "private", "BASE": self.root, "prepare_analytics_package_for_publish": forbidden}
+        exec(compile(ast.Module(body=[node], type_ignores=[]), "isolated_publish_guard", "exec"), namespace)
+        with self.assertRaisesRegex(ValueError, "Publicacion bloqueada"):
+            namespace["publish_required_marts_to_gcs"]()
+
     def metadata(self, *, title="Tema", variants="Tema", manual=False, observations=None):
         return pl.DataFrame([{"catalog_key": "ISRC:USFUT2700001", "asset_isrc": "USFUT2700001", "track_title": title,
             "title_variants": variants, "amount_usd": 123.45, "catalog_manual_correction_id": "human" if manual else None,
@@ -158,6 +215,24 @@ class IngestionControlsTests(unittest.TestCase):
         issues = reading_incidents(frame)
         self.assertEqual([row["code"] for row in issues], ["UNKNOWN_ROLE"])
         self.assertTrue(frame.equals(before))
+
+    def test_unparsed_grammar_is_visible_even_if_another_source_names_the_artist(self):
+        frame = self.metadata(observations=[{"source": "ada", "native_resolution_status": "resolved", "observations": [
+            {"grammar_status": "ambiguous_grammar", "Artist Name": "New Main and New Guest"}]}])
+        self.assertEqual(reading_incidents(frame)[0]["code"], "UNRESOLVED_CREDIT")
+
+    def test_unreadable_workbook_is_not_classified_as_an_empty_statement(self):
+        import ast
+        api_path = Path(__file__).resolve().parents[2] / "app/vpo_corp_api.py"
+        tree = ast.parse(api_path.read_text(encoding="utf-8"))
+        nodes = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in {"count_onerpm_monitor_rows", "classify_raw_file"}]
+        for node in nodes:
+            node.decorator_list = []
+        namespace = {"Path": Path, "count_excel_sheet_rows": lambda *_: None}
+        exec(compile(ast.Module(body=nodes, type_ignores=[]), "isolated_inventory", "exec"), namespace)
+        result = namespace["classify_raw_file"]("onerpm", self.root / "gusty_dj/2026-06-01-details.xlsx", set())
+        self.assertEqual(result["status"], "pending_real")
+        self.assertTrue(result["read_errors"])
 
     def test_incidents_are_grouped_not_one_task_per_observation(self):
         observations = [{"source": "onerpm", "account": "mawzrecords", "status": "ambiguous_serialization", "raw": "unknown grammar"}] * 100

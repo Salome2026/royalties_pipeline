@@ -45,6 +45,8 @@ def file_context(path: Path, source: str, account: str = "") -> tuple[str, str, 
         except ValueError as error:
             raise IngestionControlError("UNKNOWN_PERIOD", f"Orchard: periodo no reconocido en {path.name}", file=path.name) from error
         accounts = sorted(set(frame["ACCOUNT NAME"].drop_nulls().to_list()))
+        if len(months) != 1 or len(accounts) != 1:
+            raise IngestionControlError("UNKNOWN_LAYOUT", f"Orchard: multiples cuentas o periodos en un archivo no certificado: {path.name}", file=path.name)
         return " | ".join(accounts), " | ".join(months), "statement"
     if source == "fuga":
         kind = "correction" if "correction" in path.name.lower() else "regular"
@@ -89,6 +91,7 @@ def select_inputs(paths, source: str, account: str = "") -> list[Path]:
                 status="selected" if path == chosen[0] else "duplicate", duplicate_of="" if path == chosen[0] else chosen[0].name, rule=VERSION, reader_sha256=batch.reader_hash if batch else ""))
     if batch:
         batch.records.extend(records)
+        batch.inputs.update({path: digest for entries in groups.values() for path, digest in entries})
     return sorted(selected)
 
 
@@ -109,17 +112,41 @@ def validate_amounts(frame: pl.DataFrame, *, source: str, path: Path, field: str
 class Batch:
     def __init__(self, source: str, output: Path):
         self.source, self.output, self.records, self.incidents = source, output, [], []
+        self.inputs, self.prior_contexts = {}, set()
         self.receipt = output.parent / f"ingestion_control_{source}.parquet"
         self.failure = output.parent.parent / "registry" / f"ingestion_failure_{source}.json"
         self.prior_names = set()
         self.reader_hash = ""
         self.staged = None
         if self.receipt.exists():
-            self.prior_names.update(pl.read_parquet(self.receipt).filter(pl.col("status") == "selected")["file_name"].to_list())
+            previous = pl.read_parquet(self.receipt).filter(pl.col("status") == "selected")
+            self.prior_names.update(previous["file_name"].to_list())
+            self.prior_contexts.update((row["account"], row["period"], row["kind"]) for row in previous.to_dicts() if not row["period"].startswith("empty:"))
         elif output.exists():
             scan = pl.scan_parquet(output)
             if "statement_file_name" in scan.collect_schema():
                 self.prior_names.update(scan.select(pl.col("statement_file_name").drop_nulls().unique()).collect().to_series().to_list())
+            columns = set(scan.collect_schema().names())
+            if {"account", "statement_period", "statement_file_name"} <= columns:
+                if "statement_type" in columns:
+                    scan = scan.filter(pl.col("statement_type").fill_null("") != "altafonte_legacy")
+                for row in scan.select("account", "statement_period", "statement_file_name").unique().collect().to_dicts():
+                    period = row["statement_period"]
+                    if not period or period == "unknown":
+                        continue
+                    kind = {"ada": "detail", "onerpm": "details", "orchard": "statement", "dashgo": "statement"}.get(source)
+                    if source == "fuga":
+                        kind = "correction" if "correction" in row["statement_file_name"].casefold() else "regular"
+                    elif source == "soundon":
+                        _, _, kind = file_context(Path(row["statement_file_name"]), source)
+                    self.prior_contexts.add((row["account"], period, kind))
+
+    def started(self):
+        self.failure.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.failure.with_suffix(".tmp")
+        temporary.write_text(json.dumps({"source": self.source, "rule": VERSION, "status": "running", "code": "INGESTION_RUNNING",
+            "message": "La ingesta sigue en curso; esperar su finalizacion antes de publicar.", "checked_at": datetime.now().isoformat(timespec="seconds")}), encoding="utf-8")
+        temporary.replace(self.failure)
 
     def failed(self, error):
         self.failure.parent.mkdir(parents=True, exist_ok=True)
@@ -136,6 +163,23 @@ class Batch:
 
     def stage(self, economic_path=None):
         staged = []
+        for path, digest in self.inputs.items():
+            if checksum(path) != digest:
+                raise IngestionControlError("INPUT_CHANGED_DURING_READ", f"El archivo cambio durante la carga: {path.name}. Volver a procesar al terminar la transferencia.", file=path.name)
+        selected = [row for row in self.records if row["status"] == "selected"]
+        contexts = {(row["account"], row["period"], row["kind"]) for row in selected}
+        missing = self.prior_contexts - contexts
+        if self.records and missing:
+            raise IngestionControlError("MISSING_PRIOR_STATEMENT", "Faltan statements antes procesados; no se elimina su historia: " + str(sorted(missing)), scopes=sorted(missing))
+        if selected and economic_path is not None and Path(economic_path).exists():
+            scan = pl.scan_parquet(economic_path)
+            columns = set(scan.collect_schema().names())
+            if "statement_file_hash" in columns:
+                if "statement_type" in columns:
+                    scan = scan.filter(pl.col("statement_type").fill_null("") != "altafonte_legacy")
+                written_hashes = set(scan.select(pl.col("statement_file_hash").drop_nulls().unique()).collect().to_series().to_list())
+                if written_hashes - {row["file_hash"] for row in selected}:
+                    raise IngestionControlError("UNAPPLIED_REPLACEMENT", "La salida conserva una version de archivo que ya no fue seleccionada. Se bloquea la publicacion; revisar la correccion vacia o el lote.")
         if self.records:
             unique = {json.dumps(row, sort_keys=True): row for row in self.records}
             frame = pl.DataFrame(list(unique.values()), schema=FILE_SCHEMA).sort("account", "period", "kind", "file_name")
@@ -166,6 +210,7 @@ def controlled_ingestion(source):
             batch.reader_hash = checksum(Path(function.__globals__["__file__"]))
             token = _CURRENT.set(batch)
             try:
+                batch.started()
                 result = function(*args, **kwargs)
                 batch.completed()
                 return result
@@ -188,4 +233,6 @@ def validate_no_failed_batches(marts: Path, *, ignore=()) -> None:
     failures = sorted(path for path in (marts.parent / "registry").glob("ingestion_failure_*.json") if path.stem.removeprefix("ingestion_failure_") not in ignore)
     if failures:
         document = json.loads(failures[0].read_text(encoding="utf-8"))
+        if document.get("status") == "running":
+            raise ValueError("Publicacion bloqueada: " + document["source"] + " sigue en proceso. Esperar o reprocesar si se interrumpio.")
         raise ValueError("Publicacion bloqueada. Corregir y reprocesar la fuente: " + document["source"] + ". " + document["message"])

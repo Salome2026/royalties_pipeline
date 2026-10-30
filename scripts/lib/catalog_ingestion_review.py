@@ -46,9 +46,14 @@ def reading_incidents(catalog: pl.DataFrame) -> list[dict]:
                     add(source, account, "UNKNOWN_ROLE", identity, {**entry, "raw": credit.get("role_original")})
             if entry.get("manual_protected") or row.get("catalog_manual_correction_id"):
                 return
-            status = entry.get("participant_resolution_status") or entry.get("native_resolution_status") or entry.get("status")
-            if status in BAD_STATUSES and entry.get("field") != "Product Artist":
-                add(source, account, "PARTICIPANTS_CONFLICT" if "conflict" in status or status == "contradictory" else "UNRESOLVED_CREDIT", identity, entry)
+            statuses = {entry.get(key) for key in ("participant_resolution_status", "native_resolution_status", "status", "grammar_status")}
+            bad = statuses & (BAD_STATUSES | {"ambiguous", "ambiguous_grammar"})
+            if not row.get("catalog_artists") and row.get("asset_isrc") and "incomplete" in statuses:
+                bad.add("incomplete")
+            if bad and entry.get("field") != "Product Artist":
+                conflict = any("conflict" in status or status == "contradictory" for status in bad)
+                raw = entry.get("raw") or entry.get("artist_catalog_style") or entry.get("Artist Name")
+                add(source, account, "PARTICIPANTS_CONFLICT" if conflict else "UNRESOLVED_CREDIT", identity, {**entry, "raw": raw})
             for key in ("observations", "native_observations", "evidence"):
                 nested = entry.get(key)
                 if isinstance(nested, list):

@@ -1849,6 +1849,7 @@ def count_onerpm_monitor_rows(path: Path) -> dict:
     return {
         "rows": total_rows,
         "rows_by_sheet": rows_by_sheet,
+        "read_errors": [name for name, count in rows_by_sheet.items() if count is None],
     }
 
 
@@ -1924,6 +1925,8 @@ def classify_raw_file(source: str, path: Path, mart_names: set[str], fingerprint
 
     if source == "onerpm" and path.suffix.lower() in {".xlsx", ".xlsm"}:
         monitor_rows = count_onerpm_monitor_rows(path)
+        if monitor_rows.get("read_errors"):
+            return {"file_name": name, "status": "pending_real", "reason": "No se pudieron leer hojas del statement; no se considera vacio.", **monitor_rows}
         if monitor_rows["rows"] == 0:
             return {
                 "file_name": name,
