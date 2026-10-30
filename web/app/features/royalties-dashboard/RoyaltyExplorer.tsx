@@ -5,7 +5,7 @@ import styles from "./RoyaltyExplorer.module.css";
 
 export type ExplorerState = { measure: "income" | "contractual"; beneficiary: string; drill: Record<string, string>; trackName?: string };
 export const initialExplorer: ExplorerState = { measure: "income", beneficiary: "", drill: {} };
-export type ExplorerRank = { name: string; identity_key?: string; amount_usd: number; pending_amount_usd?: number; youtube_only?: boolean };
+export type ExplorerRank = { name: string; identity_key?: string; amount_usd: number; pending_amount_usd?: number; youtube_only?: boolean; aggregate_identity?: boolean };
 export type ExplorerInfo = { measure: string; beneficiary: string | null; restricted: boolean; base_amount_usd: number;
   pending_amount_usd: number; pending_tracks: number; registry_revision: string;
   pending: Array<{ title: string; identity_key: string; reason: string; amount_usd: number }> };
@@ -51,7 +51,7 @@ export function RoyaltyExplorerTrail({ state, loading, onChange }: { state: Expl
   if (!Object.keys(state.drill).length) return null;
   return <nav className={styles.trail} aria-label="Filtros de exploración">
     <button type="button" disabled={loading} onClick={() => onChange({ ...state, drill: {} })}>Volver a {state.beneficiary || "la vista general"}</button>
-    {Object.entries(state.drill).map(([key, value]) => <button type="button" key={key} disabled={loading} onClick={() => { const drill = { ...state.drill }; delete drill[key]; onChange({ ...state, drill }); }}>{drillLabels[key] || key}: {key === "track" ? state.trackName || value : value}<X size={13} aria-hidden="true" /></button>)}
+    {Object.entries(state.drill).filter(([key]) => key !== "track_title").map(([key, value]) => <button type="button" key={key} disabled={loading} onClick={() => { const drill = { ...state.drill }; delete drill[key]; if (key === "track") delete drill.track_title; onChange({ ...state, drill }); }}>{drillLabels[key] || key}: {key === "track" ? state.trackName || value : value}<X size={13} aria-hidden="true" /></button>)}
   </nav>;
 }
 
@@ -61,7 +61,7 @@ export function RoyaltyExplorerPending({ info, onOpen }: { info?: ExplorerInfo; 
     <summary>{money(info.pending_amount_usd)} de ingresos pendientes de reparto · {info.pending_tracks} temas o referencias</summary>
     <p>Estos importes todavía no tienen un reparto aplicable.</p>
     <table><thead><tr><th>Tema / referencia</th><th>Motivo</th><th>Ingreso USD</th></tr></thead><tbody>{info.pending.map((row) => <tr key={`${row.identity_key}-${row.reason}`}>
-      <td><button type="button" onClick={() => onOpen({ name: row.title, identity_key: row.identity_key, amount_usd: row.amount_usd })}>{row.title || row.identity_key}</button></td>
+      <td><button type="button" onClick={() => onOpen({ name: row.title, identity_key: row.identity_key, amount_usd: row.amount_usd, aggregate_identity: true })}>{row.title || row.identity_key}</button></td>
       <td>{row.reason}</td><td>{money(row.amount_usd)}</td>
     </tr>)}</tbody></table>
   </details>;
@@ -72,7 +72,7 @@ type Segment = { from: string; until: string | null; version: number; label: str
   shares?: Share[]; own_share?: { percent: number; amount_usd: number } };
 type Origin = { statement_month: string; transaction_month: string | null; source: string; account: string; dsp: string; territory: string;
   monetization: string; content_origin: string; amount_usd: number; units: number; rows: number };
-type Track = { identity_key: string; isrc: string | null; title: string; base_amount_usd: number; units: number; segments: Segment[];
+type Track = { identity_key: string; isrc: string | null; title: string; row_title?: string | null; base_amount_usd: number; units: number; segments: Segment[];
   pending: { reason: string; amount_usd: number }[]; records?: Origin[] };
 type TrackData = { tracks: Track[]; restricted: boolean; beneficiary: string | null; registry_revision: string; period_basis: string };
 
@@ -93,7 +93,7 @@ function Origins({ rows }: { rows: Origin[] }) {
 
 export function RoyaltyTrackDrawer({ selection, params, onClose, onParticipant }: {
   selection: ExplorerRank | null; params: string; onClose: () => void;
-  onParticipant?: (name: string, track: { identity_key: string; title: string }, youtubeOnly: boolean) => void;
+  onParticipant?: (name: string, track: { identity_key: string; title: string; row_title?: string | null }, youtubeOnly: boolean) => void;
 }) {
   const [data, setData] = useState<TrackData | null>(null);
   const [error, setError] = useState("");
@@ -104,7 +104,9 @@ export function RoyaltyTrackDrawer({ selection, params, onClose, onParticipant }
     if (!selection) return;
     const controller = new AbortController(); setData(null); setError(""); setLoading(true);
     const query = new URLSearchParams(params); query.delete("measure");
-    if (selection.identity_key) query.set("track_key", selection.identity_key); else query.set("track_title", selection.name);
+    query.delete("track_key"); query.delete("track_title");
+    if (selection.identity_key) query.set("track_key", selection.identity_key);
+    if (!selection.aggregate_identity) query.set("track_title", selection.name);
     void fetch(`/api/royalties-dashboard/track?${query}`, { cache: "no-store", signal: controller.signal }).then(async (r) => {
       const body = await r.json(); if (!r.ok) throw new Error(body.error || "No se pudo consultar el reparto."); return body;
     }).then((body: TrackData) => { if (!controller.signal.aborted) setData(body); })
