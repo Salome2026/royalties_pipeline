@@ -9,6 +9,7 @@ export type SupplementaryAudit = {
 };
 
 export type SourceMonitorItem = {
+  reading_incidents?: { code: string; label: string; identity_count: number; identities: string[]; files: string[]; samples: { identity: string; field?: string; raw?: string; statement_file_name?: string }[] }[];
   workspace_enabled?: boolean;
   workspace_version?: number;
   workspace_installed?: boolean;

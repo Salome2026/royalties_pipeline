@@ -1,5 +1,14 @@
 # Catalogo general core
 
+## Controles de futuras ingestas
+
+Lectura obligatoria: `catalog_ingestion_controls_20261030.md`. La admision
+compartida conserva los lectores de cada distribuidora y separa dinero de
+incidencias de metadata. Los reenvios no se suman dos veces, los reemplazos
+ambiguos o importes invalidos bloquean publicar, y las revisiones se agrupan
+por causa en el monitor de fuentes existente. No se modifican los reportes,
+contratos ni Shares In & Out.
+
 ## Identidades corregidas y participantes: adopcion 2026-10-28
 
 Lectura obligatoria: `catalogo_identidad_reapertura_adopcion_20261028.md` y

@@ -2,6 +2,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+FUGA_CORRECTION_STATEMENT_PERIOD = "2025-12"
+
 
 @dataclass(frozen=True)
 class StatementPeriodInfo:

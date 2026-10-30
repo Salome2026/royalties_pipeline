@@ -354,6 +354,14 @@ export function SourceMonitorModule({
                   {inventory && <span title={inventory}>{inventory}</span>}
                   {item.notes && <span title={item.notes}>{item.notes}</span>}
                   {item.supplementary_audit_error && <span>{item.supplementary_audit_error}</span>}
+                  {(item.reading_incidents || []).map((incident) => (
+                    <details key={incident.code}>
+                      <summary>{incident.label} · {incident.identity_count.toLocaleString("es-AR")} referencias</summary>
+                      {incident.samples.map((sample, index) => (
+                        <p key={`${sample.identity}-${index}`}>{sample.identity.replace(/^ISRC:/, "")} · {sample.statement_file_name || sample.field || "Catálogo"}{sample.raw ? ` · ${sample.raw}` : ""}</p>
+                      ))}
+                    </details>
+                  ))}
                   {(item.supplementary_audits || []).map((audit) => (
                     <details key={audit.file_name}>
                       <summary>YouTube Extended · {audit.status === "validated" ? "Comparado" : audit.status === "pending" ? "Pendiente" : "Requiere revisión"} · {audit.rows.toLocaleString("es-AR")} filas</summary>

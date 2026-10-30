@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 import polars as pl
+from lib.ingestion_controls import controlled_ingestion, select_inputs, validate_amounts, stage_controls
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.append(str(SCRIPT_DIR))
@@ -220,9 +221,11 @@ def standardize_dashgo(df: pl.DataFrame, file_path: Path) -> pl.DataFrame:
         pl.lit(ingested_at).alias("ingested_at"),
     ])
 
+    validate_amounts(df, source=SOURCE, path=file_path, field="Payable")
     return df
 
 
+@controlled_ingestion(SOURCE)
 def main():
     ensure_dirs()
 
@@ -230,7 +233,7 @@ def main():
         print(f"No existe carpeta: {INPUT_DIR}")
         return
 
-    csv_files = sorted(INPUT_DIR.glob("*.csv"))
+    csv_files = select_inputs(INPUT_DIR.glob("*.csv"), SOURCE, ACCOUNT)
 
     print("DashGo standardized ingest")
     print(f"Archivos encontrados: {len(csv_files)}")
@@ -283,6 +286,7 @@ def main():
 
     temporary = OUTPUT_PATH.with_suffix(".parquet.tmp")
     final_df.write_parquet(temporary)
+    stage_controls(temporary)
     temporary.replace(OUTPUT_PATH)
 
     print("\nListo.")

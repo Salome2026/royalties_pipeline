@@ -14,7 +14,10 @@ SONG_PATH = BASE / "warehouse" / "marts" / "song_level_soundon.parquet"
 INPUT_DIR = BASE / "input_raw" / "soundon"
 
 
-def validate_raw_totals(standardized: pl.DataFrame, input_dir: Path) -> None:
+def validate_raw_totals(standardized: pl.DataFrame, input_dir: Path, *, files=None) -> None:
+    if files is None:
+        from lib.ingestion_controls import select_inputs
+        files = select_inputs(input_dir.glob("*.csv"), "soundon", "soundon")
     def records(path):
         with path.open(encoding="utf-8-sig", newline="") as stream:
             return list(csv.DictReader(stream))
@@ -25,14 +28,14 @@ def validate_raw_totals(standardized: pl.DataFrame, input_dir: Path) -> None:
     expected = defaultdict(lambda: [0, Decimal(0), Decimal(0)])
     commissions = defaultdict(Decimal)
     summary = defaultdict(Decimal)
-    for path in sorted(input_dir.glob("*_My Royalty.csv")):
+    for path in sorted(path for path in files if path.name.endswith("_My Royalty.csv")):
         for row in records(path):
             key = (row["Reporting Period"], row["Store Name"])
             expected[key][0] += 1
             expected[key][1] += amount(row, "Final Royalty")
             expected[key][2] += amount(row, "Units of Sold")
             commissions[row["Reporting Period"]] += Decimal(row.get("Discovery Mode Commission Amount") or "0")
-    for path in sorted(input_dir.glob("*_Summary.csv")):
+    for path in sorted(path for path in files if path.name.endswith("_Summary.csv")):
         for row in records(path):
             summary[(row["Reporting Period"], row["Store Name"])] += amount(row, "Final Royalty")
     if not expected or set(expected) != set(summary):
@@ -47,7 +50,7 @@ def validate_raw_totals(standardized: pl.DataFrame, input_dir: Path) -> None:
         result = observed[key]
         if rows != result["rows"] or abs(float(net) - result["amount_usd"]) > 1e-6 or float(units) != result["units"] or abs(net - summary[key]) > Decimal("0.000001"):
             raise RuntimeError(f"SoundOn: filas, dinero o unidades no concilian para {key}.")
-    for path in sorted(input_dir.glob("*_Discovery Mode.csv")):
+    for path in sorted(path for path in files if path.name.endswith("_Discovery Mode.csv")):
         match = re.search(r"_(\d{4})_(\d{2})_Discovery Mode\.csv$", path.name)
         if not match:
             raise RuntimeError(f"Discovery Mode no reconocido: {path.name}")

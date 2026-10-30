@@ -7,6 +7,7 @@ import pandas as pd
 import polars as pl
 
 from lib.statement_period import from_column, legacy_manual
+from lib.ingestion_controls import controlled_ingestion, select_inputs, validate_amounts, stage_controls
 
 
 BASE_DIR = Path(r"C:\royalties_pipeline")
@@ -154,7 +155,7 @@ def standardize_orchard(df: pl.DataFrame, file_path: Path) -> pl.DataFrame:
     )
     amount = decimal_expr("NET SHARE ACCOUNT CURRENCY")
 
-    return df.with_columns([
+    result = df.with_columns([
         amount.alias("amount_usd"),
         amount.alias("net_amount"),
         amount.alias("net_amount_usd"),
@@ -202,6 +203,8 @@ def standardize_orchard(df: pl.DataFrame, file_path: Path) -> pl.DataFrame:
         pl.lit(file_hash).alias("statement_file_hash"),
         pl.lit(ingested_at).alias("ingested_at"),
     ])
+    validate_amounts(result, source=SOURCE, path=file_path, field="NET SHARE ACCOUNT CURRENCY")
+    return result
 
 
 def standardize_altafonte_legacy(file_path: Path) -> pl.DataFrame:
@@ -275,12 +278,13 @@ def standardize_altafonte_legacy(file_path: Path) -> pl.DataFrame:
     return pl.DataFrame(records)
 
 
+@controlled_ingestion(SOURCE)
 def main():
     ensure_dirs()
 
     parts = []
     errors = []
-    files = sorted(ORCHARD_INPUT_DIR.glob("*.csv"))
+    files = select_inputs(ORCHARD_INPUT_DIR.glob("*.csv"), SOURCE)
 
     print("Orchard standardized ingest")
     print(f"Archivos Orchard modernos: {len(files)}")
@@ -337,6 +341,7 @@ def main():
     final = pl.concat([pl.read_parquet(part) for part in parts], how="diagonal_relaxed")
     temporary = OUTPUT_PATH.with_suffix(".parquet.tmp")
     final.write_parquet(temporary)
+    stage_controls(temporary)
     temporary.replace(OUTPUT_PATH)
 
     print("\nListo.")
