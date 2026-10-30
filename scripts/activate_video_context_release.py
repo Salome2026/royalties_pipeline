@@ -84,6 +84,11 @@ def activate(candidate_uri: str, *, project='vpo-corp-royalties', dataset='royal
             # Validate the loaded facts against the immutable prepared artifact.
             a = f'SELECT {selected} FROM `{project}.{dataset}.{table}` WHERE release_id="{release}"'
             b = f'SELECT {selected} FROM `{project}.{dataset}.{stages[key]}`'
+            if key == 'catalog':
+                # BigQuery set operators reject ARRAY columns. JSON retains the
+                # exact approved aliases/artists and their ordering for this check.
+                a = f'SELECT TO_JSON_STRING(r) payload FROM ({a}) r'
+                b = f'SELECT TO_JSON_STRING(r) payload FROM ({b}) r'
             changed = query(f'SELECT COUNT(*) n FROM (({a} EXCEPT DISTINCT {b}) UNION ALL ({b} EXCEPT DISTINCT {a}))')[0]['n']
             if changed:
                 raise RuntimeError(f'{table} pierde datos del candidato preparado.')
@@ -106,6 +111,8 @@ def activate(candidate_uri: str, *, project='vpo-corp-royalties', dataset='royal
         'results': results}, default=str), content_type='application/json', if_generation_match=0)
     # Readers use immutable files from the manifest; canonical aliases remain for older clients.
     for filename, entry in manifest['files'].items():
+        if not entry['object_name'].startswith(f'{prefix}/releases/{release}/'):
+            continue
         bucket.copy_blob(bucket.blob(entry['object_name'], generation=int(entry['generation'])), bucket,
                          new_name=f'{prefix}/{filename}')
     check_base()
