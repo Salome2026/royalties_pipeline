@@ -10109,11 +10109,11 @@ def royalty_explorer_access(api_key: str | None, username: str | None):
 
 
 @app.get("/royalties-dashboard/explorer-options")
-def royalty_explorer_options(x_vpo_api_key: str | None = Header(default=None), x_vpo_username: str | None = Header(default=None)):
+def royalty_explorer_options(keyword: str | None = None, x_vpo_api_key: str | None = Header(default=None), x_vpo_username: str | None = Header(default=None)):
     contracts, scope = royalty_explorer_access(x_vpo_api_key, x_vpo_username)
     from app.royalty_explorer import read_options
     try:
-        return read_options(contracts, scope)
+        return read_options(contracts, scope, keyword=keyword)
     except RuntimeError as exc:
         raise HTTPException(503, "El catálogo se está preparando. Volvé a intentar en unos instantes.") from exc
 
