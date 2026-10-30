@@ -8690,6 +8690,7 @@ def list_master_contract_models(
 def list_master_contracts(
     keyword: str | None = None,
     status: Literal["all", "open", "closed", "review", "unidentified"] = "all",
+    commercialization: Literal["all", "master", "distribution", "pending"] = "all",
     limit: int = 50,
     offset: int = 0,
     source: str | None = None,
@@ -8706,6 +8707,8 @@ def list_master_contracts(
     if status == "unidentified":
         if is_wml():
             raise HTTPException(status_code=400, detail="Sin identificar corresponde al catálogo habitual.")
+        if commercialization != "all":
+            raise HTTPException(status_code=400, detail="El tipo de contrato se filtra sobre temas identificados.")
         return master_contract_unidentified_income(choices, keyword=keyword or "", source=source,
             account=account, offset=offset, limit=limit)
     catalog = master_contract_catalog(master_contract_associated_income(choices))
@@ -8730,6 +8733,9 @@ def list_master_contracts(
         "asset_isrc", "track_title", "artist_statement", "amount_usd", "isrc_amount_usd", "associated_amount_usd",
         "_contract_first_statement_month", "_contract_last_statement_month", "sources",
     ]).to_dicts()
+    if commercialization != "all":
+        all_rows = [row for row in all_rows
+                    if commercialization in states.get(row["asset_isrc"], {}).get("commercialization_types", ["pending"])]
     summary = {
         "open": sum(not states.get(row["asset_isrc"], {}).get("closed", False) for row in all_rows),
         "closed": sum(states.get(row["asset_isrc"], {}).get("closed", False) for row in all_rows),
@@ -8754,6 +8760,7 @@ def list_master_contracts(
             "first_month": row["_contract_first_statement_month"],
             "last_month": row["_contract_last_statement_month"],
             "sources": row["sources"],
+            "commercialization_types": ["pending"],
             **states.get(row["asset_isrc"], {"closed": False, "future_reports_selected": False, "version": 0}),
             **review_states.get(row["asset_isrc"], {}),
         }
@@ -8768,6 +8775,7 @@ def list_master_contracts(
         "source_accounts": source_accounts,
         "amount_basis": "wml_contractual_base_100" if is_wml() else "dashboard_net_statement_usd",
         "pool_contracts_supported": True,
+        "commercialization_filter_supported": True,
         "reports_effective": False,
     }
 
