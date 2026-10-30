@@ -33,7 +33,7 @@ DATASET = os.environ.get("VPO_BIGQUERY_DATASET", "royalties_analytics")
 LOCATION = os.environ.get("VPO_BIGQUERY_LOCATION", "US")
 DIMENSIONS = {"dsp": "dsp", "monetization": "monetization", "content_origin": "content_origin",
               "territory": "territory", "artist": "artist", "label": "label", "source": "source",
-              "account": "account", "month": "period_month", "track": "identity_key"}
+              "account": "account", "month": "period_month", "track": "identity_key", "track_title": "title"}
 _LOCK = threading.RLock()
 # Historical portal permission labels are separate from economic beneficiaries.
 # This explicit equivalence preserves the existing Candu login without granting
@@ -259,7 +259,7 @@ def base_query(context: dict, policy: dict, beneficiary: str | None, *, measure:
                track_key: str | None = None, track_title: str | None = None):
     if period_basis not in {"statement_period", "transaction_month"}:
         raise ValueError("Base temporal inválida.")
-    if set(drill) - set(DIMENSIONS) or any(not isinstance(v, str) or len(v) > 500 for v in drill.values()):
+    if set(drill) - set(DIMENSIONS) or any(not isinstance(v, str) or len(v) > (4096 if k == "track_title" else 500) for k, v in drill.items()):
         raise ValueError("Filtro de exploración inválido.")
     for value in (start_month, end_month, drill.get("month")):
         if value:
@@ -290,7 +290,7 @@ def base_query(context: dict, policy: dict, beneficiary: str | None, *, measure:
     # Restricted users are scoped to canonical tracks before any output, never by a caller's title substring.
     scope = "t.root IS NOT NULL" if restricted else "TRUE"
     name = "COALESCE(t.title,n.title)" if restricted else "n.title"
-    filters = " AND ".join(f"(@drill_{key} IS NULL OR {column}=@drill_{key})" for key, column in DIMENSIONS.items() if key != "track")
+    filters = " AND ".join(f"(@drill_{key} IS NULL OR {column}=@drill_{key})" for key, column in DIMENSIONS.items() if key not in {"track", "track_title"})
     sql = f"""WITH native_all AS (
       SELECT *,{native_columns()} AS slot,
        REGEXP_REPLACE(NORMALIZE_AND_CASEFOLD(COALESCE(search_text,''),NFD),r'\\pM','') AS normalized_search
@@ -340,7 +340,7 @@ def _period_sql(period_mode: str) -> str:
     if period_mode not in {"last_6_months", "last_12_months", "all", "single_month", "closed_range"}:
         raise ValueError("Período inválido.")
     tail = " LIMIT 6" if period_mode == "last_6_months" else " LIMIT 12" if period_mode == "last_12_months" else ""
-    return f", selected_months AS (SELECT DISTINCT period_month FROM filtered ORDER BY period_month DESC{tail}), scoped AS (SELECT * FROM filtered WHERE period_month IN (SELECT period_month FROM selected_months) AND (@drill_track IS NULL OR identity_key=@drill_track) AND (@track_key IS NULL OR identity_key=@track_key) AND (@track_title IS NULL OR title=@track_title))"
+    return f", selected_months AS (SELECT DISTINCT period_month FROM filtered ORDER BY period_month DESC{tail}), scoped AS (SELECT * FROM filtered WHERE period_month IN (SELECT period_month FROM selected_months) AND (@drill_track IS NULL OR identity_key=@drill_track) AND (@drill_track_title IS NULL OR title=@drill_track_title) AND (@track_key IS NULL OR identity_key=@track_key) AND (@track_title IS NULL OR title=@track_title))"
 
 
 def dashboard_sql(base: str, period_mode: str, limit: int) -> str:
@@ -514,7 +514,7 @@ def detail(contracts: list[dict], policy: dict, scope: set[str] | None, *, benef
             segment["months"].add(row["statement_month"])
             segment["rule"] = agreement
         displayed_segments = _display_segments(segments, beneficiary, scope is not None)
-        track = {"identity_key": identity, "isrc": income[0]["isrc"], "title": income[0]["title"],
+        track = {"identity_key": identity, "isrc": income[0]["isrc"], "title": income[0]["title"], "row_title": track_title,
                  "base_amount_usd": round_money(sum(r["amount_usd"] for r in income)),
                  "units": sum(r["units"] or 0 for r in income), "segments": displayed_segments,
                  "pending": [{"reason": reason, "amount_usd": round_money(amount)} for reason, amount in pending.items()]}

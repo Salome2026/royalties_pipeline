@@ -134,6 +134,27 @@ class ExplorerTests(unittest.TestCase):
         self.assertEqual(result["tracks"][0]["pending"], [])
         self.assertEqual(ctx, before)
 
+    def test_selected_title_and_isrc_are_intersected_and_survive_participant_drill(self):
+        ctx = context()
+        args = dict(measure="contractual", restricted=False, period_basis="statement_period", source=None,
+                    account=None, keyword="MC Tota", start_month="2021-07", end_month="2026-06",
+                    drill={"track": "ISRC:ARDL12600001", "track_title": "Movimento"})
+        base, params, _ = ex.base_query(ctx, {}, "Artista", track_key="ISRC:ARDL12600001", track_title="Movimento", **args)
+        values = {p.name: p.value for p in params if isinstance(p, bigquery.ScalarQueryParameter)}
+        self.assertEqual(values["track_key"], values["drill_track"])
+        self.assertEqual(values["track_title"], values["drill_track_title"])
+        self.assertEqual(values["track_title"], "Movimento")
+        tail = ex._period_sql("last_6_months")
+        for condition in ["identity_key=@track_key", "title=@track_title", "identity_key=@drill_track", "title=@drill_track_title"]:
+            self.assertIn(condition, tail)
+            self.assertLess(tail.index("LIMIT 6"), tail.index(condition))
+        self.assertNotIn("title=@drill_track_title", base)
+        with patch.object(ex, "get_context", return_value=ctx), patch.object(ex, "_job", return_value=[income(100, title="Movimento")]) as query:
+            detail = ex.detail([], {}, None, beneficiary="Artista", track_key="ISRC:ARDL12600001", track_title="Movimento", end_month="2026-06", period_mode="closed_range")
+        self.assertEqual(detail["tracks"][0]["row_title"], "Movimento")
+        self.assertEqual(detail["tracks"][0]["base_amount_usd"], 100)
+        self.assertEqual(next(p.value for p in query.call_args.args[1] if p.name == "track_title"), "Movimento")
+
     def test_query_contract_uses_statement_not_consumption_and_keeps_units(self):
         args = dict(measure="contractual", restricted=True, period_basis="transaction_month", source=None,
                     account=None, keyword="", start_month=None, end_month=None, drill={})

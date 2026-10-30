@@ -4141,9 +4141,9 @@ export default function Home() {
     void loadRoyaltiesDashboard({ explorer: next, query: royaltiesDashboardQuery });
   }
 
-  function exploreRoyaltiesParticipant(name: string, track: { identity_key: string; title: string }, youtubeOnly: boolean) {
+  function exploreRoyaltiesParticipant(name: string, track: { identity_key: string; title: string; row_title?: string | null }, youtubeOnly: boolean) {
     applyRoyaltiesExplorer({ measure: "contractual", beneficiary: name, trackName: track.title,
-      drill: { ...royaltiesExplorer.drill, track: track.identity_key, ...(youtubeOnly ? { dsp: "YouTube" } : {}) } });
+      drill: { ...royaltiesExplorer.drill, track: track.identity_key, ...(track.row_title != null ? { track_title: track.row_title } : {}), ...(youtubeOnly ? { dsp: "YouTube" } : {}) } });
   }
 
   function drillRoyalties(values: Record<string, string>) {
