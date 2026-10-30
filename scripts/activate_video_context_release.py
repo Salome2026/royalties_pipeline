@@ -50,7 +50,9 @@ def activate(candidate_uri: str, *, project='vpo-corp-royalties', dataset='royal
     check_base()
     def query(sql):
         return list(bq.query(sql, location='US', job_config=bigquery.QueryJobConfig(
-            maximum_bytes_billed=20_000_000_000)).result())
+            # The administrative transaction reads historic partitions as well
+            # as the candidate. Keep a bounded allowance for that full release.
+            maximum_bytes_billed=150_000_000_000)).result())
     for ddl in [detail_context_schema_sql(project, dataset), video_context_schema_sql(project, dataset), catalog_artist_schema_sql(project, dataset)]:
         query(ddl)
     suffix = re.sub('[^a-zA-Z0-9]', '', release)[-20:].lower()
