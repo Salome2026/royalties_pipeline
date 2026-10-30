@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import polars as pl
+from lib.video_context import preserve_video_context, video_group_keys
 
 from lib.identity import (
     first_valid_isrc_expr,
@@ -66,12 +67,13 @@ def main():
         optional_col("Sale Type").alias("sale_type"),
         optional_col("Label").alias("label"),
         optional_col("Product Type").alias("product_type"),
-        optional_col("Quantity", pl.Float64).alias("units"),
     ])
+
+    df = preserve_video_context(df)
 
     song_level = (
         df
-        .group_by([
+        .group_by(video_group_keys([
             "source",
             "account",
             "source_sheet",
@@ -86,7 +88,7 @@ def main():
             "track_statement_style",
             "artist_statement_style",
             "transaction_month",
-        ])
+        ]))
         .agg([
             pl.sum("amount_usd").alias("amount_usd"),
             pl.sum("net_amount").alias("net_amount"),

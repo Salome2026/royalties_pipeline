@@ -347,3 +347,26 @@ No se declara terminado mientras ambos circuitos convivan.
 - Un fallo queda trazable y no deja un archivo final parcial.
 - Localhost y cloud producen el mismo resultado porque usan el mismo Job.
 - Cloud Tasks y ejecucion local dejan de ser dependencias del sistema.
+
+## Video ID en el resumen por tema
+
+La identidad nativa del video se conserva aun cuando el statement informe un ISRC.
+En el resumen por tema, los ingresos clasificados por la fuente como `Video / Channel`
+y con un Video ID valido se agrupan por ese ID a lo largo de todos los meses. El
+resto conserva la agrupacion vigente por identidad del catalogo; Art Track, UGC,
+Shorts y otros usos no se convierten en video de canal por tener un ID. No se
+deducen asociaciones por titulo. Esta regla se aplica a todas las distribuidoras,
+en reportes por statement y por consumo, dentro de su ambito de regalias.
+
+Los marts conservan `video_id`, `channel_id`, `video_id_source` y las dimensiones
+de origen. Las cantidades de FUGA se toman de Asset Quantity o Product Quantity
+segun corresponda. El cargador valida cantidades e identidad contra los campos
+nativos antes de conciliar con BigQuery; no basta comparar dos ceros derivados.
+
+Para reparar un historial publicado, `python -m app.video_context_refresh` corre
+en Cloud Run sobre generaciones inmutables y prepara un candidato sin activarlo.
+Conserva el catalogo, sus asociaciones y el plan de revision contractual existentes.
+`scripts/activate_video_context_release.py` carga esos objetos directamente en
+BigQuery, verifica datos y conciliacion por cuenta/mes, y activa con precondicion de
+generacion del manifiesto. Si cambian el release, la gobernanza o las policies,
+el candidato no se activa. No se reescriben reportes historicos ya entregados.

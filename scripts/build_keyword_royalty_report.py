@@ -5,6 +5,10 @@ from pathlib import Path
 
 import pandas as pd
 import polars as pl
+try:
+    from lib.video_context import source_units_expr, preserve_video_context, separate_channel_video_expr
+except ModuleNotFoundError:
+    from scripts.lib.video_context import source_units_expr, preserve_video_context, separate_channel_video_expr
 
 try:
     from lib.ada_identity import ada_isrc_expr, ada_native_code_expr, ada_native_code_type_expr, ada_source_expr
@@ -503,7 +507,7 @@ def report_identity_expr(columns: set[str]) -> pl.Expr:
             normalized_artist,
         ]))
     )
-    return pl.coalesce([catalog_key, fallback_identity]).alias("_report_identity")
+    return pl.coalesce([separate_channel_video_expr(columns), catalog_key, fallback_identity]).alias("_report_identity")
 
 
 def build_track_summary_lf(base_lf: pl.LazyFrame, *, include_identity: bool = False) -> pl.LazyFrame:
@@ -676,7 +680,7 @@ def report_units_expr(columns: set[str]) -> pl.Expr:
 
 
 def normalize_report_units(lf: pl.LazyFrame, columns: set[str]) -> pl.LazyFrame:
-    return lf.with_columns(report_units_expr(columns).alias("units"))
+    return preserve_video_context(lf)
 
 
 def store_raw_expr(columns: set[str]) -> pl.Expr:
@@ -1367,6 +1371,9 @@ def build_report_tables(
                     "report_code",
                     "report_code_source",
                     "asset_isrc",
+                    "video_id",
+                    "video_id_source",
+                    "channel_id",
                     "report_territory",
                     "track_statement_style",
                     "asset_title_statement",
@@ -1386,10 +1393,10 @@ def build_report_tables(
                     "revenue_basis",
                     "catalog_key",
                     "catalog_business_status",
-                    *(["product_upc", "UPC Code", "UPC", "video_id", "Video ID", "VideoId", "track_id",
+                    *(["product_upc", "UPC Code", "UPC", "Video ID", "VideoId", "track_id",
                        "Label Track ID", "Track ID", "gpid", "source_asset_id", "catalog_number"] if contract_snapshot is not None else []),
                 ]
-                if col in standardized_cols or col in {"store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory", "catalog_key", "catalog_business_status"}
+                if col in standardized_cols or col in {"store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory", "catalog_key", "catalog_business_status", "video_id", "video_id_source", "channel_id", "dsp_normalized", "monetization_normalized", "content_origin_normalized", "classification_status"}
             ])
             .with_columns([
                 pl.lit(None).cast(pl.Utf8).alias("content_type")
