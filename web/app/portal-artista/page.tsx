@@ -15,7 +15,7 @@ import { PeriodControl } from "../components/PeriodControl";
 import { PeriodSelection, resolvePeriod } from "../lib/period";
 import { useSession } from "../shared/auth/useSession";
 import styles from "./portal-artista.module.css";
-import { RoyaltyExplorerControls, RoyaltyExplorerTrail, RoyaltyExplorerPending, RoyaltyTrackDrawer, initialExplorer, explorerActive, explorerParams, type ExplorerState, type ExplorerRank, type ExplorerInfo } from "../features/royalties-dashboard/RoyaltyExplorer";
+import { RoyaltyContextAction, RoyaltyExplorerTrail, RoyaltyExplorerPending, RoyaltyTrackDrawer, initialExplorer, explorerActive, explorerParams, type ExplorerState, type ExplorerRank, type ExplorerInfo } from "../features/royalties-dashboard/RoyaltyExplorer";
 
 type Rank = {
   identity_key?: string;
@@ -197,7 +197,6 @@ export default function ArtistPortal() {
     periodBasis?: "statement_period" | "transaction_month";
     explorer?: ExplorerState;
     query?: string;
-    clearKeyword?: boolean;
   }) => {
     const id = ++requestId.current;
     const requestUsername = activeUsernameRef.current;
@@ -223,9 +222,15 @@ export default function ArtistPortal() {
 
       const query = overrides?.query !== undefined ? new URLSearchParams(overrides.query) : params;
       for (const name of ["measure", "beneficiary", "drill"]) query.delete(name);
-      if (overrides?.clearKeyword) query.delete("keyword");
-      const nextExplorer = overrides?.explorer || explorer;
-      const enhanced = explorerActive(nextExplorer);
+      let nextExplorer = overrides?.explorer || explorer;
+      if (!overrides?.explorer && overrides?.query === undefined && nextKeyword.trim() !== (new URLSearchParams(appliedQuery).get("keyword") || "")) {
+        nextExplorer = initialExplorer;
+        setExplorer(initialExplorer);
+        setSelectedTrack(null);
+      }
+      // The portal's total and own-share views start from the same canonical
+      // artist scope; switching measures must never change the underlying rows.
+      const enhanced = artistScope.length === 1 || explorerActive(nextExplorer);
       if (enhanced) explorerParams(query, nextExplorer);
       const response = await fetch(`/api/royalties-dashboard${enhanced ? "/explore" : ""}?${query}`, { cache: "no-store" });
       const payload = await response.json().catch(() => ({}));
@@ -240,12 +245,12 @@ export default function ArtistPortal() {
     } finally {
       if (activeUsernameRef.current === requestUsername && id === requestId.current) setLoading(false);
     }
-  }, [account, keyword, period, periodBasis, source, explorer]);
+  }, [account, keyword, period, periodBasis, source, explorer, appliedQuery, artistScope.length]);
 
-  function applyExplorer(next: ExplorerState, clearKeyword = false) {
-    setExplorer(next); setSelectedTrack(null); if (clearKeyword) setKeyword("");
+  function applyExplorer(next: ExplorerState) {
+    setExplorer(next); setSelectedTrack(null);
     setDashboard(null);
-    void loadDashboard({ explorer: next, query: appliedQuery, clearKeyword });
+    void loadDashboard({ explorer: next, query: appliedQuery });
   }
   function drill(values: Record<string, string>) {
     if (tab === "youtube") values = { dsp: "YouTube", ...values };
@@ -395,7 +400,7 @@ export default function ArtistPortal() {
 
         {error && <div className={styles.alert}>{error}</div>}
 
-        <RoyaltyExplorerControls key={currentUser?.username} state={explorer} keyword={keyword} restricted loading={loading} onChange={applyExplorer} />
+        <RoyaltyContextAction key={currentUser?.username} state={explorer} keyword={new URLSearchParams(appliedQuery).get("keyword") || ""} restricted loading={loading} onChange={applyExplorer} />
         <RoyaltyExplorerTrail state={explorer} loading={loading} onChange={applyExplorer} />
         <div className={styles.metricBand} aria-live="polite">
           <div className={styles.primaryMetric}><span>{explorer.measure === "contractual" ? "Tu parte según contrato" : "Ingreso reportable"}</span><strong>{loading ? "Calculando…" : dashboard ? money(dashboard.totals.amount_usd) : "—"}</strong></div>

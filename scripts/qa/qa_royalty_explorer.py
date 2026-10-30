@@ -38,8 +38,8 @@ class ExplorerTests(unittest.TestCase):
             self.assertEqual(rules[0]["percent"], expected)
             self.assertAlmostEqual(sum(s["percent"] for s in full[tracks[0]["root"]][0]["shares"]), 100)
 
-    def test_open_unselected_and_invalid_never_allocate(self):
-        for field in ["is_closed", "future_reports_selected", "invalid"]:
+    def test_open_and_invalid_never_allocate(self):
+        for field in ["is_closed", "invalid"]:
             ctx = context()
             if field == "invalid":
                 ctx["snapshot"]["contracts"][0]["split"]["agreements"][0]["master_pool_percent"] = 99
@@ -73,6 +73,34 @@ class ExplorerTests(unittest.TestCase):
         with patch.object(ex, "catalog_data", return_value=([], [])), patch.object(ex, "current_manifest", return_value="pinned"), patch.object(ex, "participant_names", return_value=names):
             self.assertEqual(ex.read_options([], {"Candu"})["beneficiaries"], ["Candu Domínguez"])
 
+    def test_search_context_comes_from_contract_recipients_not_compound_credits(self):
+        ctx = context()
+        names = {**ctx["names"], "proyecto / artista": "Proyecto / Artista", "lost in you": "Lost In You"}
+        with patch.object(ex, "catalog_data", return_value=([], [])), patch.object(ex, "current_manifest", return_value="pinned"), patch.object(ex, "participant_names", return_value=names):
+            for keyword, expected in [("ARTISTA", "Artista"), ("Lost In You", None), ("Proyecto / Artista", None), ("Proyecto", None), ("", None)]:
+                self.assertEqual(ex.read_options(ctx["snapshot"]["contracts"], None, keyword=keyword)["participant"], expected)
+            self.assertIsNone(ex.read_options(ctx["snapshot"]["contracts"], {"Socio"}, keyword="Artista")["participant"])
+            self.assertEqual(ex.read_options(ctx["snapshot"]["contracts"], {"Artista"}, keyword="")["participant"], "Artista")
+
+    def test_internal_participant_changes_money_without_changing_the_search_universe(self):
+        ctx = context()
+        ctx["snapshot"]["catalog"].append({"isrc": "ARDL12600002", "title": "Lost In You", "artists_informed": "Otro"})
+        args = dict(restricted=False, period_basis="statement_period", source=None, account=None,
+                    keyword="Lost In You", start_month="2026-01", end_month="2026-09", drill={"track": "ISRC:ARDL12600002"})
+        income_sql, income_params, _ = ex.base_query(ctx, {}, None, measure="income", **args)
+        own_sql, own_params, _ = ex.base_query(ctx, {}, "Artista", measure="contractual", **args)
+        left = {p.name: p.to_api_repr() for p in income_params}; right = {p.name: p.to_api_repr() for p in own_params}
+        for key in ["tracks", "roots", "bindings", "keywords", "source", "account", "start", "end", "drill_track", "all_tracks"]:
+            self.assertEqual(left[key], right[key], key)
+        self.assertTrue(next(p for p in own_params if p.name == "all_tracks").value)
+        self.assertIn("WHERE TRUE", own_sql)
+        self.assertIn("n.title AS title", own_sql)
+        self.assertNotIn("identity_key=@drill_track", own_sql)
+        tail = ex._period_sql("last_6_months")
+        self.assertLess(tail.index("LIMIT 6"), tail.index("identity_key=@drill_track"))
+        _, private_params, _ = ex.base_query(ctx, {}, "Artista", measure="contractual", **{**args, "restricted": True})
+        self.assertFalse(next(p for p in private_params if p.name == "all_tracks").value)
+
     def test_detail_money_conservation_private_projection_and_adjustments(self):
         for amount in [100, -100, 0, .01, 100.005]:
             with patch.object(ex, "get_context", return_value=context()), patch.object(ex, "_job", return_value=[income(amount)]):
@@ -95,6 +123,17 @@ class ExplorerTests(unittest.TestCase):
         self.assertEqual(result["tracks"][0]["segments"], [])
         self.assertEqual(result["tracks"][0]["pending"], [{"reason": "Contrato abierto", "amount_usd": 19}])
 
+    def test_future_report_checkbox_does_not_block_closed_contract_exploration(self):
+        ctx = context()
+        ctx["snapshot"]["contracts"][0]["future_reports_selected"] = False
+        before = deepcopy(ctx)
+        self.assertEqual(ex.compiled_rules(ctx, "Artista")[1][0]["percent"], 6)
+        with patch.object(ex, "get_context", return_value=ctx), patch.object(ex, "_job", return_value=[income(100)]):
+            result = ex.detail([], {}, None, track_key="ISRC:ARDL12600001")
+        self.assertEqual(sum(s["amount_usd"] for s in result["tracks"][0]["segments"][0]["shares"]), 100)
+        self.assertEqual(result["tracks"][0]["pending"], [])
+        self.assertEqual(ctx, before)
+
     def test_query_contract_uses_statement_not_consumption_and_keeps_units(self):
         args = dict(measure="contractual", restricted=True, period_basis="transaction_month", source=None,
                     account=None, keyword="", start_month=None, end_month=None, drill={})
@@ -116,7 +155,7 @@ class ExplorerTests(unittest.TestCase):
         args = dict(measure="contractual", restricted=True, period_basis="statement_period", source=None,
                     account=None, keyword="", start_month=None, end_month=None, drill={})
         _, before, _ = ex.base_query(ctx, {}, "Artista", **args)
-        ctx["snapshot"]["contracts"][0]["future_reports_selected"] = False
+        ctx["snapshot"]["contracts"][0]["is_closed"] = False
         _, after, _ = ex.base_query(ctx, {}, "Artista", **args)
         self.assertNotEqual([p.to_api_repr() for p in before], [p.to_api_repr() for p in after])
         self.assertEqual(ex.compiled_rules(ctx, "Foreign")[0], [])

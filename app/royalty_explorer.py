@@ -1,4 +1,4 @@
-"""Read-only contractual dashboard: pinned identities, approved rules, SQL aggregation.
+"""Read-only contractual dashboard: pinned identities, closed rules, SQL aggregation.
 
 The ordinary dashboard is untouched. Monetary measures alone are apportioned;
 units always belong to the underlying income rows. Access is checked by the API
@@ -33,7 +33,7 @@ DATASET = os.environ.get("VPO_BIGQUERY_DATASET", "royalties_analytics")
 LOCATION = os.environ.get("VPO_BIGQUERY_LOCATION", "US")
 DIMENSIONS = {"dsp": "dsp", "monetization": "monetization", "content_origin": "content_origin",
               "territory": "territory", "artist": "artist", "label": "label", "source": "source",
-              "account": "account", "month": "period_month"}
+              "account": "account", "month": "period_month", "track": "identity_key"}
 _LOCK = threading.RLock()
 # Historical portal permission labels are separate from economic beneficiaries.
 # This explicit equivalence preserves the existing Candu login without granting
@@ -97,10 +97,28 @@ def catalog_data(manifest_json: str) -> tuple[list[dict], list[dict]]:
     return frame.to_dicts(), contract_catalog_rows(frame)
 
 
-def read_options(contracts: list[dict], scope: set[str] | None) -> dict:
+def read_options(contracts: list[dict], scope: set[str] | None, keyword: str | None = None) -> dict:
     catalog, _ = catalog_data(current_manifest())
     names = participant_names(catalog, contracts)
     allowed = scope_keys(scope)
+    if keyword is not None:
+        # Contextual actions come from actual contractual recipients, never a
+        # compound catalog credit or an arbitrary channel/title string.
+        recipients = {}
+        for record in contracts:
+            for agreement in record["split"].get("agreements") or []:
+                try:
+                    for share in allocation_rows(agreement, record["split"]):
+                        key = beneficiary_key(share["artist"])
+                        if key and share["percent"] > 0 and (allowed is None or key in allowed):
+                            recipients.setdefault(key, names.get(key, share["artist"]))
+                except (ValueError, TypeError, KeyError, ZeroDivisionError):
+                    continue
+        key = beneficiary_key(keyword)
+        key = PORTAL_SCOPE_LABELS.get(key, key)
+        if allowed is not None and len(allowed) == 1 and not key:
+            key = next(iter(allowed))
+        return {"participant": recipients.get(key), "restricted": scope is not None}
     return {"beneficiaries": sorted([name for key, name in names.items() if allowed is None or key in allowed], key=beneficiary_key),
             "restricted": scope is not None}
 
@@ -189,7 +207,7 @@ def get_context(contracts: list[dict]) -> dict:
         return _context(current_manifest(), json.dumps(contracts, sort_keys=True))
 
 
-def compiled_rules(context: dict, beneficiary: str | None) -> tuple[list[dict], list[dict], dict]:
+def compiled_rules(context: dict, beneficiary: str | None, *, restrict_tracks: bool = True) -> tuple[list[dict], list[dict], dict]:
     key = beneficiary_key(beneficiary or "")
     records = {row["isrc"]: row for row in context["snapshot"]["contracts"]}
     metadata = {row["isrc"]: row for row in context["snapshot"]["catalog"]}
@@ -202,13 +220,11 @@ def compiled_rules(context: dict, beneficiary: str | None) -> tuple[list[dict], 
         saved = records.get(root) or {}
         split = saved.get("split") or {}
         names = credits[root] | {beneficiary_key(n) for n in _contract_names(split)}
-        if key and key not in names:
+        if restrict_tracks and key and key not in names:
             continue
         reason = ""
         if not saved.get("is_closed"):
             reason = "Contrato abierto o sin definir"
-        elif not saved.get("future_reports_selected"):
-            reason = "Contrato sin habilitar para reportes"
         else:
             try:
                 validate_split(split, True, True)
@@ -250,16 +266,16 @@ def base_query(context: dict, policy: dict, beneficiary: str | None, *, measure:
             month_date(value)
     if start_month and end_month and start_month > end_month:
         raise ValueError("El rango de meses está invertido.")
-    tracks, rules, full_rules = compiled_rules(context, beneficiary)
+    tracks, rules, full_rules = compiled_rules(context, beneficiary, restrict_tracks=restricted)
     roots = {row["root"] for row in tracks}
-    bindings = [row for row in context["bindings"] if not beneficiary or row["root"] in roots]
+    bindings = [row for row in context["bindings"] if not restricted or row["root"] in roots]
     params = [bigquery.ScalarQueryParameter("release", "STRING", context["release"]),
               bigquery.ScalarQueryParameter("source", "STRING", source), bigquery.ScalarQueryParameter("account", "STRING", account),
               bigquery.ScalarQueryParameter("start", "DATE", month_date(start_month)), bigquery.ScalarQueryParameter("end", "DATE", month_date(end_month)),
               bigquery.ScalarQueryParameter("track_key", "STRING", track_key), bigquery.ScalarQueryParameter("track_title", "STRING", track_title),
               bigquery.ArrayQueryParameter("keywords", "STRING", normalize_search_text(keyword).split()),
               bigquery.ScalarQueryParameter("beneficiary_search", "STRING", normalize_search_text(beneficiary or "")),
-              bigquery.ScalarQueryParameter("all_tracks", "BOOL", beneficiary is None),
+              bigquery.ScalarQueryParameter("all_tracks", "BOOL", not restricted),
               bigquery.ScalarQueryParameter("restricted", "BOOL", restricted),
               bigquery.ArrayQueryParameter("roots", "STRING", sorted(roots)),
               _struct_array("tracks", [("root", "STRING"), ("title", "STRING"), ("reason", "STRING")], tracks),
@@ -272,21 +288,25 @@ def base_query(context: dict, policy: dict, beneficiary: str | None, *, measure:
     period_col = "transaction_month" if period_basis == "transaction_month" else "statement_month"
     amount = "COALESCE(r.percent,0) / 100" if measure == "contractual" else "1.0"
     # Restricted users are scoped to canonical tracks before any output, never by a caller's title substring.
-    related_unknown = "FALSE" if restricted or not beneficiary else "(COALESCE(n.root,'')='' AND @beneficiary_search!='' AND STRPOS(normalized_search,@beneficiary_search)>0)"
-    scope = "TRUE" if not beneficiary else f"(t.root IS NOT NULL OR {related_unknown})"
-    name = "COALESCE(t.title,n.title)" if beneficiary else "n.title"
-    filters = " AND ".join(f"(@drill_{key} IS NULL OR {column}=@drill_{key})" for key, column in DIMENSIONS.items())
+    scope = "t.root IS NOT NULL" if restricted else "TRUE"
+    name = "COALESCE(t.title,n.title)" if restricted else "n.title"
+    filters = " AND ".join(f"(@drill_{key} IS NULL OR {column}=@drill_{key})" for key, column in DIMENSIONS.items() if key != "track")
     sql = f"""WITH native_all AS (
       SELECT *,{native_columns()} AS slot,
        REGEXP_REPLACE(NORMALIZE_AND_CASEFOLD(COALESCE(search_text,''),NFD),r'\\pM','') AS normalized_search
       FROM {context['table']} WHERE release_id=@release
-    ), native AS (
-      SELECT * FROM native_all n WHERE @all_tracks OR n.isrc IN UNNEST(@roots)
+    ), native_scope AS (
+      SELECT *,{period_col} AS option_month FROM native_all n WHERE (@all_tracks OR n.isrc IN UNNEST(@roots)
        OR (COALESCE(n.isrc,'')='' AND (
         (NOT @restricted AND @beneficiary_search!='' AND STRPOS(normalized_search,@beneficiary_search)>0)
         OR EXISTS(SELECT 1 FROM UNNEST(@bindings) b WHERE b.source=n.source AND b.account=n.account
           AND b.sheet=COALESCE(n.source_sheet,'') AND b.month=FORMAT_DATE('%Y-%m',n.statement_month)
-          AND ((b.kind='ID' AND b.code=n.slot) OR (b.kind='UPC' AND COALESCE(n.slot,'')='' AND b.code=n.upc)))))
+          AND ((b.kind='ID' AND b.code=n.slot) OR (b.kind='UPC' AND COALESCE(n.slot,'')='' AND b.code=n.upc))))))
+    ), native AS (
+      SELECT * FROM native_scope n WHERE (@source IS NULL OR n.source=@source) AND (@account IS NULL OR n.account=@account)
+       AND (@start IS NULL OR n.{period_col}>=@start) AND (@end IS NULL OR n.{period_col}<=@end)
+       AND NOT EXISTS(SELECT 1 FROM UNNEST(@keywords) token WHERE STRPOS(normalized_search,token)=0
+         AND STRPOS(REGEXP_REPLACE(normalized_search,r'[\\s_-]+',''),REGEXP_REPLACE(token,r'[\\s_-]+',''))=0)
     ), resolved AS (
       SELECT n.*,COALESCE(NULLIF(n.isrc,''),b.root) AS root
       FROM native n LEFT JOIN UNNEST(@bindings) b ON COALESCE(n.isrc,'')=''
@@ -309,7 +329,8 @@ def base_query(context: dict, policy: dict, beneficiary: str | None, *, measure:
       SELECT * FROM scoped_base WHERE period_month IS NOT NULL
        AND (@source IS NULL OR source=@source) AND (@account IS NULL OR account=@account)
        AND (@start IS NULL OR period_month>=@start) AND (@end IS NULL OR period_month<=@end)
-       AND NOT EXISTS(SELECT 1 FROM UNNEST(@keywords) token WHERE STRPOS(CONCAT(normalized_search,' ',LOWER(COALESCE(title,'')),' ',LOWER(COALESCE(isrc,''))),token)=0)
+       AND NOT EXISTS(SELECT 1 FROM UNNEST(@keywords) token WHERE STRPOS(normalized_search,token)=0
+         AND STRPOS(REGEXP_REPLACE(normalized_search,r'[\\s_-]+',''),REGEXP_REPLACE(token,r'[\\s_-]+',''))=0)
        AND {filters}
     )"""
     return sql, params, full_rules
@@ -319,7 +340,7 @@ def _period_sql(period_mode: str) -> str:
     if period_mode not in {"last_6_months", "last_12_months", "all", "single_month", "closed_range"}:
         raise ValueError("Período inválido.")
     tail = " LIMIT 6" if period_mode == "last_6_months" else " LIMIT 12" if period_mode == "last_12_months" else ""
-    return f", selected_months AS (SELECT DISTINCT period_month FROM filtered ORDER BY period_month DESC{tail}), scoped AS (SELECT * FROM filtered WHERE period_month IN (SELECT period_month FROM selected_months) AND (@track_key IS NULL OR identity_key=@track_key) AND (@track_title IS NULL OR title=@track_title))"
+    return f", selected_months AS (SELECT DISTINCT period_month FROM filtered ORDER BY period_month DESC{tail}), scoped AS (SELECT * FROM filtered WHERE period_month IN (SELECT period_month FROM selected_months) AND (@drill_track IS NULL OR identity_key=@drill_track) AND (@track_key IS NULL OR identity_key=@track_key) AND (@track_title IS NULL OR title=@track_title))"
 
 
 def dashboard_sql(base: str, period_mode: str, limit: int) -> str:
@@ -356,9 +377,9 @@ def dashboard_sql(base: str, period_mode: str, limit: int) -> str:
     UNION ALL SELECT 'matrix_month',TO_JSON_STRING(t) FROM (
       SELECT source,account,FORMAT_DATE('%Y-%m',period_month) AS month,SUM(amount_usd) AS amount_usd FROM scoped GROUP BY source,account,period_month) t
     UNION ALL SELECT section,TO_JSON_STRING(t) FROM ranking t
-    UNION ALL SELECT 'option_pair',TO_JSON_STRING(t) FROM (SELECT DISTINCT source,account FROM scoped_base) t
+    UNION ALL SELECT 'option_pair',TO_JSON_STRING(t) FROM (SELECT DISTINCT source,account FROM native_scope) t
     UNION ALL SELECT 'option_bounds',TO_JSON_STRING(t) FROM (
-      SELECT FORMAT_DATE('%Y-%m',MIN(period_month)) AS first_month,FORMAT_DATE('%Y-%m',MAX(period_month)) AS last_month FROM scoped_base) t
+      SELECT FORMAT_DATE('%Y-%m',MIN(option_month)) AS first_month,FORMAT_DATE('%Y-%m',MAX(option_month)) AS last_month FROM native_scope) t
     UNION ALL SELECT 'contract_summary',TO_JSON_STRING(t) FROM (
       SELECT ROUND(COALESCE(SUM(base_amount_usd),0),2) AS base_amount_usd,
       ROUND(COALESCE(SUM(pending_amount_usd),0),2) AS pending_amount_usd,
@@ -422,6 +443,33 @@ def dashboard(contracts: list[dict], policy: dict, scope: set[str] | None, *, me
                             restricted=scope is not None, period_basis=period_basis, keyword=keyword or "")
 
 
+
+def _display_segments(segments: dict, beneficiary: str | None, restricted: bool) -> list[dict]:
+    displayed_segments = []
+    for segment in segments.values():
+        agreement = segment["rule"]
+        combined = defaultdict(lambda: {"name": "", "percent": 0.0, "origins": []})
+        for share in agreement["shares"]:
+            item = combined[beneficiary_key(share["artist"])]
+            item["name"] = share["artist"]
+            item["percent"] += share["percent"]
+            item["origins"].append({"label": share["label"], "percent": share["percent"]})
+        shares = list(combined.values())
+        values = settle_amounts([segment["amount_usd"] * s["percent"] / 100 for s in shares], segment["amount_usd"])
+        for share, value in zip(shares, values):
+            share["amount_usd"] = value
+        own = [s for s in shares if beneficiary_key(s["name"]) == beneficiary_key(beneficiary or "")]
+        value = {"from": agreement["from"], "until": agreement["until"], "version": agreement["version"],
+                 "label": agreement["label"], "months": sorted(segment["months"]),
+                 "base_amount_usd": round_money(segment["amount_usd"])}
+        if not restricted:
+            value["shares"] = shares
+        else:
+            value["label"] = "Participación vigente"
+            value["own_share"] = {"percent": sum(s["percent"] for s in own), "amount_usd": sum(s["amount_usd"] for s in own)}
+        displayed_segments.append(value)
+    return displayed_segments
+
 def detail(contracts: list[dict], policy: dict, scope: set[str] | None, *, beneficiary=None, track_key=None,
            track_title=None, source=None, account=None, keyword="", period_basis="statement_period",
            period_mode="last_6_months", start_month=None, end_month=None, drill=None) -> dict:
@@ -465,29 +513,7 @@ def detail(contracts: list[dict], policy: dict, scope: set[str] | None, *, benef
             segment["units"] += row["units"] or 0
             segment["months"].add(row["statement_month"])
             segment["rule"] = agreement
-        displayed_segments = []
-        for segment in segments.values():
-            agreement = segment["rule"]
-            combined = defaultdict(lambda: {"name": "", "percent": 0.0, "origins": []})
-            for share in agreement["shares"]:
-                item = combined[beneficiary_key(share["artist"])]
-                item["name"] = share["artist"]
-                item["percent"] += share["percent"]
-                item["origins"].append({"label": share["label"], "percent": share["percent"]})
-            shares = list(combined.values())
-            values = settle_amounts([segment["amount_usd"] * s["percent"] / 100 for s in shares], segment["amount_usd"])
-            for share, value in zip(shares, values):
-                share["amount_usd"] = value
-            own = [s for s in shares if beneficiary_key(s["name"]) == beneficiary_key(beneficiary or "")]
-            value = {"from": agreement["from"], "until": agreement["until"], "version": agreement["version"],
-                     "label": agreement["label"], "months": sorted(segment["months"]),
-                     "base_amount_usd": round_money(segment["amount_usd"])}
-            if scope is None:
-                value["shares"] = shares
-            else:
-                value["label"] = "Participación vigente"
-                value["own_share"] = {"percent": sum(s["percent"] for s in own), "amount_usd": sum(s["amount_usd"] for s in own)}
-            displayed_segments.append(value)
+        displayed_segments = _display_segments(segments, beneficiary, scope is not None)
         track = {"identity_key": identity, "isrc": income[0]["isrc"], "title": income[0]["title"],
                  "base_amount_usd": round_money(sum(r["amount_usd"] for r in income)),
                  "units": sum(r["units"] or 0 for r in income), "segments": displayed_segments,

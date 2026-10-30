@@ -17,7 +17,7 @@ import { selectedRoyaltyScope } from './features/wml/WmlScopeControl';
 import { StatementReportModule } from "./features/statements/StatementReportModule";
 import digitalStyles from "./features/digital-income/DigitalIncome.module.css";
 import royaltyDashboardStyles from "./features/royalties-dashboard/RoyaltyDashboard.module.css";
-import { RoyaltyExplorerControls, RoyaltyExplorerTrail, RoyaltyExplorerPending, RoyaltyTrackDrawer, initialExplorer, explorerActive, explorerParams, type ExplorerState, type ExplorerRank, type ExplorerInfo } from "./features/royalties-dashboard/RoyaltyExplorer";
+import { RoyaltyContextAction, RoyaltyExplorerTrail, RoyaltyExplorerPending, RoyaltyTrackDrawer, initialExplorer, explorerActive, explorerParams, type ExplorerState, type ExplorerRank, type ExplorerInfo } from "./features/royalties-dashboard/RoyaltyExplorer";
 import SelectionMenu, { type SelectionIntent } from "./features/digital-income/SelectionMenu";
 import type { DigitalIncomeReportScope } from "./features/digital-income/exportPdf";
 import {
@@ -4085,7 +4085,6 @@ export default function Home() {
     periodBasis?: "statement_period" | "transaction_month";
     explorer?: ExplorerState;
     query?: string;
-    clearKeyword?: boolean;
   }) {
     const requestId = ++royaltiesDashboardRequest.current;
     setRoyaltiesDashboardLoading(true);
@@ -4107,8 +4106,12 @@ export default function Home() {
       params.set("limit", "10");
       const query = filters?.query !== undefined ? new URLSearchParams(filters.query) : params;
       for (const name of ["measure", "beneficiary", "drill"]) query.delete(name);
-      if (filters?.clearKeyword) query.delete("keyword");
-      const selection = filters?.explorer || royaltiesExplorer;
+      let selection = filters?.explorer || royaltiesExplorer;
+      if (!filters?.explorer && filters?.query === undefined && keyword.trim() !== (new URLSearchParams(royaltiesDashboardQuery).get("keyword") || "")) {
+        selection = initialExplorer;
+        setRoyaltiesExplorer(initialExplorer);
+        setRoyaltiesTrack(null);
+      }
       const enhanced = !wmlScope && explorerActive(selection);
       if (enhanced) explorerParams(query, selection);
       const response = await fetch(`/api/royalties-dashboard${enhanced ? "/explore" : ""}?${query}`, { cache: "no-store" });
@@ -4132,11 +4135,15 @@ export default function Home() {
     }
   }
 
-  function applyRoyaltiesExplorer(next: ExplorerState, clearKeyword = false) {
+  function applyRoyaltiesExplorer(next: ExplorerState) {
     setRoyaltiesExplorer(next); setRoyaltiesTrack(null);
     setRoyaltiesDashboard(null);
-    if (clearKeyword) setRoyaltiesDashboardKeyword("");
-    void loadRoyaltiesDashboard({ explorer: next, query: royaltiesDashboardQuery, clearKeyword });
+    void loadRoyaltiesDashboard({ explorer: next, query: royaltiesDashboardQuery });
+  }
+
+  function exploreRoyaltiesParticipant(name: string, track: { identity_key: string; title: string }, youtubeOnly: boolean) {
+    applyRoyaltiesExplorer({ measure: "contractual", beneficiary: name, trackName: track.title,
+      drill: { ...royaltiesExplorer.drill, track: track.identity_key, ...(youtubeOnly ? { dsp: "YouTube" } : {}) } });
   }
 
   function drillRoyalties(values: Record<string, string>) {
@@ -7835,7 +7842,7 @@ export default function Home() {
               </div>
             </form>
 
-            {!wmlScope && <><RoyaltyExplorerControls key={currentUser?.username} state={royaltiesExplorer} keyword={royaltiesDashboardKeyword} loading={royaltiesDashboardLoading} onChange={applyRoyaltiesExplorer} />
+            {!wmlScope && <><RoyaltyContextAction key={currentUser?.username} state={royaltiesExplorer} keyword={new URLSearchParams(royaltiesDashboardQuery).get("keyword") || ""} loading={royaltiesDashboardLoading} onChange={applyRoyaltiesExplorer} />
               <RoyaltyExplorerTrail state={royaltiesExplorer} loading={royaltiesDashboardLoading} onChange={applyRoyaltiesExplorer} /></>}
             <div className={`${digitalStyles.metricBand} ${royaltyDashboardStyles.metricBand}`} aria-live="polite">
               <div className={digitalStyles.primaryMetric}>
@@ -7976,7 +7983,7 @@ export default function Home() {
 
         {view === "royalties-dashboard" && !wmlScope && <>
           <RoyaltyExplorerPending info={royaltiesDashboard?.explorer} onOpen={setRoyaltiesTrack} />
-          <RoyaltyTrackDrawer selection={royaltiesTrack} params={royaltiesTrack?.youtube_only ? explorerParams(new URLSearchParams(royaltiesDashboardQuery), { ...royaltiesExplorer, drill: { ...royaltiesExplorer.drill, dsp: "YouTube" } }).toString() : royaltiesDashboardQuery} onClose={() => setRoyaltiesTrack(null)} />
+          <RoyaltyTrackDrawer onParticipant={exploreRoyaltiesParticipant} selection={royaltiesTrack} params={royaltiesTrack?.youtube_only ? explorerParams(new URLSearchParams(royaltiesDashboardQuery), { ...royaltiesExplorer, drill: { ...royaltiesExplorer.drill, dsp: "YouTube" } }).toString() : royaltiesDashboardQuery} onClose={() => setRoyaltiesTrack(null)} />
         </>}
         {view === "digital-income" && (
           <section className={digitalStyles.workspace}>
