@@ -325,6 +325,48 @@ def write_lazy(frame: pl.LazyFrame, path: Path) -> None:
 
 
 def build_detail(source: Path, target: Path, release_id: str, *, overrides: dict[str,pl.Expr] | None = None) -> None:
+    if source.stat().st_size > 128 * 1024 * 1024:
+        return build_detail_batches(source, target, release_id, overrides=overrides)
+    return _build_detail_file(source, target, release_id, overrides=overrides)
+
+
+def build_detail_batches(source: Path, target: Path, release_id: str, *,
+                         overrides: dict[str,pl.Expr] | None = None, batch_size: int = 50_000) -> None:
+    """Bound native-expression evaluation independently of historical row count."""
+    import tempfile
+    import pyarrow.parquet as pq
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix('.batches.tmp.parquet')
+    writer = None
+    try:
+        with tempfile.TemporaryDirectory(prefix='bigquery-detail-', dir=target.parent) as directory:
+            raw, normalized = Path(directory)/'raw.parquet', Path(directory)/'normalized.parquet'
+            for index, batch in enumerate(pq.ParquetFile(source).iter_batches(batch_size=batch_size)):
+                pl.from_arrow(batch).write_parquet(raw, compression='zstd')
+                _build_detail_file(raw, normalized, release_id, overrides=overrides, validate_source=False)
+                table = pq.read_table(normalized)
+                if writer is None:
+                    writer = pq.ParquetWriter(temporary, table.schema, compression='zstd')
+                writer.write_table(table)
+                del batch, table
+                if index % 20 == 0:
+                    print(json.dumps({'event': 'bigquery_detail_batch', 'batch': index + 1}), flush=True)
+        if writer is None:
+            raise ValueError('El detalle fuente esta vacio.')
+    finally:
+        if writer is not None:
+            writer.close()
+    temporary.replace(target)
+    if overrides is None:
+        try:
+            from lib.bigquery_source_integrity import validate_detail_source
+        except ModuleNotFoundError:
+            from scripts.lib.bigquery_source_integrity import validate_detail_source
+        validate_detail_source(source, target)
+
+
+def _build_detail_file(source: Path, target: Path, release_id: str, *,
+                       overrides: dict[str,pl.Expr] | None = None, validate_source: bool = True) -> None:
     frame = pl.scan_parquet(source)
     columns = set(frame.collect_schema().names())
     def select_detail(expressions):
@@ -422,7 +464,7 @@ def build_detail(source: Path, target: Path, release_id: str, *, overrides: dict
         target,
     )
 
-    if overrides is None:
+    if overrides is None and validate_source:
         try:
             from lib.bigquery_source_integrity import validate_detail_source
         except ModuleNotFoundError:
