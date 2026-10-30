@@ -107,6 +107,12 @@ def upload_to_gcs(
     prefix: str,
     uploads: list[UploadItem],
 ) -> dict | None:
+    try:
+        from lib.ingestion_controls import CONTROL_FILE, validate_no_failed_batches
+    except ModuleNotFoundError:
+        from scripts.lib.ingestion_controls import CONTROL_FILE, validate_no_failed_batches
+    for directory in {item.local_path.parent for item in uploads}:
+        validate_no_failed_batches(directory)
     from google.cloud import storage
 
     client = storage.Client.from_service_account_json(credentials_path)
@@ -117,10 +123,14 @@ def upload_to_gcs(
         sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
         from app.catalog_participant_review import publish_with_participant_review
         from app.operational_db import operational_connect
+        files = [(item.local_path.name, item.local_path) for item in uploads]
+        control = uploads[0].local_path.parent / CONTROL_FILE
+        if control.exists():
+            files.append((CONTROL_FILE, control))
         release = publish_with_participant_review(
             bucket,
             prefix,
-            [(item.local_path.name, item.local_path) for item in uploads],
+            files,
             publisher=publish_mart_release,
             connection_factory=operational_connect,
         )
