@@ -48,6 +48,33 @@ def assert_money_preserved(before: Path, after: Path) -> None:
         raise RuntimeError('El reproceso cambia importes por cuenta y mes.')
 
 
+def song_input_columns(source: str, available: set[str]) -> list[str]:
+    """Do not materialize hundreds of other distributors' null columns in RAM."""
+    common = {
+        'source', 'account', 'statement_type', 'statement_period', 'transaction_month',
+        'source_sheet', 'revenue_basis', 'include_in_cash_view', 'include_in_catalog_view',
+        'include_in_statement_view', 'possible_internal_transfer', 'asset_isrc', 'product_upc',
+        'track_statement_style', 'artist_statement_style', 'amount_usd', 'units', 'streams',
+        'track_id', 'video_id', 'video_id_source', 'channel_id', 'dsp_normalized',
+        'monetization_normalized', 'content_origin_normalized', 'classification_status',
+    }
+    extra = {
+        'fuga': {'asset_product_type', 'product_title_statement', 'product_artist_statement',
+                 'net_amount_eur', 'asset_quantity_num', 'asset_title_statement', 'asset_artist_statement'},
+        'dashgo': {'ISRC', 'VideoId'},
+        'orchard': set(),
+        'soundon': {'artist_catalog_style', 'net_amount', 'gross_revenue_usd', 'artist_share_usd'},
+        'ada': {'asset_title_statement', 'release_statement_style', 'catalog_number', 'ada_account_id',
+                'parent_product_id', 'product_upc_source', 'product_upc_status', 'artist_statement_original',
+                'artist_catalog_style', 'artist_credit_status', 'artist_credit_evidence_file',
+                'net_amount', 'gross_royalty_usd', 'deductible_fees_usd'},
+        'onerpm': {'ISRC', 'ID', 'Parent ID', 'Video ID', 'Channel ID', 'Track Title', 'Title',
+                   'Video Title', 'Album Title', 'UPC', 'Store', 'Territory', 'Sale Type', 'Label',
+                   'Product Type', 'Quantity', 'net_amount'},
+    }
+    return sorted(available & (common | extra[source]))
+
+
 def run() -> None:
     client = storage.Client()
     bucket = client.bucket(os.environ.get('GCS_BUCKET', 'vpo-corp-royalties-marts'))
@@ -84,8 +111,9 @@ def run() -> None:
         for source in ['ada', 'dashgo', 'fuga', 'onerpm', 'orchard', 'soundon']:
             module = importlib.import_module(f'scripts.build_song_level_{source}')
             module.INPUT_PATH = root/f'raw_{source}.parquet'
-            module.OUTPUT_PATH = root/f'song_{source}.parquet'
-            pl.scan_parquet(updated/raw_name).filter(pl.col('source') == source).sink_parquet(module.INPUT_PATH)
+            module.OUTPUT_PATH = root/f'song_level_{source}.parquet'
+            source_lf = pl.scan_parquet(updated/raw_name).filter(pl.col('source') == source)
+            source_lf.select(song_input_columns(source, set(source_lf.collect_schema().names()))).sink_parquet(module.INPUT_PATH)
             module.main()
             song_paths.append(module.OUTPUT_PATH)
             module.INPUT_PATH.unlink()
