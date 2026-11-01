@@ -1021,7 +1021,7 @@ def build_filtered_raw_detail_lf(
                         add_period_filter(
                             add_match_text(
                                 add_source_account_filter(
-                                    scan_income(standardized_path).with_row_index('_report_detail_position'),
+                                    scan_income(standardized_path).filter(raw_filter).with_row_index('_report_detail_position'),
                                     columns,
                                     source,
                                     account,
@@ -1044,7 +1044,6 @@ def build_filtered_raw_detail_lf(
         )
         .pipe(lambda frame: filter_reportable_generation(frame, columns))
         .pipe(lambda frame: apply_report_net_personalization(frame))
-        .filter(raw_filter)
         .filter(exclude_isrc_expr(columns, excluded))
     )
     return detail, columns
@@ -1381,7 +1380,7 @@ def build_report_tables(
                         normalize_report_units(
                             add_period_filter(
                                 add_source_account_filter(
-                                    scan_income(standardized_path),
+                                    scan_income(standardized_path).filter(raw_filter),
                                     standardized_cols,
                                     source,
                                     account,
@@ -1401,7 +1400,6 @@ def build_report_tables(
             )
             .pipe(lambda frame: filter_reportable_generation(frame, standardized_cols))
             .pipe(lambda frame: apply_report_net_personalization(frame))
-            .filter(raw_filter)
             .filter(exclude_isrc_expr(standardized_cols, excluded_isrcs))
             .select([
                 col for col in [
@@ -1576,7 +1574,7 @@ def build_report_tables(
                     add_period_filter(
                         add_match_text(
                             add_source_account_filter(
-                                scan_income(song_path),
+                                scan_income(song_path).filter(song_filter),
                                 song_cols,
                                 source,
                                 account,
@@ -1595,7 +1593,6 @@ def build_report_tables(
             )
             .pipe(lambda frame: filter_reportable_generation(frame, song_cols))
             .pipe(lambda frame: apply_report_net_personalization(frame))
-            .filter(song_filter)
             .filter(exclude_isrc_expr(song_cols, excluded_isrcs))
             .with_columns(pl.col(period_column).cast(pl.Utf8).alias("period_month"))
             .collect()
@@ -1650,7 +1647,7 @@ def build_report_tables(
                             add_period_filter(
                                 add_match_text(
                                     add_source_account_filter(
-                                        scan_income(standardized_path),
+                                        scan_income(standardized_path).filter(raw_filter),
                                         raw_cols,
                                         source,
                                         account,
@@ -1673,7 +1670,6 @@ def build_report_tables(
             )
             .pipe(lambda frame: filter_reportable_generation(frame, raw_cols))
             .pipe(lambda frame: apply_report_net_personalization(frame))
-            .filter(raw_filter)
             .filter(exclude_isrc_expr(raw_cols, excluded_isrcs))
         )
 
