@@ -350,6 +350,30 @@ No se declara terminado mientras ambos circuitos convivan.
 
 ## Video ID en el resumen por tema
 
+Los agregados publicados para BigQuery conservan el contexto sin inferir nuevas
+clasificaciones. `royalty_song_level` incluye statement_month, transaction_month,
+Video ID, canal, procedencia, DSP, monetizacion, origen y estado de clasificacion.
+Los seis builders mantienen statement_period en la clave antes de agregar, para
+no perder el mes de liquidacion cuando varias liquidaciones incluyen el mismo
+mes de consumo. Los dashboards base y actualizado por catalogo conservan Video ID,
+canal y procedencia; estos campos no reemplazan las claves existentes de admision
+economica ni agregan ingresos. Las consultas visibles siguen sumando con su alcance
+habitual. El identificador nativo se valida, sin tratar IDs internos como videos.
+Los historiales anteriores requieren preparar y conciliar un candidato inmutable
+con los datos ya publicados; agregar columnas vacias no equivale a repararlos.
+
+La presentacion es compartida por todas las distribuidoras, sin nuevas ingestas
+ni reglas por fuente. Cuando todas las operaciones de una fila ya tienen DSP
+`YouTube` y origen `Video / Channel`, `Tipo de contenido` agrega
+`YouTube · video/canal`, conservando los tipos anteriores. Las filas mixtas o
+sin evidencia suficiente conservan su texto habitual. Esta etiqueta no cambia
+claves de agrupacion, importes, unidades, policies ni participantes.
+En Excel y Google Sheets, un `Codigo` cuyo `Tipo codigo` ya es `Video ID`
+se enlaza a YouTube si es valido, sin reemplazar el identificador por una URL
+ni agregar columnas o filas. Un enlace identifica la publicacion; por si solo
+no declara que todo el ingreso de la fila sea ingreso del canal.
+WML conserva su ambito aislado y sus referencias informativas existentes.
+
 La identidad nativa del video se conserva aun cuando el statement informe un ISRC.
 En el resumen por tema, los ingresos clasificados por la fuente como `Video / Channel`
 y con un Video ID valido se agrupan por ese ID a lo largo de todos los meses. El

@@ -9,6 +9,7 @@ import polars as pl
 from scripts.lib.ingestion_controls import CONTROL_FILE, checksum, file_context
 
 LABELS = {"UNKNOWN_ROLE": "Rol no reconocido", "PARTICIPANTS_CONFLICT": "Participantes por confirmar",
+          "PARTICIPANTS_DIFFERENCE": "Participantes informados que faltan en la ficha",
           "UNRESOLVED_CREDIT": "Credito por confirmar", "TITLE_CONTRADICTION": "Titulos diferentes para un ISRC"}
 
 

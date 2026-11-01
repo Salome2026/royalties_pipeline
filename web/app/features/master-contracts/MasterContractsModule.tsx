@@ -3,7 +3,7 @@ import { selectedRoyaltyScope } from "../wml/WmlScopeControl";
 import { WmlReferences } from "../wml/WmlReferences";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { ArrowLeft, Check, ChevronDown, ChevronLeft, ChevronRight, FilePenLine, Link2, RefreshCw, Search } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, ChevronLeft, ChevronRight, Disc3, FilePenLine, Link2, RefreshCw, Search, X } from "lucide-react";
 import styles from "./MasterContractsModule.module.css";
 import { ArtistContractsPanel, artistBeneficiaries, type ArtistContract } from "./ArtistContractsPanel";
 import { MasterAgreementsEditor, visibleAgreements, type MasterAgreement } from "./MasterAgreementsEditor";
@@ -40,6 +40,7 @@ export type ContractItem = {
   version: number;
   association_review_pending?: boolean;
   association_pending_count?: number;
+  commercialization_types?: Array<"master" | "distribution" | "pending">;
 };
 
 type ContractList = {
@@ -48,6 +49,7 @@ type ContractList = {
   summary: { open: number; closed: number; review?: number };
   offset: number;
   source_accounts: Array<{ source: string; account: string }>;
+  commercialization_filter_supported?: boolean;
   unidentified_items?: UnidentifiedIncome[];
   unidentified_summary?: { amount_usd: number; with_candidates: number; without_candidates: number };
 };
@@ -82,6 +84,13 @@ type Props = {
 };
 
 const PAGE_SIZE = 50;
+const CONTRACT_TYPES = [
+  { value: "all", label: "Todos" },
+  { value: "master", label: "Máster" },
+  { value: "distribution", label: "Distribución" },
+  { value: "pending", label: "Por definir" },
+] as const;
+type ContractType = typeof CONTRACT_TYPES[number]["value"];
 const ACCOUNT_LABELS: Record<string, string> = { indyana_records: "INDYANA", mawzrecords: "MAWZ", gusty_dj: "GUSTY", henry_remix: "HENRY" };
 const accountLabel = (account: string) => ACCOUNT_LABELS[account] || account.replace(/_/g, " ").toUpperCase();
 const money = (value: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value || 0);
@@ -101,6 +110,9 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   const [appliedKeyword, setAppliedKeyword] = useState("");
   const [status, setStatus] = useState<"all" | "open" | "closed" | "review" | "unidentified">("all");
   const [sourceAccount, setSourceAccount] = useState("");
+  const [contractType, setContractType] = useState<ContractType>("all");
+  const [sourceAccounts, setSourceAccounts] = useState<ContractList["source_accounts"]>([]);
+  const [typeFilterSupported, setTypeFilterSupported] = useState(false);
   const [offset, setOffset] = useState(0);
   const [list, setList] = useState<ContractList | null>(null);
   const [listError, setListError] = useState("");
@@ -122,7 +134,8 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   const [selectedIsrcs, setSelectedIsrcs] = useState<string[]>([]);
   const [bulkOpen, setBulkOpen] = useState(false);
   const selectable = canEdit && !wml && status === "open";
-  useEffect(() => { setSelectedIsrcs([]); }, [appliedKeyword, sourceAccount, status, offset]);
+  const hasFilters = Boolean(appliedKeyword || sourceAccount || status !== "all" || contractType !== "all");
+  useEffect(() => { setSelectedIsrcs([]); }, [appliedKeyword, sourceAccount, status, contractType, offset]);
 
   const loadList = useCallback(async () => {
     const requestId = ++listRequest.current;
@@ -130,7 +143,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
     setList(null);
     setListError("");
     try {
-      const params = new URLSearchParams({ status, limit: String(PAGE_SIZE), offset: String(offset) });
+      const params = new URLSearchParams({ status, commercialization: contractType, limit: String(PAGE_SIZE), offset: String(offset) });
       if (appliedKeyword) params.set("keyword", appliedKeyword);
       if (sourceAccount) {
         const [source, account] = sourceAccount.split("/");
@@ -138,7 +151,11 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
         params.set("account", account);
       }
       const result = await requestJson<ContractList>(`/api/master-contracts?${params}`);
-      if (requestId === listRequest.current) setList(result);
+      if (requestId === listRequest.current) {
+        setList(result);
+        setSourceAccounts(result.source_accounts || []);
+        if (status !== "unidentified") setTypeFilterSupported(result.commercialization_filter_supported === true);
+      }
     } catch (error) {
       if (requestId === listRequest.current) {
         const message = error instanceof Error ? error.message : "No se pudo cargar Contratos.";
@@ -148,7 +165,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
     } finally {
       if (requestId === listRequest.current) setLoading(false);
     }
-  }, [appliedKeyword, offset, onMessage, sourceAccount, status]);
+  }, [appliedKeyword, contractType, offset, onMessage, sourceAccount, status]);
 
   useEffect(() => { void loadList(); }, [loadList]);
   useEffect(() => {
@@ -319,7 +336,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
     event.preventDefault();
     setOffset(0);
     setAppliedKeyword(keyword.trim());
-    if (keyword.trim() === appliedKeyword) void loadList();
+    if (keyword.trim() === appliedKeyword && offset === 0) void loadList();
   }
 
   if (mode === "artists") return <ArtistContractsPanel canEdit={canEdit} onBack={() => setMode("isrc")} onMessage={onMessage} />;
@@ -462,14 +479,28 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
         <button type="button" className={styles.iconButton} title="Actualizar catálogo" aria-label="Actualizar catálogo" disabled={loading} onClick={() => void loadList()}><RefreshCw size={18} /></button>
       </header>
       <form className={styles.toolbar} onSubmit={submitSearch}>
-        <div className={styles.searchBox}><Search size={18} /><input aria-label={unidentified ? "Buscar tema, artista o código" : "Buscar tema, artista o ISRC"} value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder={unidentified ? "Buscar tema, artista o código" : "Buscar tema, artista o ISRC"} /></div>
-        <button type="submit" className={styles.secondaryButton}>Buscar</button>
-        <select className={styles.sourceFilter} aria-label="Distribuidora y cuenta" title="Distribuidora y cuenta" value={sourceAccount} disabled={loading} onChange={(event) => { setSourceAccount(event.target.value); setOffset(0); }}>
-          <option value="">Distribuidoras: todas</option>
-          {(list?.source_accounts || []).map(({ source, account }) => <option key={`${source}/${account}`} value={`${source}/${account}`}>{source.toUpperCase()} / {accountLabel(account)}</option>)}
-        </select>
-        <div className={styles.segmented} aria-label="Estado del reparto">
-          {(["all", "open", "closed", "review", "unidentified"] as const).filter((value) => !wml || (value !== "review" && value !== "unidentified")).map((value) => <button type="button" key={value} aria-pressed={status === value} className={status === value ? styles.selected : ""} onClick={() => { setStatus(value); setOffset(0); }}>{value === "all" ? "Todos" : value === "open" ? "Abiertos" : value === "review" ? "Por revisar" : value === "unidentified" ? "Sin identificar" : "Cerrados"}</button>)}
+        <div className={styles.searchRow}>
+          <div className={styles.searchBox}><Search size={18} aria-hidden="true" /><input aria-label={unidentified ? "Buscar tema, artista o código" : "Buscar tema, artista o ISRC"} value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder={unidentified ? "Buscar tema, artista o código" : "Buscar tema, artista o ISRC"} /></div>
+          <button type="submit" className={styles.secondaryButton}>Buscar</button>
+          <select className={styles.sourceFilter} aria-label="Distribuidora y cuenta" title="Distribuidora y cuenta" value={sourceAccount} disabled={loading} onChange={(event) => { setSourceAccount(event.target.value); setOffset(0); }}>
+            <option value="">Distribuidoras: todas</option>
+            {sourceAccounts.map(({ source, account }) => <option key={`${source}/${account}`} value={`${source}/${account}`}>{source.toUpperCase()} / {accountLabel(account)}</option>)}
+          </select>
+        </div>
+        <div className={styles.filterRow}>
+          <div className={styles.filterGroup} role="group" aria-labelledby="contract-status-label">
+            <span className={styles.filterLabel} id="contract-status-label">Estado del reparto</span>
+            <div className={styles.segmented}>
+              {(["all", "open", "closed", "review", "unidentified"] as const).filter((value) => !wml || (value !== "review" && value !== "unidentified")).map((value) => <button type="button" key={value} aria-pressed={status === value} className={status === value ? styles.selected : ""} onClick={() => { setStatus(value); setOffset(0); if (value === "unidentified") setContractType("all"); }}>{value === "all" ? "Todos" : value === "open" ? "Abiertos" : value === "review" ? "Por revisar" : value === "unidentified" ? "Sin identificar" : "Cerrados"}</button>)}
+            </div>
+          </div>
+          <div className={styles.filterGroup} role="group" aria-labelledby="contract-type-label" title={unidentified ? "Disponible para temas identificados" : "Tipos registrados en la ficha, incluidas sus distintas vigencias"}>
+            <span className={styles.filterLabel} id="contract-type-label"><Disc3 size={13} aria-hidden="true" />Tipo de contrato</span>
+            <div className={`${styles.segmented} ${styles.typeSegmented}`}>
+              {CONTRACT_TYPES.map(({ value, label }) => <button type="button" key={value} disabled={unidentified || !typeFilterSupported} aria-pressed={contractType === value} className={contractType === value ? styles.selected : ""} onClick={() => { setContractType(value); setOffset(0); }}>{label}</button>)}
+            </div>
+          </div>
+          {hasFilters && <button type="button" className={styles.clearFilters} onClick={() => { setKeyword(""); setAppliedKeyword(""); setSourceAccount(""); setStatus("all"); setContractType("all"); setOffset(0); }}><X size={14} aria-hidden="true" />Limpiar filtros</button>}
         </div>
       </form>
       {unidentified ? <>
@@ -496,7 +527,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
           {!loading && list?.items.length === 0 && <tr><td colSpan={selectable ? 6 : 5} className={styles.empty}>No hay ISRC para este filtro.</td></tr>}
           {(list?.items || []).map((item) => <tr key={item.isrc}>
             {selectable && <td><input type="checkbox" aria-label={`Seleccionar ${item.title || item.isrc}`} checked={selectedIsrcs.includes(item.isrc)} onChange={(event) => setSelectedIsrcs((current) => event.target.checked ? [...current, item.isrc] : current.filter((isrc) => isrc !== item.isrc))} /></td>}
-            <td><button type="button" className={styles.titleButton} onClick={() => void openDetail(item.isrc)}>{item.title || "Sin título"}</button></td>
+            <td><button type="button" className={styles.titleButton} onClick={() => void openDetail(item.isrc)}>{item.title || "Sin título"}</button>{item.commercialization_types?.some((kind) => kind !== "pending") && <small className={styles.typeBadge}>{item.commercialization_types.filter((kind) => kind !== "pending").map((kind) => kind === "master" ? "Máster" : "Distribución").join(" · ")}</small>}</td>
             <td><button type="button" className={styles.isrcButton} onClick={() => void openDetail(item.isrc)}>{item.isrc}</button></td>
             <td className={styles.artistCell} title={item.artists_informed || ""}>{item.artists_informed || "-"}</td>
             <td className={styles.amountCell}><button type="button" className={styles.incomeButton} title="Ver ingreso del ISRC y asociados" aria-label={`Ingreso de ${item.isrc} y asociados`} onClick={() => void openDetail(item.isrc, true)}>{money(item.amount_usd)}<Link2 size={13} /></button>{Boolean(item.associated_amount_usd) && <small className={styles.incomeExtra}>Asociados: {money(item.associated_amount_usd)}</small>}</td>

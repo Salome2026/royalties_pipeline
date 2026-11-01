@@ -169,22 +169,35 @@
 .iconButton:disabled, .secondaryButton:disabled, .primaryButton:disabled, .addButton:disabled { opacity: .45; cursor: not-allowed; }
 
 .toolbar {
+  display: grid;
+  gap: 17px;
+  padding: 18px;
+  border: 1px solid rgba(164, 188, 199, .2);
+  border-radius: 12px;
+  background: linear-gradient(115deg, rgba(120, 178, 166, .055), rgba(255, 255, 255, .015));
+}
+
+.searchRow {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 10px;
-  padding: 14px 0;
-  border-top: 1px solid rgba(164, 188, 199, .2);
-  border-bottom: 1px solid rgba(164, 188, 199, .2);
 }
+
+.filterRow { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px 26px; }
+.filterGroup { display: grid; gap: 8px; min-width: 0; }
+.filterLabel { display: flex; align-items: center; gap: 6px; min-height: 14px; color: #9eb9b7; font-size: .64rem; font-weight: 650; text-transform: uppercase; }
+.clearFilters { display: inline-flex; align-items: center; gap: 5px; width: auto; min-height: 39px; margin: 0 0 0 auto; padding: 0 3px; border: 0; border-radius: 4px; color: #a6bebc; background: transparent; box-shadow: none; font-size: .73rem; font-weight: 550; transform: none; }
+.clearFilters:hover { color: #edfffa; background: transparent; box-shadow: none; transform: none; }
+.clearFilters:focus-visible, .filterRow button:focus-visible { outline: 2px solid #65d9c8; outline-offset: 3px; }
 
 .searchBox {
   flex: 1 1 260px;
-  max-width: 510px;
+  min-width: 0;
   position: relative;
 }
 .searchBox svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #7d99a1; pointer-events: none; }
-.searchBox input { padding-left: 39px; }
+.toolbar .searchBox input { padding-left: 39px; }
 
 .toolbar .sourceFilter {
   flex: 0 1 190px;
@@ -260,9 +273,12 @@
   border-radius: 7px;
   background: rgba(255, 255, 255, .025);
 }
-.segmented button { min-height: 31px; padding: 0 12px; border: 0; border-radius: 4px; color: #aebfc7; background: transparent; font-size: .78rem; font-weight: 700; }
-.segmented button.selected { color: #edfffa; background: rgba(38, 150, 133, .42); }
-.segmented button:hover { color: #fff; transform: none; }
+.segmented button { min-height: 32px; padding: 0 12px; border: 1px solid transparent; border-radius: 5px; color: #aebfc7; background: transparent; font-size: .76rem; font-weight: 600; white-space: nowrap; transition: color .15s ease, background .15s ease, border-color .15s ease; }
+.segmented button.selected { color: #c5f7ec; background: rgba(38, 150, 133, .27); border-color: rgba(101, 217, 200, .25); }
+.segmented button:hover:not(:disabled) { color: #fff; background: rgba(101, 217, 200, .08); transform: none; }
+.segmented button.selected:hover:not(:disabled) { background: rgba(38, 150, 133, .38); }
+.segmented button:disabled, .segmented button:disabled:hover { opacity: .4; background: transparent; cursor: not-allowed; }
+.typeBadge { display: block; margin-top: 5px; color: #98c3ba; font-size: .65rem; font-weight: 500; }
 
 .listMeta { display: flex; justify-content: space-between; gap: 14px; padding: 17px 0 10px; color: #a9bec6; font-size: .78rem; }
 .tableWrap { width: 100%; overflow-x: auto; border-top: 1px solid rgba(255, 255, 255, .2); border-bottom: 1px solid rgba(255, 255, 255, .12); background: linear-gradient(155deg, rgba(255, 255, 255, .07), rgba(255, 255, 255, .008)); }
@@ -443,7 +459,14 @@
   .participantIdentity > .iconButton { width: 32px; height: 39px; }
   .workspace { padding: 20px 15px 36px; }
   .heading h1 { font-size: 1.45rem; }
-  .toolbar { align-items: stretch; }
+  .toolbar { padding: 14px; gap: 16px; }
+  .searchRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .toolbar .sourceFilter { grid-column: 1 / -1; width: 100%; }
+  .filterGroup { width: 100%; }
+  .filterRow .segmented { display: flex; flex-wrap: wrap; }
+  .filterRow .typeSegmented { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .filterRow .segmented button { flex: 1 1 auto; min-height: 36px; }
+  .clearFilters { margin-left: 0; min-height: 32px; }
   .searchBox { flex-basis: 100%; max-width: none; }
   .segmented { flex: 1 1 auto; }
   .segmented button { flex: 1; }

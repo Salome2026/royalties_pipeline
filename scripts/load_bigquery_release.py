@@ -111,6 +111,9 @@ DASHBOARD_FIELDS = [
     "title",
     "isrc",
     "upc",
+    "video_id",
+    "video_id_source",
+    "channel_id",
     "dsp",
     "territory",
     "sale_type",
@@ -126,6 +129,7 @@ DASHBOARD_FIELDS = [
 
 SONG_FIELDS = [
     "release_id",
+    "statement_month",
     "transaction_month",
     "source",
     "account",
@@ -146,6 +150,10 @@ SONG_FIELDS = [
     "video_id_source",
     "channel_id",
     "statement_type",
+    "dsp",
+    "monetization",
+    "content_origin",
+    "classification_status",
 ]
 
 CATALOG_FIELDS = [
@@ -325,6 +333,48 @@ def write_lazy(frame: pl.LazyFrame, path: Path) -> None:
 
 
 def build_detail(source: Path, target: Path, release_id: str, *, overrides: dict[str,pl.Expr] | None = None) -> None:
+    if source.stat().st_size > 128 * 1024 * 1024:
+        return build_detail_batches(source, target, release_id, overrides=overrides)
+    return _build_detail_file(source, target, release_id, overrides=overrides)
+
+
+def build_detail_batches(source: Path, target: Path, release_id: str, *,
+                         overrides: dict[str,pl.Expr] | None = None, batch_size: int = 50_000) -> None:
+    """Bound native-expression evaluation independently of historical row count."""
+    import tempfile
+    import pyarrow.parquet as pq
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix('.batches.tmp.parquet')
+    writer = None
+    try:
+        with tempfile.TemporaryDirectory(prefix='bigquery-detail-', dir=target.parent) as directory:
+            raw, normalized = Path(directory)/'raw.parquet', Path(directory)/'normalized.parquet'
+            for index, batch in enumerate(pq.ParquetFile(source).iter_batches(batch_size=batch_size)):
+                pl.from_arrow(batch).write_parquet(raw, compression='zstd')
+                _build_detail_file(raw, normalized, release_id, overrides=overrides, validate_source=False)
+                table = pq.read_table(normalized)
+                if writer is None:
+                    writer = pq.ParquetWriter(temporary, table.schema, compression='zstd')
+                writer.write_table(table)
+                del batch, table
+                if index % 20 == 0:
+                    print(json.dumps({'event': 'bigquery_detail_batch', 'batch': index + 1}), flush=True)
+        if writer is None:
+            raise ValueError('El detalle fuente esta vacio.')
+    finally:
+        if writer is not None:
+            writer.close()
+    temporary.replace(target)
+    if overrides is None:
+        try:
+            from lib.bigquery_source_integrity import validate_detail_source
+        except ModuleNotFoundError:
+            from scripts.lib.bigquery_source_integrity import validate_detail_source
+        validate_detail_source(source, target)
+
+
+def _build_detail_file(source: Path, target: Path, release_id: str, *,
+                       overrides: dict[str,pl.Expr] | None = None, validate_source: bool = True) -> None:
     frame = pl.scan_parquet(source)
     columns = set(frame.collect_schema().names())
     def select_detail(expressions):
@@ -401,7 +451,7 @@ def build_detail(source: Path, target: Path, release_id: str, *, overrides: dict
                     ["label_normalized", "label_normalized_auto", "label_statement_style", "Product Label", "Label Name"],
                 ).alias("label"),
                 text_expr(columns, ["dsp_normalized", "dsp", "store_report_label", "store_name", "DSP", "Store"]).alias("dsp"),
-                text_expr(columns, ["store_name", "Store Name", "Sale Store Name", "STORE"]).alias("store_name"),
+                text_expr(columns, ["store_name", "Store Name", "Sale Store Name", "STORE", "Store"]).alias("store_name"),
                 text_expr(columns, ["territory", "Territory", "Region", "SALE COUNTRY", "Country"]).alias("territory"),
                 text_expr(columns, ["sale_type", "Sales Type", "Sale Type", "TRANSACTION TYPE"]).alias("sale_type"),
                 text_expr(columns, ["use_type", "sale_user_type", "Sales Sub Type", "SERVICE DETAIL"]).alias("use_type"),
@@ -422,7 +472,7 @@ def build_detail(source: Path, target: Path, release_id: str, *, overrides: dict
         target,
     )
 
-    if overrides is None:
+    if overrides is None and validate_source:
         try:
             from lib.bigquery_source_integrity import validate_detail_source
         except ModuleNotFoundError:
@@ -439,7 +489,11 @@ def build_dashboard(source: Path, target: Path, release_id: str) -> None:
                 pl.lit(release_id).alias("release_id"),
                 month_expr(columns, ["statement_period"]).alias("statement_month"),
                 month_expr(columns, ["transaction_month"]).alias("transaction_month"),
-                *[text_expr(columns, [name]).alias(name) for name in ["source", "account", "source_sheet", "artist", "title", "isrc", "upc", "dsp", "territory", "sale_type"]],
+                *[text_expr(columns, [name]).alias(name) for name in ["source", "account", "source_sheet", "artist", "title", "isrc", "upc"]],
+                native_video_exprs(columns)[0].alias("video_id"),
+                native_video_exprs(columns)[1].alias("video_id_source"),
+                native_channel_expr(columns).alias("channel_id"),
+                *[text_expr(columns, [name]).alias(name) for name in ["dsp", "territory", "sale_type"]],
                 text_expr(columns, ["monetization_normalized"]).alias("monetization"),
                 text_expr(columns, ["content_origin_normalized"]).alias("content_origin"),
                 text_expr(columns, ["classification_status"]).alias("classification_status"),
@@ -461,6 +515,7 @@ def build_song(source: Path, target: Path, release_id: str) -> None:
         frame.select(
             [
                 pl.lit(release_id).alias("release_id"),
+                month_expr(columns, ["statement_period"]).alias("statement_month"),
                 month_expr(columns, ["transaction_month"]).alias("transaction_month"),
                 *[text_expr(columns, [name]).alias(name) for name in ["source", "account", "source_sheet", "revenue_basis"]],
                 bool_expr(columns, "include_in_cash_view", True).alias("include_in_cash_view"),
@@ -478,6 +533,10 @@ def build_song(source: Path, target: Path, release_id: str) -> None:
                 native_video_exprs(columns)[1].alias("video_id_source"),
                 text_expr(columns, ["channel_id"]).alias("channel_id"),
                 text_expr(columns, ["statement_type"]).alias("statement_type"),
+                text_expr(columns, ["dsp_normalized"]).alias("dsp"),
+                text_expr(columns, ["monetization_normalized"]).alias("monetization"),
+                text_expr(columns, ["content_origin_normalized"]).alias("content_origin"),
+                text_expr(columns, ["classification_status"]).alias("classification_status"),
             ]
         ),
         target,
@@ -716,7 +775,20 @@ def video_context_schema_sql(project: str, dataset: str) -> str:
         f"ALTER TABLE `{project}.{dataset}.{table}` ADD COLUMN IF NOT EXISTS video_id_source STRING;"
         for table in ["royalty_statement_fact", "royalty_transaction_fact", "royalty_song_level"]
     )
-    return alterations + f"\nCREATE OR REPLACE VIEW `{project}.{dataset}.royalty_report_detail` AS SELECT fact.* FROM `{project}.{dataset}.royalty_statement_fact` AS fact WHERE fact.release_id = (SELECT release_id FROM `{project}.{dataset}.current_release`);"
+    summary_fields = {
+        "royalty_song_level": {"statement_month": "DATE", "dsp": "STRING", "monetization": "STRING",
+                               "content_origin": "STRING", "classification_status": "STRING"},
+        "royalty_dashboard_rankings": {"video_id": "STRING", "video_id_source": "STRING", "channel_id": "STRING"},
+        "royalty_catalog_dashboard": {"video_id": "STRING", "video_id_source": "STRING", "channel_id": "STRING"},
+    }
+    for table, fields in summary_fields.items():
+        statement = f"ALTER TABLE `{project}.{dataset}.{table}` " + ", ".join(
+            f"ADD COLUMN IF NOT EXISTS {name} {dtype}" for name, dtype in fields.items()) + ";"
+        if table == "royalty_catalog_dashboard":
+            statement = (f"IF EXISTS (SELECT 1 FROM `{project}.{dataset}.INFORMATION_SCHEMA.TABLES` "
+                         f"WHERE table_name = '{table}') THEN\n{statement}\nEND IF;")
+        alterations += "\n" + statement
+    return alterations + f"\nCREATE OR REPLACE VIEW `{project}.{dataset}.royalty_report_detail` AS SELECT fact.* FROM `{project}.{dataset}.royalty_statement_fact` AS fact WHERE fact.release_id = (SELECT release_id FROM `{project}.{dataset}.current_release`);" + f"\nCREATE OR REPLACE VIEW `{project}.{dataset}.royalty_dashboard_current` AS SELECT rankings.* FROM `{project}.{dataset}.royalty_dashboard_rankings` AS rankings WHERE rankings.release_id = (SELECT release_id FROM `{project}.{dataset}.current_release`);"
 
 
 def catalog_artist_schema_sql(project: str, dataset: str) -> str:

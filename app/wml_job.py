@@ -126,6 +126,7 @@ def load_bigquery(bucket,folder: Path,summary: dict,package: dict,*,project: str
     # The Job can write only WML; dataset creation belongs to administrative provisioning.
     query(schema[schema.index('CREATE TABLE'):].format(project=project,dataset=dataset,location=location))
     query(loader.detail_context_schema_sql(project,dataset));query(loader.catalog_artist_schema_sql(project,dataset))
+    query(loader.video_context_schema_sql(project,dataset))
     for table in ['royalty_statement_fact','royalty_transaction_fact']:
         query(f"ALTER TABLE `{project}.{dataset}.{table}` "+', '.join(f'ADD COLUMN IF NOT EXISTS {c} {t}' for c,t in WML_CONTEXT.items()))
     release=summary['release_id']

@@ -125,13 +125,14 @@ def standardize(path: Path,file_hash: str) -> tuple[pl.DataFrame,dict]:
          'amount_usd':frame['amount_usd'].sum(),'warner_royalty_usd':frame['wml_reported_royalty_usd'].sum()}
 
 def write_summaries(detail: Path,out: Path) -> None:
-    lf=pl.scan_parquet(detail)
+    from scripts.lib.video_context import preserve_video_context, video_group_keys
+    lf=preserve_video_context(pl.scan_parquet(detail))
     song_keys=['source','account','source_sheet','revenue_basis','asset_isrc','track_id','gpid','catalog_number',
        'catalog_key','track_statement_style','asset_title_statement','release_statement_style','artist_statement_style',
        'asset_artist_statement','transaction_month','statement_period','statement_semester','product_upc','content_type',
        'include_in_cash_view','include_in_catalog_view','include_in_statement_view','possible_internal_transfer','statement_type',
        'product_type','Share Tracks','Share Total Tracks','Tune Title']
-    song=lf.group_by(song_keys).agg(pl.col('amount_usd').sum(),pl.col('units').sum(),pl.len().alias('raw_rows'))
+    song=lf.group_by(video_group_keys(song_keys)).agg(pl.col('amount_usd').sum(),pl.col('units').sum(),pl.len().alias('raw_rows'))
     song.sink_parquet(out/'song_level_all_sources.parquet',compression='zstd')
     join=lambda name:pl.col(name).drop_nulls().unique().sort().str.join(' | ')
     cat=lf.group_by('catalog_key').agg([

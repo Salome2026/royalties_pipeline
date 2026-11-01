@@ -50,11 +50,18 @@ def activate(candidate_uri: str, *, project='vpo-corp-royalties', dataset='royal
     check_base()
     def query(sql):
         return list(bq.query(sql, location='US', job_config=bigquery.QueryJobConfig(
-            maximum_bytes_billed=20_000_000_000)).result())
+            # The administrative transaction reads historic partitions as well
+            # as the candidate. Keep a bounded allowance for that full release.
+            maximum_bytes_billed=150_000_000_000)).result())
     for ddl in [detail_context_schema_sql(project, dataset), video_context_schema_sql(project, dataset), catalog_artist_schema_sql(project, dataset)]:
         query(ddl)
     suffix = re.sub('[^a-zA-Z0-9]', '', release)[-20:].lower()
     stages = {key: f'_stage_video_{key}_{suffix}' for key in candidate['prepared']}
+    existing = query(f"SELECT status, source_manifest_uri FROM `{project}.{dataset}.analytics_releases` WHERE release_id='{release}'")
+    resume = bool(existing)
+    if resume and (len(existing) != 1 or existing[0]['status'] != 'loaded'
+                   or existing[0]['source_manifest_uri'] != f'gs://{bucket.name}/{pointer.name}'):
+        raise RuntimeError('El candidato ya tiene otro estado; no se sobrescribe.')
     fields = {'detail': DETAIL_FIELDS, 'song': SONG_FIELDS, 'catalog': CATALOG_FIELDS,
               'dashboard': DASHBOARD_FIELDS, 'digital': DIGITAL_FIELDS}
     for key, entry in candidate['prepared'].items():
@@ -64,14 +71,19 @@ def activate(candidate_uri: str, *, project='vpo-corp-royalties', dataset='royal
             raise RuntimeError('El candidato preparado no es inmutable.')
         uri = f'gs://{bucket.name}/{blob.name}'
         stage = f'{project}.{dataset}.{stages[key]}'
-        bq.load_table_from_uri(uri, stage, location='US', job_config=bigquery.LoadJobConfig(
-            source_format='PARQUET', write_disposition='WRITE_TRUNCATE')).result()
+        if not resume:
+            options = bigquery.ParquetOptions()
+            options.enable_list_inference = True
+            config = bigquery.LoadJobConfig(source_format='PARQUET', write_disposition='WRITE_TRUNCATE')
+            config.parquet_options = options
+            bq.load_table_from_uri(uri, stage, location='US', job_config=config).result()
         amount = 'total_usd' if key == 'digital' else 'amount_usd'
         checked = query(f'SELECT COUNT(*) n, COALESCE(SUM({amount}),0) amount FROM `{stage}`')[0]
         expected = candidate['expected'][key]
         if checked['n'] != expected['rows'] or abs(checked['amount'] - expected['amount_usd']) > .01:
             raise RuntimeError(f'La etapa {key} no coincide con el candidato.')
-    query(insert_sql(project=project, dataset=dataset, release_id=release,
+    if not resume:
+        query(insert_sql(project=project, dataset=dataset, release_id=release,
                      manifest_generation=base, published_at=manifest['published_at'],
                      manifest_uri=f'gs://{bucket.name}/{pointer.name}', source_files=len(manifest['files']), stages=stages))
     # Exact bidirectional content comparison includes the native video ID/provenance.
@@ -84,6 +96,11 @@ def activate(candidate_uri: str, *, project='vpo-corp-royalties', dataset='royal
             # Validate the loaded facts against the immutable prepared artifact.
             a = f'SELECT {selected} FROM `{project}.{dataset}.{table}` WHERE release_id="{release}"'
             b = f'SELECT {selected} FROM `{project}.{dataset}.{stages[key]}`'
+            if key == 'catalog':
+                # BigQuery set operators reject ARRAY columns. JSON retains the
+                # exact approved aliases/artists and their ordering for this check.
+                a = f'SELECT TO_JSON_STRING(r) payload FROM ({a}) r'
+                b = f'SELECT TO_JSON_STRING(r) payload FROM ({b}) r'
             changed = query(f'SELECT COUNT(*) n FROM (({a} EXCEPT DISTINCT {b}) UNION ALL ({b} EXCEPT DISTINCT {a}))')[0]['n']
             if changed:
                 raise RuntimeError(f'{table} pierde datos del candidato preparado.')
@@ -92,8 +109,9 @@ def activate(candidate_uri: str, *, project='vpo-corp-royalties', dataset='royal
         remote.extend(dict(row) for row in query(aggregate_bigquery_sql(project=project, dataset=dataset,
             release_id=release, period_column=column, period_basis=basis)))
     local = candidate['reconciliation']
-    for row in local:
-        row['period_month'] = date.fromisoformat(row['period_month'])
+    for row in [*local, *remote]:
+        if isinstance(row['period_month'], str):
+            row['period_month'] = date.fromisoformat(row['period_month'])
     run_id = f'video-context-{release}'
     results = reconcile_rows(local_rows=local, bigquery_rows=remote, release_id=release,
                             run_id=run_id, amount_tolerance=.01, units_tolerance=.0001)
@@ -106,6 +124,8 @@ def activate(candidate_uri: str, *, project='vpo-corp-royalties', dataset='royal
         'results': results}, default=str), content_type='application/json', if_generation_match=0)
     # Readers use immutable files from the manifest; canonical aliases remain for older clients.
     for filename, entry in manifest['files'].items():
+        if not entry['object_name'].startswith(f'{prefix}/releases/{release}/'):
+            continue
         bucket.copy_blob(bucket.blob(entry['object_name'], generation=int(entry['generation'])), bucket,
                          new_name=f'{prefix}/{filename}')
     check_base()

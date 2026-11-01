@@ -8707,6 +8707,7 @@ def list_master_contract_models(
 def list_master_contracts(
     keyword: str | None = None,
     status: Literal["all", "open", "closed", "review", "unidentified"] = "all",
+    commercialization: Literal["all", "master", "distribution", "pending"] = "all",
     limit: int = 50,
     offset: int = 0,
     source: str | None = None,
@@ -8723,6 +8724,8 @@ def list_master_contracts(
     if status == "unidentified":
         if is_wml():
             raise HTTPException(status_code=400, detail="Sin identificar corresponde al catálogo habitual.")
+        if commercialization != "all":
+            raise HTTPException(status_code=400, detail="El tipo de contrato se filtra sobre temas identificados.")
         return master_contract_unidentified_income(choices, keyword=keyword or "", source=source,
             account=account, offset=offset, limit=limit)
     catalog = master_contract_catalog(master_contract_associated_income(choices))
@@ -8747,6 +8750,9 @@ def list_master_contracts(
         "asset_isrc", "track_title", "artist_statement", "amount_usd", "isrc_amount_usd", "associated_amount_usd",
         "_contract_first_statement_month", "_contract_last_statement_month", "sources",
     ]).to_dicts()
+    if commercialization != "all":
+        all_rows = [row for row in all_rows
+                    if commercialization in states.get(row["asset_isrc"], {}).get("commercialization_types", ["pending"])]
     summary = {
         "open": sum(not states.get(row["asset_isrc"], {}).get("closed", False) for row in all_rows),
         "closed": sum(states.get(row["asset_isrc"], {}).get("closed", False) for row in all_rows),
@@ -8771,6 +8777,7 @@ def list_master_contracts(
             "first_month": row["_contract_first_statement_month"],
             "last_month": row["_contract_last_statement_month"],
             "sources": row["sources"],
+            "commercialization_types": ["pending"],
             **states.get(row["asset_isrc"], {"closed": False, "future_reports_selected": False, "version": 0}),
             **review_states.get(row["asset_isrc"], {}),
         }
@@ -8785,6 +8792,7 @@ def list_master_contracts(
         "source_accounts": source_accounts,
         "amount_basis": "wml_contractual_base_100" if is_wml() else "dashboard_net_statement_usd",
         "pool_contracts_supported": True,
+        "commercialization_filter_supported": True,
         "reports_effective": False,
     }
 
@@ -9133,52 +9141,14 @@ def put_master_contract(
     return {**saved, "reports_effective": False}
 
 
-def build_royalties_dashboard_summary_mart(
-    standardized_path: Path,
-    refresh_cache: bool = False,
-    *,
-    output_path: Path | None = None,
-    partition_large_input: bool = True,
-) -> Path:
-    from scripts.lib.product_income import current_index, use_product_income, allocation_cache_matches
-    product_index = current_index(standardized_path)
-    target_path = output_path or ROYALTIES_DASHBOARD_SUMMARY_PATH
-    allocation_stamp = target_path.with_suffix(".income.json")
-    allocation_hash = product_index.get("evidence_hash") if product_index else None
-    if (
-        not refresh_cache
-        and target_path.exists()
-        and target_path.stat().st_mtime >= standardized_path.stat().st_mtime
-        and allocation_cache_matches(allocation_stamp,product_index)
-    ):
-        return target_path
-
-    if partition_large_input and standardized_path.stat().st_size > 256 * 1024 * 1024:
-        with use_product_income(product_index):
-            result = build_partitioned_royalties_dashboard_summary_mart(
-                standardized_path=standardized_path, output_path=target_path)
-        allocation_stamp.write_text(json.dumps({"evidence_hash": allocation_hash}), encoding="utf-8")
-        return result
-
-    from scripts.lib.product_income import allocate_income
-    lf = allocate_income(pl.scan_parquet(standardized_path), source_path=standardized_path)
-    schema = lf.collect_schema()
-    columns = set(schema.names())
-    required_store_dimensions = {
-        "dsp_normalized",
-        "monetization_normalized",
-        "content_origin_normalized",
-        "classification_status",
-        "store_report_label",
-    }
-    missing_store_dimensions = sorted(required_store_dimensions - columns)
-    if missing_store_dimensions:
-        raise ValueError(
-            "El mart consolidado no cumple el contrato de Store/DSP normalizado. "
-            f"Faltan: {', '.join(missing_store_dimensions)}"
-        )
-    needed_columns = {
+def royalties_dashboard_input_columns() -> set[str]:
+    from scripts.lib.product_income import SEARCH_FIELDS,MEASURES
+    return {
+        *SEARCH_FIELDS,*MEASURES,
         "_income_origin_search",
+        'catalog_number','Catalogue Number','Catalog Number','ada_account_id','release_statement_style',
+        'product_type','asset_product_type','Asset/Product','Share Total Tracks','Share Tracks','Tune Title',
+        'product_title_statement',
         "source",
         "Fuente",
         "SOURCE",
@@ -9230,6 +9200,14 @@ def build_royalties_dashboard_summary_mart(
         "YOUTUBE VIDEO ID",
         "YouTube Video ID",
         "YouTube Asset ID",
+        "video_id_source",
+        "channel_id",
+        "Channel ID",
+        "ChannelId",
+        "YOUTUBE CHANNEL ID",
+        "DSP Container ID",
+        "Product Reference",
+        "product_reference",
         "ID",
         "Parent ID",
         "track_id",
@@ -9301,6 +9279,51 @@ def build_royalties_dashboard_summary_mart(
         "LABEL",
         "label",
     }
+
+
+def build_royalties_dashboard_summary_mart(
+    standardized_path: Path,
+    refresh_cache: bool = False,
+    *,
+    output_path: Path | None = None,
+    partition_large_input: bool = True,
+) -> Path:
+    from scripts.lib.product_income import current_index,use_product_income,allocation_cache_matches,allocate_income
+    product_index=current_index(standardized_path)
+    target_path = output_path or ROYALTIES_DASHBOARD_SUMMARY_PATH
+    allocation_stamp=target_path.with_suffix('.income.json')
+    allocation_hash=(product_index or {}).get('evidence_hash')
+    if (
+        not refresh_cache
+        and target_path.exists()
+        and target_path.stat().st_mtime >= standardized_path.stat().st_mtime
+        and allocation_cache_matches(allocation_stamp,product_index)
+    ):
+        return target_path
+
+    if partition_large_input and standardized_path.stat().st_size > 256 * 1024 * 1024:
+        with use_product_income(product_index):
+            result=build_partitioned_royalties_dashboard_summary_mart(standardized_path=standardized_path,output_path=target_path)
+        allocation_stamp.write_text(json.dumps({'evidence_hash':allocation_hash}),encoding='utf-8')
+        return result
+
+    lf = allocate_income(pl.scan_parquet(standardized_path),source_path=standardized_path)
+    schema = lf.collect_schema()
+    columns = set(schema.names())
+    required_store_dimensions = {
+        "dsp_normalized",
+        "monetization_normalized",
+        "content_origin_normalized",
+        "classification_status",
+        "store_report_label",
+    }
+    missing_store_dimensions = sorted(required_store_dimensions - columns)
+    if missing_store_dimensions:
+        raise ValueError(
+            "El mart consolidado no cumple el contrato de Store/DSP normalizado. "
+            f"Faltan: {', '.join(missing_store_dimensions)}"
+        )
+    needed_columns = royalties_dashboard_input_columns()
     selected_columns = [column for column in sorted(needed_columns) if column in columns]
     if selected_columns:
         lf = lf.select(selected_columns)
@@ -9417,6 +9440,8 @@ def build_royalties_dashboard_summary_mart(
         if column_name in columns
     ], separator=" ")
     source_sheet = coalesce_text_expr(["source_sheet", "sheet_name", "Sheet", "SHEET"])
+    from scripts.lib.video_context import native_video_exprs, native_channel_expr
+    native_video, native_provenance = native_video_exprs(columns)
     precompact = (
         lf
         .with_columns([
@@ -9431,6 +9456,9 @@ def build_royalties_dashboard_summary_mart(
             isrc.alias("asset_isrc"),
             upc.alias("UPC"),
             coalesce_text_expr(["video_id", "Video ID", "VideoId", "YOUTUBE VIDEO ID", "YouTube Video ID", "YouTube Asset ID", "ID", "Parent ID", "track_id"]).alias("video_id"),
+            native_video.alias("_native_video_id"),
+            native_provenance.alias("_native_video_source"),
+            native_channel_expr(columns).alias("_native_channel_id"),
             *[
                 pl.when(text_expr("source") == "ada").then(non_empty_text_expr(field))
                 .otherwise(pl.lit(None).cast(pl.Utf8)).alias(field)
@@ -9483,6 +9511,9 @@ def build_royalties_dashboard_summary_mart(
             "catalog_number",
             "gpid",
             "ada_account_id",
+            "_native_video_id",
+            "_native_video_source",
+            "_native_channel_id",
         ])
         .agg([
             pl.sum("_dashboard_amount_usd").alias("_dashboard_amount_usd"),
@@ -9504,6 +9535,9 @@ def build_royalties_dashboard_summary_mart(
             "title",
             pl.col("asset_isrc").alias("isrc"),
             pl.col("UPC").alias("upc"),
+            pl.col("_native_video_id").alias("video_id"),
+            pl.col("_native_video_source").alias("video_id_source"),
+            pl.col("_native_channel_id").alias("channel_id"),
             "dsp",
             "territory",
             "sale_type",
@@ -9580,77 +9614,39 @@ def build_partitioned_royalties_dashboard_summary_mart(
     standardized_path: Path,
     output_path: Path,
 ) -> Path:
-    import pyarrow as pa
-    import pyarrow.compute as pc
-    import pyarrow.parquet as pq
+    from tempfile import TemporaryDirectory
 
-    raw_parts_dir = BASE / "staging" / "royalties_dashboard_raw_periods"
-    summary_parts_dir = BASE / "staging" / "royalties_dashboard_compact_periods"
-    temporary_output = output_path.with_name(f"{output_path.name}.tmp")
-
-    for path in [raw_parts_dir, summary_parts_dir]:
-        if path.exists():
-            shutil.rmtree(path)
-        path.mkdir(parents=True, exist_ok=True)
-    if temporary_output.exists():
-        temporary_output.unlink()
-
-    parquet_file = pq.ParquetFile(standardized_path)
-    statement_period_index = parquet_file.schema_arrow.get_field_index("statement_period")
-    if statement_period_index < 0:
+    source = pl.scan_parquet(standardized_path)
+    columns = set(source.collect_schema().names())
+    if "statement_period" not in columns:
         raise ValueError("El mart consolidado no contiene statement_period.")
-
-    writers: dict[str, pq.ParquetWriter] = {}
-    try:
-        for batch in parquet_file.iter_batches(batch_size=100_000):
-            statement_periods = batch.column(statement_period_index)
-            for scalar in pc.unique(statement_periods):
-                if not scalar.is_valid:
-                    continue
-                statement_period = str(scalar.as_py()).strip()
-                if not statement_period:
-                    continue
-                mask = pc.equal(
-                    statement_periods,
-                    pa.scalar(scalar.as_py(), type=statement_periods.type),
-                )
-                table = pa.Table.from_batches([batch]).filter(mask)
-                writer = writers.get(statement_period)
-                if writer is None:
-                    part_path = raw_parts_dir / f"{statement_period}.parquet"
-                    writer = pq.ParquetWriter(part_path, table.schema, compression="zstd")
-                    writers[statement_period] = writer
-                writer.write_table(table)
-    finally:
-        for writer in writers.values():
-            writer.close()
-
-    raw_parts = sorted(raw_parts_dir.rglob("*.parquet"))
-    if not raw_parts:
+    selected = sorted(columns & royalties_dashboard_input_columns())
+    periods = source.select(pl.col("statement_period").cast(pl.String).str.strip_chars()).unique().collect()["statement_period"].drop_nulls().sort().to_list()
+    periods = [period for period in periods if period]
+    if not periods:
         raise ValueError("No se generaron particiones mensuales para el dashboard de regalias.")
-
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_output = output_path.with_name(f"{output_path.name}.tmp")
     try:
-        for index, raw_part in enumerate(raw_parts):
-            summary_part = summary_parts_dir / f"{index:03d}.parquet"
-            build_royalties_dashboard_summary_mart(
-                standardized_path=raw_part,
-                refresh_cache=True,
-                output_path=summary_part,
-                partition_large_input=False,
-            )
-
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        (
-            pl.scan_parquet(summary_parts_dir / "*.parquet")
-            .sink_parquet(temporary_output, compression="zstd", engine="streaming")
-        )
-        temporary_output.replace(output_path)
+        with TemporaryDirectory(prefix="dashboard-periods-", dir=output_path.parent) as directory:
+            root = Path(directory)
+            raw_part = root / "raw.parquet"
+            # One projected month at a time. Holding a ParquetWriter for every
+            # month retains buffers for hundreds of unrelated native columns.
+            for index, period in enumerate(periods):
+                print(json.dumps({"event": "royalties_dashboard_period", "period": period,
+                                  "part": index + 1, "total": len(periods)}), flush=True)
+                source.filter(pl.col("statement_period").cast(pl.String).str.strip_chars() == period).select(selected).sink_parquet(raw_part, compression="zstd", engine="streaming")
+                build_royalties_dashboard_summary_mart(
+                    raw_part, refresh_cache=True, output_path=root / f"summary-{index:03d}.parquet",
+                    partition_large_input=False,
+                )
+                raw_part.unlink()
+            pl.scan_parquet(root / "summary-*.parquet").sink_parquet(temporary_output, compression="zstd", engine="streaming")
+            temporary_output.replace(output_path)
     finally:
-        shutil.rmtree(raw_parts_dir, ignore_errors=True)
-        shutil.rmtree(summary_parts_dir, ignore_errors=True)
         if temporary_output.exists():
             temporary_output.unlink()
-
     return output_path
 
 

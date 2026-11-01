@@ -9,6 +9,8 @@ from google.oauth2.credentials import Credentials as UserCredentials
 from googleapiclient.discovery import build as google_build
 from googleapiclient.errors import HttpError
 
+from scripts.lib.report_presentation import youtube_video_url
+
 
 GOOGLE_API_SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -69,6 +71,26 @@ def dataframe_values(dataframe) -> list[list[object]]:
     return values
 
 
+def video_code_link_request(dataframe, sheet_id: int) -> dict | None:
+    if not {"Codigo", "Tipo codigo"}.issubset(dataframe.columns):
+        return None
+    rows = []
+    has_links = False
+    for code, kind in dataframe[["Codigo", "Tipo codigo"]].itertuples(index=False, name=None):
+        url = youtube_video_url(code, kind)
+        cell = {"userEnteredFormat": {"textFormat": {"link": {"uri": url}}}} if url else {}
+        rows.append({"values": [cell]})
+        has_links |= url is not None
+    if not has_links:
+        return None
+    return {"updateCells": {
+        "start": {"sheetId": sheet_id, "rowIndex": 1,
+                  "columnIndex": list(dataframe.columns).index("Codigo")},
+        "rows": rows,
+        "fields": "userEnteredFormat.textFormat.link",
+    }}
+
+
 def sheet_title(keywords: list[str], start_month: str | None, end_month: str | None) -> str:
     keyword_part = " ".join(keywords)[:60] or "keyword"
     period_part = ""
@@ -109,13 +131,15 @@ def column_width(column_name: str, dataframe) -> int:
     elif lower_name in {"unidades", "filas", "filas song level", "filas raw"}:
         max_width = 120
         min_width = 95
+    elif lower_name == "tipo de contenido":
+        max_width = 220
+        min_width = 100
     elif lower_name in {
         "desde",
         "hasta",
         "mes",
         "fuente",
         "cuenta",
-        "tipo de contenido",
         "isrc",
     }:
         max_width = 150
@@ -249,6 +273,10 @@ def create_google_sheet(
         sheet_id = sheet_id_by_title[sheet_name]
         column_count = max(1, len(dataframe.columns))
         row_count = max(1, len(dataframe.index) + 1)
+        if sheet_name == "resumen por tema":
+            video_links = video_code_link_request(dataframe, sheet_id)
+            if video_links:
+                requests.append(video_links)
         requests.extend(
             [
                 {

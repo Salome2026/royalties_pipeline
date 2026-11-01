@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import date
 from functools import lru_cache
 import json
 from typing import Any
@@ -11,6 +12,68 @@ from google.cloud import bigquery
 from app.bigquery_dashboard import DEFAULT_DATASET, DEFAULT_LOCATION, DEFAULT_PROJECT, dashboard_client
 from app.master_contract_associations import association_key, candidates
 from app.operational_db import is_postgres_connection
+
+
+STATEMENT_WINDOW = "/* contract_statement_window */"
+
+
+def _billing_limit(exc):
+    return (any(item.get("reason") == "bytesBilledLimitExceeded" for item in getattr(exc, "errors", []) or [])
+            or "Query exceeded limit for bytes billed:" in str(exc))
+
+
+def _statement_rows(client, config, sql, *, alias="", include_undated=False):
+    """Fall back to disjoint partitions without increasing the query budget."""
+    from google.api_core.exceptions import GoogleAPICallError
+
+    def read(predicate="", start=None, end=None):
+        scoped = bigquery.QueryJobConfig.from_api_repr(config.to_api_repr())
+        if start is not None:
+            scoped.query_parameters = [*scoped.query_parameters,
+                bigquery.ScalarQueryParameter("window_start", "DATE", start),
+                bigquery.ScalarQueryParameter("window_end", "DATE", end)]
+        return [dict(row) for row in client.query(sql.replace(STATEMENT_WINDOW, predicate),
+            job_config=scoped, location=DEFAULT_LOCATION).result(timeout=60)]
+
+    try:
+        return read()
+    except GoogleAPICallError as exc:
+        if not _billing_limit(exc):
+            raise
+    prefix = f"{DEFAULT_PROJECT}.{DEFAULT_DATASET}"
+    months = [row["month"] for row in client.query(f"""
+        SELECT DISTINCT DATE_TRUNC(statement_month, MONTH) AS month
+        FROM `{prefix}.royalty_statement_fact` WHERE release_id=@release_id
+          AND statement_month IS NOT NULL ORDER BY month
+        """, job_config=config, location=DEFAULT_LOCATION).result(timeout=60)]
+    column = (alias + "." if alias else "") + "statement_month"
+    predicate = f"AND {column} >= @window_start AND {column} < @window_end"
+    rows = []
+    for year in sorted({month.year for month in months}):
+        try:
+            rows.extend(read(predicate, date(year, 1, 1), date(year + 1, 1, 1)))
+        except GoogleAPICallError as exc:
+            if not _billing_limit(exc):
+                raise
+            for month in (value for value in months if value.year == year):
+                end = date(month.year + (month.month == 12), month.month % 12 + 1, 1)
+                rows.extend(read(predicate, month, end))
+    if include_undated:
+        rows.extend(read(f"AND {column} IS NULL"))
+    return rows
+
+
+def _merge_statement_evidence(rows):
+    merged = {}
+    for row in rows:
+        key = tuple(row[name] for name in ("kind", "code", "source", "account"))
+        item = merged.setdefault(key, {**row, "isrcs": set(), "titles": set(), "artists": set(),
+                                       "native_ada_product": False})
+        for name in ("isrcs", "titles", "artists"):
+            item[name].update(row.get(name) or [])
+        item["native_ada_product"] |= bool(row.get("native_ada_product"))
+    return [{**item, **{name: sorted(item[name]) for name in ("isrcs", "titles", "artists")}}
+            for _, item in sorted(merged.items())]
 
 
 @lru_cache(maxsize=2)
@@ -33,13 +96,14 @@ def published_unassigned_income(release_id: str) -> tuple[list[dict], list[dict]
     FROM `{prefix}.royalty_statement_fact`
     WHERE release_id = @release_id AND COALESCE(asset_isrc, '') = ''
       AND statement_month IS NOT NULL
+      {STATEMENT_WINDOW}
     GROUP BY source, account, source_sheet, revenue_basis, artist, title, asset_isrc,
       product_upc, video_id, track_id, catalog_number, statement_period
     """
-    rows = [dict(row) for row in client.query(sql, job_config=config, location=DEFAULT_LOCATION).result(timeout=60)]
+    rows = _statement_rows(client, config, sql)
     sql = f"""
     WITH facts AS (
-      SELECT source, account, asset_isrc, product_upc, video_id, track_id, catalog_number, title, artist
+      SELECT source, account, asset_isrc, product_upc, video_id, track_id, catalog_number, title, artist, statement_month
       FROM `{prefix}.royalty_statement_fact` WHERE release_id = @release_id
     ), codes AS (
       SELECT f.*, c.kind, c.value,
@@ -61,9 +125,12 @@ def published_unassigned_income(release_id: str) -> tuple[list[dict], list[dict]
       LOGICAL_OR(c.source = 'ada' AND COALESCE(c.asset_isrc, '') = ''
         AND COALESCE(c.catalog_number, '') != '') AS native_ada_product
     FROM codes c JOIN seeds s USING (kind, value, scope_source, scope_account)
+    WHERE TRUE {STATEMENT_WINDOW}
     GROUP BY c.kind, c.value, c.source, c.account
     """
-    evidence = [dict(row) for row in client.query(sql, job_config=config, location=DEFAULT_LOCATION).result(timeout=60)]
+    # Seeds intentionally remain global: a code without ISRC in one month can
+    # identify an ISRC-bearing sale in a different month (including undated rows).
+    evidence = _merge_statement_evidence(_statement_rows(client, config, sql, alias="c", include_undated=True))
     return rows, evidence
 
 

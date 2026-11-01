@@ -9,6 +9,7 @@ import polars as pl
 
 from .catalog_manual_metadata import CORRECTIONS_PATH
 from .catalog_artist_dictionary import canonical
+from .catalog_artist_evidence import assert_other_sources_preserved, records, replace_source
 
 
 RULE_VERSION = "FUGA-ARTISTS-2"
@@ -158,8 +159,8 @@ def enrich_fuga_catalog(
     for row in catalog.to_dicts():
         entity = evidence.get(row.get("asset_isrc"))
         if not entity:
-            for entries in values.values():
-                entries.append(None)
+            for name, entries in values.items():
+                entries.append(row.get(name))
             continue
         resolved = {}
         for name in entity["artists"].values():
@@ -168,7 +169,11 @@ def enrich_fuga_catalog(
         artists = list(resolved.values())
         # A source-specific list must not erase names already shared by another distributor.
         original = str(row.get("artist_statement") or "")
-        album_only = {name_key(name) for entry in entity["evidence"] if entry["field"] == "Product Artist" for name in entry["artists"]} - set(entity["artists"])
+        other_track_artists = {name_key(name) for entry in records(row.get("catalog_artist_evidence"))
+                               if entry.get("source") != "fuga" and entry.get("used_for_catalog")
+                               for name in entry.get("artists") or []}
+        album_only = ({name_key(name) for entry in entity["evidence"] if entry["field"] == "Product Artist" for name in entry["artists"]}
+                      - set(entity["artists"]) - other_track_artists)
         previous = [aliases.get((row["asset_isrc"], name_key(name)), name) for name in [*parse_catalog_credit(original), *(row.get("catalog_artists") or [])]
                     if name_key(name) not in album_only]
         correction = artist_corrections.get(row.get("catalog_key"))
@@ -182,9 +187,13 @@ def enrich_fuga_catalog(
                     seen.add(name_key(name))
         values["catalog_artists"].append(artists)
         values["catalog_artist_statement"].append(" / ".join(artists) or original or None)
-        values["catalog_artist_evidence"].append(json.dumps(entity["evidence"], ensure_ascii=False, sort_keys=True))
-        values["catalog_artist_rule"].append(RULE_VERSION)
-    return catalog.with_columns([pl.Series(name, values[name], dtype=dtype) for name, dtype in ARTIST_COLUMNS.items()])
+        values["catalog_artist_evidence"].append(replace_source(row.get("catalog_artist_evidence"), "fuga", entity["evidence"]))
+        rules = [rule for rule in str(row.get("catalog_artist_rule") or "").split(" | ")
+                 if rule and not rule.startswith("FUGA-ARTISTS-")]
+        values["catalog_artist_rule"].append(" | ".join(dict.fromkeys([RULE_VERSION, *rules])))
+    result = catalog.with_columns([pl.Series(name, values[name], dtype=dtype) for name, dtype in ARTIST_COLUMNS.items()])
+    assert_other_sources_preserved(catalog, result, "fuga")
+    return result
 
 
 def enrich_fuga_catalog_file(catalog: pl.DataFrame, raw_path: Path) -> pl.DataFrame:

@@ -9,6 +9,18 @@ actuales.
 
 ## Controles
 
+Desde la conservacion de contexto de video de noviembre de 2026, los rankings
+base y la tabla actualizada por catalogo incluyen `video_id`, `channel_id` y
+`video_id_source`. Son identificadores nativos validados. Las claves anteriores
+de admision y las dimensiones que muestra la pantalla permanecen iguales.
+Los agregados por tema conservan ademas `statement_month`, DSP, monetizacion,
+origen y estado de clasificacion, separados del mes de consumo.
+La ampliacion del schema es aditiva; los historiales se preparan desde los
+objetos publicados e inmutables y solo se activan despues de conciliar dinero,
+unidades y filas economicas por fuente, cuenta, fecha y origen. El catalogo y las
+asociaciones humanas se mantienen. Las clasificaciones existentes no se vuelven
+a inferir como parte de esta reparacion de columnas.
+
 - `VPO_ROYALTIES_DASHBOARD_BACKEND=parquet|bigquery` elige el motor.
 - `VPO_ROYALTIES_DASHBOARD_BIGQUERY_FALLBACK=1` vuelve automaticamente a
   Parquet si BigQuery falla.

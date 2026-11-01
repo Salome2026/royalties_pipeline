@@ -566,18 +566,31 @@ def read_split(conn: Any, isrc: str) -> dict[str, Any] | None:
     }
 
 
+def contract_commercializations(split: dict[str, Any]) -> list[str]:
+    agreements = split.get("agreements") or []
+    if agreements:
+        kinds = {agreement.get("commercialization") for agreement in agreements}
+    else:
+        legacy = split.get("master_type")
+        kinds = ({"master"} if legacy in {"indyana_master", "mawz_master", "indyana_and_other", "mawz_and_other"}
+                 else {"distribution"} if legacy in {"distribution", "distribution_mawz"} else set())
+    return [kind for kind in ("master", "distribution") if kind in kinds] or ["pending"]
+
+
 def read_split_statuses(conn: Any) -> dict[str, dict[str, Any]]:
     from app.royalty_scope import is_wml
     if is_wml():
         from app.royalty_workspace_store import records
         return {key:{'closed':r['payload'].get('closed',False),'future_reports_selected':r['payload'].get('future_reports_selected',False),
+            'commercialization_types':contract_commercializations(r['payload'].get('split',{})),
             'version':r['version'],'updated_at':r['updated_at']} for key,r in records('master_split',conn=conn).items()}
     ensure_sqlite_tables(conn)
     rows = conn.execute(
-        "SELECT isrc, is_closed, future_reports_selected, version, updated_at FROM master_contract_splits"
+        "SELECT isrc, payload_json, is_closed, future_reports_selected, version, updated_at FROM master_contract_splits"
     ).fetchall()
     return {
         row["isrc"]: {
+            "commercialization_types": contract_commercializations(json.loads(row["payload_json"])),
             "closed": bool(row["is_closed"]),
             "future_reports_selected": bool(row["future_reports_selected"]),
             "version": int(row["version"]),
