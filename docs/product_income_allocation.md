@@ -36,6 +36,8 @@ Para archivos grandes, la vista localiza las posiciones candidatas leyendo únic
 
 El reporte prepara además su selección temporal por keyword en bloques de 65.536 filas: aplica primero la distribución, busca también por tema/ISRC de destino y conserva todos los campos y el orden de la vista. Escribe grupos Parquet pequeños antes de los resúmenes y contratos. La marca interna evita repartir nuevamente esas filas. El temporal se elimina al terminar y no modifica los archivos publicados ni el formato del Excel. Versiones congeladas sin evidencia mantienen los ingresos nativos.
 
+En esa selección, la búsqueda evalúa los textos distintos de cada bloque y recupera sus filas por igualdad. Conserva el mismo predicado de tildes, espacios, guiones, palabras combinadas y códigos exclusivos de ADA; evita normalizar repetidamente el mismo título en cada venta. Los datos y sus formatos se conservan.
+
 La actualización de importes del catálogo se aplica a un catálogo recién reconstruido desde el resumen nativo; su marca de revisión evita aplicarla dos veces. No se aplica una versión diferente sobre un catálogo ya distribuido.
 
 La inferencia antigua por un único ISRC observado no absorbe los productos nativos. En la versión con esta regla, esos productos conservan su referencia propia y los UPC pendientes o multipista no generan una equivalencia a una sola grabación. Un sencillo con composición completa validada sí conserva su equivalencia exacta al ISRC.

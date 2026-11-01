@@ -338,6 +338,34 @@ def existing_columns(path: Path) -> set[str]:
     return set(scan_income(path).collect_schema().names())
 
 
+def filter_report_keyword_values(frame: pl.DataFrame,keywords: list[str],mode: str) -> pl.DataFrame:
+    """Apply the existing search to distinct values, avoiding repeated text normalization."""
+    if not keywords or frame.is_empty():return frame
+    columns=set(frame.columns)
+    ordinary=[name for name in SEARCH_COLUMNS_STANDARDIZED if name in columns]
+    scoped=[name for name in ['catalog_number','gpid','Catalog Number','Catalogue Number','GPID'] if name in columns]
+    ada=frame.select(ada_source_expr(columns).fill_null(False)).to_series() if scoped else None
+    cache={}
+    result=None
+    for keyword in keywords:
+        mask=pl.Series('_match',[False]*frame.height,dtype=pl.Boolean)
+        for name in [*ordinary,*scoped]:
+            if name not in cache:
+                values=frame[name].cast(pl.String,strict=False).fill_null('')
+                cache[name]=(values,values.unique().to_frame('_value'))
+            values,unique=cache[name]
+            matches=unique.filter(contains_search_expr(pl.col('_value'),keyword))['_value']
+            if matches.is_empty():continue
+            found=values.is_in(matches.implode())
+            if name in scoped and name not in ordinary:found=found & ada
+            mask=mask | found
+            if mask.all():break
+        result=mask if result is None else (result & mask if mode=='all' else result | mask)
+        if mode=='all' and not result.any():return frame.head(0)
+        if mode!='all' and result.all():return frame
+    return frame.filter(result)
+
+
 def prepare_keyword_source(source: Path, output: Path, keywords: list[str], mode: str, *, batch_size: int = 65536) -> Path:
     """Materialize a bounded, already allocated selection for the report job only."""
     import pyarrow.parquet as pq
@@ -353,7 +381,6 @@ def prepare_keyword_source(source: Path, output: Path, keywords: list[str], mode
             '_income_product_pending':pl.Boolean,'_income_upc_pending':pl.Boolean,
             '_income_origin_search':pl.String,'_income_original_isrc':pl.String})
     schema['_income_allocated']=pl.Boolean
-    match=build_filter(set(schema),SEARCH_COLUMNS_STANDARDIZED,keywords,mode)
     output.parent.mkdir(parents=True,exist_ok=True)
     paths=[output.with_name(output.stem+'.native.parquet'),output.with_name(output.stem+'.products.parquet')]
     writers=[None,None]
@@ -362,7 +389,7 @@ def prepare_keyword_source(source: Path, output: Path, keywords: list[str], mode
             original=pl.from_arrow(batch)
             frame=allocate_income(original.lazy(),index).collect(engine='streaming') if index is not None else original
             missing=[pl.lit(None,dtype=dtype).alias(name) for name,dtype in schema.items() if name not in frame.columns]
-            frame=frame.with_columns(missing).select(list(schema)).cast(schema,strict=False).filter(match)
+            frame=filter_report_keyword_values(frame.with_columns(missing).select(list(schema)),keywords,mode).cast(schema,strict=False)
             candidate=pl.col('_income_allocated').is_not_null()
             for part,condition in enumerate([~candidate,candidate]):
                 selected=frame.filter(condition)

@@ -98,6 +98,17 @@ class AllocationTests(unittest.TestCase):
             self.assertAlmostEqual(actual['amount_usd'][0],1.89)
             self.assertNotIn('_income_origin_search',actual.columns)
 
+    def test_distinct_value_search_preserves_accents_nulls_compaction_and_ada_scope(self):
+        from build_keyword_royalty_report import filter_report_keyword_values,build_filter,SEARCH_COLUMNS_STANDARDIZED
+        frame=pl.DataFrame([{'source':source,'track_statement_style':title,'artist_statement_style':artist,
+            'catalog_number':'CÓDIGO_1','_income_origin_search':origin} for source,title,artist,origin in [
+                ('ada','Tema-Feliz','Candú',None),('fuga','Otro tema','G Sony','La Juntada'),
+                ('ada',None,None,None),('fuga','Tema-Feliz','Candú',None)]])
+        for keywords in [['candu'],['tema feliz'],['CODIGO1'],['la juntada','g sony'],[''],[],['absent']]:
+            for mode in ['all','any']:
+                expected=frame.filter(build_filter(set(frame.columns),SEARCH_COLUMNS_STANDARDIZED,keywords,mode))
+                self.assertTrue(filter_report_keyword_values(frame,keywords,mode).equals(expected),(keywords,mode))
+
     def test_multiple_positions_of_same_recording_use_positions_not_distinct_isrcs(self):
         doc=index();doc['products']['UPC:08718521191726']['tracks'][1]['isrc']='BK4DA2632806'
         out=allocate_income(pl.DataFrame([sale()]).lazy(),doc).collect()
