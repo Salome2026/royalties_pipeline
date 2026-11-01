@@ -143,6 +143,10 @@ def consolidate_associated_income(
     choices: dict[str, list[dict]], claims: dict[str, str], cutoff: str,
 ) -> dict[str, dict]:
     index = income_association_index(evidence, aliases, choices, claims)
+    from scripts.lib.product_income import allocate_income_rows
+    # Validated product income is already in the shared dashboard baseline.
+    # Allocated rows carry an ISRC and cannot also enter the additional-income path.
+    rows = allocate_income_rows(rows)
     months: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     breakdown: dict[str, dict[tuple, float]] = defaultdict(lambda: defaultdict(float))
     for row in rows:

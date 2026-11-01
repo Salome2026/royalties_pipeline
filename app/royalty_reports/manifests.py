@@ -50,6 +50,9 @@ def build_gcs_input_manifest(
         release_files = release_document.get("files")
         if not isinstance(release_files, dict):
             raise RuntimeError("El manifiesto de publicacion no contiene archivos.")
+        # Allocation evidence must come from this immutable release, never a newer canonical object.
+        if "product_income_allocations.json" in release_files:
+            expected = list(dict.fromkeys([*expected, "product_income_allocations.json"]))
         for filename in expected:
             if filename == "catalog_status.parquet" and release_document.get('royalty_scope') != 'wml':
                 continue
@@ -74,6 +77,8 @@ def build_gcs_input_manifest(
     for filename in expected:
         if filename in objects:
             continue
+        if filename == 'product_income_allocations.json' and release_document is not None:
+            raise RuntimeError('La evidencia de productos no pertenece a la versión publicada del reporte.')
         blob = bucket.blob(gcs_object_name(prefix, filename))
         try:
             blob.reload(client=client)

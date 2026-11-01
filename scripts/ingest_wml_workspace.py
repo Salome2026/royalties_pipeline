@@ -15,7 +15,7 @@ from app.royalty_scope import WML_FILES
 from scripts.lib.store_taxonomy import add_store_dimensions
 from scripts.lib.wml_references import build_references, REFERENCE_VERSION
 
-INGEST_VERSION='wml-91230-base100-v1'
+INGEST_VERSION='wml-91230-base100-product-income-v2'
 DEFAULT_ROOT=ROOT/'warehouse/isolated/wml'
 
 def sha256(path: Path) -> str:
@@ -129,7 +129,8 @@ def write_summaries(detail: Path,out: Path) -> None:
     song_keys=['source','account','source_sheet','revenue_basis','asset_isrc','track_id','gpid','catalog_number',
        'catalog_key','track_statement_style','asset_title_statement','release_statement_style','artist_statement_style',
        'asset_artist_statement','transaction_month','statement_period','statement_semester','product_upc','content_type',
-       'include_in_cash_view','include_in_catalog_view','include_in_statement_view','possible_internal_transfer','statement_type']
+       'include_in_cash_view','include_in_catalog_view','include_in_statement_view','possible_internal_transfer','statement_type',
+       'product_type','Share Tracks','Share Total Tracks','Tune Title']
     song=lf.group_by(song_keys).agg(pl.col('amount_usd').sum(),pl.col('units').sum(),pl.len().alias('raw_rows'))
     song.sink_parquet(out/'song_level_all_sources.parquet',compression='zstd')
     join=lambda name:pl.col(name).drop_nulls().unique().sort().str.join(' | ')
@@ -149,14 +150,20 @@ def write_summaries(detail: Path,out: Path) -> None:
         pl.concat_list('catalog_key').alias('catalog_aliases'),pl.lit('[]').alias('video_relationships_json'),
     ])
     cat.sink_parquet(out/'catalog_master.parquet',compression='zstd')
+    from scripts.lib.product_income import align_catalog_income,allocate_income
+    align_catalog_income(pl.read_parquet(out/'catalog_master.parquet'),detail).write_parquet(out/'catalog_master.parquet',compression='zstd')
     pl.DataFrame(schema={'catalog_key':pl.String,'active':pl.Boolean,'include_in_reports':pl.Boolean,
        'catalog_business_status':pl.String,'status_notes':pl.String,'label_normalized_override':pl.String,'updated_at':pl.String}).write_parquet(out/'catalog_status.parquet')
     lf.group_by(['source','account','artist_statement_style','statement_period']).agg([
         pl.col('amount_usd').sum().alias('total'),pl.lit(False).alias('has_share_in_out')
     ]).rename({'artist_statement_style':'artist'}).with_columns(pl.lit('artist_total').alias('row_type'),pl.lit(None,dtype=pl.Float64).alias('total_eur')).sink_parquet(out/'statement_summary_all_sources.parquet')
-    base=lf.with_columns([
+    resolved=allocate_income(lf)
+    resolved_cols=set(resolved.collect_schema().names())
+    search=['artist_statement_style','track_statement_style','asset_isrc']
+    if '_income_origin_search' in resolved_cols:search.append('_income_origin_search')
+    base=resolved.with_columns([
         pl.col('artist_statement_style').alias('artist'),pl.col('track_statement_style').alias('title'),
-        pl.concat_str(['artist_statement_style','track_statement_style','asset_isrc'],separator=' ',ignore_nulls=True).str.to_lowercase().alias('search_text'),
+        pl.concat_str(search,separator=' ',ignore_nulls=True).str.to_lowercase().alias('search_text'),
     ])
     base.group_by(['statement_period','source','account','artist','title','search_text']).agg([
         pl.col('amount_usd').sum().alias('total_usd'),pl.lit(0.0).alias('total_eur'),pl.lit(False).alias('has_share_in_out'),pl.len().alias('raw_rows')
@@ -194,7 +201,14 @@ def ingest(input_root: Path,output_root: Path) -> dict:
         print(f"Validated {file['file']}: {summary['rows']} rows",flush=True)
     detail=output/'standardized_raw_all_sources.parquet'
     pl.concat([pl.scan_parquet(p) for p in parts],how='diagonal_relaxed').sink_parquet(detail,compression='zstd')
-    write_summaries(detail,output)
+    from scripts.build_product_income_allocations import build as build_product_income
+    from scripts.lib.product_income import FILE,use_product_income
+    from app.royalty_scope import use_scope
+    product_index=build_product_income(detail,output/'catalog_master.parquet',output/FILE,
+        lookup_cache=ROOT/'warehouse/registry/catalog_release_lookup_cache.parquet',
+        metadata_cache=output_root/'product_income_metadata.json',scope='wml')
+    with use_scope('wml'),use_product_income(product_index):
+        write_summaries(detail,output)
     build_references(detail,input_root,output/'wml_isrc_references.parquet')
     manifest={'scope':'wml','account':'91230','enabled_by_default':False,'release_id':release,'fingerprint':fingerprint,
         'ingest_version':INGEST_VERSION,'reference_version':REFERENCE_VERSION,'created_at':datetime.now(timezone.utc).isoformat(),

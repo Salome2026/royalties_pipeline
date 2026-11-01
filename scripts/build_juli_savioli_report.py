@@ -8,6 +8,10 @@ from pathlib import Path
 
 import pandas as pd
 import polars as pl
+try:
+    from lib.product_income import scan_income
+except ModuleNotFoundError:
+    from scripts.lib.product_income import scan_income
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -327,7 +331,7 @@ def classified_rows(end_month: str) -> pl.DataFrame:
     if not SONG_LEVEL_PATH.exists():
         raise FileNotFoundError(f"No existe {SONG_LEVEL_PATH}")
 
-    lf = ensure_store_dimensions(pl.scan_parquet(SONG_LEVEL_PATH))
+    lf = ensure_store_dimensions(scan_income(SONG_LEVEL_PATH))
     schema = lf.collect_schema()
     schema_dict = {name: dtype for name, dtype in zip(schema.names(), schema.dtypes())}
     schema_names = set(schema.names())
@@ -545,7 +549,7 @@ def raw_country_dsp_rows(
         for value in reportable_assets.get("ISRC", pd.Series(dtype=object)).dropna().to_list()
         if str(value).strip()
     }
-    lf = ensure_store_dimensions(pl.scan_parquet(RAW_ALL_PATH))
+    lf = ensure_store_dimensions(scan_income(RAW_ALL_PATH))
     schema = lf.collect_schema()
     schema_dict = {name: dtype for name, dtype in zip(schema.names(), schema.dtypes())}
     schema_names = set(schema.names())
@@ -554,7 +558,9 @@ def raw_country_dsp_rows(
         col
         for col in [
             "artist_statement_style",
+            "_income_origin_search",
             "artist_name_statement",
+            "_income_origin_search",
             "track_artist_statement",
             "asset_artist_statement",
             "Product Artist",

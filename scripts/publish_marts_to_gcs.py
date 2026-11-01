@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,6 +18,7 @@ MARTS_DIR = BASE / "warehouse" / "marts"
 ENV_PATH = BASE / ".env"
 
 DEFAULT_FILES = [
+    "product_income_allocations.json",
     "standardized_raw_all_sources.parquet",
     "song_level_all_sources.parquet",
     "catalog_master.parquet",
@@ -158,6 +160,11 @@ def main() -> None:
     credentials_path = Path(args.credentials) if args.credentials else Path("(not configured)")
     if args.apply and not credentials_path.exists():
         parser.error(f"No existe credentials JSON: {credentials_path}")
+
+    if args.apply and args.only is None:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from app.vpo_corp_api import prepare_analytics_package_for_publish
+        prepare_analytics_package_for_publish()
 
     uploads = collect_uploads(args.prefix or "", args.only)
 

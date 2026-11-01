@@ -6,6 +6,10 @@ from pathlib import Path
 import pandas as pd
 import polars as pl
 try:
+    from lib.product_income import scan_income
+except ModuleNotFoundError:
+    from scripts.lib.product_income import scan_income
+try:
     from lib.video_context import source_units_expr, preserve_video_context, separate_channel_video_expr
 except ModuleNotFoundError:
     from scripts.lib.video_context import source_units_expr, preserve_video_context, separate_channel_video_expr
@@ -37,6 +41,7 @@ STANDARDIZED_PATH = MARTS / "standardized_raw_all_sources.parquet"
 
 
 SEARCH_COLUMNS_SONG = [
+    "_income_origin_search",
     "asset_isrc",
     "track_statement_style",
     "asset_title_statement",
@@ -51,6 +56,7 @@ SEARCH_COLUMNS_SONG = [
 ]
 
 SEARCH_COLUMNS_STANDARDIZED = [
+    "_income_origin_search",
     "asset_isrc",
     "ISRC",
     "Track Title",
@@ -325,7 +331,7 @@ def prompt_keywords() -> list[str]:
 
 
 def existing_columns(path: Path) -> set[str]:
-    return set(pl.scan_parquet(path).collect_schema().names())
+    return set(scan_income(path).collect_schema().names())
 
 
 def normalize_isrcs(raw_isrcs: list[str] | None) -> list[str]:
@@ -996,7 +1002,7 @@ def build_filtered_raw_detail_lf(
                         add_period_filter(
                             add_match_text(
                                 add_source_account_filter(
-                                    pl.scan_parquet(standardized_path),
+                                    scan_income(standardized_path),
                                     columns,
                                     source,
                                     account,
@@ -1340,7 +1346,7 @@ def build_report_tables(
                         normalize_report_units(
                             add_period_filter(
                                 add_source_account_filter(
-                                    pl.scan_parquet(standardized_path),
+                                    scan_income(standardized_path),
                                     standardized_cols,
                                     source,
                                     account,
@@ -1531,7 +1537,7 @@ def build_report_tables(
                     add_period_filter(
                         add_match_text(
                             add_source_account_filter(
-                                pl.scan_parquet(song_path),
+                                scan_income(song_path),
                                 song_cols,
                                 source,
                                 account,
@@ -1605,7 +1611,7 @@ def build_report_tables(
                             add_period_filter(
                                 add_match_text(
                                     add_source_account_filter(
-                                        pl.scan_parquet(standardized_path),
+                                        scan_income(standardized_path),
                                         raw_cols,
                                         source,
                                         account,

@@ -15,9 +15,9 @@ def main():
 
     print("Cargando standardized DashGo...")
 
-    df = pl.read_parquet(INPUT_PATH)
+    df = pl.scan_parquet(INPUT_PATH)
 
-    print(f"Filas input: {df.height}")
+    print(f"Filas input: {df.select(pl.len()).collect().item()}")
 
     # =========================
     # FILTRAR
@@ -36,7 +36,7 @@ def main():
         pl.lit(False).alias("possible_internal_transfer"),
     ])
 
-    input_columns = set(df.columns)
+    input_columns = set(df.collect_schema().names())
 
     df = df.with_columns(
         first_valid_isrc_expr(input_columns, ["asset_isrc", "ISRC"]).alias("asset_isrc")
@@ -66,6 +66,8 @@ def main():
             "include_in_statement_view",
             "possible_internal_transfer",
             "asset_isrc",
+            "product_upc",
+            "product_type",
             "track_id",
             "track_statement_style",
             "artist_statement_style",
@@ -88,6 +90,7 @@ def main():
         .alias("content_type")
     ])
 
+    song_level = song_level.collect(engine='streaming')
     print(f"Filas song level: {song_level.height}")
 
     # =========================

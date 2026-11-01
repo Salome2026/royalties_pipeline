@@ -14,6 +14,7 @@ WML_ACCOUNT = '91230'
 WML_LABEL = 'WML — base contractual al 100%'
 WML_PREFIX = 'marts/wml'
 WML_DATASET = 'royalties_wml'
+WML_OPTIONAL_FILES = ('product_income_allocations.json',)
 WML_FILES = (
     'standardized_raw_all_sources.parquet', 'song_level_all_sources.parquet',
     'catalog_master.parquet', 'statement_summary_all_sources.parquet',

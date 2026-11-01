@@ -28,6 +28,7 @@ DEFAULT_SONG_PATH = MARTS / "song_level_all_sources.parquet"
 
 
 SEARCH_COLUMNS_RAW = [
+    "_income_origin_search",
     "track_statement_style",
     "asset_title_statement",
     "artist_statement_style",
@@ -47,6 +48,7 @@ SEARCH_COLUMNS_RAW = [
 ]
 
 SEARCH_COLUMNS_SONG = [
+    "_income_origin_search",
     "asset_title_statement",
     "track_statement_style",
     "asset_artist_statement",
@@ -419,8 +421,12 @@ def build_dataset(
     sources: list[str] | None,
     source_accounts: list[dict[str, Any]] | None,
 ) -> pl.DataFrame:
-    columns = set(pl.scan_parquet(path).collect_schema().names())
-    lf = pl.scan_parquet(path)
+    try:
+        from lib.product_income import scan_income
+    except ModuleNotFoundError:
+        from scripts.lib.product_income import scan_income
+    lf = scan_income(path)
+    columns = set(lf.collect_schema().names())
     lf = apply_source_filter(
         apply_statement_filter(lf, columns, start_month, end_month),
         columns,

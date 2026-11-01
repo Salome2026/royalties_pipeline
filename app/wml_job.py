@@ -10,7 +10,7 @@ import polars as pl
 from google.api_core.exceptions import NotFound,PreconditionFailed
 from google.cloud import bigquery,storage
 from app.operational_db import close_operational_db_pool
-from app.royalty_scope import WML_FILES,WML_DATASET,wml_release_prefix
+from app.royalty_scope import WML_FILES,WML_OPTIONAL_FILES,WML_DATASET,wml_release_prefix
 from app.royalty_workspace_store import settings,merge_config
 from app.wml_cloud import input_manifest
 from scripts.ingest_wml_workspace import ingest,sha256
@@ -61,7 +61,7 @@ def publish_package(bucket,folder: Path,summary: dict) -> dict:
         return old | {'manifest_generation':str(manifest_blob.generation),'manifest_object_name':manifest_blob.name}
     except NotFound:pass
     entries={}
-    for name in [*WML_FILES,'wml_manifest.json']:
+    for name in [*WML_FILES,*[n for n in WML_OPTIONAL_FILES if (folder/n).exists()],'wml_manifest.json']:
         blob=immutable_upload(bucket,prefix+'/files/'+sha256(folder/name)+'/'+name,folder/name)
         entries[name]={'object_name':blob.name,'generation':str(blob.generation),'size_bytes':int(blob.size),
                        'md5_hash':blob.md5_hash,'crc32c':blob.crc32c}
@@ -198,7 +198,7 @@ def main() -> None:
                 from scripts.lib.mart_release import validate_release_manifest
                 validate_release_manifest(existing,[*WML_FILES,'wml_manifest.json'])
                 folder=root/'published';folder.mkdir()
-                for name in [*WML_FILES,'wml_manifest.json']:
+                for name in [*WML_FILES,*[n for n in WML_OPTIONAL_FILES if n in existing['files']],'wml_manifest.json']:
                     entry=existing['files'][name]
                     bucket.blob(entry['object_name'],generation=int(entry['generation'])).download_to_filename(str(folder/name))
                 summary=json.loads((folder/'wml_manifest.json').read_text())

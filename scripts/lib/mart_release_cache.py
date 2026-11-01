@@ -29,6 +29,7 @@ class MartReleaseCache:
         prefix: str,
         required_files: Iterable[str],
         auxiliary_files: Iterable[str] = (),
+        optional_release_files: Iterable[str] = (),
         client_factory: Callable[[], Any],
         validator: Callable[[Path], None],
         check_interval_seconds: float = 15.0,
@@ -38,6 +39,7 @@ class MartReleaseCache:
         self.prefix = prefix.strip("/")
         self.required_files = tuple(required_files)
         self.auxiliary_files = tuple(auxiliary_files)
+        self.optional_release_files = tuple(optional_release_files)
         self.client_factory = client_factory
         self.validator = validator
         self.check_interval_seconds = max(0.0, float(check_interval_seconds))
@@ -54,7 +56,7 @@ class MartReleaseCache:
 
     def ensure(self, requested_files: Iterable[str], *, refresh: bool = False) -> dict[str, Path]:
         requested = tuple(dict.fromkeys(requested_files))
-        supported = set(self.required_files) | set(self.auxiliary_files)
+        supported = set(self.required_files) | set(self.auxiliary_files) | set(self.optional_release_files)
         unsupported = [name for name in requested if name not in supported]
         if unsupported:
             raise MartReleaseCacheError(f"Unsupported mart files: {', '.join(unsupported)}")
@@ -62,17 +64,22 @@ class MartReleaseCache:
         with self._lock:
             self._last_error = None
             self._using_stale_fallback = False
-            release_requested = tuple(name for name in requested if name in self.required_files)
-            auxiliary_requested = tuple(name for name in requested if name in self.auxiliary_files)
+            release_requested = tuple(name for name in requested if name in self.required_files or name in self.optional_release_files)
+            auxiliary_requested = tuple(name for name in requested if name in self.auxiliary_files and name not in self.optional_release_files)
             result: dict[str, Path] = {}
             if release_requested:
                 previous = self._read_active()
                 try:
                     snapshot = self._remote_snapshot(force=refresh)
+                    pinned_optional = tuple(name for name in self.optional_release_files if name in snapshot["files"])
+                    release_requested = tuple(dict.fromkeys([*release_requested, *pinned_optional]))
                     result.update(self._activate(snapshot, release_requested, refresh=refresh))
                 except Exception as exc:
                     self._last_error = str(exc)
-                    fallback = self._paths_for_active(previous, release_requested)
+                    # Optional evidence belongs to the fallback release, never to the failed upgrade.
+                    fallback_requested = tuple(name for name in release_requested if
+                        name not in self.optional_release_files or name in requested or name in (previous or {}).get("optional_release_files", []))
+                    fallback = self._paths_for_active(previous, fallback_requested)
                     if fallback and not refresh:
                         self._using_stale_fallback = True
                         result.update(fallback)
@@ -88,7 +95,7 @@ class MartReleaseCache:
                     if isinstance(exc, MartReleaseCacheError):
                         raise
                     raise MartReleaseCacheError(str(exc)) from exc
-            return {name: result[name] for name in requested}
+            return {name: result[name] for name in dict.fromkeys([*requested, *self.optional_release_files]) if name in result}
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -259,6 +266,7 @@ class MartReleaseCache:
             "manifest_generation": snapshot.get("manifest_generation"),
             "release_dir": str(release_dir),
             "activated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "optional_release_files": [name for name in self.optional_release_files if name in snapshot["files"]],
         }
         self._write_json_atomic(self.active_path, active)
         return existing

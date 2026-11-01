@@ -13,9 +13,9 @@ def main():
 
     print("Cargando standardized FUGA...")
 
-    df = pl.read_parquet(INPUT_PATH)
+    df = pl.scan_parquet(INPUT_PATH)
 
-    print(f"Filas input: {df.height}")
+    print(f"Filas input: {df.select(pl.len()).collect().item()}")
 
     # =========================
     # FILTRADO BÁSICO
@@ -92,6 +92,7 @@ def main():
       .alias("content_type")
     ])
 
+    song_level = song_level.collect(engine='streaming')
     print(f"Filas song level: {song_level.height}")
 
     # =========================

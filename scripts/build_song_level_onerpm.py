@@ -32,10 +32,10 @@ def main():
 
     print("Cargando standardized ONErpm...")
 
-    df = pl.read_parquet(INPUT_PATH)
-    INPUT_COLUMNS = set(df.columns)
+    df = pl.scan_parquet(INPUT_PATH)
+    INPUT_COLUMNS = set(df.collect_schema().names())
 
-    print(f"Filas input: {df.height}")
+    print(f"Filas input: {df.select(pl.len()).collect().item()}")
 
     df = df.filter(pl.col("amount_usd").is_not_null())
 
@@ -83,6 +83,8 @@ def main():
             "include_in_statement_view",
             "possible_internal_transfer",
             "asset_isrc",
+            "product_upc",
+            "product_type",
             "track_id",
             "channel_id",
             "track_statement_style",
@@ -107,6 +109,7 @@ def main():
         .alias("content_type")
     ])
 
+    song_level = song_level.collect(engine='streaming')
     print(f"Filas song level: {song_level.height}")
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)

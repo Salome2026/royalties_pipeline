@@ -18,7 +18,9 @@ eligibility and distributor deductions still control the money being summed.
 Existing unique catalog aliases and scoped platform IDs remain automatic.
 Different valid ISRCs are separate assets, even when their titles are identical.
 A shared UPC is not a basis for allocating album income to one recording.
-Native ADA products without ISRC retain their own identity and income.
+Native ADA products without ISRC retain their own identity. Their income can be
+distributed only by the shared [verified product-income rule](product_income_allocation.md),
+independently of a contract association. Unresolved products retain their income.
 
 ## Video metadata rule: video-title-performers-v1
 

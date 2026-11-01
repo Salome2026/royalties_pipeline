@@ -38,6 +38,8 @@ def unidentified_income(rows, evidence, catalog, aliases, choices, *, keyword=""
     evidence/signatures/ownership rules as Contracts, without saving decisions.
     Filtering never changes those global ownership rules.
     """
+    from scripts.lib.product_income import allocate_income_rows
+    rows = allocate_income_rows(rows)
     known = {r["asset_isrc"]: r for r in catalog if re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}[0-9]{7}", r.get("asset_isrc") or "")}
     claims = {c["key"]: root for root, values in choices.items() for c in values if c.get("included")}
     index = income_association_index(evidence, aliases, choices, claims, with_candidates=True)

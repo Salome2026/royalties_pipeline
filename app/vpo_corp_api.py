@@ -274,6 +274,7 @@ REQUIRED_MART_FILES = [
     CATALOG_MASTER_FILE,
 ]
 AUXILIARY_MART_FILES = [
+    "product_income_allocations.json",
     FUGA_EXTENDED_AUDIT_FILE,
     FUGA_EXTENDED_METADATA_FILE,
     STANDARDIZED_ONERPM_FILE,
@@ -1462,7 +1463,11 @@ def catalog_status_object_name() -> str:
 def validate_cached_mart(path: Path) -> None:
     if not path.exists() or path.stat().st_size <= 8:
         raise ValueError(f"Invalid cached mart: {path}")
-    pl.read_parquet_schema(path)
+    if path.name == "product_income_allocations.json":
+        from scripts.lib.product_income import validate_index
+        validate_index(json.loads(path.read_text(encoding="utf-8")))
+    else:
+        pl.read_parquet_schema(path)
 
 
 def mart_release_cache() -> MartReleaseCache:
@@ -1475,6 +1480,7 @@ def mart_release_cache() -> MartReleaseCache:
             prefix=GCS_PREFIX,
             required_files=REQUIRED_MART_FILES,
             auxiliary_files=AUXILIARY_MART_FILES,
+            optional_release_files=("product_income_allocations.json",),
             client_factory=gcs_client,
             validator=validate_cached_mart,
             check_interval_seconds=float(
@@ -2032,7 +2038,7 @@ def publish_required_marts_to_gcs() -> dict:
     uploads = []
     uploaded = []
     optional_fuga = [FUGA_EXTENDED_AUDIT_FILE, FUGA_EXTENDED_METADATA_FILE, CONTROL_FILE]
-    publication_files = [*REQUIRED_MART_FILES, *[
+    publication_files = [*REQUIRED_MART_FILES, 'product_income_allocations.json', *[
         filename for filename in optional_fuga
         if (BASE / "warehouse" / "marts" / filename).exists()
     ]]
@@ -2206,7 +2212,9 @@ def prepare_analytics_package_for_publish() -> dict:
         raise HTTPException(status_code=500, detail=f"No existe mart requerido: {song_path}")
 
     scripts = [
+        run_publish_preparation_script("refresh_product_income_song_level.py"),
         run_publish_preparation_script("build_statement_summary_mart.py"),
+        run_publish_preparation_script("build_product_income_allocations.py"),
         run_publish_preparation_script("build_catalog_master.py"),
     ]
     digital_summary_path = build_digital_income_summary_mart(standardized_path, refresh_cache=True)
@@ -2221,6 +2229,11 @@ def prepare_analytics_package_for_publish() -> dict:
 
 
 def validate_analytics_package_for_publish() -> dict:
+    from scripts.lib.product_income import FILE as PRODUCT_FILE, validate_index
+    product_path = mart_path(PRODUCT_FILE)
+    if not product_path.exists():
+        raise ValueError("Falta la asignacion de productos para cerrar la version analitica.")
+    validate_index(json.loads(product_path.read_text(encoding="utf-8")))
     summaries = {
         SONG_FILE: parquet_summary(mart_path(SONG_FILE), ["transaction_month"]),
         STANDARDIZED_FILE: parquet_summary(mart_path(STANDARDIZED_FILE), ["statement_period", "transaction_month"]),
@@ -2244,8 +2257,11 @@ def validate_analytics_package_for_publish() -> dict:
     standardized_mtime = mart_path(STANDARDIZED_FILE).stat().st_mtime
     song_mtime = mart_path(SONG_FILE).stat().st_mtime
     dependency_mtime = max(standardized_mtime, song_mtime)
+    if product_path.stat().st_mtime + 0.001 < standardized_mtime:
+        stale.append(PRODUCT_FILE)
     for filename in [CATALOG_MASTER_FILE, STATEMENT_SUMMARY_FILE, DIGITAL_INCOME_SUMMARY_FILE, ROYALTIES_DASHBOARD_SUMMARY_FILE]:
-        if mart_path(filename).stat().st_mtime + 0.001 < dependency_mtime:
+        required_mtime = dependency_mtime if filename == STATEMENT_SUMMARY_FILE else max(dependency_mtime, product_path.stat().st_mtime)
+        if mart_path(filename).stat().st_mtime + 0.001 < required_mtime:
             stale.append(filename)
 
     song_last_tx = summaries[SONG_FILE].get("last_transaction_month")
@@ -2297,6 +2313,7 @@ def source_monitor_pipeline_scripts(source: str) -> list[str]:
         *scripts,
         "build_consolidated_marts.py",
         "build_statement_summary_mart.py",
+        "build_product_income_allocations.py",
         "build_catalog_master.py",
     ]
 
@@ -8777,6 +8794,7 @@ def master_contract_unidentified_income(choices: dict, **filters) -> dict:
     from lib.catalog_report_filter import with_distributor_policy, GENERATION_REVENUE_BASIS, LEGACY_GENERATION_REVENUE_BASIS
     try:
         marts = ensure_marts(filenames=[CATALOG_MASTER_FILE])
+        configure_catalog_report_env(marts)
         release_id = mart_release_cache().status().get("active_release_id")
         if not release_id:
             raise ValueError("No hay una versión publicada disponible.")
@@ -9122,21 +9140,28 @@ def build_royalties_dashboard_summary_mart(
     output_path: Path | None = None,
     partition_large_input: bool = True,
 ) -> Path:
+    from scripts.lib.product_income import current_index, use_product_income, allocation_cache_matches
+    product_index = current_index(standardized_path)
     target_path = output_path or ROYALTIES_DASHBOARD_SUMMARY_PATH
+    allocation_stamp = target_path.with_suffix(".income.json")
+    allocation_hash = product_index.get("evidence_hash") if product_index else None
     if (
         not refresh_cache
         and target_path.exists()
         and target_path.stat().st_mtime >= standardized_path.stat().st_mtime
+        and allocation_cache_matches(allocation_stamp,product_index)
     ):
         return target_path
 
     if partition_large_input and standardized_path.stat().st_size > 256 * 1024 * 1024:
-        return build_partitioned_royalties_dashboard_summary_mart(
-            standardized_path=standardized_path,
-            output_path=target_path,
-        )
+        with use_product_income(product_index):
+            result = build_partitioned_royalties_dashboard_summary_mart(
+                standardized_path=standardized_path, output_path=target_path)
+        allocation_stamp.write_text(json.dumps({"evidence_hash": allocation_hash}), encoding="utf-8")
+        return result
 
-    lf = pl.scan_parquet(standardized_path)
+    from scripts.lib.product_income import allocate_income
+    lf = allocate_income(pl.scan_parquet(standardized_path), source_path=standardized_path)
     schema = lf.collect_schema()
     columns = set(schema.names())
     required_store_dimensions = {
@@ -9153,6 +9178,7 @@ def build_royalties_dashboard_summary_mart(
             f"Faltan: {', '.join(missing_store_dimensions)}"
         )
     needed_columns = {
+        "_income_origin_search",
         "source",
         "Fuente",
         "SOURCE",
@@ -9362,6 +9388,7 @@ def build_royalties_dashboard_summary_mart(
         text_expr(column_name)
         for column_name in [
             "artist_statement_style",
+            "_income_origin_search",
             "artist_best_available",
             "artist_name_statement",
             "track_artist_statement",
@@ -9459,7 +9486,7 @@ def build_royalties_dashboard_summary_mart(
         ])
         .agg([
             pl.sum("_dashboard_amount_usd").alias("_dashboard_amount_usd"),
-            pl.sum("units").round(0).alias("units"),
+            pl.sum("units").alias("units"),
             pl.len().alias("raw_rows"),
         ])
     )
@@ -9545,6 +9572,7 @@ def build_royalties_dashboard_summary_mart(
         temporary_output.replace(target_path)
     finally:
         shutil.rmtree(parts_dir, ignore_errors=True)
+    allocation_stamp.write_text(json.dumps({"evidence_hash": allocation_hash}), encoding="utf-8")
     return target_path
 
 
@@ -9627,14 +9655,19 @@ def build_partitioned_royalties_dashboard_summary_mart(
 
 
 def build_digital_income_summary_mart(standardized_path: Path, refresh_cache: bool = False) -> Path:
+    from scripts.lib.product_income import allocate_income, current_index, allocation_cache_matches
+    product_index = current_index(standardized_path)
+    stamp = DIGITAL_INCOME_SUMMARY_PATH.with_suffix(".income.json")
+    fingerprint = (product_index or {}).get("evidence_hash")
     if (
         not refresh_cache
         and DIGITAL_INCOME_SUMMARY_PATH.exists()
         and DIGITAL_INCOME_SUMMARY_PATH.stat().st_mtime >= standardized_path.stat().st_mtime
+        and allocation_cache_matches(stamp,product_index)
     ):
         return DIGITAL_INCOME_SUMMARY_PATH
 
-    lf = pl.scan_parquet(standardized_path)
+    lf = allocate_income(pl.scan_parquet(standardized_path), source_path=standardized_path)
     schema = lf.collect_schema()
     columns = set(schema.names())
 
@@ -9688,7 +9721,7 @@ def build_digital_income_summary_mart(standardized_path: Path, refresh_cache: bo
         "Video Title",
         "Album Title",
     ]
-    search_fields = [field for field in artist_fields + title_fields if field in columns]
+    search_fields = [field for field in artist_fields + title_fields + ["_income_origin_search"] if field in columns]
 
     base = lf.with_columns([
         text_expr("source").alias("source"),
@@ -9730,6 +9763,7 @@ def build_digital_income_summary_mart(standardized_path: Path, refresh_cache: bo
 
     DIGITAL_INCOME_SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
     compact.write_parquet(DIGITAL_INCOME_SUMMARY_PATH)
+    stamp.write_text(json.dumps({'evidence_hash':fingerprint}), encoding="utf-8")
     return DIGITAL_INCOME_SUMMARY_PATH
 
 

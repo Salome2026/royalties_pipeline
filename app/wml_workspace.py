@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 import polars as pl
-from app.royalty_scope import WML_FILES, WML_LABEL, MARTS, RELEASE, wml_release_prefix
+from app.royalty_scope import WML_FILES, WML_OPTIONAL_FILES, WML_LABEL, MARTS, RELEASE, wml_release_prefix
 from scripts.lib.mart_release_cache import MartReleaseCache
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -25,13 +25,17 @@ def local_release(root: Path | None = None) -> tuple[dict,Path] | None:
 
 @lru_cache(maxsize=4)
 def release_cache(bucket: str,prefix: str,cache_dir: str,client_factory: Callable):
-    def validate(path):pl.read_parquet_schema(path)
+    def validate(path):
+        if path.name in WML_OPTIONAL_FILES:
+            from scripts.lib.product_income import validate_index
+            validate_index(json.loads(path.read_text(encoding='utf-8')))
+        else:pl.read_parquet_schema(path)
     return MartReleaseCache(cache_dir=Path(cache_dir),bucket_name=bucket,prefix=prefix,
-        required_files=WML_FILES,client_factory=client_factory,validator=validate)
+        required_files=WML_FILES,optional_release_files=WML_OPTIONAL_FILES,client_factory=client_factory,validator=validate)
 
 def resolve_marts(filenames: list[str],*,bucket: str,client_factory: Callable,cache_dir: Path,
                   local_mode: bool=False,refresh: bool=False) -> dict[str,Path]:
-    if set(filenames)-set(WML_FILES):raise ValueError('WML solicitó un archivo fuera de su ámbito.')
+    if set(filenames)-set(WML_FILES)-set(WML_OPTIONAL_FILES):raise ValueError('WML solicitó un archivo fuera de su ámbito.')
     local_root=os.environ.get('VPO_WML_LOCAL_ROOT')
     # Ordinary local marts never select a different WML release. Offline QA is explicit.
     if local_root:
@@ -40,6 +44,7 @@ def resolve_marts(filenames: list[str],*,bucket: str,client_factory: Callable,ca
         if RELEASE.get() and local[0]['release_id'] != RELEASE.get():
             raise RuntimeError('La carga WML local difiere de la versión publicada. Actualizá WML.')
         paths={name:local[1]/name for name in filenames}
+        paths.update({name:local[1]/name for name in WML_OPTIONAL_FILES if (local[1]/name).exists()})
     else:
         prefix=wml_release_prefix()
         paths=release_cache(bucket,prefix,str(cache_dir/'wml'),client_factory).ensure(filenames,refresh=refresh)

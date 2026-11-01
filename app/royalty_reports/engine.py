@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import json
 from typing import Callable
 
 from app.royalty_reports.builders import GoogleSheetBuilder, build_registered_report
@@ -55,6 +56,9 @@ class ReportEngine:
             built = build_contractual_pdf(request, job, self.runtime.output_dir)
             return self.store(request, built)
         extra_files = ['wml_isrc_references.parquet'] if request.royalty_scope == 'wml' else []
+        from scripts.lib.product_income import FILE as PRODUCT_INCOME_FILE, use_product_income
+        if PRODUCT_INCOME_FILE in (job.get("input_manifest") or {}).get("objects", {}):
+            extra_files.append(PRODUCT_INCOME_FILE)
         marts = self.runtime.resolve_marts(
             dict(job.get("input_manifest") or {}),
             [
@@ -85,7 +89,8 @@ class ReportEngine:
 
         self.runtime.report_stage(request.job_id, "building")
         from app.royalty_scope import use_scope
-        with use_scope(request.royalty_scope,marts=marts,
+        allocation = json.loads(marts[PRODUCT_INCOME_FILE].read_text(encoding="utf-8")) if PRODUCT_INCOME_FILE in marts else None
+        with use_product_income(allocation), use_scope(request.royalty_scope,marts=marts,
                        catalog_status=job.get('input_manifest',{}).get('catalog_status_snapshot')), use_distributor_policy_snapshot(policy_snapshot):
             built = build_registered_report(
                 request,
