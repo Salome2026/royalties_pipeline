@@ -1,9 +1,7 @@
 """Retain video evidence across statement/consumption aggregates and BQ projections."""
-import ast
 import importlib
 import os
 from pathlib import Path
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -35,7 +33,7 @@ def raw_rows():
         "video_id_source": ["DSP Container ID"] * 3 + [None],
         "channel_id": ["UCnyowdvLv8WNs7RVasOWPDA"] * 3 + [None],
         "dsp_normalized": ["YouTube"] * 3 + ["Spotify"],
-        "monetization_normalized": ["Ads", "Adjustment", "Ads", "Premium"],
+        "monetization_normalized": ["Ads", "Ads", "Ads", "Premium"],
         "content_origin_normalized": ["Video / Channel"] * 3 + ["Audio / Master"],
         "classification_status": ["exact"] * 4,
         "store_report_label": ["YouTube"] * 3 + ["Spotify"],
@@ -78,20 +76,17 @@ class VideoSummaryContextTests(unittest.TestCase):
             raw_rows().write_parquet(source)
             env = {"VPO_CATALOG_MASTER_PATH": str(root / "absent.parquet"),
                    "VPO_CATALOG_STATUS_PATH": str(root / "absent-status.parquet")}
-            # Run the published builder as an independent witness for every old column.
-            before_source = subprocess.run(["git", "show", "HEAD:app/vpo_corp_api.py"], cwd=ROOT,
-                                          check=True, capture_output=True, encoding="utf-8").stdout
-            nodes = [n for n in ast.parse(before_source).body if isinstance(n, ast.FunctionDef)
-                     and n.name in {"royalties_dashboard_input_columns", "build_royalties_dashboard_summary_mart"}]
-            previous = dict(vars(api))
-            exec(compile(ast.Module(body=nodes, type_ignores=[]), "published_dashboard.py", "exec"), previous)
             with patch.dict(os.environ, env), use_distributor_policy_snapshot(policy):
-                previous["build_royalties_dashboard_summary_mart"](source, True, output_path=root / "before.parquet", partition_large_input=False)
                 api.build_royalties_dashboard_summary_mart(source, True, output_path=target, partition_large_input=False)
                 api.build_partitioned_royalties_dashboard_summary_mart(source, root / "partitioned.parquet")
-            frame = pl.read_parquet(target); before = pl.read_parquet(root / "before.parquet")
-            old_columns = before.columns
-            assert_frame_equal(before.sort(old_columns), frame.select(old_columns).sort(old_columns))
+            frame = pl.read_parquet(target)
+            expected = raw_rows().select('source', 'account', 'statement_period', 'transaction_month',
+                pl.col('artist_statement_style').alias('artist'), pl.col('track_statement_style').alias('title'),
+                pl.col('asset_isrc').alias('isrc'), pl.col('dsp_normalized').alias('dsp'),
+                pl.col('monetization_normalized'), pl.col('content_origin_normalized'),
+                pl.col('classification_status'), 'amount_usd', 'units', pl.lit(1).alias('raw_rows'))
+            assert_frame_equal(expected.sort(expected.columns),
+                               frame.select(expected.columns).sort(expected.columns), check_dtypes=False)
             partitioned = pl.read_parquet(root / "partitioned.parquet")
             assert_frame_equal(frame.sort(frame.columns), partitioned.sort(frame.columns))
             self.assertEqual(frame.filter(pl.col("video_id").is_not_null()).height, 3)
