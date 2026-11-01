@@ -32,6 +32,8 @@ El Job WML recibe las credenciales de metadata existentes desde Secret Manager. 
 
 El Job de reportes fija `POLARS_MAX_THREADS=2`, acorde con sus dos CPU. Esto acota los buffers de lectura del histórico completo; sin ese límite el contenedor puede dimensionarlos según el host y exceder su memoria al abrir el crudo ancho.
 
+Para archivos grandes, la vista localiza las posiciones candidatas leyendo únicamente las columnas del predicado en bloques de 16.384 filas. Recupera esas filas con lectura anticipada limitada y deja el resto como lectura diferida por posición. Esto evita materializar el crudo ancho para evaluar la asignación y conserva el mismo orden, campos nativos, selección y resultados que la vista lógica. La regresión cubre filas candidatas en distintos bloques, negativos y movimientos ajenos al reparto.
+
 La actualización de importes del catálogo se aplica a un catálogo recién reconstruido desde el resumen nativo; su marca de revisión evita aplicarla dos veces. No se aplica una versión diferente sobre un catálogo ya distribuido.
 
 La inferencia antigua por un único ISRC observado no absorbe los productos nativos. En la versión con esta regla, esos productos conservan su referencia propia y los UPC pendientes o multipista no generan una equivalencia a una sola grabación. Un sencillo con composición completa validada sí conserva su equivalencia exacta al ISRC.

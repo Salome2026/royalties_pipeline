@@ -57,6 +57,21 @@ class AllocationTests(unittest.TestCase):
         self.assertEqual(a.height,4)
         self.assertEqual(a.filter(pl.col('asset_isrc').is_null()).height,1)
 
+    def test_bounded_history_scan_preserves_native_rows_and_batch_boundary_assignments(self):
+        from lib.product_income import _scan_income_bounded
+        rows=[sale(asset_isrc='BK4DA2632806',amount_usd=10.),sale(amount_usd=-.09),
+              sale(product_upc='123456789012',amount_usd=7.),sale(video_id='abcdefghijk'),sale(),
+              sale(asset_isrc='BK4DA2632807',amount_usd=3.)]
+        rows=[{**row,'opaque_distributor_field':f'native {n}'} for n,row in enumerate(rows)]
+        with tempfile.TemporaryDirectory() as tmp:
+            source=Path(tmp)/'history.parquet';original=pl.DataFrame(rows);original.write_parquet(source)
+            expected=allocate_income(original.lazy(),index()).collect()
+            actual=_scan_income_bounded(source,index(),batch_size=2).collect()
+            self.assertEqual(actual.columns,expected.columns)
+            self.assertEqual(actual.to_dicts(),expected.to_dicts())
+            self.assertAlmostEqual(actual['amount_usd'].sum(),original['amount_usd'].sum())
+            self.assertAlmostEqual(actual['units'].sum(),original['units'].sum())
+
     def test_multiple_positions_of_same_recording_use_positions_not_distinct_isrcs(self):
         doc=index();doc['products']['UPC:08718521191726']['tracks'][1]['isrc']='BK4DA2632806'
         out=allocate_income(pl.DataFrame([sale()]).lazy(),doc).collect()

@@ -220,6 +220,13 @@ def allocation_table(index: dict) -> pl.DataFrame:
         "_income_position": pl.Int64, "_income_tracks": pl.Int64})
 
 
+def _candidate_expr(columns: set[str],index: dict) -> pl.Expr:
+    candidate=((product_key_expr(columns).is_in(list(index['products']))|whole_product_expr(columns))
+        & ~_text(columns,'asset_isrc','isrc','ISRC').fill_null('').str.contains(ISRC.pattern)).fill_null(False)
+    return (candidate & ~_text(columns,'content_origin_normalized','content_origin').fill_null('').str.contains('(?i)UGC|Video|Channel')
+        & ~_text(columns,'video_id').fill_null('').str.contains(r'^[A-Za-z0-9_-]{11}$'))
+
+
 def allocate_income(frame: pl.LazyFrame, index: dict | None = None, *, source_path: Path | None = None) -> pl.LazyFrame:
     index = index if index is not None else current_index(source_path)
     columns = set(frame.collect_schema().names())
@@ -238,10 +245,7 @@ def allocate_income(frame: pl.LazyFrame, index: dict | None = None, *, source_pa
     if 'source_prorated' in columns:shared=shared|pl.col('source_prorated').cast(pl.Boolean,strict=False).fill_null(False)
     # Match single-track products unconditionally; multiple-track products require native product evidence.
     singles = mapping.filter(pl.col("_income_tracks") == 1)
-    candidate = ((product_key_expr(columns).is_in(list(index['products']))|whole_product_expr(columns))
-        & ~_text(columns, "asset_isrc", "isrc", "ISRC").fill_null("").str.contains(ISRC.pattern)).fill_null(False)
-    candidate=candidate & ~_text(columns,'content_origin_normalized','content_origin').fill_null('').str.contains('(?i)UGC|Video|Channel')
-    candidate=candidate & ~_text(columns,'video_id').fill_null('').str.contains(r'^[A-Za-z0-9_-]{11}$')
+    candidate=_candidate_expr(columns,index)
     # Resolve only the unresolved UPC subset eagerly. Keeping the historical scan
     # outside a join lets downstream keyword/date projections stay pushable and
     # avoids materializing millions of wide rows. File scans cache this small view.
@@ -298,7 +302,40 @@ def scan_income(path: Path) -> pl.LazyFrame:
 
 @lru_cache(maxsize=4)
 def _scan_income(path: str,mtime: int,size: int,document: str) -> pl.LazyFrame:
-    return allocate_income(pl.scan_parquet(path),json.loads(document))
+    index=json.loads(document)
+    if size>128*1024*1024:
+        return _scan_income_bounded(Path(path),index)
+    return allocate_income(pl.scan_parquet(path),index)
+
+
+def _scan_income_bounded(path: Path,index: dict,*,batch_size: int=16384) -> pl.LazyFrame:
+    """Find candidate positions using narrow bounded batches, then read only those rows.
+
+    A wide historical Parquet can exhaust a job while evaluating a lazy predicate
+    even when the final candidate set is tiny. Native Arrow scan limits also bound
+    decoder read-ahead; the unchanged tail stays lazy and retains every native field.
+    """
+    import pyarrow as pa
+    import pyarrow.dataset as ds
+    import pyarrow.parquet as pq
+    raw=pl.scan_parquet(path);columns=set(raw.collect_schema().names())
+    if '_income_allocated' in columns:return raw
+    candidate=_candidate_expr(columns,index)
+    needed=sorted(set(candidate.meta.root_names()))
+    positions=[];offset=0
+    for batch in pq.ParquetFile(path).iter_batches(batch_size=batch_size,columns=needed,use_threads=False):
+        selected=pl.from_arrow(batch).select(pl.arg_where(candidate).alias('_position'))['_position'].to_list()
+        positions.extend(offset+n for n in selected)
+        offset+=batch.num_rows
+    if not positions:return raw
+    table=ds.dataset(str(path),format='parquet').take(pa.array(positions,type=pa.int64()),
+        batch_size=batch_size,batch_readahead=1,fragment_readahead=1,use_threads=False)
+    resolved=allocate_income(pl.from_arrow(table).lazy(),index).collect()
+    if len(positions)==offset:return resolved.lazy()
+    position='_income_native_row_position'
+    untouched=raw.with_row_index(position).filter(~pl.col(position).is_in(
+        pl.Series(positions,dtype=pl.UInt32).implode())).drop(position)
+    return pl.concat([untouched,resolved.lazy()],how='diagonal_relaxed')
 
 
 def cached_metadata(path: Path) -> tuple[dict[str, dict], dict[str, dict]]:
