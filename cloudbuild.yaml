@@ -57,6 +57,7 @@ steps:
       - update
       - ${_WML_INGEST_JOB}
       - --image=${_IMAGE_REPOSITORY}/vpo-corp-platform:${COMMIT_SHA}
+      - --update-secrets=SPOTIFY_CLIENT_ID=spotify-client-id:latest,SPOTIFY_CLIENT_SECRET=spotify-client-secret:latest
       - --region=${_REGION}
       - --quiet
 

@@ -28,6 +28,8 @@ La evidencia se publica en el mismo manifiesto inmutable que sus datos. Caché, 
 
 Las consultas de contratos conservan la versión de sus rutas inmutables aunque otra petición active una publicación nueva. Al construir el dashboard se fijan tanto la evidencia como el catálogo de su crudo; los filtros no toman los alias que haya dejado otra petición. WML recupera la evidencia de su publicación anterior para nuevas ingestas y conserva esa copia también al reutilizar un paquete local.
 
+El Job WML recibe las credenciales de metadata existentes desde Secret Manager. Su identidad tiene lectura únicamente sobre esos dos secretos para validar UPC nuevos; las credenciales no se guardan en el manifiesto ni en los archivos de ingreso.
+
 La actualización de importes del catálogo se aplica a un catálogo recién reconstruido desde el resumen nativo; su marca de revisión evita aplicarla dos veces. No se aplica una versión diferente sobre un catálogo ya distribuido.
 
 La inferencia antigua por un único ISRC observado no absorbe los productos nativos. En la versión con esta regla, esos productos conservan su referencia propia y los UPC pendientes o multipista no generan una equivalencia a una sola grabación. Un sencillo con composición completa validada sí conserva su equivalencia exacta al ISRC.
