@@ -89,6 +89,36 @@ class AllocationTests(unittest.TestCase):
             frame=pl.DataFrame([sale()]).lazy()
             self.assertTrue(allocate_income(frame).collect().equals(frame.collect()))
 
+    def test_request_pins_its_catalog_and_evidence_and_restores_outer_scope(self):
+        from lib.product_income import FILE,use_product_income_marts,current_index
+        from lib.catalog_report_filter import current_catalog_master_path
+        from app.royalty_scope import use_scope,MARTS,RELEASE
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);evidence=root/FILE;evidence.write_text(json.dumps(index()))
+            outer={'catalog_master.parquet':root/'outer.parquet'}
+            with use_scope('regular',marts=outer,release_id='r1'):
+                own={'catalog_master.parquet':root/'own.parquet',FILE:evidence}
+                with use_product_income_marts(own):
+                    self.assertEqual(current_catalog_master_path(),own['catalog_master.parquet'])
+                    self.assertEqual(current_index(),index())
+                    self.assertEqual(RELEASE.get(),'r1')
+                with use_product_income_marts({'catalog_master.parquet':root/'old.parquet'}):
+                    self.assertIsNone(current_index())
+                self.assertEqual(MARTS.get(),outer)
+
+    def test_summary_build_uses_source_catalog_even_if_another_request_changed_environment(self):
+        from lib.product_income import FILE,use_product_income_source,current_index
+        from lib.catalog_report_filter import current_catalog_master_path
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'standardized_raw_all_sources.parquet'
+            pl.DataFrame([sale()]).write_parquet(source)
+            catalog=root/'catalog_master.parquet';catalog.touch()
+            (root/FILE).write_text(json.dumps(index()))
+            with patch.dict(os.environ,{'VPO_CATALOG_MASTER_PATH':str(root/'other-release.parquet')}):
+                with use_product_income_source(source):
+                    self.assertEqual(current_catalog_master_path(),catalog)
+                    self.assertEqual(current_index(),index())
+
     def test_thin_published_rows_use_exact_native_product_scope(self):
         doc=index();doc['products']['UPC:08718521191726']['native_product_scopes']=['ada||indyana_records||ALBUM-1||La Juntada album']
         row=sale();row['title']=row.pop('track_statement_style');row.pop('release_statement_style')
@@ -108,6 +138,69 @@ class AllocationTests(unittest.TestCase):
         out=allocate_income(pl.DataFrame([row]).lazy(),index()).collect()
         self.assertEqual(out.height,1)
         self.assertIsNone(out['asset_isrc'][0])
+
+    def test_pending_album_cannot_bypass_rule_through_old_unique_upc_alias(self):
+        from app.master_contract_unidentified import unidentified_income
+        from app.master_contract_income import consolidate_associated_income
+        from app.royalty_reports.excel_contracts import reference_fragments,participant_columns
+        from app.master_contract_associations import association_key
+        from qa_excel_contracts import snapshot
+        import build_keyword_royalty_report as report
+        doc=index();doc['products']['UPC:08718521191726'].update(status='pending',tracks=[])
+        row=sale(source='fuga',account='indy',product_type='Product')
+        code='ARDL12600001'
+        ev=[{'kind':'UPC','code':row['product_upc'],'source':'fuga','account':'indy','isrcs':[code],'titles':[],'artists':[]}]
+        aliases={'UPC:'+row['product_upc']:'ISRC:'+code}
+        with use_product_income(doc):
+            result=unidentified_income([row],ev,[{'asset_isrc':code}],aliases,{})
+            self.assertEqual(result['total'],1)
+            self.assertEqual(consolidate_associated_income([row],ev,aliases,{},{},'2026-12'),{})
+            frame=allocate_income(pl.DataFrame([row]).lazy())
+            frame=report.add_report_code(frame,set(frame.collect_schema().names())).with_columns(pl.col('transaction_month').alias('period_month'))
+            summary=report.build_track_summary_lf(frame,include_identity=True).collect()
+            state=snapshot();state['associations']['included'][association_key('UPC',row['product_upc'],'fuga','indy')]=[code]
+            _,values=participant_columns(summary,reference_fragments(frame),state,['La Juntada'],'all')
+            self.assertTrue(all(value is None for value in values[0].values()))
+
+    def test_product_without_upc_remains_pending_and_explicit_track_is_not_an_album(self):
+        row=sale(source='fuga',account='indy',asset_product_type='Product',product_upc=None,catalog_number=None)
+        out=allocate_income(pl.DataFrame([row]).lazy(),index()).collect()
+        self.assertTrue(out['_income_product_pending'][0])
+        self.assertIsNone(out['asset_isrc'][0])
+        doc=index();doc['products']['UPC:08718521191726']['native_product_scopes']=['fuga||indy||ALBUM-1||La Juntada album']
+        row=sale(source='fuga',account='indy',product_type='Track')
+        out=allocate_income(pl.DataFrame([row]).lazy(),doc).collect()
+        self.assertEqual(out.height,1);self.assertIsNone(out['asset_isrc'][0])
+
+    def test_fact_retains_product_type_so_equal_titles_do_not_mix_album_and_track(self):
+        from scripts.load_bigquery_release import build_detail
+        from lib.product_income import allocate_income_rows
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'raw.parquet';target=root/'fact.parquet'
+            rows=[sale(source='fuga',account='indy',asset_product_type=kind,release_statement_style='La Juntada album',amount_usd=amount)
+                for kind,amount in [('Product',1.89),('Asset',2.)]]
+            rows.append(sale(source='fuga',account='indy',asset_product_type='Product',product_type='Video',amount_usd=4.))
+            pl.DataFrame(rows).write_parquet(source)
+            build_detail(source,target,'release-test')
+            fact=pl.read_parquet(target)
+            self.assertEqual(set(fact['product_type']),{'Product','Asset','Video'})
+            self.assertAlmostEqual(fact['amount_usd'].sum(),7.89)
+            with use_product_income(index()):out=allocate_income_rows(fact.to_dicts())
+            self.assertEqual(len(out),5)
+            self.assertAlmostEqual(sum(r['amount_usd'] for r in out if not r['asset_isrc']),6.)
+
+    def test_catalog_keeps_native_product_identity_even_with_one_observed_isrc(self):
+        import build_catalog_master as catalog
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);source=root/'raw.parquet'
+            pl.DataFrame([sale(source='fuga',account='indy',asset_product_type='Product'),
+                sale(source='fuga',account='indy',asset_product_type='Asset',asset_isrc='BK4DA2632806')]).write_parquet(source)
+            with patch.object(catalog,'MARTS_DIR',root),patch.object(catalog,'STANDARDIZED_PATHS',[source]),use_product_income(index()):
+                frame=catalog.identity_with_canonical_key().collect()
+                product=frame.filter(pl.col('identity_native_product'))
+                self.assertEqual(product.height,1)
+                self.assertIsNone(product['effective_isrc'][0])
+                self.assertTrue(product['catalog_key'][0].startswith('TEXT:'))
 
     def test_source_scope_and_corrupted_evidence_fail_closed(self):
         doc=index();doc['scope']='wml'
@@ -136,6 +229,27 @@ class AllocationTests(unittest.TestCase):
             pl.DataFrame([sale(),sale(asset_isrc='XXAAA2600001')]).write_parquet(source)
             doc=compile_index(source,albums={},tracks={},prior_index=prior)
             self.assertEqual(doc['products']['UPC:08718521191726']['reason'],'contradictory_composition')
+
+    def test_missing_ada_upc_uses_unique_native_product_binding_and_rejects_reuse(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source=Path(tmp)/'raw.parquet'
+            rows=[sale(),sale(product_upc=None)]
+            pl.DataFrame(rows).write_parquet(source)
+            albums={'verified':{'id':'verified','total_tracks':3,'external_ids':{'upc':'8718521191726'},
+                'tracks':{'total':3,'next':None,'items':[{'id':str(i),'name':f'Tema {i}','artists':[],
+                    'external_ids':{'isrc':f'BK4DA263280{i}'}} for i in [6,7,8]]}}}
+            doc=compile_index(source,albums=albums,tracks={})
+            native='ADA:indyana_records:ALBUM-1'
+            self.assertEqual(doc['products'][native]['status'],'validated')
+            self.assertEqual(doc['products'][native]['resolved_upc'],'08718521191726')
+            out=allocate_income(pl.DataFrame(rows).lazy(),doc).collect()
+            self.assertEqual(out.height,6)
+            self.assertEqual(out.filter(pl.col('product_upc').is_null()).height,3)
+            self.assertAlmostEqual(out['amount_usd'].sum(),3.78)
+            rows.append(sale(product_upc='123456789012'))
+            pl.DataFrame(rows).write_parquet(source)
+            changed=compile_index(source,albums=albums,tracks={},prior_index=doc)
+            self.assertEqual(changed['products'][native]['status'],'pending')
 
     def test_catalog_preserves_native_records_and_only_transfers_money(self):
         from lib.distributor_policy_store import use_distributor_policy_snapshot
@@ -238,9 +352,13 @@ class AllocationTests(unittest.TestCase):
                 else:validate_test_parquet(path)
             cache=MartReleaseCache(cache_dir=root/'cache',bucket_name='bucket',prefix='marts',required_files=FILES,
                 optional_release_files=[FILE],client_factory=lambda:client,validator=validate,check_interval_seconds=0)
-            self.assertNotIn(FILE,cache.ensure(['a.parquet']))
+            old=cache.ensure(['a.parquet'])
+            self.assertNotIn(FILE,old)
+            self.assertEqual(cache.release_id_for(old['a.parquet']),'r1')
             publish_mart_release(bucket,'marts',write_release_files(root,'r2')+[(FILE,evidence)],release_id='r2')
             result=cache.ensure(['a.parquet'])
+            self.assertEqual(cache.release_id_for(old['a.parquet']),'r1')
+            self.assertEqual(cache.release_id_for(result['a.parquet']),'r2')
             self.assertIn(FILE,result);self.assertIn('r2',str(result[FILE]))
             bucket.put('marts/'+FILE,b'corrupt canonical')
             self.assertEqual(json.loads(cache.ensure(['a.parquet'])[FILE].read_text()),index())

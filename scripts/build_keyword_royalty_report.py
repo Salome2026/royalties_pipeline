@@ -1021,7 +1021,7 @@ def build_filtered_raw_detail_lf(
                         add_period_filter(
                             add_match_text(
                                 add_source_account_filter(
-                                    scan_income(standardized_path),
+                                    scan_income(standardized_path).with_row_index('_report_detail_position'),
                                     columns,
                                     source,
                                     account,
@@ -1136,6 +1136,8 @@ def build_report_detail(
     if detail_mode == DETAIL_MODE_LIMITED:
         if raw_limit <= 0:
             return pd.DataFrame()
+        if '_report_detail_position' in raw_matches_lf.collect_schema().names():
+            raw_matches_lf=raw_matches_lf.sort('_report_detail_position')
         return display_dataframe(
             raw_matches_lf.select(detail_columns).limit(raw_limit).collect(engine="streaming").to_pandas()
         )
@@ -1432,8 +1434,9 @@ def build_report_tables(
                     "revenue_basis",
                     "catalog_key",
                     "catalog_business_status",
-                    *(["product_upc", "UPC Code", "UPC", "Video ID", "VideoId", "track_id",
-                       "Label Track ID", "Track ID", "gpid", "source_asset_id", "catalog_number"] if contract_snapshot is not None else []),
+                    "product_upc", "UPC Code", "UPC", "Video ID", "VideoId", "track_id",
+                    "Label Track ID", "Track ID", "gpid", "source_asset_id", "catalog_number",
+                    '_income_product_pending','_income_upc_pending',
                 ]
                 if col in standardized_cols or col in {"store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory", "catalog_key", "catalog_business_status", "video_id", "video_id_source", "channel_id", "dsp_normalized", "monetization_normalized", "content_origin_normalized", "classification_status"}
             ])
@@ -1445,6 +1448,9 @@ def build_report_tables(
             ])
         )
 
+        # All summaries and optional contract columns consume one frozen selection.
+        # Do not repeat the wide keyword/catalog/policy scan for every worksheet.
+        statement_base_lf = statement_base_lf.collect(engine='streaming').lazy()
         metrics_lf = statement_base_lf.select([
             pl.len().alias("song_level_rows"),
             pl.sum("amount_usd").alias("song_level_amount_usd"),

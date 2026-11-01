@@ -49,6 +49,11 @@ class MartReleaseCache:
         self._last_error: str | None = None
         self._using_stale_fallback = False
         self._auxiliary_generations: dict[str, str] = {}
+        self._release_ids: dict[str,str] = {}
+
+    def release_id_for(self,path: Path) -> str | None:
+        """Keep a request's immutable paths bound when another request activates a release."""
+        with self._lock:return self._release_ids.get(str(Path(path).parent.resolve()))
 
     @property
     def active_path(self) -> Path:
@@ -269,6 +274,7 @@ class MartReleaseCache:
             "optional_release_files": [name for name in self.optional_release_files if name in snapshot["files"]],
         }
         self._write_json_atomic(self.active_path, active)
+        self._release_ids[str(release_dir.resolve())]=snapshot['release_id']
         return existing
 
     def _download_files(
@@ -342,6 +348,7 @@ class MartReleaseCache:
                 self.validator(path)
         except Exception:
             return None
+        self._release_ids[str(release_dir.resolve())]=active['release_id']
         return paths
 
     @staticmethod

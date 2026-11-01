@@ -34,6 +34,8 @@ NON_GENERATION_REVENUE_BASIS = {"transfer", "summary", "share_transfer"}
 
 def current_catalog_master_path() -> Path:
     from app.royalty_scope import is_wml, MARTS
+    path=MARTS.get().get('catalog_master.parquet')
+    if path is not None:return path
     if is_wml():
         path = MARTS.get().get('catalog_master.parquet')
         if path is None:
@@ -44,6 +46,8 @@ def current_catalog_master_path() -> Path:
 
 def current_catalog_status_path() -> Path:
     from app.royalty_scope import is_wml, MARTS
+    path=MARTS.get().get('catalog_status.parquet')
+    if path is not None:return path
     if is_wml():
         path = MARTS.get().get('catalog_status.parquet')
         if path is None:
@@ -248,8 +252,21 @@ def catalog_alias_lookup(catalog_path: Path | None = None, *, catalog: pl.DataFr
             "catalog_key": pl.Series([], dtype=pl.Utf8),
         })
 
+    combined=pl.concat(rows, how='diagonal_relaxed')
+    from .product_income import current_index
+    product_index=current_index()
+    if product_index is not None:
+        single={key[4:]:p['tracks'][0]['isrc'] for key,p in product_index['products'].items() if key.startswith('UPC:')
+            and p['status']=='validated' and len(p['tracks'])==1 and 'ISRC:'+p['tracks'][0]['isrc'] in set(catalog['catalog_key'])}
+        protected=[key[4:] for key,p in product_index['products'].items() if key.startswith('UPC:') and key[4:] not in single]
+        barcode=pl.col('alias_catalog_key').str.strip_prefix('UPC:').str.pad_start(14,'0')
+        upc=pl.col('alias_catalog_key').str.starts_with('UPC:')
+        combined=combined.filter(~(upc & barcode.is_in(protected) & pl.col('catalog_key').str.starts_with('ISRC:')))
+        if single:
+            confirmed=pl.concat_str([pl.lit('ISRC:'),barcode.replace_strict(single,default=None)])
+            combined=combined.filter(~(upc & barcode.is_in(list(single)) & (pl.col('catalog_key')!=confirmed)))
     return (
-        pl.concat(rows, how="diagonal_relaxed")
+        combined
         .filter(pl.col("alias_catalog_key").is_not_null() & pl.col("catalog_key").is_not_null())
         .unique(["alias_catalog_key", "catalog_key"])
         .group_by("alias_catalog_key")

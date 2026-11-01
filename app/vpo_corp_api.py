@@ -1506,6 +1506,8 @@ def ensure_marts(refresh_cache: bool = False, filenames: list[str] | None = None
                 status_code=500,
                 detail=f"Local mart files not found: {', '.join(missing)}",
             )
+        product_path=VPO_LOCAL_MARTS_DIR/'product_income_allocations.json'
+        if product_path.exists():paths['product_income_allocations.json']=product_path
         return paths
 
     if not GCS_BUCKET:
@@ -2233,7 +2235,9 @@ def validate_analytics_package_for_publish() -> dict:
     product_path = mart_path(PRODUCT_FILE)
     if not product_path.exists():
         raise ValueError("Falta la asignacion de productos para cerrar la version analitica.")
-    validate_index(json.loads(product_path.read_text(encoding="utf-8")))
+    product_document=validate_index(json.loads(product_path.read_text(encoding="utf-8")))
+    if product_document.get('source_size_bytes')!=mart_path(STANDARDIZED_FILE).stat().st_size:
+        raise ValueError('La asignación de productos no corresponde al crudo admitido que se intenta publicar.')
     summaries = {
         SONG_FILE: parquet_summary(mart_path(SONG_FILE), ["transaction_month"]),
         STANDARDIZED_FILE: parquet_summary(mart_path(STANDARDIZED_FILE), ["statement_period", "transaction_month"]),
@@ -8585,29 +8589,38 @@ def master_contract_statement_income(isrc: str) -> list[dict[str, Any]]:
     ).sort("statement_month").collect().to_dicts()
 
 
+def master_contract_mart_release_id(marts: dict[str,Path]) -> str | None:
+    cache=mart_release_cache()
+    pinned=getattr(cache,'release_id_for',lambda path:None)(marts[CATALOG_MASTER_FILE])
+    return pinned if isinstance(pinned,str) and pinned else cache.status().get('active_release_id')
+
+
 def master_contract_associated_income(choices: dict[str, list[dict]]) -> dict[str, dict]:
     if is_wml():return {}
     try:
         marts = ensure_marts(filenames=[CATALOG_MASTER_FILE])
-        load_catalog_status()
-        configure_catalog_report_env(marts)
-        release_id = mart_release_cache().status().get("active_release_id")
-        if not release_id:
-            raise ValueError("No hay una versión publicada disponible.")
-        rows, evidence = published_unassigned_income(release_id)
-        if not rows:
-            return {}
-        aliases = {row["alias_catalog_key"]: row["catalog_key"]
-                   for row in catalog_alias_lookup(marts[CATALOG_MASTER_FILE]).to_dicts()}
-        evidence = infer_video_evidence(contract_metadata_catalog(pl.read_parquet(marts[CATALOG_MASTER_FILE]).to_dicts()), evidence)
-        claims = {choice["key"]: root for root, values in choices.items()
-                  for choice in values if choice.get("included")}
-        schema = {key: pl.Int64 if key == "raw_rows" else pl.Utf8 for key in rows[0] if key != "amount_usd"}
-        frame = pl.DataFrame(rows, schema_overrides=schema).lazy()
-        eligible = filter_reportable_generation(frame, set(schema) | {"amount_usd"})
-        adjusted = apply_report_net_personalization(eligible, set(eligible.collect_schema().names()))
-        return consolidate_associated_income(adjusted.collect().to_dicts(), evidence, aliases,
-                                             choices, claims, CONTRACT_ANALYSIS_CUTOFF_MONTH)
+        marts={**marts,'catalog_status.parquet':CATALOG_STATUS_PATH}
+        from scripts.lib.product_income import use_product_income_marts
+        with use_product_income_marts(marts):
+            load_catalog_status()
+            configure_catalog_report_env(marts)
+            release_id = master_contract_mart_release_id(marts)
+            if not release_id:
+                raise ValueError("No hay una versión publicada disponible.")
+            rows, evidence = published_unassigned_income(release_id)
+            if not rows:
+                return {}
+            aliases = {row["alias_catalog_key"]: row["catalog_key"]
+                       for row in catalog_alias_lookup(marts[CATALOG_MASTER_FILE]).to_dicts()}
+            evidence = infer_video_evidence(contract_metadata_catalog(pl.read_parquet(marts[CATALOG_MASTER_FILE]).to_dicts()), evidence)
+            claims = {choice["key"]: root for root, values in choices.items()
+                      for choice in values if choice.get("included")}
+            schema = {key: pl.Int64 if key == "raw_rows" else pl.Utf8 for key in rows[0] if key != "amount_usd"}
+            frame = pl.DataFrame(rows, schema_overrides=schema).lazy()
+            eligible = filter_reportable_generation(frame, set(schema) | {"amount_usd"})
+            adjusted = apply_report_net_personalization(eligible, set(eligible.collect_schema().names()))
+            return consolidate_associated_income(adjusted.collect().to_dicts(), evidence, aliases,
+                                                 choices, claims, CONTRACT_ANALYSIS_CUTOFF_MONTH)
     except Exception as exc:
         raise HTTPException(status_code=503, detail="No se pudo calcular el ingreso de los códigos asociados. Volvé a intentar.") from exc
 
@@ -8803,7 +8816,7 @@ def master_contract_unidentified_income(choices: dict, **filters) -> dict:
     try:
         marts = ensure_marts(filenames=[CATALOG_MASTER_FILE])
         configure_catalog_report_env(marts)
-        release_id = mart_release_cache().status().get("active_release_id")
+        release_id = master_contract_mart_release_id(marts)
         if not release_id:
             raise ValueError("No hay una versión publicada disponible.")
         catalog = contract_metadata_catalog(pl.read_parquet(marts[CATALOG_MASTER_FILE]).to_dicts())
@@ -8820,10 +8833,12 @@ def master_contract_unidentified_income(choices: dict, **filters) -> dict:
                 .otherwise(pl.col("_effective_revenue_basis").is_in(
                     GENERATION_REVENUE_BASIS | LEGACY_GENERATION_REVENUE_BASIS)))
             rows = eligible.select(list(schema) + ["amount_usd"]).collect().to_dicts()
-        aliases = {r["alias_catalog_key"]: r["catalog_key"]
-                   for r in catalog_alias_lookup(marts[CATALOG_MASTER_FILE]).to_dicts()}
-        return {**unidentified_income(rows, infer_video_evidence(catalog, evidence), catalog, aliases,
-            choices, **filters), "release_id": release_id}
+        from scripts.lib.product_income import use_product_income_marts
+        with use_product_income_marts(marts):
+            aliases = {r["alias_catalog_key"]: r["catalog_key"]
+                       for r in catalog_alias_lookup(marts[CATALOG_MASTER_FILE]).to_dicts()}
+            return {**unidentified_income(rows, infer_video_evidence(catalog, evidence), catalog, aliases,
+                choices, **filters), "release_id": release_id}
     except Exception as exc:
         raise HTTPException(status_code=503,
             detail="No se pudieron verificar los ingresos sin identificar. Volvé a intentar.") from exc
@@ -9287,6 +9302,16 @@ def build_royalties_dashboard_summary_mart(
     *,
     output_path: Path | None = None,
     partition_large_input: bool = True,
+) -> Path:
+    from scripts.lib.product_income import use_product_income_source
+    with use_product_income_source(standardized_path):
+        return _build_royalties_dashboard_summary_mart(standardized_path,refresh_cache,
+            output_path=output_path,partition_large_input=partition_large_input)
+
+
+def _build_royalties_dashboard_summary_mart(
+    standardized_path: Path, refresh_cache: bool = False, *,
+    output_path: Path | None = None, partition_large_input: bool = True,
 ) -> Path:
     from scripts.lib.product_income import current_index,use_product_income,allocation_cache_matches,allocate_income
     product_index=current_index(standardized_path)
@@ -9754,7 +9779,7 @@ def build_digital_income_summary_mart(standardized_path: Path, refresh_cache: bo
             pl.max("has_share_in_out").alias("has_share_in_out"),
             pl.len().alias("raw_rows"),
         ])
-        .collect()
+        .collect(engine="streaming")
     )
 
     DIGITAL_INCOME_SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)

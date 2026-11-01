@@ -205,6 +205,15 @@ def main() -> None:
                 summary=json.loads((folder/'wml_manifest.json').read_text())
                 print('WML: reutilizando paquete inmutable validado.',flush=True)
             else:
+                prior_release=config.get('published_release_id')
+                if prior_release:
+                    prior_manifest=json.loads(bucket.blob(wml_release_prefix(prior_release)+'/release_manifest.json').download_as_text())
+                    from scripts.lib.product_income import FILE
+                    prior=prior_manifest.get('files',{}).get(FILE)
+                    if prior:
+                        prior_path=root/'output'/FILE
+                        prior_path.parent.mkdir(parents=True,exist_ok=True)
+                        bucket.blob(prior['object_name'],generation=int(prior['generation'])).download_to_filename(str(prior_path))
                 for entry in document['files']:
                     path=inputs/entry['file']
                     bucket.blob(entry['object_name'],generation=int(entry['generation'])).download_to_filename(str(path))

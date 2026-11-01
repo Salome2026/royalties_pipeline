@@ -161,7 +161,8 @@ class ContractAssociationTests(unittest.TestCase):
     def test_api_schema_roundtrip_keeps_choices(self):
         choices = [choice(self.items()[0], False)]
         request = api.MasterContractSaveRequest(split={"code_association_overrides": choices})
-        self.assertEqual(request.split.model_dump()["code_association_overrides"], choices)
+        self.assertEqual(request.split.model_dump()["code_association_overrides"],
+                         [{**item, "manual": False} for item in choices])
 
     def test_parameterized_query_inspects_all_statements_without_financial_changes(self):
         client = MagicMock()

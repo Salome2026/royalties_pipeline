@@ -67,6 +67,7 @@ def main():
             "possible_internal_transfer",
             "asset_isrc",
             "product_upc",
+            "asset_product_type",
             "track_statement_style",
             "artist_statement_style",
             "video_id",

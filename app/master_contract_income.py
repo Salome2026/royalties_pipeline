@@ -90,7 +90,7 @@ def published_unassigned_income(release_id: str) -> tuple[list[dict], list[dict]
     # Keep identifiers together: expanding them before summing would multiply revenue.
     sql = f"""
     SELECT source, account, source_sheet, revenue_basis, artist, title, asset_isrc,
-      product_upc, video_id, track_id, catalog_number,
+      product_upc, video_id, track_id, catalog_number, product_type, release_title,content_type,content_origin,
       FORMAT_DATE('%Y-%m', statement_month) AS statement_period,
       SUM(amount_usd) AS amount_usd, COUNT(*) AS raw_rows
     FROM `{prefix}.royalty_statement_fact`
@@ -98,7 +98,7 @@ def published_unassigned_income(release_id: str) -> tuple[list[dict], list[dict]
       AND statement_month IS NOT NULL
       {STATEMENT_WINDOW}
     GROUP BY source, account, source_sheet, revenue_basis, artist, title, asset_isrc,
-      product_upc, video_id, track_id, catalog_number, statement_period
+      product_upc, video_id, track_id, catalog_number, product_type, release_title,content_type,content_origin, statement_period
     """
     rows = _statement_rows(client, config, sql)
     sql = f"""
@@ -195,11 +195,11 @@ def income_association_index(
 
 
 def associated_income_isrc(row: dict, index: dict) -> str | None:
-    if row.get("asset_isrc") or (row["source"] == "ada" and row.get("catalog_number")):
+    if row.get("asset_isrc") or row.get('_income_product_pending') or (row["source"] == "ada" and row.get("catalog_number")):
         return None
     keys = [association_key(kind, row[field], row["source"], row["account"])
             for kind, field in [("UPC", "product_upc"), ("VIDEO", "video_id"), ("TRACK", "track_id")]
-            if row.get(field)]
+            if row.get(field) and not (kind=='UPC' and row.get('_income_upc_pending'))]
     roots = {root for key in keys for root in index["included"].get(key, [])}
     roots -= {root for key in keys for root in index["excluded"].get(key, [])}
     return next(iter(roots)) if len(roots) == 1 else None

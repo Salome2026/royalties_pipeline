@@ -73,7 +73,7 @@ class SpotifyEvidence:
 
 
 def build(source: Path, catalog: Path, output: Path, *, lookup_cache: Path | None = None,
-          metadata_cache: Path | None = None, online: bool = True, scope="regular") -> dict:
+          metadata_cache: Path | None = None, online: bool = True, scope="regular",prior_index: dict | None = None) -> dict:
     albums, tracks = cached_metadata(lookup_cache) if lookup_cache else ({}, {})
     metadata = {"albums": {}, "tracks": {}}
     if metadata_cache and metadata_cache.exists():
@@ -84,7 +84,7 @@ def build(source: Path, catalog: Path, output: Path, *, lookup_cache: Path | Non
     document = compile_index(source, albums=albums, tracks=tracks,
         catalog=pl.read_parquet(catalog) if catalog.exists() else None, scope=scope,
         fetch=provider.fetch if online else None,
-        prior_index=json.loads(output.read_text(encoding='utf-8')) if output.exists() else None)
+        prior_index=json.loads(output.read_text(encoding='utf-8')) if output.exists() else prior_index)
     document["source_size_bytes"] = source.stat().st_size
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary = output.with_suffix(".tmp.json")

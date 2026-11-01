@@ -178,14 +178,16 @@ def write_summaries(detail: Path,out: Path) -> None:
     ]).sink_parquet(out/'royalties_dashboard_summary.parquet',compression='zstd')
 
 def ingest(input_root: Path,output_root: Path) -> dict:
+    from scripts.lib.product_income import FILE,use_product_income
     files,ignored=discover(input_root)
     evidence=[{'file':p.name,'sha256':sha256(p)} for p in sorted(input_root.glob('Statement_91355_*.txt'))]
     fingerprint=input_fingerprint(files,evidence)
     release='wml-'+fingerprint[:24]
     output=output_root/'releases'/release
     manifest_file=output/'wml_manifest.json'
-    if manifest_file.exists() and all((output/name).exists() for name in WML_FILES):
+    if manifest_file.exists() and all((output/name).exists() for name in (*WML_FILES,FILE)):
         manifest=json.loads(manifest_file.read_text(encoding='utf-8'));manifest['reused']=True
+        write_json(output_root/FILE,json.loads((output/FILE).read_text(encoding='utf-8')))
         write_json(output_root/'active_release.json',{'release_id':release,'path':str(output),'fingerprint':fingerprint})
         return manifest
     output.mkdir(parents=True,exist_ok=True)
@@ -203,11 +205,11 @@ def ingest(input_root: Path,output_root: Path) -> dict:
     detail=output/'standardized_raw_all_sources.parquet'
     pl.concat([pl.scan_parquet(p) for p in parts],how='diagonal_relaxed').sink_parquet(detail,compression='zstd')
     from scripts.build_product_income_allocations import build as build_product_income
-    from scripts.lib.product_income import FILE,use_product_income
     from app.royalty_scope import use_scope
     product_index=build_product_income(detail,output/'catalog_master.parquet',output/FILE,
         lookup_cache=ROOT/'warehouse/registry/catalog_release_lookup_cache.parquet',
-        metadata_cache=output_root/'product_income_metadata.json',scope='wml')
+        metadata_cache=output_root/'product_income_metadata.json',scope='wml',
+        prior_index=json.loads((output_root/FILE).read_text(encoding='utf-8')) if (output_root/FILE).exists() else None)
     with use_scope('wml'),use_product_income(product_index):
         write_summaries(detail,output)
     build_references(detail,input_root,output/'wml_isrc_references.parquet')
@@ -219,6 +221,7 @@ def ingest(input_root: Path,output_root: Path) -> dict:
     for name in WML_FILES:
         if not (output/name).exists():raise RuntimeError('El paquete WML está incompleto: '+name)
     write_json(manifest_file,manifest)
+    write_json(output_root/FILE,product_index)
     write_json(output_root/'active_release.json',{'release_id':release,'path':str(output),'fingerprint':fingerprint})
     return manifest
 

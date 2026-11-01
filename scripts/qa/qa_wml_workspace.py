@@ -78,9 +78,12 @@ class WmlFinancialTests(unittest.TestCase):
             root=Path(d);inputs=root/'inputs';inputs.mkdir();sample(inputs/'Statement_91230_1_91230_20260630.txt',[{}])
             first=ingest(inputs,root/'output');folder=root/'output/releases'/first['release_id']
             before={n:(folder/n).stat().st_mtime_ns for n in WML_FILES}
+            from scripts.lib.product_income import FILE
+            (root/'output'/FILE).unlink()
             second=ingest(inputs,root/'output')
             self.assertTrue(second['reused']);self.assertEqual(first['release_id'],second['release_id'])
             self.assertEqual(before,{n:(folder/n).stat().st_mtime_ns for n in WML_FILES})
+            self.assertEqual(json.loads((root/'output'/FILE).read_text()),json.loads((folder/FILE).read_text()))
             refs=pl.read_parquet(folder/'wml_isrc_references.parquet')
             self.assertFalse(refs['applies_automatically'].any())
             self.assertEqual(set(refs['evidence_status']),{'informed','deduced'})

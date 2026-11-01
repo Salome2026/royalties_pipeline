@@ -34,8 +34,13 @@ def freeze_snapshot(frame: pl.DataFrame, contracts: list[dict], manifest: dict) 
         catalog = with_external_titles(catalog, pl.read_parquet(BytesIO(content)).to_dicts())
     choices = {row["isrc"]: row["split"].get("code_association_overrides") or [] for row in contracts}
     claims = {choice["key"]: root for root, items in choices.items() for choice in items if choice.get("included")}
-    aliases = {row["alias_catalog_key"]: row["catalog_key"] for row in catalog_alias_lookup(catalog=frame).to_dicts()}
-    index = income_association_index(infer_video_evidence(catalog, evidence), aliases, choices, claims)
+    from scripts.lib.product_income import FILE,use_product_income
+    allocation=manifest.get('objects',{}).get(FILE)
+    document=json.loads(storage.Client().bucket(manifest['bucket']).blob(allocation['object'],
+        generation=int(allocation['generation'])).download_as_bytes()) if allocation else None
+    with use_product_income(document):
+        aliases = {row["alias_catalog_key"]: row["catalog_key"] for row in catalog_alias_lookup(catalog=frame).to_dicts()}
+        index = income_association_index(infer_video_evidence(catalog, evidence), aliases, choices, claims)
     fields = ("catalog_key", "asset_isrc", "artist_statement", "catalog_artists")
     return {"schema_version": 1, "kind": "excel_contract_columns", "release_id": release,
         "captured_at": datetime.now(timezone.utc).isoformat(),
@@ -70,7 +75,7 @@ def reference_fragments(frame: pl.LazyFrame) -> pl.DataFrame:
         _text(columns, ("source_asset_id", "catalog_number"))).otherwise(
         _text(columns, ("track_id", "Label Track ID", "Track ID", "gpid")))
     keys = ["identity", "source", "account", "statement_period", "asset_isrc",
-            "product_upc", "video_id", "track_id", "catalog_number"]
+            "product_upc", "video_id", "track_id", "catalog_number",'_income_product_pending','_income_upc_pending']
     return frame.select(
         report_identity_expr(columns).alias("identity"),
         *[_text(columns, (name,)).fill_null("").alias(name) for name in ("source", "account")],
@@ -80,6 +85,8 @@ def reference_fragments(frame: pl.LazyFrame) -> pl.DataFrame:
         _text(columns, ("video_id", "Video ID", "VideoId")).alias("video_id"),
         track.alias("track_id"),
         _text(columns, ("catalog_number",)).alias("catalog_number"),
+        *[(pl.col(name).cast(pl.Boolean,strict=False).fill_null(False) if name in columns else pl.lit(False)).alias(name)
+          for name in ('_income_product_pending','_income_upc_pending')],
         pl.col("amount_usd"),
     ).group_by(keys).agg(pl.col("amount_usd").sum()).collect(engine="streaming")
 

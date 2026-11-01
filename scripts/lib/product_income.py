@@ -70,10 +70,12 @@ def unidentified_audio_expr(columns):
     origin = _text(columns, "content_origin_normalized", "content_origin").fill_null("")
     sheet = _text(columns, "source_sheet").fill_null("").str.to_lowercase()
     basis = _text(columns, "revenue_basis").fill_null("")
+    media=_text(columns,'product_type','Product Type').fill_null('')
     video, _ = native_video_exprs(columns)
     return (~isrc.fill_null("").str.contains(ISRC.pattern) & video.is_null()
             & ~origin.str.contains("(?i)UGC|Video|Channel")
             & ~sheet.str.contains("(?i)youtube|shares")
+            & ~media.str.contains('(?i)video|ugc|channel')
             & ~basis.is_in(["transfer", "summary", "share_transfer"]))
 
 
@@ -83,8 +85,22 @@ def whole_product_expr(columns):
     source = _text(columns, "source")
     title = _text(columns, "Catalogue Title", "track_statement_style", "asset_title_statement", "title")
     release = _text(columns, "Project Title", "release_statement_style", "release_title")
-    return (kind.is_in(["product", "album", "a", "internet album", "release"])
+    result=(kind.is_in(["product", "album", "a", "internet album", "release"])
+            | (_text(columns,'content_type').fill_null('').str.to_lowercase()=='product')
             | ((source == "ada") & title.is_not_null() & release.is_not_null() & (title == release)))
+    if 'is_product_income' in columns:
+        result=pl.coalesce([pl.col('is_product_income').cast(pl.Boolean,strict=False),result])
+    return result
+
+
+def native_product_expr(columns,index: dict | None = None):
+    index=index if index is not None else current_index()
+    scopes=[key+'||'+scope for key,p in (index or {}).get('products',{}).items() for scope in p.get('native_product_scopes',[])]
+    kind=_text(columns,'asset_product_type','Asset/Product','product_type','Product Type')
+    kind_known=kind.is_not_null()
+    if 'is_product_income' in columns:kind_known=kind_known|pl.col('is_product_income').is_not_null()
+    contextual=pl.concat_str([product_key_expr(columns),native_scope_expr(columns)],separator='||').is_in(scopes)
+    return whole_product_expr(columns)|(~kind_known & contextual)
 
 
 def native_scope_expr(columns):
@@ -128,14 +144,14 @@ def allocation_cache_matches(stamp: Path,index: dict | None) -> bool:
 
 def current_index(source_path: Path | None = None) -> dict | None:
     if _PINNED.get():
-        return _INDEX.get()
+        return _check_source_index(_INDEX.get(),source_path)
     from app.royalty_scope import is_wml, MARTS
     if is_wml():
         scoped = MARTS.get().get(FILE)
         if scoped is None:
             return None
         stat = scoped.stat()
-        return _read_index(str(scoped), stat.st_mtime_ns, stat.st_size)
+        return _check_source_index(_read_index(str(scoped), stat.st_mtime_ns, stat.st_size),source_path)
     configured = os.environ.get("VPO_PRODUCT_INCOME_PATH")
     path = Path(configured) if configured else (Path(source_path).with_name(FILE) if source_path else None)
     if path is None:
@@ -146,7 +162,14 @@ def current_index(source_path: Path | None = None) -> dict | None:
             raise ValueError("Falta la asignacion de productos de esta version.")
         return None  # An older immutable release keeps its original behaviour.
     stat = path.stat()
-    return _read_index(str(path), stat.st_mtime_ns, stat.st_size)
+    return _check_source_index(_read_index(str(path), stat.st_mtime_ns, stat.st_size),source_path)
+
+
+def _check_source_index(index: dict | None,source_path: Path | None) -> dict | None:
+    if index is not None and source_path is not None and Path(source_path).name=='standardized_raw_all_sources.parquet':
+        if index.get('source_size_bytes') is not None and index['source_size_bytes']!=Path(source_path).stat().st_size:
+            raise ValueError('La ingesta cambió: reconstruí la asignación de productos antes de generar informes.')
+    return index
 
 
 @contextmanager
@@ -159,6 +182,28 @@ def use_product_income(document: dict | None):
         _INDEX.reset(token)
 
 
+@contextmanager
+def use_product_income_marts(marts: dict[str,Path]):
+    from app.royalty_scope import SCOPE,MARTS,STATUS,RELEASE,use_scope
+    path=marts.get(FILE)
+    document=json.loads(path.read_text(encoding='utf-8')) if path is not None else None
+    with use_scope(SCOPE.get(),marts={**MARTS.get(),**marts},catalog_status=STATUS.get(),release_id=RELEASE.get()),use_product_income(document):
+        yield
+
+
+@contextmanager
+def use_product_income_source(source: Path):
+    """Pin a summary build to its source release, including its catalog aliases."""
+    from app.royalty_scope import SCOPE,MARTS,STATUS,RELEASE,use_scope
+    document=current_index(source)
+    marts=dict(MARTS.get())
+    catalog=Path(source).with_name('catalog_master.parquet')
+    if Path(source).name=='standardized_raw_all_sources.parquet' and catalog.exists():
+        marts.setdefault('catalog_master.parquet',catalog)
+    with use_scope(SCOPE.get(),marts=marts,catalog_status=STATUS.get(),release_id=RELEASE.get()),use_product_income(document):
+        yield
+
+
 def allocation_table(index: dict) -> pl.DataFrame:
     records = []
     for key, product in index.get("products", {}).items():
@@ -168,9 +213,11 @@ def allocation_table(index: dict) -> pl.DataFrame:
         for track in tracks:
             records.append({"_income_key": key, "_income_isrc": track["isrc"],
                 "_income_title": track.get("title"), "_income_artist": track.get("artist"),
+                '_income_reference_upc':product.get('resolved_upc') or (key[4:] if key.startswith('UPC:') else None),
                 "_income_position": track["position"], "_income_tracks": len(tracks)})
     return pl.DataFrame(records, schema={"_income_key": pl.String, "_income_isrc": pl.String,
-        "_income_title": pl.String, "_income_artist": pl.String, "_income_position": pl.Int64, "_income_tracks": pl.Int64})
+        "_income_title": pl.String, "_income_artist": pl.String, "_income_reference_upc":pl.String,
+        "_income_position": pl.Int64, "_income_tracks": pl.Int64})
 
 
 def allocate_income(frame: pl.LazyFrame, index: dict | None = None, *, source_path: Path | None = None) -> pl.LazyFrame:
@@ -182,19 +229,19 @@ def allocate_income(frame: pl.LazyFrame, index: dict | None = None, *, source_pa
     if index["scope"] != SCOPE.get():
         raise ValueError("La asignacion de productos pertenece a otro ambito de regalias.")
     mapping = allocation_table(index)
-    if mapping.is_empty():
+    if not index.get('products') and not any(n in columns for n in ['is_product_income','Asset/Product','asset_product_type','product_type','Product Type','release_statement_style']):
         return frame
     # Never spread a track-level movement or a second share of an already prorated row.
     audio = unidentified_audio_expr(columns)
-    verified_scopes = [key + "||" + scope for key, product in index["products"].items()
-        if product["status"] == "validated" for scope in product.get("native_product_scopes", [])]
-    scoped = pl.concat_str([product_key_expr(columns), native_scope_expr(columns)], separator="||")
-    whole = whole_product_expr(columns) | scoped.is_in(verified_scopes)
+    whole = native_product_expr(columns,index)
     shared = _text(columns, "Share Total Tracks").cast(pl.Float64, strict=False).fill_null(1) > 1
+    if 'source_prorated' in columns:shared=shared|pl.col('source_prorated').cast(pl.Boolean,strict=False).fill_null(False)
     # Match single-track products unconditionally; multiple-track products require native product evidence.
     singles = mapping.filter(pl.col("_income_tracks") == 1)
-    candidate = (product_key_expr(columns).is_in(mapping["_income_key"].unique().to_list())
+    candidate = ((product_key_expr(columns).is_in(list(index['products']))|whole_product_expr(columns))
         & ~_text(columns, "asset_isrc", "isrc", "ISRC").fill_null("").str.contains(ISRC.pattern)).fill_null(False)
+    candidate=candidate & ~_text(columns,'content_origin_normalized','content_origin').fill_null('').str.contains('(?i)UGC|Video|Channel')
+    candidate=candidate & ~_text(columns,'video_id').fill_null('').str.contains(r'^[A-Za-z0-9_-]{11}$')
     # Resolve only the unresolved UPC subset eagerly. Keeping the historical scan
     # outside a join lets downstream keyword/date projections stay pushable and
     # avoids materializing millions of wide rows. File scans cache this small view.
@@ -204,13 +251,15 @@ def allocate_income(frame: pl.LazyFrame, index: dict | None = None, *, source_pa
     eligible = (audio & ~shared
         & (whole | pl.col("_income_key").is_in(singles["_income_key"].to_list()))).fill_null(False)
     joined = potential.lazy().with_columns(pl.when(eligible).then(pl.col("_income_key")).alias("_income_match_key")).join(
-        mapping.rename({"_income_key": "_income_match_key"}).lazy(), on="_income_match_key", how="left")
+        mapping.rename({"_income_key": "_income_match_key"}).lazy(), on="_income_match_key", how="left",maintain_order='left_right')
     allocated = pl.col("_income_isrc").is_not_null()
     original_search = pl.concat_str([pl.when(allocated).then(_text(columns, n))
-        for n in SEARCH_FIELDS if n in columns], separator=" | ", ignore_nulls=True)
+        for n in SEARCH_FIELDS if n in columns]+[pl.when(allocated).then(pl.col('_income_reference_upc'))], separator=" | ", ignore_nulls=True)
     factor = pl.when(allocated).then(1.0 / pl.col("_income_tracks")).otherwise(1.0)
     joined = joined.with_columns([
         allocated.alias("_income_allocated"),
+        (audio & whole & ~allocated).fill_null(False).alias('_income_product_pending'),
+        (audio & ~allocated).fill_null(False).alias('_income_upc_pending'),
         pl.when(allocated).then(original_search).alias("_income_origin_search"),
         pl.when(allocated).then(_text(columns, "asset_isrc", "ISRC")).alias("_income_original_isrc"),
         *[pl.when(allocated).then(pl.col(name).cast(pl.Float64, strict=False) * factor)
@@ -282,6 +331,19 @@ def compile_index(source: Path, *, albums: dict[str, dict], tracks: dict[str, di
             _text(cols, "track_statement_style", "asset_title_statement", "product_title_statement", "title").alias("title"),
             whole_product_expr(cols).fill_null(False).alias("whole"), native_scope_expr(cols).alias("native_scope")).unique().collect()
     keys = sorted(set(seeds["key"]))
+    native_keys=[key for key in keys if key.startswith('ADA:')]
+    bindings={};native_upcs={}
+    if native_keys:
+        native=pl.concat_str([pl.lit('ADA:'),_text(cols,'account'),pl.lit(':'),_text(cols,'catalog_number','Catalogue Number')])
+        pairs=frame.filter(_text(cols,'source')=='ada').with_columns(native.alias('native'),product_key_expr(cols).alias('upc_key')).filter(
+            pl.col('native').is_in(native_keys)&pl.col('upc_key').str.starts_with('UPC:')).select(
+                'native','upc_key',_text(cols,'product_upc','UPC Code','UPC').alias('upc')).unique().collect(engine='streaming')
+        for key in native_keys:
+            matches=pairs.filter(pl.col('native')==key)
+            codes=matches['upc_key'].unique().to_list()
+            if len(codes)==1:
+                bindings[key]=codes[0];native_upcs[codes[0]]=matches['upc'].drop_nulls().to_list()[0]
+        keys=sorted(set(keys)|set(bindings.values()))
     upcs = {key[4:] for key in keys if key.startswith("UPC:")}
     observed = defaultdict(set)
     observations = frame.with_columns(product_key_expr(cols).alias("key")).filter(
@@ -297,11 +359,16 @@ def compile_index(source: Path, *, albums: dict[str, dict], tracks: dict[str, di
     for key in keys:
         evidence = []
         prior=(prior_index or {}).get('products',{}).get(key,{})
-        if prior.get('status')=='validated':
+        if prior.get('status')=='validated' and key.startswith('UPC:'):
             # Reuse the already validated complete composition, never guessed API
             # payloads. New source contradictions below invalidate this evidence.
             for proof in prior.get('evidence',[]):
-                evidence.append({'album_id':proof['album_id'],'tracks':prior['tracks']})
+                reused=[]
+                for track in prior['tracks']:
+                    canonical=by_isrc.get(track['isrc'],{})
+                    reused.append({**track,'title':canonical.get('track_title') or track.get('title'),
+                        'artist':canonical.get('catalog_artist_statement') or canonical.get('artist_statement') or track.get('artist')})
+                evidence.append({'album_id':proof['album_id'],'tracks':reused})
         target = key[4:] if key.startswith("UPC:") else None
         for album in albums.values():
             if target is None or normalized_upc(album.get("external_ids", {}).get("upc")) != target:
@@ -326,11 +393,16 @@ def compile_index(source: Path, *, albums: dict[str, dict], tracks: dict[str, di
                 evidence.append({"album_id": album["id"], "tracks": resolved})
         if not evidence and fetch is not None and target is not None:
             original_upc = seeds.filter(pl.col("key") == key)["upc"].drop_nulls().to_list()
-            new_albums, new_tracks = fetch(original_upc[0] if original_upc else target)
+            new_albums, new_tracks = fetch(original_upc[0] if original_upc else native_upcs.get(key,target))
             if new_albums:
                 # Retry this product from the complete newly fetched, exact-UPC evidence.
                 nested = compile_index_for_product(key, new_albums, new_tracks, by_isrc)
                 evidence.extend(nested)
+        unique={}
+        for proof in evidence:
+            proof_key=(proof['album_id'],tuple(sorted(Counter(t['isrc'] for t in proof['tracks']).items())))
+            unique.setdefault(proof_key,proof)
+        evidence=list(unique.values())
         compositions = {tuple(sorted(Counter(t["isrc"] for t in e["tracks"]).items())) for e in evidence}
         complete = bool(evidence) and len(compositions) == 1
         conflict = len(compositions) > 1 or (complete and not observed[key].issubset({t["isrc"] for t in evidence[0]["tracks"]}))
@@ -340,6 +412,11 @@ def compile_index(source: Path, *, albums: dict[str, dict], tracks: dict[str, di
             "tracks": evidence[0]["tracks"] if valid else [], "observed_isrcs": sorted(observed[key]),
             "evidence": [{"album_id": e["album_id"], "track_count": len(e["tracks"])} for e in evidence],
             "native_product_scopes": sorted(seeds.filter((pl.col("key") == key) & pl.col("whole"))["native_scope"].to_list())}
+    for native,key in bindings.items():
+        product=products[native];release=products[key]
+        if release['status']=='validated' and set(product['observed_isrcs']).issubset({t['isrc'] for t in release['tracks']}):
+            product.update(status='validated',reason='complete_exact_upc_native_product',tracks=release['tracks'],
+                evidence=release['evidence'],resolved_upc=key[4:])
     payload = {"schema_version": 1, "rule": RULE, "scope": scope, "products": products}
     payload["evidence_hash"] = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
     return validate_index(payload)
@@ -411,10 +488,11 @@ def align_catalog_income(catalog: pl.DataFrame, source: Path, index: dict | None
             pl.concat_str([pl.lit('ISRC:'),code])).otherwise(
             pl.concat_str([pl.lit('PRODUCT:'),text(['gpid','catalog_number'])]))
     frame = frame.with_columns(key.alias("_catalog_income_key"))
-    aliases = catalog_alias_lookup(catalog=catalog,catalog_path=source.with_name('catalog_master.parquet')).rename({"catalog_key": "_canonical_income_key"})
+    with use_product_income(index):
+        aliases = catalog_alias_lookup(catalog=catalog,catalog_path=source.with_name('catalog_master.parquet')).rename({"catalog_key": "_canonical_income_key"})
     if native_aliases is not None and not native_aliases.is_empty():
         native_text=native_aliases.filter(pl.col('alias_catalog_key').str.starts_with('TEXT:') &
-            ~pl.col('alias_catalog_key').is_in(aliases['alias_catalog_key'].to_list()))
+            ~pl.col('alias_catalog_key').is_in(aliases['alias_catalog_key'].to_list()+catalog['catalog_key'].to_list()))
         aliases=pl.concat([aliases,native_text.rename({'canonical_catalog_key':'_canonical_income_key'})],how='vertical_relaxed').unique()
     upc_aliases=aliases.filter(pl.col('alias_catalog_key').str.starts_with('UPC:')).rename({
         'alias_catalog_key':'_native_upc_key','_canonical_income_key':'_native_upc_income_key'})

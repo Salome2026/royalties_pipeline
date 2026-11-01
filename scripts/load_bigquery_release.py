@@ -433,8 +433,10 @@ def _build_detail_file(source: Path, target: Path, release_id: str, *,
                     .then(text_expr(columns, [field]))
                     .otherwise(pl.lit(None).cast(pl.Utf8))
                     .alias(target_field)
-                    for field, target_field in [("catalog_number", "catalog_number"), ("parent_product_id", "parent_product_id"), ("release_statement_style", "release_title"), ("product_upc_source", "product_upc_source"), ("product_upc_status", "product_upc_status"), *[(field, target) for target, field in ADA_DETAIL_CONTEXT.items() if target not in {"artist_statement_original", "artist_catalog_style"}]]
+                    for field, target_field in [("catalog_number", "catalog_number"), ("parent_product_id", "parent_product_id"), ("product_upc_source", "product_upc_source"), ("product_upc_status", "product_upc_status"), *[(field, target) for target, field in ADA_DETAIL_CONTEXT.items() if target not in {"artist_statement_original", "artist_catalog_style",'product_type'}]]
                 ],
+                text_expr(columns,['product_type','Product Type','asset_product_type','Asset/Product']).alias('product_type'),
+                text_expr(columns,['release_statement_style','product_title_statement','Product Title','Album Title']).alias('release_title'),
                 *[text_expr(columns, [name]).alias(name) for name in ["artist_statement_original", "artist_catalog_style"]],
                 *[pl.when(text_expr(columns, ["source"]) == "soundon").then(text_expr(columns, [field]))
                   .otherwise(pl.lit(None, dtype=pl.Utf8)).alias(target)
@@ -458,7 +460,8 @@ def _build_detail_file(source: Path, target: Path, release_id: str, *,
                 text_expr(columns, ["monetization_normalized"]).alias("monetization"),
                 text_expr(columns, ["content_origin_normalized"]).alias("content_origin"),
                 text_expr(columns, ["classification_status"]).alias("classification_status"),
-                text_expr(columns, ["content_type", "Product Type", "Config Type"]).alias("content_type"),
+                pl.when(text_expr(columns,['asset_product_type','Asset/Product']).str.to_lowercase()=='product')
+                .then(pl.lit('product')).otherwise(text_expr(columns,["content_type", "Product Type", "Config Type"])).alias('content_type'),
                 float_expr(columns, "amount_usd").alias("amount_usd"),
                 units.fill_null(0.0).alias("units"),
                 bool_expr(columns, "include_in_statement_view", True).alias("include_in_statement_view"),

@@ -26,11 +26,15 @@ def refresh(marts: Path) -> Path:
         writers={}
         schemas={}
         inputs={}
+        present=set(pl.scan_parquet(raw).select('source').unique().collect()['source'].to_list()) & set(SOURCES)
         raw_names=set(pq.read_schema(raw).names)
         context={'video_id','video_id_source','channel_id','units','dsp_normalized','monetization_normalized',
             'content_origin_normalized','classification_status','product_upc','asset_product_type','product_type'}
-        for source in SOURCES:
+        for source in present:
             native=BASE/'warehouse/marts'/f'standardized_raw_{source}.parquet'
+            if not native.exists() or native.stat().st_size==0:
+                schemas[source]=list(pq.read_schema(raw).names)
+                continue
             schemas[source]=[n for n in pq.read_schema(native).names if n in raw_names]
             schemas[source]+=sorted((context&raw_names)-set(schemas[source]))
             # Reuse a native input only when its admitted movements reconcile,
@@ -42,9 +46,11 @@ def refresh(marts: Path) -> Path:
             identity=[n for n in ['source','account','statement_file_name','statement_file_hash','asset_isrc',
                 'product_upc','catalog_number','video_id','track_id','transaction_month','amount_usd'] if n in common]
             metrics=[pl.len(),pl.col('amount_usd').sum(),pl.struct(identity).hash(seed=42).sum().alias('identity')]
-            if left.select(metrics).collect(engine='streaming').equals(right.select(metrics).collect(engine='streaming')):
+            a=left.select(metrics).collect(engine='streaming').row(0,named=True)
+            b=right.select(metrics).collect(engine='streaming').row(0,named=True)
+            if a['len']==b['len'] and a['identity']==b['identity'] and abs(a['amount_usd']-b['amount_usd'])<=0.0000001:
                 inputs[source]=native
-        missing=set(SOURCES)-set(inputs)
+        missing=present-set(inputs)
         try:
             # Read a bounded batch of the immutable admitted source, once.
             for batch in (pq.ParquetFile(raw).iter_batches(batch_size=65536,use_threads=False) if missing else []):

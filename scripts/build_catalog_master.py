@@ -218,6 +218,9 @@ def standardized_identity_frame(path: Path) -> pl.LazyFrame | None:
 
     lf = correct_recording_identity(pl.scan_parquet(path))
     schema = set(lf.collect_schema().names())
+    from lib.product_income import current_index,whole_product_expr,unidentified_audio_expr
+    product_index=current_index(MARTS_DIR/'standardized_raw_all_sources.parquet')
+    native_product=(whole_product_expr(schema)&unidentified_audio_expr(schema)).fill_null(False) if product_index is not None else pl.lit(False)
 
     source = coalesce_text(schema, ["source"])
     account = coalesce_text(schema, ["account"])
@@ -300,6 +303,7 @@ def standardized_identity_frame(path: Path) -> pl.LazyFrame | None:
             transaction_month.alias("transaction_month"),
             amount.alias("identity_amount_usd"),
             ada_catalog_key_expr(schema).alias("_ada_catalog_key"),
+            native_product.alias('identity_native_product'),
         ])
         .with_columns([
             normalized_text(pl.col("identity_title")).alias("_title_norm"),
@@ -321,6 +325,7 @@ def standardized_identity_frame(path: Path) -> pl.LazyFrame | None:
             "_title_norm",
             "_artist_norm",
             "_ada_catalog_key",
+            'identity_native_product',
         ])
     )
 
@@ -335,9 +340,14 @@ def identity_with_canonical_key() -> pl.LazyFrame | None:
         return None
 
     all_identity = pl.concat(frames, how="diagonal_relaxed")
+    from lib.product_income import current_index
+    product_index=current_index(MARTS_DIR/'standardized_raw_all_sources.parquet')
+    protected=[key[4:] for key,p in (product_index or {}).get('products',{}).items() if key.startswith('UPC:') and
+        not(p['status']=='validated' and len(p['tracks'])==1)]
     upc_isrc_map = (
         all_identity
         .filter(pl.col("identity_upc").is_not_null() & pl.col("identity_isrc").is_not_null())
+        .filter(~pl.col('identity_upc').str.pad_start(14,'0').is_in(protected))
         .group_by("identity_upc")
         .agg(pl.col("identity_isrc").drop_nulls().unique().alias("_isrcs_for_upc"))
         .filter(pl.col("_isrcs_for_upc").list.len() == 1)
@@ -351,7 +361,7 @@ def identity_with_canonical_key() -> pl.LazyFrame | None:
         all_identity
         .join(upc_isrc_map, on="identity_upc", how="left")
         .with_columns(
-            pl.when(pl.col("_ada_catalog_key").is_not_null())
+            pl.when(pl.col("_ada_catalog_key").is_not_null() | pl.col('identity_native_product').fill_null(False))
             .then(pl.col("identity_isrc"))
             .otherwise(pl.coalesce(["identity_isrc", "_mapped_isrc"]))
             .alias("effective_isrc")
@@ -415,7 +425,7 @@ def build_identity_alias_lookup() -> pl.DataFrame:
             "alias_catalog_key",
             pl.col("_canonical_keys").list.first().alias("canonical_catalog_key"),
         ])
-        .collect()
+        .collect(engine='streaming')
     )
 
 
@@ -449,7 +459,7 @@ def build_identity_lookup() -> pl.DataFrame:
             list_join_expr("identity_title").alias("identity_title_variants"),
             list_join_expr("identity_artist").alias("identity_artist_variants"),
         ])
-        .collect()
+        .collect(engine='streaming')
     )
 
 
@@ -537,6 +547,9 @@ def build_catalog_master() -> pl.DataFrame:
 
     lf = correct_recording_identity(pl.scan_parquet(SONG_LEVEL_PATH))
     schema = set(lf.collect_schema().names())
+    from lib.product_income import current_index,whole_product_expr,unidentified_audio_expr
+    product_index=current_index(MARTS_DIR/'standardized_raw_all_sources.parquet')
+    native_product=(whole_product_expr(schema)&unidentified_audio_expr(schema)).fill_null(False) if product_index is not None else pl.lit(False)
 
     source = coalesce_text(schema, ["source"])
     account = coalesce_text(schema, ["account"])
@@ -569,6 +582,7 @@ def build_catalog_master() -> pl.DataFrame:
             amount.alias("observed_amount_usd"),
             units.alias("units"),
             ada_catalog_key_expr(schema).alias("_ada_catalog_key"),
+            native_product.alias('_native_product'),
         ])
         .join(policy_rules.lazy(), on=["source", "account", "source_sheet"], how="left")
         .with_columns([
@@ -609,7 +623,8 @@ def build_catalog_master() -> pl.DataFrame:
                 how="left",
             )
             .with_columns(
-                pl.coalesce(["canonical_catalog_key", "catalog_key"]).alias("catalog_key")
+                pl.when(pl.col('_native_product')).then(pl.col('catalog_key')).otherwise(
+                    pl.coalesce(["canonical_catalog_key", "catalog_key"])).alias("catalog_key")
             )
             .drop("canonical_catalog_key", strict=False)
         )
