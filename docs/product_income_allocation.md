@@ -30,6 +30,8 @@ Las consultas de contratos conservan la versión de sus rutas inmutables aunque 
 
 El Job WML recibe las credenciales de metadata existentes desde Secret Manager. Su identidad tiene lectura únicamente sobre esos dos secretos para validar UPC nuevos; las credenciales no se guardan en el manifiesto ni en los archivos de ingreso.
 
+El Job de reportes fija `POLARS_MAX_THREADS=2`, acorde con sus dos CPU. Esto acota los buffers de lectura del histórico completo; sin ese límite el contenedor puede dimensionarlos según el host y exceder su memoria al abrir el crudo ancho.
+
 La actualización de importes del catálogo se aplica a un catálogo recién reconstruido desde el resumen nativo; su marca de revisión evita aplicarla dos veces. No se aplica una versión diferente sobre un catálogo ya distribuido.
 
 La inferencia antigua por un único ISRC observado no absorbe los productos nativos. En la versión con esta regla, esos productos conservan su referencia propia y los UPC pendientes o multipista no generan una equivalencia a una sola grabación. Un sencillo con composición completa validada sí conserva su equivalencia exacta al ISRC.
