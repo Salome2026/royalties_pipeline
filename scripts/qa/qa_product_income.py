@@ -72,6 +72,32 @@ class AllocationTests(unittest.TestCase):
             self.assertAlmostEqual(actual['amount_usd'].sum(),original['amount_usd'].sum())
             self.assertAlmostEqual(actual['units'].sum(),original['units'].sum())
 
+    def test_report_selection_preserves_order_amounts_and_destination_keyword_matches(self):
+        from build_keyword_royalty_report import prepare_keyword_source,build_filter,SEARCH_COLUMNS_STANDARDIZED
+        rows=[sale(asset_isrc='BK4DA2632806',amount_usd=10.),sale(amount_usd=-.09),
+              sale(product_upc='123456789012',amount_usd=7.),sale(video_id='abcdefghijk'),sale()]
+        rows=[{**row,'Product Quantity':'3','streams':3} for row in rows]
+        with tempfile.TemporaryDirectory() as tmp,use_product_income(index()):
+            source=Path(tmp)/'source.parquet';original=pl.DataFrame(rows);original.write_parquet(source)
+            full=allocate_income(original.lazy()).collect()
+            for n,(keywords,mode) in enumerate([(['La Juntada'],'any'),(['La Juntada','Tema 2'],'all'),(['absent'],'any')]):
+                path=prepare_keyword_source(source,Path(tmp)/f'selected{n}.parquet',keywords,mode,batch_size=2)
+                actual=pl.read_parquet(path)
+                expected=full.filter(build_filter(set(full.columns),SEARCH_COLUMNS_STANDARDIZED,keywords,mode))
+                self.assertEqual(actual.select(full.columns).to_dicts(),expected.to_dicts())
+                self.assertAlmostEqual(actual['amount_usd'].sum(),expected['amount_usd'].sum())
+
+    def test_report_selection_without_evidence_preserves_frozen_native_album(self):
+        from build_keyword_royalty_report import prepare_keyword_source
+        with tempfile.TemporaryDirectory() as tmp,use_product_income(None):
+            source=Path(tmp)/'source.parquet';pl.DataFrame([sale()]).write_parquet(source)
+            selected=prepare_keyword_source(source,Path(tmp)/'selected.parquet',['La Juntada'],'any',batch_size=1)
+            actual=pl.read_parquet(selected)
+            self.assertEqual(actual.height,1)
+            self.assertIsNone(actual['asset_isrc'][0])
+            self.assertAlmostEqual(actual['amount_usd'][0],1.89)
+            self.assertNotIn('_income_origin_search',actual.columns)
+
     def test_multiple_positions_of_same_recording_use_positions_not_distinct_isrcs(self):
         doc=index();doc['products']['UPC:08718521191726']['tracks'][1]['isrc']='BK4DA2632806'
         out=allocate_income(pl.DataFrame([sale()]).lazy(),doc).collect()

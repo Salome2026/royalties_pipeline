@@ -34,6 +34,8 @@ El Job de reportes fija `POLARS_MAX_THREADS=2`, acorde con sus dos CPU. Esto aco
 
 Para archivos grandes, la vista localiza las posiciones candidatas leyendo únicamente las columnas del predicado en bloques de 16.384 filas. Recupera esas filas con lectura anticipada limitada y deja el resto como lectura diferida por posición. Esto evita materializar el crudo ancho para evaluar la asignación y conserva el mismo orden, campos nativos, selección y resultados que la vista lógica. La regresión cubre filas candidatas en distintos bloques, negativos y movimientos ajenos al reparto.
 
+El reporte prepara además su selección temporal por keyword en bloques de 65.536 filas: aplica primero la distribución, busca también por tema/ISRC de destino y conserva todos los campos y el orden de la vista. Escribe grupos Parquet pequeños antes de los resúmenes y contratos. La marca interna evita repartir nuevamente esas filas. El temporal se elimina al terminar y no modifica los archivos publicados ni el formato del Excel. Versiones congeladas sin evidencia mantienen los ingresos nativos.
+
 La actualización de importes del catálogo se aplica a un catálogo recién reconstruido desde el resumen nativo; su marca de revisión evita aplicarla dos veces. No se aplica una versión diferente sobre un catálogo ya distribuido.
 
 La inferencia antigua por un único ISRC observado no absorbe los productos nativos. En la versión con esta regla, esos productos conservan su referencia propia y los UPC pendientes o multipista no generan una equivalencia a una sola grabación. Un sencillo con composición completa validada sí conserva su equivalencia exacta al ISRC.

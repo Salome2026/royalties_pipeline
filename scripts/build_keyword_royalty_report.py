@@ -1,5 +1,6 @@
 import argparse
 import re
+import tempfile
 from copy import copy
 from datetime import datetime
 from pathlib import Path
@@ -335,6 +336,57 @@ def prompt_keywords() -> list[str]:
 
 def existing_columns(path: Path) -> set[str]:
     return set(scan_income(path).collect_schema().names())
+
+
+def prepare_keyword_source(source: Path, output: Path, keywords: list[str], mode: str, *, batch_size: int = 65536) -> Path:
+    """Materialize a bounded, already allocated selection for the report job only."""
+    import pyarrow.parquet as pq
+    from lib.product_income import current_index,allocate_income,MEASURES
+    index=current_index(source)
+    signature=(source.stat().st_size,source.stat().st_mtime_ns)
+    schema=dict(pl.scan_parquet(source).collect_schema())
+    if index is not None:
+        for name in MEASURES:
+            if name in schema and schema[name].is_numeric():schema[name]=pl.Float64
+        schema.update({'asset_isrc':pl.String,'track_statement_style':pl.String,'artist_statement_style':pl.String,
+            '_income_key':pl.String,'_income_reference_upc':pl.String,'_income_position':pl.Int64,'_income_tracks':pl.Int64,
+            '_income_product_pending':pl.Boolean,'_income_upc_pending':pl.Boolean,
+            '_income_origin_search':pl.String,'_income_original_isrc':pl.String})
+    schema['_income_allocated']=pl.Boolean
+    match=build_filter(set(schema),SEARCH_COLUMNS_STANDARDIZED,keywords,mode)
+    output.parent.mkdir(parents=True,exist_ok=True)
+    paths=[output.with_name(output.stem+'.native.parquet'),output.with_name(output.stem+'.products.parquet')]
+    writers=[None,None]
+    try:
+        for batch in pq.ParquetFile(source).iter_batches(batch_size=batch_size,use_threads=False):
+            original=pl.from_arrow(batch)
+            frame=allocate_income(original.lazy(),index).collect(engine='streaming') if index is not None else original
+            missing=[pl.lit(None,dtype=dtype).alias(name) for name,dtype in schema.items() if name not in frame.columns]
+            frame=frame.with_columns(missing).select(list(schema)).cast(schema,strict=False).filter(match)
+            candidate=pl.col('_income_allocated').is_not_null()
+            for part,condition in enumerate([~candidate,candidate]):
+                selected=frame.filter(condition)
+                if selected.is_empty():continue
+                table=selected.to_arrow()
+                if writers[part] is None:writers[part]=pq.ParquetWriter(paths[part],table.schema,compression='zstd')
+                writers[part].write_table(table)
+    finally:
+        for writer in writers:
+            if writer is not None:writer.close()
+    if signature!=(source.stat().st_size,source.stat().st_mtime_ns):
+        raise ValueError('Cambió el histórico mientras se seleccionaban los ingresos del reporte.')
+    # Preserve the logical view order: untouched native rows, then product rows.
+    combined=None
+    try:
+        for path,writer in zip(paths,writers):
+            if writer is None:continue
+            for batch in pq.ParquetFile(path).iter_batches(batch_size=batch_size,use_threads=False):
+                if combined is None:combined=pq.ParquetWriter(output,batch.schema,compression='zstd')
+                combined.write_batch(batch)
+    finally:
+        if combined is not None:combined.close()
+    if combined is None:pl.DataFrame(schema=schema).write_parquet(output)
+    return output
 
 
 def normalize_isrcs(raw_isrcs: list[str] | None) -> list[str]:
@@ -1362,6 +1414,13 @@ def build_report_tables(
     contract_snapshot: dict | None = None,
     contract_columns: str = "all",
 ) -> dict[str, pd.DataFrame]:
+    if (standardized_path.exists() and standardized_path.stat().st_size>128*1024*1024
+            and '_income_allocated' not in pl.scan_parquet(standardized_path).collect_schema().names()):
+        from lib.product_income import current_index,use_product_income
+        with use_product_income(current_index(standardized_path)),tempfile.TemporaryDirectory(prefix='royalty-selection-') as temporary:
+            selected=prepare_keyword_source(standardized_path,Path(temporary)/'selected_income.parquet',keywords,mode)
+            return build_report_tables(keywords,mode,raw_limit,start_month,end_month,period_basis,song_path,selected,
+                exclude_isrcs,source,account,detail_mode,contract_snapshot,contract_columns)
     period_column = "statement_period" if period_basis == "statement_period" else "transaction_month"
     period_label = PERIOD_BASIS_LABELS.get(period_column, period_column)
     excluded_isrcs = normalize_isrcs(exclude_isrcs)
