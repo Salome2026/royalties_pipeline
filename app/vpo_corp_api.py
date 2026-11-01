@@ -9176,6 +9176,14 @@ def royalties_dashboard_input_columns() -> set[str]:
         "YOUTUBE VIDEO ID",
         "YouTube Video ID",
         "YouTube Asset ID",
+        "video_id_source",
+        "channel_id",
+        "Channel ID",
+        "ChannelId",
+        "YOUTUBE CHANNEL ID",
+        "DSP Container ID",
+        "Product Reference",
+        "product_reference",
         "ID",
         "Parent ID",
         "track_id",
@@ -9402,6 +9410,8 @@ def build_royalties_dashboard_summary_mart(
         if column_name in columns
     ], separator=" ")
     source_sheet = coalesce_text_expr(["source_sheet", "sheet_name", "Sheet", "SHEET"])
+    from scripts.lib.video_context import native_video_exprs, native_channel_expr
+    native_video, native_provenance = native_video_exprs(columns)
     precompact = (
         lf
         .with_columns([
@@ -9416,6 +9426,9 @@ def build_royalties_dashboard_summary_mart(
             isrc.alias("asset_isrc"),
             upc.alias("UPC"),
             coalesce_text_expr(["video_id", "Video ID", "VideoId", "YOUTUBE VIDEO ID", "YouTube Video ID", "YouTube Asset ID", "ID", "Parent ID", "track_id"]).alias("video_id"),
+            native_video.alias("_native_video_id"),
+            native_provenance.alias("_native_video_source"),
+            native_channel_expr(columns).alias("_native_channel_id"),
             *[
                 pl.when(text_expr("source") == "ada").then(non_empty_text_expr(field))
                 .otherwise(pl.lit(None).cast(pl.Utf8)).alias(field)
@@ -9468,6 +9481,9 @@ def build_royalties_dashboard_summary_mart(
             "catalog_number",
             "gpid",
             "ada_account_id",
+            "_native_video_id",
+            "_native_video_source",
+            "_native_channel_id",
         ])
         .agg([
             pl.sum("_dashboard_amount_usd").alias("_dashboard_amount_usd"),
@@ -9489,6 +9505,9 @@ def build_royalties_dashboard_summary_mart(
             "title",
             pl.col("asset_isrc").alias("isrc"),
             pl.col("UPC").alias("upc"),
+            pl.col("_native_video_id").alias("video_id"),
+            pl.col("_native_video_source").alias("video_id_source"),
+            pl.col("_native_channel_id").alias("channel_id"),
             "dsp",
             "territory",
             "sale_type",

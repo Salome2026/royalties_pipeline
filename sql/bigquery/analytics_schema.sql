@@ -84,6 +84,9 @@ CREATE TABLE IF NOT EXISTS `{project}.{dataset}.royalty_dashboard_rankings` (
   title STRING,
   isrc STRING,
   upc STRING,
+  video_id STRING,
+  video_id_source STRING,
+  channel_id STRING,
   dsp STRING,
   territory STRING,
   sale_type STRING,
@@ -119,6 +122,7 @@ OPTIONS(description = 'Totales mensuales por distribuidora y cuenta');
 
 CREATE TABLE IF NOT EXISTS `{project}.{dataset}.royalty_song_level` (
   release_id STRING NOT NULL,
+  statement_month DATE,
   transaction_month DATE,
   source STRING,
   account STRING,
@@ -138,7 +142,11 @@ CREATE TABLE IF NOT EXISTS `{project}.{dataset}.royalty_song_level` (
   video_id STRING,
   video_id_source STRING,
   channel_id STRING,
-  statement_type STRING
+  statement_type STRING,
+  dsp STRING,
+  monetization STRING,
+  content_origin STRING,
+  classification_status STRING
 )
 PARTITION BY transaction_month
 CLUSTER BY release_id, source, account, asset_isrc
@@ -238,6 +246,23 @@ OPTIONS(description = 'Resultado de conciliacion por fuente, cuenta y mes');
 ALTER TABLE `{project}.{dataset}.royalty_statement_fact` ADD COLUMN IF NOT EXISTS video_id_source STRING;
 ALTER TABLE `{project}.{dataset}.royalty_transaction_fact` ADD COLUMN IF NOT EXISTS video_id_source STRING;
 ALTER TABLE `{project}.{dataset}.royalty_song_level` ADD COLUMN IF NOT EXISTS video_id_source STRING;
+ALTER TABLE `{project}.{dataset}.royalty_song_level`
+  ADD COLUMN IF NOT EXISTS statement_month DATE,
+  ADD COLUMN IF NOT EXISTS dsp STRING,
+  ADD COLUMN IF NOT EXISTS monetization STRING,
+  ADD COLUMN IF NOT EXISTS content_origin STRING,
+  ADD COLUMN IF NOT EXISTS classification_status STRING;
+ALTER TABLE `{project}.{dataset}.royalty_dashboard_rankings`
+  ADD COLUMN IF NOT EXISTS video_id STRING,
+  ADD COLUMN IF NOT EXISTS video_id_source STRING,
+  ADD COLUMN IF NOT EXISTS channel_id STRING;
+IF EXISTS (SELECT 1 FROM `{project}.{dataset}.INFORMATION_SCHEMA.TABLES`
+           WHERE table_name = 'royalty_catalog_dashboard') THEN
+ALTER TABLE `{project}.{dataset}.royalty_catalog_dashboard`
+  ADD COLUMN IF NOT EXISTS video_id STRING,
+  ADD COLUMN IF NOT EXISTS video_id_source STRING,
+  ADD COLUMN IF NOT EXISTS channel_id STRING;
+END IF;
 
 CREATE OR REPLACE VIEW `{project}.{dataset}.current_release` AS
 SELECT *

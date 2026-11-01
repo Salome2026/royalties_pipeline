@@ -111,6 +111,9 @@ DASHBOARD_FIELDS = [
     "title",
     "isrc",
     "upc",
+    "video_id",
+    "video_id_source",
+    "channel_id",
     "dsp",
     "territory",
     "sale_type",
@@ -126,6 +129,7 @@ DASHBOARD_FIELDS = [
 
 SONG_FIELDS = [
     "release_id",
+    "statement_month",
     "transaction_month",
     "source",
     "account",
@@ -146,6 +150,10 @@ SONG_FIELDS = [
     "video_id_source",
     "channel_id",
     "statement_type",
+    "dsp",
+    "monetization",
+    "content_origin",
+    "classification_status",
 ]
 
 CATALOG_FIELDS = [
@@ -443,7 +451,7 @@ def _build_detail_file(source: Path, target: Path, release_id: str, *,
                     ["label_normalized", "label_normalized_auto", "label_statement_style", "Product Label", "Label Name"],
                 ).alias("label"),
                 text_expr(columns, ["dsp_normalized", "dsp", "store_report_label", "store_name", "DSP", "Store"]).alias("dsp"),
-                text_expr(columns, ["store_name", "Store Name", "Sale Store Name", "STORE"]).alias("store_name"),
+                text_expr(columns, ["store_name", "Store Name", "Sale Store Name", "STORE", "Store"]).alias("store_name"),
                 text_expr(columns, ["territory", "Territory", "Region", "SALE COUNTRY", "Country"]).alias("territory"),
                 text_expr(columns, ["sale_type", "Sales Type", "Sale Type", "TRANSACTION TYPE"]).alias("sale_type"),
                 text_expr(columns, ["use_type", "sale_user_type", "Sales Sub Type", "SERVICE DETAIL"]).alias("use_type"),
@@ -481,7 +489,11 @@ def build_dashboard(source: Path, target: Path, release_id: str) -> None:
                 pl.lit(release_id).alias("release_id"),
                 month_expr(columns, ["statement_period"]).alias("statement_month"),
                 month_expr(columns, ["transaction_month"]).alias("transaction_month"),
-                *[text_expr(columns, [name]).alias(name) for name in ["source", "account", "source_sheet", "artist", "title", "isrc", "upc", "dsp", "territory", "sale_type"]],
+                *[text_expr(columns, [name]).alias(name) for name in ["source", "account", "source_sheet", "artist", "title", "isrc", "upc"]],
+                native_video_exprs(columns)[0].alias("video_id"),
+                native_video_exprs(columns)[1].alias("video_id_source"),
+                native_channel_expr(columns).alias("channel_id"),
+                *[text_expr(columns, [name]).alias(name) for name in ["dsp", "territory", "sale_type"]],
                 text_expr(columns, ["monetization_normalized"]).alias("monetization"),
                 text_expr(columns, ["content_origin_normalized"]).alias("content_origin"),
                 text_expr(columns, ["classification_status"]).alias("classification_status"),
@@ -503,6 +515,7 @@ def build_song(source: Path, target: Path, release_id: str) -> None:
         frame.select(
             [
                 pl.lit(release_id).alias("release_id"),
+                month_expr(columns, ["statement_period"]).alias("statement_month"),
                 month_expr(columns, ["transaction_month"]).alias("transaction_month"),
                 *[text_expr(columns, [name]).alias(name) for name in ["source", "account", "source_sheet", "revenue_basis"]],
                 bool_expr(columns, "include_in_cash_view", True).alias("include_in_cash_view"),
@@ -520,6 +533,10 @@ def build_song(source: Path, target: Path, release_id: str) -> None:
                 native_video_exprs(columns)[1].alias("video_id_source"),
                 text_expr(columns, ["channel_id"]).alias("channel_id"),
                 text_expr(columns, ["statement_type"]).alias("statement_type"),
+                text_expr(columns, ["dsp_normalized"]).alias("dsp"),
+                text_expr(columns, ["monetization_normalized"]).alias("monetization"),
+                text_expr(columns, ["content_origin_normalized"]).alias("content_origin"),
+                text_expr(columns, ["classification_status"]).alias("classification_status"),
             ]
         ),
         target,
@@ -758,7 +775,20 @@ def video_context_schema_sql(project: str, dataset: str) -> str:
         f"ALTER TABLE `{project}.{dataset}.{table}` ADD COLUMN IF NOT EXISTS video_id_source STRING;"
         for table in ["royalty_statement_fact", "royalty_transaction_fact", "royalty_song_level"]
     )
-    return alterations + f"\nCREATE OR REPLACE VIEW `{project}.{dataset}.royalty_report_detail` AS SELECT fact.* FROM `{project}.{dataset}.royalty_statement_fact` AS fact WHERE fact.release_id = (SELECT release_id FROM `{project}.{dataset}.current_release`);"
+    summary_fields = {
+        "royalty_song_level": {"statement_month": "DATE", "dsp": "STRING", "monetization": "STRING",
+                               "content_origin": "STRING", "classification_status": "STRING"},
+        "royalty_dashboard_rankings": {"video_id": "STRING", "video_id_source": "STRING", "channel_id": "STRING"},
+        "royalty_catalog_dashboard": {"video_id": "STRING", "video_id_source": "STRING", "channel_id": "STRING"},
+    }
+    for table, fields in summary_fields.items():
+        statement = f"ALTER TABLE `{project}.{dataset}.{table}` " + ", ".join(
+            f"ADD COLUMN IF NOT EXISTS {name} {dtype}" for name, dtype in fields.items()) + ";"
+        if table == "royalty_catalog_dashboard":
+            statement = (f"IF EXISTS (SELECT 1 FROM `{project}.{dataset}.INFORMATION_SCHEMA.TABLES` "
+                         f"WHERE table_name = '{table}') THEN\n{statement}\nEND IF;")
+        alterations += "\n" + statement
+    return alterations + f"\nCREATE OR REPLACE VIEW `{project}.{dataset}.royalty_report_detail` AS SELECT fact.* FROM `{project}.{dataset}.royalty_statement_fact` AS fact WHERE fact.release_id = (SELECT release_id FROM `{project}.{dataset}.current_release`);" + f"\nCREATE OR REPLACE VIEW `{project}.{dataset}.royalty_dashboard_current` AS SELECT rankings.* FROM `{project}.{dataset}.royalty_dashboard_rankings` AS rankings WHERE rankings.release_id = (SELECT release_id FROM `{project}.{dataset}.current_release`);"
 
 
 def catalog_artist_schema_sql(project: str, dataset: str) -> str:

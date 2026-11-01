@@ -41,11 +41,27 @@ def totals(path: Path, amount: str = 'amount_usd') -> dict:
 def assert_money_preserved(before: Path, after: Path) -> None:
     def grouped(path):
         return pl.scan_parquet(path).group_by(['source', 'account', 'transaction_month']).agg(
-            pl.col('amount_usd').sum()).collect()
+            pl.col('amount_usd').sum(), pl.col('units').sum()).collect()
     diff = grouped(before).join(grouped(after), on=['source', 'account', 'transaction_month'],
                                 how='full', coalesce=True, nulls_equal=True, suffix='_new')
     if diff.filter((pl.col('amount_usd') - pl.col('amount_usd_new')).abs().fill_null(float('inf')) > .01).height:
         raise RuntimeError('El reproceso cambia importes por cuenta y mes.')
+    if diff.filter((pl.col('units') - pl.col('units_new')).abs().fill_null(float('inf')) > .0001).height:
+        raise RuntimeError('El reproceso cambia unidades por cuenta y mes.')
+
+
+def assert_dashboard_preserved(before: Path, after: Path) -> None:
+    keys = ['source', 'account', 'statement_period', 'transaction_month', 'dsp',
+            'monetization_normalized', 'content_origin_normalized', 'classification_status']
+    def grouped(path):
+        return pl.scan_parquet(path).group_by(keys).agg(
+            pl.col('amount_usd').sum(), pl.col('units').sum(), pl.col('raw_rows').sum()).collect()
+    diff = grouped(before).join(grouped(after), on=keys, how='full', coalesce=True,
+                                nulls_equal=True, suffix='_new')
+    for field, tolerance in [('amount_usd', .01), ('units', .0001), ('raw_rows', 0)]:
+        delta = (pl.col(field).cast(pl.Float64) - pl.col(field + '_new').cast(pl.Float64)).abs()
+        if diff.filter(delta.fill_null(float('inf')) > tolerance).height:
+            raise RuntimeError(f'El reproceso cambia {field} del dashboard por origen, fuente y mes.')
 
 
 def song_input_columns(source: str, available: set[str]) -> list[str]:
@@ -131,6 +147,7 @@ def run() -> None:
         with use_distributor_policy_snapshot(policy):
             api.build_royalties_dashboard_summary_mart(updated/raw_name, refresh_cache=True,
                 output_path=updated/SOURCE_FILES['dashboard'], partition_large_input=True)
+        assert_dashboard_preserved(original/SOURCE_FILES['dashboard'], updated/SOURCE_FILES['dashboard'])
         builders = {'detail': build_detail, 'song': build_song, 'catalog': build_catalog,
                     'dashboard': build_dashboard, 'digital': build_digital}
         expected = {}
