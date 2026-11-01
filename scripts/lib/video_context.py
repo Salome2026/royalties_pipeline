@@ -13,7 +13,8 @@ VIDEO_DIMENSIONS = [
 
 
 def video_group_keys(keys: list[str]) -> list[str]:
-    return list(dict.fromkeys([*keys, *VIDEO_DIMENSIONS]))
+    # A consumption month can arrive in several statements. Keep both dates.
+    return list(dict.fromkeys([*keys, "statement_period", *VIDEO_DIMENSIONS]))
 _VIDEO_FIELDS = ["video_id", "Video ID", "VideoId", "YOUTUBE VIDEO ID", "YouTube Video ID"]
 
 
@@ -73,7 +74,8 @@ def preserve_video_context(frame: pl.DataFrame | pl.LazyFrame):
     lf = frame.lazy() if eager else frame
     columns = set(lf.collect_schema().names())
     video, provenance = native_video_exprs(columns)
-    lf = lf.with_columns(video.alias("video_id"), provenance.alias("video_id_source"),
+    lf = lf.with_columns(optional_text_expr(columns, "statement_period").alias("statement_period"),
+                         video.alias("video_id"), provenance.alias("video_id_source"),
                          native_channel_expr(columns).alias("channel_id"), source_units_expr(columns).alias("units"))
     # Existing business dimensions are authoritative; never reinterpret a projection.
     if not {"dsp_normalized", "monetization_normalized", "content_origin_normalized"}.issubset(columns):

@@ -10,7 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.bootstrap_bigquery_analytics import rendered_schema
-from scripts.load_bigquery_release import insert_sql
+from scripts.load_bigquery_release import insert_sql, video_context_schema_sql
 from scripts.reconcile_bigquery_release import aggregate_bigquery_sql
 from app.bigquery_dashboard import royalty_detail_count_bigquery
 
@@ -46,6 +46,9 @@ def main() -> None:
     assert "royalty_report_detail" in schema
     assert "analytics_reconciliation_runs" in schema
     assert "analytics_reconciliation_results" in schema
+    # BigQuery accepts column IF NOT EXISTS, but not table IF EXISTS with ADD COLUMN.
+    assert "ALTER TABLE IF EXISTS" not in schema
+    assert "ALTER TABLE IF EXISTS" not in video_context_schema_sql("project-test", "dataset_test")
 
     stages = {key: f"stage_{key}" for key in ["detail", "dashboard", "song", "catalog", "digital"]}
     load_sql = insert_sql(
