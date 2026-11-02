@@ -659,7 +659,7 @@ def detail(contracts: list[dict], policy: dict, scope: set[str] | None, *, benef
         period_basis=period_basis, source=source, account=account, keyword=keyword or "",
         start_month=start_month, end_month=end_month, drill=drill or {}, track_key=track_key, track_title=track_title)
     # Period bounds are selected before the topic drill, so last-six-month detail cannot jump into old history.
-    sql = base + _period_sql(period_mode) + """ SELECT identity_key,isrc,title,
+    tail = """ SELECT identity_key,isrc,title,
       FORMAT_DATE('%Y-%m',statement_month) AS statement_month,
       FORMAT_DATE('%Y-%m',transaction_month) AS transaction_month,
       source,account,dsp,territory,monetization,content_origin,contract_percent,contract_version,pending_reason,
@@ -667,7 +667,16 @@ def detail(contracts: list[dict], policy: dict, scope: set[str] | None, *, benef
       FROM scoped GROUP BY identity_key,isrc,title,statement_month,transaction_month,source,account,dsp,territory,
         monetization,content_origin,contract_percent,contract_version,pending_reason
       ORDER BY statement_month,source,account,dsp,territory LIMIT 50001"""
-    rows = _job(sql, params)
+    try:
+        rows = _job(base + _period_sql(period_mode) + tail, params)
+    except GoogleAPICallError as exc:
+        if not any(error.get('reason') == 'bytesBilledLimitExceeded' for error in exc.errors or []) and 'Query exceeded limit for bytes billed' not in str(exc):
+            raise
+        discovery = _job(_dashboard_discovery_sql(base, period_mode), params)
+        selection = next(json.loads(row['payload']) for row in discovery if row['section'] == 'scan_scope')
+        params.append(bigquery.ArrayQueryParameter('selected_months', 'DATE', [date.fromisoformat(value) for value in selection.get('months') or []]))
+        rows = _job(_bounded_dashboard_sql(base, selection, 10, result_sql=tail,
+            columns='period_month,identity_key,isrc,title,statement_month,transaction_month,source,account,dsp,territory,monetization,content_origin,contract_percent,contract_version,pending_reason,base_amount_usd,units,raw_rows'), params)
     if len(rows) > 50000:
         raise ValueError("El detalle supera 50.000 grupos. Acotá el período o la plataforma.")
     groups = defaultdict(list)

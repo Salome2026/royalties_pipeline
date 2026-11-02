@@ -85,6 +85,17 @@ class ExplorerTests(unittest.TestCase):
         self.assertNotIn('presentation_only',result['tracks'][0])
         self.assertNotIn('shares',result['tracks'][0]['segments'][0])
 
+    def test_track_detail_budget_fallback_preserves_period_and_row(self):
+        discovery=[{'section':'scan_scope','payload':json.dumps({'months':['2026-07-01'],'statements':['2026-07-01'],'undated':False})}]
+        with patch.object(ex,'get_context',return_value=project_context()),patch.object(ex,'_job',side_effect=[InternalServerError('Query exceeded limit for bytes billed'),discovery,[income()]]) as query:
+            result=ex.detail([],{}, {'Artista'},track_key='ISRC:ARDL12600001',track_title='Tema',period_mode='last_6_months',juntada_presentation=True)
+        self.assertEqual(result['tracks'][0]['base_amount_usd'],100)
+        sql,params=query.call_args.args
+        self.assertIn("statement_month BETWEEN DATE '2026-07-01' AND DATE '2026-07-01'",sql)
+        self.assertIn('transaction_month,source,account,dsp',sql)
+        self.assertIn('LIMIT 50001',sql)
+        self.assertEqual(next(p.value for p in params if p.name=='track_title'),'Tema')
+
     def test_project_distribution_excludes_other_projects_of_the_same_participant(self):
         ctx = project_context()
         foreign = deepcopy(ctx["snapshot"]["contracts"][0])
