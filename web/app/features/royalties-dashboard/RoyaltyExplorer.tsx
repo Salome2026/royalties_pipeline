@@ -74,7 +74,7 @@ type Segment = { from: string; until: string | null; version: number; label: str
 type Origin = { statement_month: string; transaction_month: string | null; source: string; account: string; dsp: string; territory: string;
   monetization: string; content_origin: string; amount_usd: number; units: number; rows: number };
 type Track = { identity_key: string; isrc: string | null; title: string; row_title?: string | null; base_amount_usd: number; units: number; segments: Segment[];
-  pending: { reason: string; amount_usd: number }[]; records?: Origin[] };
+  presentation_only?: boolean; pending: { reason: string; amount_usd: number }[]; records?: Origin[] };
 type TrackData = { tracks: Track[]; restricted: boolean; beneficiary: string | null; registry_revision: string; period_basis: string };
 
 function Origins({ rows }: { rows: Origin[] }) {
@@ -144,7 +144,7 @@ export function RoyaltyTrackDrawer({ selection, params, onClose, onParticipant }
       {track.segments.map((segment, i) => <section className={styles.segment} key={`${segment.version}-${segment.from}-${i}`}>
         <h3>{segment.label} · versión {segment.version}</h3><p>Vigente: {segment.from} a {segment.until || "actual"}<br />Statements incluidos: {segment.months.join(", ")}</p>
         <div className={styles.segmentBase}>Ingreso en esta vigencia: <strong>{money(segment.base_amount_usd)}</strong></div>
-        {!segment.shares ? <div className={styles.own}><span>Tu participación · {percentage(segment.own_share?.percent || 0)}</span><strong>{money(segment.own_share?.amount_usd || 0)}</strong></div> : <table><thead><tr><th>Participante</th><th>Porcentaje</th><th>Importe USD</th></tr></thead><tbody>{segment.shares?.map((share) => <tr key={share.name} className={explorerKey(share.name) === explorerKey(data.beneficiary || "") ? styles.selectedShare : undefined}><td>{onParticipant ? <button type="button" className={styles.participantLink} onClick={() => onParticipant(share.name, track, !!selection.youtube_only)}>{share.name}</button> : share.name}<details><summary>Composición</summary>{share.origins.map((origin, j) => <small key={j}>{origin.label}: {percentage(origin.percent)}</small>)}</details></td><td>{percentage(share.percent)}</td><td>{money(share.amount_usd)}</td></tr>)}</tbody></table>}
+        {!segment.shares ? <div className={styles.own}><span>Tu participación · {percentage(segment.own_share?.percent || 0)}</span><strong>{money(segment.own_share?.amount_usd || 0)}</strong></div> : <table><thead><tr><th>Participante</th><th>Porcentaje</th><th>Importe USD</th></tr></thead><tbody>{segment.shares?.map((share) => <tr key={share.name} className={explorerKey(share.name) === explorerKey(data.beneficiary || "") ? styles.selectedShare : undefined}><td>{onParticipant && !track.presentation_only ? <button type="button" className={styles.participantLink} onClick={() => onParticipant(share.name, track, !!selection.youtube_only)}>{share.name}</button> : share.name}{share.origins.length > 0 && <details><summary>Composición</summary>{share.origins.map((origin, j) => <small key={j}>{origin.label}: {percentage(origin.percent)}</small>)}</details>}</td><td>{percentage(share.percent)}</td><td>{money(share.amount_usd)}</td></tr>)}</tbody></table>}
       </section>)}
       {track.pending.map((p, i) => <p key={i} className={styles.notice}>{money(p.amount_usd)} pendientes de reparto · {p.reason}</p>)}
       {!data.restricted && !!track.records?.length && <Origins rows={track.records} />}

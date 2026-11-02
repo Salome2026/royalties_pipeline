@@ -36,6 +36,55 @@ def project_context():
 
 
 class ExplorerTests(unittest.TestCase):
+    def test_hernan_presentation_groups_artist_contracts_and_preserves_actual_rules(self):
+        from app.royalty_reports.contractual import allocation_rows
+        agreement={'allocation_model':'pools','commercialization':'master','master_pool_percent':70,
+            'owner_split_mode':'equal','owners':[{'name':n} for n in ['Indyana','Hernan','Claudio']],
+            'allocation':{'principal':'La Juntada de los Artistas','principal_percent':10,
+                'principal_rule':{'treatment':'project_owners'},'participants':[
+                    {'artist':'Candu Dominguez','percent':10,'rule':{'treatment':'artist_contract',
+                        'beneficiaries':[{'name':'Indyana','percent':70},{'name':'Candu Dominguez','percent':30}]}},
+                    {'artist':'G Sony','percent':10,'rule':{'treatment':'artist_contract',
+                        'beneficiaries':[{'name':'Indyana','percent':33.3334},{'name':'G Sony','percent':33.3333},{'name':'Federico','percent':33.3333}]}}]}}
+        shares=allocation_rows(agreement,{})
+        rule={'from':'2026-01-01','end':'9999-12-31','until':None,'version':1,'label':'Contrato','shares':shares}
+        rules={'ARDL12600001':[rule]};original=deepcopy(rules)
+        for amount in [100,100.005,0.01,0.02,-100,-0.02]:
+            rows=[{'isrc':'ARDL12600001','statement_month':'2026-07','pending_reason':'','amount_usd':amount}]
+            actual=ex.format_distribution(rows,rules)
+            visual=ex.format_distribution(rows,rules,juntada_presentation=True)
+            groups=visual['groups'];self.assertEqual([g['name'] for g in groups],['Claudio','Hernán','Indyana','Artistas'])
+            self.assertEqual(len({g['amount_usd'] for g in groups[:3]}),1)
+            self.assertEqual(len({g['percentage'] for g in groups[:3]}),1)
+            self.assertAlmostEqual(sum(g['amount_usd'] for g in groups),actual['distributed_amount_usd'])
+            self.assertTrue(all(not g['members'] for g in groups))
+            self.assertEqual(visual['pending_amount_usd'],actual['pending_amount_usd'])
+            segments={'one':{'rule':rule,'amount_usd':amount,'months':{'2026-07'}}}
+            detail=ex._display_segments(segments,None,False,juntada_presentation=True)[0]
+            self.assertEqual([s['name'] for s in detail['shares']],['Claudio','Hernán','Indyana','Artistas'])
+            self.assertTrue(all(not s['origins'] for s in detail['shares']))
+            self.assertAlmostEqual(sum(s['amount_usd'] for s in detail['shares']),actual['distributed_amount_usd'])
+        self.assertEqual(rules,original)
+        self.assertTrue(any(g['members'] for g in actual['groups']))
+
+    def test_hernan_display_is_selected_only_by_authenticated_username(self):
+        from app import vpo_corp_api as api
+        for username,expected in [('hernanlda',True),('rubene',False),('otro',False)]:
+            with patch.object(api,'royalty_explorer_access',return_value=([],None)), \
+                 patch.object(api,'load_distributor_policy_document',return_value={}), \
+                 patch.object(ex,'distribution',return_value={}) as render:
+                api.royalty_explorer_request(detail=False,distribution_summary=True,measure='income',
+                    beneficiary=None,source=None,account=None,keyword=None,period_basis='statement_period',
+                    period_mode='all',start_month=None,end_month=None,drill=None,track_key=None,
+                    track_title=None,api_key='key',username=username)
+                self.assertIs(render.call_args.kwargs['juntada_presentation'],expected)
+
+    def test_hernan_display_never_changes_detail_of_other_projects(self):
+        with patch.object(ex,'get_context',return_value=context()),patch.object(ex,'_job',return_value=[income()]):
+            result=ex.detail([],{}, {'Artista'},track_key='ISRC:ARDL12600001',juntada_presentation=True)
+        self.assertNotIn('presentation_only',result['tracks'][0])
+        self.assertNotIn('shares',result['tracks'][0]['segments'][0])
+
     def test_project_distribution_excludes_other_projects_of_the_same_participant(self):
         ctx = project_context()
         foreign = deepcopy(ctx["snapshot"]["contracts"][0])

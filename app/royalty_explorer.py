@@ -521,11 +521,33 @@ def dashboard(contracts: list[dict], policy: dict, scope: set[str] | None, *, me
                             restricted=scope is not None, period_basis=period_basis, keyword=keyword or "")
 
 
-def format_distribution(rows: list[dict], rules: dict) -> dict:
+def _juntada_partner_rate(shares: list[dict]) -> float:
+    partners = {name: 0.0 for name in ('claudio', 'hernan', 'indyana')}
+    for share in shares:
+        key = beneficiary_key(share['artist'])
+        if key in partners and share.get('partner') and not share.get('label', '').startswith('Contrato de '):
+            partners[key] += float(share['percent'])
+    return min(partners.values())
+
+
+def _juntada_display_shares(amount: float, partner_amount: float) -> list[dict]:
+    # Equal cents for all three partners; the artist bucket absorbs rounding.
+    equal = math.trunc(round(partner_amount * 100, 8)) / 100
+    total = round_money(amount)
+    partner_percent = round(equal / total * 100, 2) if total else 0.0
+    return [{'name': name, 'amount_usd': value,
+             'percent': (round(100 - 3 * partner_percent, 2) if name == 'Artistas' else partner_percent) if total else 0.0,
+             'origins': []}
+            for name, value in [('Claudio', equal), ('Hernán', equal), ('Indyana', equal),
+                                ('Artistas', round_money(total - 3 * equal))]]
+
+
+def format_distribution(rows: list[dict], rules: dict, *, juntada_presentation=False) -> dict:
     recipients = {}
     partner_keys = {beneficiary_key(share["artist"]) for agreements in rules.values()
                     for agreement in agreements for share in agreement["shares"] if share["partner"]}
     total = covered = 0.0
+    displayed_partner_amount = 0.0
     pending = defaultdict(float)
     for row in rows:
         amount = float(row["amount_usd"] or 0)
@@ -539,6 +561,8 @@ def format_distribution(rows: list[dict], rules: dict) -> dict:
         if agreement is None:
             raise ValueError("El reparto no conserva la versión contractual de la consulta.")
         covered += amount
+        if juntada_presentation:
+            displayed_partner_amount += amount * _juntada_partner_rate(agreement['shares']) / 100
         for share in agreement["shares"]:
             key = beneficiary_key(share["artist"])
             recipient = recipients.setdefault(key, {"name": share["artist"], "amount_usd": 0.0, "partner": key in partner_keys})
@@ -553,17 +577,24 @@ def format_distribution(rows: list[dict], rules: dict) -> dict:
                    "members": [{"name": r["name"], "amount_usd": r["amount_usd"]} for r in artists]})
     for group in groups:
         group["percentage"] = round(group["amount_usd"] / total * 100, 2) if total else 0.0
+    if juntada_presentation:
+        groups = [{'name': s['name'], 'amount_usd': s['amount_usd'], 'members': [],
+                   'percentage': round(s['amount_usd'] / round_money(total) * 100, 2) if round_money(total) else 0.0}
+                  for s in _juntada_display_shares(covered, displayed_partner_amount)]
+        coverage = round(round_money(covered) / round_money(total) * 100, 2) if round_money(total) else 0.0
+        groups[-1]['percentage'] = round(coverage - 3 * groups[0]['percentage'], 2)
     pending_total = round_money(round_money(total) - round_money(covered))
     reasons = [{"reason": reason, "amount_usd": amount} for reason, amount in sorted(pending.items())]
     for reason, amount in zip(reasons, settle_amounts([r["amount_usd"] for r in reasons], pending_total)):
         reason["amount_usd"] = amount
     return {"amount_usd": round_money(total), "distributed_amount_usd": round_money(covered),
-            "pending_amount_usd": pending_total, "groups": groups, "pending": reasons}
+            "pending_amount_usd": pending_total, "groups": groups, "pending": reasons,
+            **({'presentation_only': True} if juntada_presentation else {})}
 
 
 def distribution(contracts: list[dict], policy: dict, scope: set[str] | None, *, beneficiary=None,
                  source=None, account=None, keyword="", period_basis="statement_period", period_mode="last_6_months",
-                 start_month=None, end_month=None, drill=None) -> dict:
+                 start_month=None, end_month=None, drill=None, juntada_presentation=False) -> dict:
     context = juntada_context(get_context(contracts))
     beneficiary = authorize_beneficiary(beneficiary, context["names"], scope)
     base, params, rules = base_query(context, policy, beneficiary, measure="income", restricted=True,
@@ -583,12 +614,12 @@ def distribution(contracts: list[dict], policy: dict, scope: set[str] | None, *,
         params.append(bigquery.ArrayQueryParameter("selected_months", "DATE", [date.fromisoformat(value) for value in selection.get("months") or []]))
         rows = _job(_bounded_dashboard_sql(base, selection, 10, result_sql=tail,
             columns="period_month,identity_key,title,isrc,statement_month,pending_reason,base_amount_usd"), params)
-    return {**format_distribution(rows, rules), "registry_revision": context["revision"],
+    return {**format_distribution(rows, rules, juntada_presentation=juntada_presentation), "registry_revision": context["revision"],
             "release_id": context["release"], "period_basis": period_basis}
 
 
 
-def _display_segments(segments: dict, beneficiary: str | None, restricted: bool) -> list[dict]:
+def _display_segments(segments: dict, beneficiary: str | None, restricted: bool, *, juntada_presentation=False) -> list[dict]:
     displayed_segments = []
     for segment in segments.values():
         agreement = segment["rule"]
@@ -602,6 +633,9 @@ def _display_segments(segments: dict, beneficiary: str | None, restricted: bool)
         values = settle_amounts([segment["amount_usd"] * s["percent"] / 100 for s in shares], segment["amount_usd"])
         for share, value in zip(shares, values):
             share["amount_usd"] = value
+        if juntada_presentation:
+            shares = _juntada_display_shares(segment['amount_usd'],
+                segment['amount_usd'] * _juntada_partner_rate(agreement['shares']) / 100)
         own = [s for s in shares if beneficiary_key(s["name"]) == beneficiary_key(beneficiary or "")]
         value = {"from": agreement["from"], "until": agreement["until"], "version": agreement["version"],
                  "label": agreement["label"], "months": sorted(segment["months"]),
@@ -616,7 +650,7 @@ def _display_segments(segments: dict, beneficiary: str | None, restricted: bool)
 
 def detail(contracts: list[dict], policy: dict, scope: set[str] | None, *, beneficiary=None, track_key=None,
            track_title=None, source=None, account=None, keyword="", period_basis="statement_period",
-           period_mode="last_6_months", start_month=None, end_month=None, drill=None) -> dict:
+           period_mode="last_6_months", start_month=None, end_month=None, drill=None, juntada_presentation=False) -> dict:
     if not track_key and not track_title:
         raise ValueError("Elegí un tema del dashboard.")
     context = get_context(contracts)
@@ -659,11 +693,14 @@ def detail(contracts: list[dict], policy: dict, scope: set[str] | None, *, benef
             segment["months"].add(row["statement_month"])
             segment["rule"] = agreement
         distribution_visible = scope is None or income[0]["isrc"] in project_roots
-        displayed_segments = _display_segments(segments, beneficiary, scope is not None and not distribution_visible)
+        project_presentation = juntada_presentation and income[0]['isrc'] in project_roots
+        displayed_segments = _display_segments(segments, beneficiary, scope is not None and not distribution_visible,
+                                               juntada_presentation=project_presentation)
         track = {"identity_key": identity, "isrc": income[0]["isrc"], "title": income[0]["title"], "row_title": track_title,
                  "base_amount_usd": round_money(sum(r["amount_usd"] for r in income)),
                  "units": sum(r["units"] or 0 for r in income), "segments": displayed_segments,
                  "distribution_visible": distribution_visible,
+                 **({'presentation_only': True} if project_presentation else {}),
                  "pending": [{"reason": reason, "amount_usd": round_money(amount)} for reason, amount in pending.items()]}
         if scope is None:
             track["records"] = [{k: r[k] for k in ("statement_month", "transaction_month", "source", "account", "dsp", "territory", "monetization", "content_origin", "amount_usd", "units", "rows")} for r in income]

@@ -6,6 +6,7 @@ import styles from "./RoyaltyExplorer.module.css";
 
 type Member = { name: string; amount_usd: number };
 type Distribution = {
+  presentation_only?: boolean;
   amount_usd: number;
   distributed_amount_usd: number;
   pending_amount_usd: number;
@@ -62,7 +63,7 @@ export function RoyaltyDistributionDrawer({ open, params, onClose }: { open: boo
   return <div className={styles.backdrop} onClick={onClose}>
     <aside ref={panel} className={styles.drawer} role="dialog" aria-modal="true" aria-label="Distribución del ingreso reportable" onClick={(event) => event.stopPropagation()}>
       <header><div><span>Ingreso reportable</span><h2>Distribución de ingresos</h2></div><button type="button" aria-label="Cerrar distribución" onClick={onClose}><X size={20} /></button></header>
-      <p className={styles.distributionCaption}>Reparto según los contratos guardados, para el catálogo, período y filtros que estás viendo.</p>
+      <p className={styles.distributionCaption}>{data?.presentation_only ? "Vista agrupada de socios y artistas, para el período y filtros que estás viendo." : "Reparto según los contratos guardados, para el catálogo, período y filtros que estás viendo."}</p>
       {!data && !error && <p role="status">Consultando la distribución…</p>}
       {error && <p className={styles.notice} role="alert">{error}</p>}
       {data && <>

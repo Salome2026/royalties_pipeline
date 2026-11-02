@@ -10195,9 +10195,11 @@ def royalty_explorer_request(*, detail: bool, measure: str, beneficiary: str | N
                     period_mode=period_mode, start_month=start_month, end_month=end_month, drill=filters)
         policy = load_distributor_policy_document()
         if distribution_summary:
-            return royalty_explorer.distribution(contracts, policy, scope, **args)
+            return royalty_explorer.distribution(contracts, policy, scope,
+                juntada_presentation=clean_username(username or '') == 'hernanlda', **args)
         if detail:
-            return royalty_explorer.detail(contracts, policy, scope, track_key=track_key, track_title=track_title, **args)
+            return royalty_explorer.detail(contracts, policy, scope, track_key=track_key, track_title=track_title,
+                juntada_presentation=clean_username(username or '') == 'hernanlda', **args)
         return royalty_explorer.dashboard(contracts, policy, scope, measure=measure, **args)
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc
