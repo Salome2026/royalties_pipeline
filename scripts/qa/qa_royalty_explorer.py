@@ -30,6 +30,51 @@ def income(amount=100, **changes):
 
 
 class ExplorerTests(unittest.TestCase):
+    def test_distribution_groups_saved_partners_and_artists_and_conserves_cents(self):
+        ctx = context()
+        agreement = ctx["snapshot"]["contracts"][0]["split"]["agreements"][0]
+        agreement["owners"] = [{"name": name, "percent": None} for name in ["Indyana", "Hernan", "Claudio"]]
+        _, _, rules = ex.compiled_rules(ctx, "Artista")
+        for amount in [100, -100, 0.01, 100.005]:
+            rows = [{"isrc": "ARDL12600001", "statement_month": "2026-07", "pending_reason": "", "amount_usd": amount},
+                    {"isrc": None, "statement_month": "2026-07", "pending_reason": "Contrato abierto", "amount_usd": 7.13}]
+            result = ex.format_distribution(rows, rules)
+            groups = {r["name"]: r for r in result["groups"]}
+            self.assertEqual(set(groups), {"Indyana", "Hernan", "Claudio", "Artistas"})
+            self.assertEqual(groups["Artistas"]["members"][0]["name"], "Artista")
+            self.assertAlmostEqual(sum(r["amount_usd"] for r in groups.values()), result["distributed_amount_usd"])
+            self.assertAlmostEqual(result["distributed_amount_usd"] + result["pending_amount_usd"], result["amount_usd"])
+            self.assertEqual(sum(r["amount_usd"] for r in result["pending"]), result["pending_amount_usd"])
+        self.assertEqual(ex.format_distribution([], {})["amount_usd"], 0)
+
+    def test_distribution_cannot_override_artist_scope_and_keeps_track_detail_private(self):
+        with patch.object(ex, "get_context", return_value=context()), patch.object(ex, "_job") as query:
+            with self.assertRaises(PermissionError):
+                ex.distribution([], {}, {"Artista"}, beneficiary="Socio")
+            query.assert_not_called()
+        row = {"isrc": "ARDL12600001", "statement_month": "2026-07", "pending_reason": "", "amount_usd": 100}
+        with patch.object(ex, "get_context", return_value=context()), patch.object(ex, "_job", return_value=[row]) as query:
+            result = ex.distribution([], {}, {"Artista"}, source="fuga", period_mode="last_6_months", drill={"dsp": "YouTube"})
+            sql, params = query.call_args.args
+            self.assertIn("WHERE t.root IS NOT NULL", sql)
+            self.assertIn("n.statement_month BETWEEN r.start AND r.end", sql)
+            self.assertEqual(next(p.value for p in params if p.name == "drill_dsp"), "YouTube")
+            self.assertEqual(next(p.value for p in params if p.name == "source"), "fuga")
+            self.assertEqual({r["name"]: r["amount_usd"] for r in result["groups"]}, {"Indyana": 54, "Socio": 40, "Artistas": 6})
+        with patch.object(ex, "get_context", return_value=context()), patch.object(ex, "_job", return_value=[income(100)]):
+            private = ex.detail([], {}, {"Artista"}, track_key="ISRC:ARDL12600001")
+            self.assertNotIn("shares", private["tracks"][0]["segments"][0])
+
+    def test_distribution_budget_fallback_materializes_only_selected_income(self):
+        discovery = [{"section": "scan_scope", "payload": json.dumps({"months": ["2026-07-01"], "statements": ["2026-07-01"], "undated": False})}]
+        row = {"isrc": "ARDL12600001", "statement_month": "2026-07", "pending_reason": "", "amount_usd": 100}
+        with patch.object(ex, "get_context", return_value=context()), patch.object(ex, "_job", side_effect=[InternalServerError("Query exceeded limit for bytes billed"), discovery, [row]]) as query:
+            self.assertEqual(ex.distribution([], {}, {"Artista"})["distributed_amount_usd"], 100)
+            sql, params = query.call_args.args
+            self.assertIn("statement_month BETWEEN DATE '2026-07-01' AND DATE '2026-07-01'", sql)
+            self.assertIn("SUM(base_amount_usd)", sql)
+            self.assertIn("FROM explorer_filtered", sql)
+
     def test_budget_fallback_preserves_options_and_caches_the_complete_result(self):
         base, params, _ = ex.base_query(context(), {}, "Artista", measure="contractual", restricted=True,
             period_basis="transaction_month", source=None, account=None, keyword="Tema",

@@ -28,6 +28,7 @@ steps:
       - scripts.qa.qa_soundon_catalog_artists
       - scripts.qa.qa_ingestion_controls
       - scripts.qa.qa_contract_income_budget
+      - scripts.qa.qa_royalty_explorer
       - scripts.qa.qa_common_participant_resolution
       - -q
 

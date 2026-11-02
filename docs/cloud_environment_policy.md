@@ -61,6 +61,13 @@ El menu web se define por permisos de usuario/modulo. No hay modo temporal paral
 - No alcanza con ocultar el menu. La prueba de alta debe comprobar login,
   filtrado del dashboard y rechazo del catalogo general y de los otros modulos.
 - Si no se pueden validar permisos, no se permite consultar otros modulos.
+- El clic en `Ingreso reportable` abre el resumen de distribucion del mismo
+  catalogo, periodo y filtros aplicados. Este resumen muestra todos los
+  beneficiarios de esos ingresos: socios por nombre y artistas agrupados con
+  detalle desplegable. Calcula contratos cerrados y vigencias guardadas, conserva
+  centavos y separa pendientes. La ruta `/royalties-dashboard/distribution`
+  verifica los mismos permisos y alcance; no habilita otros catalogos ni cambia
+  la proyeccion privada de la vista por tema.
 
 ### Google Cloud Run
 

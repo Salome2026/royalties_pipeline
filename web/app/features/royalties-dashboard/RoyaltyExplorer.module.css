@@ -8,6 +8,7 @@
 .participantLink { font-weight:600; text-align:left; }
 .selectedShare { background:rgba(121,203,182,.09); }
 .notice { color:#edc487; font-size:13px; line-height:1.6; }
+.distributionCaption { color:#b1c7b8; font-size:13px; line-height:1.6; }
 .trail { display:flex; flex-wrap:wrap; gap:7px; margin:12px 0 20px; }
 .trail button { display:flex; align-items:center; gap:8px; border:1px solid #37453d; border-radius:4px; padding:5px 8px; background:transparent; color:#a8b5ac; font-size:12px; font-weight:500; }
 .pending { padding:14px 0; color:#edc487; border-top:1px solid #665735; margin-top:18px; }

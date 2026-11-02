@@ -130,6 +130,11 @@
 .metricBand span { color: var(--muted); font-size: 10px; font-weight: 800; text-transform: uppercase; }
 .metricBand strong { display: block; margin-top: 7px; color: var(--text); font-size: 17px; line-height: 1.25; overflow-wrap: anywhere; }
 .primaryMetric strong { color: var(--accent); font-size: 23px; }
+.metricButton { display:block; width:100%; min-height:0; margin:0; padding:0; border:0; border-radius:0; background:transparent; color:inherit; text-align:left; font:inherit; box-shadow:none; cursor:pointer; transform:none; }
+.metricButton:hover:not(:disabled) { background:transparent; box-shadow:none; transform:none; }
+.metricButton:hover:not(:disabled) strong { text-decoration:underline; text-underline-offset:4px; }
+.metricButton:focus-visible { outline:2px solid var(--accent); outline-offset:5px; }
+.metricButton:disabled { cursor:default; }
 .youtubeMetrics { grid-template-columns: minmax(220px, 1.5fr) repeat(2, minmax(150px, 1fr)); margin-top: 24px; }
 .scopeLine { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 7px 22px; margin-top: 11px; color: var(--muted); font-size: 11px; }
 .scopeLine strong { color: #dce8df; }
