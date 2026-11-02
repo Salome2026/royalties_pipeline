@@ -169,6 +169,12 @@ def apply_approved(frame):
                 row[mapping[field]] = value
                 if field == "artists":
                     row["catalog_artist_statement"] = " / ".join(value)
+                    from scripts.lib.catalog_participant_resolution import resolve_row, native_records, FIELD
+                    proof = document(row.get("catalog_artist_evidence") or "[]")
+                    if any(item.get("source") == "catalog" and item.get("field") == FIELD for item in proof):
+                        row["catalog_artist_evidence"] = json.dumps(native_records(proof))
+                        resolved, _ = resolve_row(row, manual_keys={row["catalog_key"]})
+                        row.update(resolved)
                 elif field == "label":
                     row["label_normalized_auto"] = value
                     row["label_normalized"] = value

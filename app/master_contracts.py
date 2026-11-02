@@ -186,6 +186,27 @@ def artist_suggestions(
     isrc: str, raw_path: Path | None, fallback: str | None,
     catalog_artists: list[str] | None = None, catalog_artist_evidence: str | None = None,
 ) -> dict[str, Any]:
+    from scripts.lib.catalog_participant_resolution import resolution_from_evidence, native_records
+    common = resolution_from_evidence(isrc, catalog_artists, catalog_artist_evidence)
+    if common is not None:
+        # Existing helpers still supply dates/principal confidence, never the membership list.
+        original = json.dumps(native_records(json.loads(catalog_artist_evidence or "[]")), ensure_ascii=True)
+        result = artist_suggestions(isrc, raw_path, fallback, common["original_artists"], original)
+        result["artists"] = list(common["artists"] or [])
+        result["artists_reported"] = list(common["artists"] or [])
+        if not common["original_artists"] and len(result["artists"]) > 1:
+            result["principal_uncertain"] = True
+        result["participant_resolution_status"] = common["status"]
+        result["participant_resolution_rule"] = common["rule"]
+        result["participant_alternatives"] = common["claims"]
+        result["evidence"] = [*result.get("evidence", []), common]
+        if common["status"] in {"completed_from_native_track", "consistent", "manual_protected"}:
+            obsolete = {"Las fuentes difieren en participantes; se conservan los nombres informados, sin asignar porcentajes.",
+                        "Las fuentes de pista discrepan; sugerimos solo los nombres comunes. Revisar antes de cerrar."}
+            result["warnings"] = [message for message in result.get("warnings", []) if message not in obsolete]
+        if common["status"] in {"review_required", "conflicting_participants"}:
+            result["warnings"] = [*result.get("warnings", []), "La evidencia de participantes requiere revision; se conserva la lista del catalogo sin completar por suposicion."]
+        return result
     from scripts.lib.catalog_artist_extensions import contract_credit_base
     base = contract_credit_base(isrc, catalog_artists, catalog_artist_evidence)
     if base is not None:

@@ -754,6 +754,8 @@ def build_catalog_master() -> pl.DataFrame:
     catalog = enrich_checked(catalog, "soundon", enrich_soundon_catalog_file, MARTS_DIR / "standardized_raw_soundon.parquet")
     catalog = enrich_checked(catalog, "dashgo", enrich_dashgo_catalog_file, MARTS_DIR / "standardized_raw_dashgo.parquet")
     catalog = enrich_checked(catalog, "ada", enrich_catalog_artist_extensions_file, MARTS_DIR / ADA_METADATA_FILE)
+    from lib.catalog_participant_resolution import resolve_catalog_participants
+    catalog = resolve_catalog_participants(catalog)
     from lib.product_income import align_catalog_income
     catalog = align_catalog_income(catalog, MARTS_DIR / "standardized_raw_all_sources.parquet",native_aliases=identity_alias_lookup)
     return catalog.sort("amount_usd", descending=True)
