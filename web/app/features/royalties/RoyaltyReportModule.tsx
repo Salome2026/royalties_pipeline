@@ -32,14 +32,15 @@ type Props = {
 
 export function RoyaltyReportModule({ onMessage }: Props) {
   const [output, setOutput] = useState<RoyaltyReportOutput>("excel");
-  const [executiveMode, setExecutiveMode] = useState<"income" | "contractual">("income");
+  const [executiveMode, setExecutiveMode] = useState<"income" | "contractual" | "artist_settlement">("income");
   const [includeContracts, setIncludeContracts] = useState(false);
   const [contractColumns, setContractColumns] = useState<"matching" | "all">("all");
   const [contractArtists, setContractArtists] = useState<string[]>([]);
   const [artistOptions, setArtistOptions] = useState<string[]>([]);
   const [artistSearch, setArtistSearch] = useState("");
   const [artistError, setArtistError] = useState("");
-  const contractual = output === "executive_pdf" && executiveMode === "contractual";
+  const individual = output === "executive_pdf" && executiveMode === "artist_settlement";
+  const contractual = output === "executive_pdf" && executiveMode !== "income";
   const [keywords, setKeywords] = useState("");
   const [period, setPeriod] = useState<PeriodSelection>({ mode: "all" });
   const [periodBasis, setPeriodBasis] = useState<RoyaltyPeriodBasis>("transaction_month");
@@ -173,6 +174,10 @@ export function RoyaltyReportModule({ onMessage }: Props) {
       onMessage({ type: "error", text: selection.error });
       return;
     }
+    if (individual && selection.artists.length > 1) {
+      onMessage({ type: "error", text: "Elegí un solo artista para la liquidación individual." });
+      return;
+    }
     setContractArtists(selection.artists);
     setArtistSearch("");
     onMessage(null);
@@ -189,11 +194,19 @@ export function RoyaltyReportModule({ onMessage }: Props) {
       onMessage({ type: "error", text: "La opción de contratos todavía no está disponible. Recargá la pantalla." });
       return null;
     }
+    if (individual && !options?.artist_settlement_supported) {
+      onMessage({ type: "error", text: "La liquidación individual todavía no está disponible. Recargá la pantalla." });
+      return null;
+    }
     let artists = contractArtists;
     if (contractual) {
       const selection = prepareContractArtists(contractArtists, artistSearch, artistOptions);
       if (artistError || selection.error || !selection.artists.length) {
         onMessage({ type: "error", text: artistError || selection.error || "Elegí al menos un artista o proyecto." });
+        return null;
+      }
+      if (individual && selection.artists.length !== 1) {
+        onMessage({ type: "error", text: "Elegí un solo artista para la liquidación individual." });
         return null;
       }
       artists = selection.artists;
@@ -220,7 +233,7 @@ export function RoyaltyReportModule({ onMessage }: Props) {
       start_month: resolved.startMonth,
       end_month: resolved.endMonth,
       period_basis: contractual ? "statement_period" : periodBasis,
-      ...(contractual ? { executive_mode: "contractual" as const, contract_artists: artists } : {}),
+      ...(contractual ? { executive_mode: executiveMode, contract_artists: artists } : {}),
       ...(output === "excel" && !wml && includeContracts ? { include_contracts: true, contract_columns: contractColumns } : {}),
       mode: matchMode,
       raw_limit: Number.isFinite(parsedRawLimit) ? parsedRawLimit : 0,
@@ -354,8 +367,13 @@ export function RoyaltyReportModule({ onMessage }: Props) {
             {output === "executive_pdf" && (
               <div className={styles.field}>
                 <label htmlFor="royalty_pdf_type">Tipo de PDF</label>
-                <select id="royalty_pdf_type" value={executiveMode} onChange={(event) => setExecutiveMode(event.target.value as "income" | "contractual")}>
+                <select id="royalty_pdf_type" value={executiveMode} onChange={(event) => {
+                  const value = event.target.value as "income" | "contractual" | "artist_settlement";
+                  setExecutiveMode(value);
+                  if (value === "artist_settlement") { setContractArtists((names) => names.slice(0, 1)); setArtistSearch(""); }
+                }}>
                   <option value="income">Resumen de ingresos</option>
+                  <option value="artist_settlement" disabled={wml || !options?.artist_settlement_supported}>Liquidación individual del artista</option>
                   <option value="contractual" disabled={wml}>Ingresos y reparto contractual</option>
                 </select>
               </div>
@@ -363,15 +381,16 @@ export function RoyaltyReportModule({ onMessage }: Props) {
 
             {contractual && (
               <div className={styles.field}>
-                <label htmlFor="royalty_contract_artist">Artistas / proyectos</label>
+                <label htmlFor="royalty_contract_artist">{individual ? "Artista de la liquidación" : "Artistas / proyectos"}</label>
                 <div className={styles.artistEntry}>
                   <input id="royalty_contract_artist" list="royalty_contract_artists" value={artistSearch} onChange={(event) => setArtistSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && artistSearch.trim()) { event.preventDefault(); addContractArtist(); } }} placeholder="Buscar artista o proyecto" />
                   <datalist id="royalty_contract_artists">{artistOptions.filter((name) => !contractArtists.includes(name)).map((name) => <option key={name} value={name} />)}</datalist>
-                  <button type="button" title="Agregar artista" aria-label="Agregar artista" disabled={!pendingArtist || contractArtists.includes(pendingArtist) || contractArtists.length >= 20} onClick={addContractArtist}><Plus size={18} /></button>
+                  <button type="button" title="Agregar artista" aria-label="Agregar artista" disabled={!pendingArtist || contractArtists.includes(pendingArtist) || contractArtists.length >= (individual ? 1 : 20)} onClick={addContractArtist}><Plus size={18} /></button>
                 </div>
                 <div className={styles.artistSelection}>
                   {contractArtists.map((name) => <span key={name}>{name}<button type="button" title={`Quitar ${name}`} aria-label={`Quitar ${name}`} onClick={() => setContractArtists((names) => names.filter((item) => item !== name))}><X size={14} /></button></span>)}
                 </div>
+                {individual && <small>Mismo formato de Indyana, con nombre de cobro, DNI y correo en blanco para completar en el PDF o al imprimir.</small>}
                 {artistError && <small role="alert">{artistError}</small>}
               </div>
             )}
@@ -537,7 +556,7 @@ export function RoyaltyReportModule({ onMessage }: Props) {
             {lastSheetUrl ? (
               <a href={lastSheetUrl} target="_blank" rel="noreferrer">Abrir Google Sheet <ExternalLink size={14} aria-hidden="true" /></a>
             ) : (
-              <span>{lastFile || (output === "excel" ? "Excel detallado" : contractual ? "Ingresos y reparto contractual" : "PDF ejecutivo de una página")}</span>
+              <span>{lastFile || (output === "excel" ? "Excel detallado" : individual ? "Liquidación individual del artista" : contractual ? "Ingresos y reparto contractual" : "PDF ejecutivo de una página")}</span>
             )}
           </div>
           <div className={styles.actionButtons}>
@@ -562,7 +581,7 @@ export function RoyaltyReportModule({ onMessage }: Props) {
               <div className={styles.recentRow} key={job.id}>
                 <span className={`${styles.statusDot} ${styles[job.status]}`} aria-hidden="true" />
                 <div>
-                  <strong>{job.params.executive_mode === "contractual" ? "PDF de reparto contractual" : job.output_format === "executive_pdf" ? "PDF ejecutivo" : job.output_format === "google_sheet" ? "Google Sheet" : "Excel detallado"}</strong>
+                  <strong>{job.params.executive_mode === "artist_settlement" ? "Liquidación individual del artista" : job.params.executive_mode === "contractual" ? "PDF de reparto contractual" : job.output_format === "executive_pdf" ? "PDF ejecutivo" : job.output_format === "google_sheet" ? "Google Sheet" : "Excel detallado"}</strong>
                   <span>{job.params.contract_artists?.join(", ") || job.params.keywords?.join(", ") || "Todas las regalías"} · #{job.id}</span>
                 </div>
                 <span className={styles.recentState}>{job.status === "completed" ? "Listo" : job.status === "failed" ? "Error" : job.status === "running" ? "Procesando" : "En cola"}</span>

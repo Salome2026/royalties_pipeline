@@ -301,7 +301,7 @@ MART_RELEASE_CACHE_CONFIG: tuple[str, str, str] | None = None
 
 class RoyaltyReportJobRequest(BaseModel):
     output: Literal["excel", "executive_pdf", "google_sheet"] = "excel"
-    executive_mode: Literal["income", "contractual"] = "income"
+    executive_mode: Literal["income", "contractual", "artist_settlement"] = "income"
     contract_artists: list[str] = Field(default_factory=list, max_length=20)
     include_contracts: bool = False
     contract_columns: Literal["matching", "all"] = "all"
@@ -7419,13 +7419,15 @@ def canonical_royalty_report_params(
         raise HTTPException(status_code=400, detail="Ingresa al menos una palabra clave.")
     if request.start_month and request.end_month and request.start_month > request.end_month:
         raise HTTPException(status_code=400, detail="El periodo desde no puede ser mayor que hasta.")
-    if request.executive_mode == "contractual":
+    if request.executive_mode in {"contractual", "artist_settlement"}:
         if request.output != "executive_pdf":
             raise HTTPException(status_code=400, detail="El reparto contractual solo está disponible en PDF.")
         artists = list(dict.fromkeys(name.strip() for name in request.contract_artists if name.strip()))
         if not artists or any(len(name) > 200 for name in artists):
             raise HTTPException(status_code=400, detail="Elegí al menos un artista o proyecto del catálogo.")
-        params.update(executive_mode="contractual", contract_artists=artists, period_basis="statement_period")
+        if request.executive_mode == "artist_settlement" and len(artists) != 1:
+            raise HTTPException(status_code=400, detail="Elegí exactamente un artista para la liquidación individual.")
+        params.update(executive_mode=request.executive_mode, contract_artists=artists, period_basis="statement_period")
         for month in [request.start_month, request.end_month]:
             if month and not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
                 raise HTTPException(status_code=400, detail="El período debe contener meses válidos.")
@@ -7453,7 +7455,7 @@ def canonical_royalty_report_params(
     params["source"] = source
     params["account"] = account
     if is_wml():
-        if params.get("executive_mode") == "contractual":
+        if params.get("executive_mode") in {"contractual", "artist_settlement"}:
             raise HTTPException(400,"WML usa informes al 100%; las referencias no generan un reparto automático.")
         params['royalty_scope'] = 'wml'
         params['source'] = 'wml'
@@ -7467,7 +7469,7 @@ def canonical_royalty_report_params(
 def require_report_job_access(username: str, job: dict[str, Any], action: Literal["access", "create"] = "access") -> dict:
     with operational_connect() as conn:
         permission = require_module_permission(conn, username, "royalty_reports", action)
-        if (job.get("params") or {}).get("executive_mode") == "contractual" or (job.get("params") or {}).get("include_contracts"):
+        if (job.get("params") or {}).get("executive_mode") in {"contractual", "artist_settlement"} or (job.get("params") or {}).get("include_contracts"):
             require_contract_report_permission(conn, username, action)
     if not permission.get("is_admin") and str(job.get("requested_by") or "").casefold() != username.casefold():
         raise HTTPException(status_code=403, detail="No tenes permiso para ver este reporte.")
@@ -7554,7 +7556,7 @@ def create_royalty_report_job(
         raise HTTPException(status_code=401, detail="Usuario requerido.")
     with operational_connect() as conn:
         require_module_permission(conn, username, "royalty_reports", "create")
-        if request.executive_mode == "contractual" or request.include_contracts:
+        if request.executive_mode in {"contractual", "artist_settlement"} or request.include_contracts:
             require_contract_report_permission(conn, username)
 
     policy_snapshot = load_distributor_policy_document()
@@ -7571,7 +7573,7 @@ def create_royalty_report_job(
                 'catalog_master.parquet','catalog_status.parquet','wml_isrc_references.parquet')} if is_wml() else
                {'filenames': ('song_level_all_sources.parquet','standardized_raw_all_sources.parquet',
                 'catalog_master.parquet','catalog_status.parquet',CATALOG_RELEASE_METADATA_FILE)}
-               if request.executive_mode == "contractual" or request.include_contracts else {}),
+               if request.executive_mode in {"contractual", "artist_settlement"} or request.include_contracts else {}),
         )
         if is_wml():
             from app.royalty_workspace_store import records
@@ -7580,7 +7582,7 @@ def create_royalty_report_job(
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Los datos publicados no estan disponibles.") from exc
 
-    if request.executive_mode == "contractual":
+    if request.executive_mode in {"contractual", "artist_settlement"}:
         from app.catalog_refresh import pin_report_dashboard
         try:
             pin_report_dashboard(input_manifest)
@@ -7597,6 +7599,8 @@ def create_royalty_report_job(
             contracts = stored_contracts(conn)
         try:
             snapshot = freeze_contract_snapshot(params["contract_artists"], catalog, contracts)
+            if request.executive_mode == "artist_settlement":
+                snapshot["template_version"] = "artist-settlement-v1"
             input_manifest["contract_snapshot"] = freeze_contract_associations(
                 snapshot, catalog_frame, contracts, input_manifest["release_id"],
                 input_manifest=input_manifest,
@@ -7662,7 +7666,7 @@ def recent_royalty_report_jobs(
             reconcile_report_job_if_stale(job)
             for job in list_report_jobs(requested_by, limit=limit,royalty_scope='wml' if is_wml() else 'regular')
             if (job.get("params") or {}).get("royalty_scope","regular") == ("wml" if is_wml() else "regular")
-            if not ((job.get("params") or {}).get("executive_mode") == "contractual" or (job.get("params") or {}).get("include_contracts")) or permission.get("is_admin") or can_read_contracts
+            if not ((job.get("params") or {}).get("executive_mode") in {"contractual", "artist_settlement"} or (job.get("params") or {}).get("include_contracts")) or permission.get("is_admin") or can_read_contracts
         ]
     }
 
@@ -7762,6 +7766,7 @@ def royalty_report_options(
         "sources": sorted({item["source"] for item in source_accounts}),
         "source_accounts": source_accounts,
         "excel_contracts_supported": not is_wml(),
+        "artist_settlement_supported": not is_wml(),
     }
 
 

@@ -55,11 +55,13 @@ class ReportRequest:
         if output_format in {"excel", "google_sheet"} and not keywords and royalty_scope != 'wml':
             raise ValueError("El reporte requiere al menos una palabra clave.")
         executive_mode = str(params.get("executive_mode") or "income")
-        if executive_mode not in {"income", "contractual"}:
+        if executive_mode not in {"income", "contractual", "artist_settlement"}:
             raise ValueError("Tipo de PDF no soportado.")
-        if executive_mode == "contractual":
+        if executive_mode in {"contractual", "artist_settlement"}:
             if output_format != "executive_pdf" or params.get("period_basis") != "statement_period":
                 raise ValueError("El reparto contractual usa PDF y exclusivamente fecha de statement.")
+        if executive_mode == "artist_settlement" and len(params.get("contract_artists") or []) != 1:
+            raise ValueError("La liquidación individual requiere exactamente un artista.")
         include_contracts = params.get("include_contracts", False)
         contract_columns = params.get("contract_columns", "all")
         if not isinstance(include_contracts, bool) or contract_columns not in {"matching", "all"}:
