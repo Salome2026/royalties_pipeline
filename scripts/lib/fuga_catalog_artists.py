@@ -205,6 +205,6 @@ def enrich_fuga_catalog_file(catalog: pl.DataFrame, raw_path: Path) -> pl.DataFr
 def catalog_artist_display(catalog: pl.DataFrame) -> pl.DataFrame:
     if "catalog_artist_statement" not in catalog.columns:
         return catalog
-    return catalog.with_columns(
-        pl.coalesce([pl.col("catalog_artist_statement"), pl.col("artist_statement")]).alias("artist_statement")
-    )
+    from .catalog_artist_dictionary import display_credit_expr
+    return catalog.with_columns(display_credit_expr(
+        pl.coalesce([pl.col("catalog_artist_statement"), pl.col("artist_statement")])).alias("artist_statement"))

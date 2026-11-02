@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 import polars as pl
+from scripts.lib.catalog_artist_dictionary import display_credit, search_terms
 try:
     from lib.product_income import scan_income
 except ModuleNotFoundError:
@@ -354,7 +355,7 @@ def filter_report_keyword_values(frame: pl.DataFrame,keywords: list[str],mode: s
                 values=frame[name].cast(pl.String,strict=False).fill_null('')
                 cache[name]=(values,values.unique().to_frame('_value'))
             values,unique=cache[name]
-            matches=unique.filter(contains_search_expr(pl.col('_value'),keyword))['_value']
+            matches=unique.filter(pl.any_horizontal([contains_search_expr(pl.col('_value'),term) for term in search_terms(keyword)]))['_value']
             if matches.is_empty():continue
             found=values.is_in(matches.implode())
             if name in scoped and name not in ordinary:found=found & ada
@@ -459,7 +460,7 @@ def contains_expr(columns: set[str], search_columns: list[str], keyword: str) ->
     normalized_keyword = normalize_search_text(keyword)
     for col in search_columns:
         if col in columns:
-            match = contains_search_expr(pl.col(col), normalized_keyword)
+            match = pl.any_horizontal([contains_search_expr(pl.col(col), term) for term in search_terms(normalized_keyword)])
             exprs.append(match.fill_null(False))
     for col in ["catalog_number", "gpid", "Catalog Number", "Catalogue Number", "GPID"]:
         if col in columns:
@@ -960,7 +961,13 @@ def normalize_report_usage(lf: pl.LazyFrame, columns: set[str]) -> pl.LazyFrame:
 
 
 def display_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
-    return dataframe.rename(columns={col: DISPLAY_HEADERS.get(col, col) for col in dataframe.columns})
+    from app.royalty_scope import is_wml
+    result = dataframe.copy()
+    if not is_wml():
+        for column in ("artist_statement_style", "asset_artist_statement", "artist", "artist_statement", "catalog_artist_statement"):
+            if column in result.columns:
+                result[column] = result[column].map(display_credit)
+    return result.rename(columns={col: DISPLAY_HEADERS.get(col, col) for col in result.columns})
 
 
 def public_detail_columns(

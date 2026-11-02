@@ -136,6 +136,7 @@ from lib.fuga_extended import (  # noqa: E402
     monitor_directory as monitor_fuga_extended_directory,
 )
 from lib.fuga_catalog_artists import catalog_artist_display  # noqa: E402
+from scripts.lib.catalog_artist_dictionary import display_credit_expr  # noqa: E402
 from lib.mart_release_cache import MartReleaseCache, MartReleaseCacheError  # noqa: E402
 from build_fuga_gusty_contract_report import build_fuga_gusty_contract_report  # noqa: E402
 import build_la_nueva_sangre_report as la_nueva_sangre_report  # noqa: E402
@@ -9481,7 +9482,7 @@ def _build_royalties_dashboard_summary_mart(
             text_expr("transaction_month").alias("transaction_month"),
             source_sheet.alias("source_sheet"),
             coalesce_text_expr(["revenue_basis", "Base ingreso"]).alias("revenue_basis"),
-            artist.alias("artist"),
+            display_credit_expr(artist).alias("artist"),
             title.alias("title"),
             isrc.alias("asset_isrc"),
             upc.alias("UPC"),
@@ -9748,14 +9749,20 @@ def build_digital_income_summary_mart(standardized_path: Path, refresh_cache: bo
         "Album Title",
     ]
     search_fields = [field for field in artist_fields + title_fields + ["_income_origin_search"] if field in columns]
+    native_artist = pl.coalesce([non_empty_text_expr(field) for field in artist_fields if field in columns] or [pl.lit("")]).fill_null("")
+    current_artist = display_credit_expr(native_artist)
+    native_search = pl.concat_str([text_expr(field) for field in search_fields] or [pl.lit("")], separator=" ").str.to_lowercase()
+    search = pl.when(current_artist != native_artist).then(
+        pl.concat_str([native_search, current_artist.str.to_lowercase()], separator=" ")
+    ).otherwise(native_search)
 
     base = lf.with_columns([
         text_expr("source").alias("source"),
         text_expr("account").alias("account"),
         text_expr("statement_period").alias("statement_period"),
-        pl.coalesce([non_empty_text_expr(field) for field in artist_fields if field in columns] or [pl.lit("")]).fill_null("").alias("artist"),
+        current_artist.alias("artist"),
         pl.coalesce([non_empty_text_expr(field) for field in title_fields if field in columns] or [pl.lit("")]).fill_null("").alias("title"),
-        pl.concat_str([text_expr(field) for field in search_fields] or [pl.lit("")], separator=" ").str.to_lowercase().alias("search_text"),
+        search.alias("search_text"),
         amount_usd.alias("total_usd"),
         numeric_expr("net_amount_eur").fill_null(0.0).alias("total_eur"),
         (

@@ -42,6 +42,7 @@ class ArtistDictionaryTests(unittest.TestCase):
             with self.subTest(module=key.__module__):
                 self.assertEqual(key("Matias Mareco DJ"), key("Matias Mareco"))
                 self.assertEqual(key("DJ Alan Gomez"), key("Alan Gomez"))
+                self.assertEqual(key("ACIT x"), key("Acita"))
                 self.assertNotEqual(key("DJ Another"), key("Another"))
 
     def test_contractual_and_source_identity_keys_are_not_merged(self):

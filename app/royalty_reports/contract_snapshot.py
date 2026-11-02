@@ -20,10 +20,11 @@ def published_catalog_frame(client, manifest: dict) -> pl.DataFrame:
 
 
 def contract_catalog_rows(frame: pl.DataFrame) -> list[dict]:
+    from scripts.lib.catalog_artist_dictionary import display_credit
     frame = frame.filter(pl.col("asset_isrc").str.contains(r"^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$"))
     frame = frame.sort(["amount_usd", "asset_isrc"], descending=[True, False]).unique(subset=["asset_isrc"], keep="first", maintain_order=True)
     return [{"isrc": row["asset_isrc"], "title": row.get("track_title") or "Sin título",
-             "artists_informed": row.get("artist_statement") or "", "artist_variants": row.get("artist_variants") or ""} for row in frame.to_dicts()]
+             "artists_informed": display_credit(row.get("artist_statement") or ""), "artist_variants": row.get("artist_variants") or ""} for row in frame.to_dicts()]
 
 
 def published_contract_catalog(client, manifest: dict) -> list[dict]:
