@@ -113,6 +113,26 @@ process.stdout.write(JSON.stringify(rows.map(r=>({codes:m.exports.pendingAssocia
         self.assertNotEqual(first, review_revision(changed, {"object": "metadata", "generation": 5}))
         self.assertNotEqual(first, review_revision(manifest, {"object": "metadata", "generation": 6}))
         self.assertEqual(first, review_revision(manifest, {"object": "metadata", "generation": "5", "size_bytes": 123}))
+        changed = copy.deepcopy(manifest)
+        changed['objects']['product_income_allocations.json'] = {'object':'products','generation':3}
+        self.assertNotEqual(first, review_revision(changed, {"object":"metadata","generation":5}))
+
+    def test_background_review_uses_validated_product_like_live_editor(self):
+        import polars as pl
+        from app.master_contract_review import review_aliases
+        from scripts.lib.product_income import use_product_income
+        upc='790092134546'
+        catalog=pl.DataFrame({'catalog_key':['ISRC:'+ISRC,'TEXT:funky rocho|credits'], 'upcs':[upc,upc]})
+        index={'schema_version':1,'scope':'regular','rule':'product-income-equal-tracks-v1',
+            'products':{'UPC:'+upc.zfill(14):{'status':'validated','tracks':[{'isrc':ISRC,'position':1}]}}}
+        self.assertNotIn('UPC:'+upc,review_aliases(catalog,None))
+        aliases=review_aliases(catalog,index)
+        self.assertEqual(aliases['UPC:'+upc],'ISRC:'+ISRC)
+        row={'kind':'UPC','code':upc,'source':'fuga','account':'indyana_records','isrcs':[ISRC]}
+        self.assertTrue(candidates(ISRC,[row],aliases,[],{})[0]['automatic'])
+        self.assertEqual(pending_details(candidates(ISRC,[row],aliases,[],{}),[]),[])
+        with use_product_income(index):
+            self.assertNotIn('UPC:'+upc,review_aliases(catalog,None))
 
     def items(self, rows=None, catalog=None, choices=None):
         rows = rows or [video(titles=["Movimento Remix - DJ Plaga, MC Tota (Official Video)"])]

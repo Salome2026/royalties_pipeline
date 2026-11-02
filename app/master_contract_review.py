@@ -10,7 +10,7 @@ from app.master_contract_associations import (
 )
 from app.operational_db import is_postgres_connection
 
-REVIEW_RULE = "complete-identity-evidence-v2"
+REVIEW_RULE = "complete-identity-evidence-v3"
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS master_contract_association_reviews (
     isrc text PRIMARY KEY,
@@ -154,7 +154,8 @@ def reconcile_reviews(conn, release_id: str, evidence: list[dict], aliases: dict
 def review_revision(manifest: dict, metadata_entry: dict | None) -> str:
     inputs = [manifest["bucket"], *[
         [entry["object"], str(entry["generation"])] if entry else None
-        for entry in (manifest["objects"]["catalog_master.parquet"], metadata_entry)]]
+        for entry in (manifest["objects"]["catalog_master.parquet"], metadata_entry,
+                      manifest["objects"].get("product_income_allocations.json"))]]
     return REVIEW_RULE + ":" + hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()[:20]
 
 
@@ -172,6 +173,16 @@ def enrich_review_evidence(catalog: list[dict], evidence: list[dict]) -> list[di
                for row in infer_video_evidence(catalog, [r for r in evidence if scope(r) in unknown])}
     return [{**row, **derived.get(association_key(row["kind"], row["code"], row["source"], row["account"]), {})}
             for row in evidence]
+
+
+def review_aliases(frame, product_index):
+    # The editor resolves validated single-track products before evaluating UPCs.
+    # A background process must use that exact pinned input, never ambient files.
+    from scripts.lib.catalog_report_filter import catalog_alias_lookup
+    from scripts.lib.product_income import use_product_income
+    with use_product_income(product_index):
+        return {row["alias_catalog_key"]: row["catalog_key"]
+                for row in catalog_alias_lookup(catalog=frame).to_dicts()}
 
 
 def review_published_release(client, manifest: dict, *, actor: str = "statement-review") -> None:
@@ -219,8 +230,12 @@ def review_published_release(client, manifest: dict, *, actor: str = "statement-
     evidence = review_identity_evidence(release, frame.to_dicts(), choices)
     enriched = with_external_titles(frame.to_dicts(), metadata)
     evidence = enrich_review_evidence(enriched, evidence)
-    aliases = {row["alias_catalog_key"]: row["catalog_key"]
-               for row in catalog_alias_lookup(catalog=frame).to_dicts()}
+    product_entry = manifest["objects"].get("product_income_allocations.json")
+    product_index = None
+    if product_entry:
+        product_index = json.loads(client.bucket(manifest["bucket"]).blob(
+            product_entry["object"], generation=int(product_entry["generation"])).download_as_bytes())
+    aliases = review_aliases(frame, product_index)
     with operational_connect() as conn:
         result = reconcile_reviews(conn, release, evidence, aliases, expected_choices=choices, rule_version=revision, actor=actor, catalog=enriched)
     print(json.dumps({"event": "contract_association_review_completed", **result}), flush=True)
