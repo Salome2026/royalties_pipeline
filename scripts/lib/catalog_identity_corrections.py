@@ -8,6 +8,20 @@ import polars as pl
 REGISTRY = Path(__file__).with_suffix(".json")
 
 
+def video_corrections():
+    rules = json.loads(REGISTRY.read_text(encoding="utf-8")).get("video_corrections", [])
+    scopes = set()
+    for rule in rules:
+        scope = (rule["source"], rule["account"], rule["video_id"])
+        if scope in scopes or not rule.get("confirmed_by") or not re.fullmatch(r"[A-Za-z0-9_-]{11}", rule["video_id"]):
+            raise ValueError("Conflicting or unconfirmed video recording correction")
+        scopes.add(scope)
+        for code in [rule["canonical_isrc"], *rule["reported_isrcs"]]:
+            if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}\d{7}", code):
+                raise ValueError("Invalid video recording ISRC")
+    return rules
+
+
 def corrections():
     document = json.loads(REGISTRY.read_text(encoding="utf-8"))
     if document.get("version") != 1:
@@ -77,6 +91,21 @@ def correct_recording_identity(frame, *, code_column="asset_isrc", strict=True):
         lf = lf.with_columns(
             pl.when(matched).then(pl.lit(rule["canonical_isrc"])).otherwise(current).alias(code_column),
             pl.when(matched | (canonical_row & canonical_proof)).then(pl.lit(rule["id"])).otherwise(pl.col("catalog_identity_correction")).alias("catalog_identity_correction"))
+    video = text(schema, ["video_id", "DSP Container ID", "YouTube Video ID"])
+    for rule in video_corrections():
+        matched = (workspace & (pl.col("source") == rule["source"]) &
+            (pl.col("account") == rule["account"]) & (video == rule["video_id"])).fill_null(False)
+        allowed = current.is_null() | (current == "") | current.is_in([rule["canonical_isrc"], *rule["reported_isrcs"]])
+        if strict and lf.filter(matched & ~allowed.fill_null(False)).select(pl.len()).collect().item():
+            raise ValueError("El video corregido trae un nuevo ISRC no verificado; revisar antes de reasignar.")
+        lf = lf.with_columns(
+            pl.when(matched & allowed).then(pl.lit(rule["canonical_isrc"])).otherwise(current).alias(code_column),
+            pl.when(matched & allowed).then(pl.lit(rule["id"])).otherwise(pl.col("catalog_identity_correction")).alias("catalog_identity_correction"))
+        for column, value in [("product_upc", rule.get("canonical_upc")), ("track_statement_style", rule.get("title"))]:
+            if column in schema and value:
+                if "reported_" + column not in schema:
+                    lf = lf.with_columns(pl.col(column).alias("reported_" + column))
+                lf = lf.with_columns(pl.when(matched & allowed).then(pl.lit(value)).otherwise(pl.col(column)).alias(column))
     return lf.collect() if eager else lf
 
 
@@ -90,6 +119,12 @@ def correct_extended_identity(metadata):
             result = result.with_columns(pl.col("principal_asset_isrc").alias("reported_principal_asset_isrc"))
         result = result.with_columns(pl.when(proof & (pl.col("principal_asset_isrc") == rule["reported_isrc"]))
             .then(pl.lit(rule["canonical_isrc"])).otherwise(pl.col("principal_asset_isrc")).alias("principal_asset_isrc"))
+    for rule in video_corrections():
+        matched = pl.col("YouTube Video ID") == rule["video_id"]
+        if "reported_principal_asset_isrc" not in result.columns:
+            result = result.with_columns(pl.col("principal_asset_isrc").alias("reported_principal_asset_isrc"))
+        result = result.with_columns(pl.when(matched).then(pl.lit(rule["canonical_isrc"]))
+            .otherwise(pl.col("principal_asset_isrc")).alias("principal_asset_isrc"))
     return result
 
 

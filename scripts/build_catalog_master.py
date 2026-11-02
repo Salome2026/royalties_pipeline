@@ -541,7 +541,7 @@ def build_release_lookup() -> pl.DataFrame:
     return pl.concat([by_isrc, by_video, by_upc], how="diagonal_relaxed").unique("catalog_key")
 
 
-def build_catalog_master() -> pl.DataFrame:
+def build_catalog_master(*, native_only: bool = False) -> pl.DataFrame:
     if not SONG_LEVEL_PATH.exists():
         raise FileNotFoundError(f"No existe {SONG_LEVEL_PATH}")
 
@@ -689,6 +689,9 @@ def build_catalog_master() -> pl.DataFrame:
                 pl.coalesce(["artist_variants", "identity_artist_variants"]).alias("artist_variants"),
             ])
         )
+
+    if native_only:
+        return catalog
 
     # Native metadata and admission of money are separate. Shares-only ISRCs
     # must exist before release metadata/manual corrections/artist enrichment.

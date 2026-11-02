@@ -898,9 +898,9 @@
     },
     {
       "video_isrc": "ARS8H2600019",
-      "catalog_key": "ISRC:QZTB62504366",
+      "catalog_key": "ISRC:ARDL12600097",
       "audio_relationship_status": "confirmed",
-      "confirmed_audio_isrc": "QZTB62504366",
+      "confirmed_audio_isrc": "ARDL12600097",
       "proposed_audio_isrc": null,
       "proposed_audio_title": null,
       "video_ids": [
@@ -920,8 +920,10 @@
       ],
       "source_file": "October2026_INDYANARECORDSLLC-youtube_extended.csv",
       "evidence": "Sale ID y YouTube Asset ID historico",
-      "notes": "El mismo video aparece tambien en VIDEO:LZJSvkx13LI, con el titulo PERREO TICKET, ficha de identidad sin filas economicas propias. Vincularla como alias, conservando el titulo alternativo.",
-      "is_composite_video": false
+      "notes": "Ruben confirmed 2026-11-02: this exact video is PERREO TICKET, distinct from Perreo mamiyosoyelth. Correct the reported audio relationship; retain native FUGA fields as evidence.",
+      "is_composite_video": false,
+      "confirmed_by": "Ruben",
+      "confirmed_on": "2026-11-02"
     },
     {
       "video_isrc": "ARS8H2600023",
@@ -1264,7 +1266,7 @@
     },
     {
       "alias_catalog_key": "VIDEO:LZJSvkx13LI",
-      "catalog_key": "ISRC:QZTB62504366"
+      "catalog_key": "ISRC:ARDL12600097"
     }
   ],
   "recording_review_closed_on": "2026-10-15",

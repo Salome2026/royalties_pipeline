@@ -1,5 +1,21 @@
 {
   "version": 1,
+  "video_corrections": [
+    {
+      "id": "PERREO-TICKET-VIDEO-20261102",
+      "source": "fuga",
+      "account": "indyana_records",
+      "video_id": "LZJSvkx13LI",
+      "video_isrc": "ARS8H2600019",
+      "reported_isrcs": ["QZTB62504366"],
+      "canonical_isrc": "ARDL12600097",
+      "canonical_upc": "8721555044371",
+      "title": "PERREO TICKET",
+      "confirmed_by": "Ruben",
+      "confirmed_on": "2026-11-02",
+      "reason": "Confirmed distinct recordings. This exact official video is Perreo Ticket; its native audio association in FUGA is incorrect. Other videos and audio revenue of QZTB62504366 retain their identity."
+    }
+  ],
   "corrections": [
     {
       "id": "DORMUN-EL-FARSANTE-ISRC-20261027",

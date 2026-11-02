@@ -118,10 +118,25 @@ def run() -> None:
             bucket.blob(item['object_name'], generation=int(item['generation'])).download_to_filename(str(original/filename))
         # Keep every other immutable manifest entry and every catalog field verbatim.
         raw_name, song_name = SOURCE_FILES['detail'], SOURCE_FILES['song']
-        preserve_video_context(pl.scan_parquet(original/raw_name)).sink_parquet(updated/raw_name, compression='zstd')
+        raw_frame = pl.scan_parquet(original/raw_name)
+        identity_repair = os.environ.get('VPO_RECORDING_IDENTITY_REPAIR') == '1'
+        if identity_repair:
+            from scripts.lib.catalog_identity_corrections import correct_recording_identity
+            raw_frame = correct_recording_identity(raw_frame)
+        preserve_video_context(raw_frame).sink_parquet(updated/raw_name, compression='zstd')
         if totals(original/raw_name)['rows'] != totals(updated/raw_name)['rows']:
             raise RuntimeError('El reproceso cambia la cantidad de filas originales.')
         assert_money_preserved(original/raw_name, updated/raw_name)
+        if identity_repair and 'product_income_allocations.json' in manifest['files']:
+            entry = manifest['files']['product_income_allocations.json']
+            allocation = json.loads(bucket.blob(entry['object_name'], generation=int(entry['generation'])).download_as_text())
+            from scripts.lib.catalog_identity_corrections import video_corrections
+            corrected_codes = {code for r in video_corrections() for code in [r['canonical_isrc'], *r['reported_isrcs']]}
+            if any(t.get('isrc') in corrected_codes for p in allocation['products'].values() for t in p.get('tracks', [])):
+                raise RuntimeError('La grabacion corregida participa en un producto; revisar su asignacion antes de reconstruir.')
+            allocation['source_size_bytes'] = (updated/raw_name).stat().st_size
+            (updated/'product_income_allocations.json').write_text(json.dumps(allocation, sort_keys=True), encoding='utf-8')
+            os.environ['VPO_PRODUCT_INCOME_PATH'] = str(updated/'product_income_allocations.json')
         event('raw_context_preserved', **totals(updated/raw_name))
         song_paths = []
         for source in ['ada', 'dashgo', 'fuga', 'onerpm', 'orchard', 'soundon']:
@@ -138,8 +153,14 @@ def run() -> None:
         assert_money_preserved(original/song_name, updated/song_name)
         for path in song_paths:
             path.unlink()
+        if identity_repair:
+            from app.recording_identity_repair import rebuild_catalog
+            with use_distributor_policy_snapshot(policy):
+                result = rebuild_catalog(original/SOURCE_FILES['catalog'], updated/raw_name,
+                    updated/song_name, updated/SOURCE_FILES['catalog'], root/'identity_catalog')
+            event('recording_identity_rebuilt', **result)
         # Catalog metadata, approved relationships and monetary admission stay pinned.
-        os.environ['VPO_CATALOG_MASTER_PATH'] = str(original/SOURCE_FILES['catalog'])
+        os.environ['VPO_CATALOG_MASTER_PATH'] = str((updated if identity_repair else original)/SOURCE_FILES['catalog'])
         os.environ['VPO_CATALOG_STATUS_PATH'] = str(root/'catalog_status.parquet')
         if status_generation != '0':
             bucket.blob(status.name, generation=int(status_generation)).download_to_filename(os.environ['VPO_CATALOG_STATUS_PATH'])

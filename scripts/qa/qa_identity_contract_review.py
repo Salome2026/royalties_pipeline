@@ -17,6 +17,62 @@ from scripts.qa.qa_contractual_executive import fixture, income
 OLD, NEW, TEST = "ARDL12400078", "ARDL12600160", "ARDL12600999"
 
 
+class VideoRecordingCorrectionTests(unittest.TestCase):
+    def test_scoped_catalog_rebuild_preserves_manual_metadata_and_other_rows(self):
+        import tempfile
+        from pathlib import Path
+        from app.recording_identity_repair import rebuild_catalog
+        codes=['ARDL12600097','QZTB62504366','ARDL12600999']
+        rows=[{'catalog_key':'ISRC:'+code,'asset_isrc':code,'track_title':'Manual '+code,
+            'catalog_artists':['Manual artist'],'amount_usd':float(i+1),'video_ids':'LZJSvkx13LI' if i==1 else '',
+            'catalog_aliases':['VIDEO:LZJSvkx13LI'] if i==1 else [],
+            'video_isrcs':['ARS8H2600019'] if i==1 else [],'video_relationships_json':'[]'} for i,code in enumerate(codes)]
+        original=pl.DataFrame(rows)
+        native=original.head(2).with_columns(pl.Series('amount_usd',[40.,20.]),pl.lit('Wrong native name').alias('track_title'))
+        with tempfile.TemporaryDirectory() as d:
+            p=Path(d);original.write_parquet(p/'original.parquet')
+            minimal=pl.DataFrame({'asset_isrc':codes,'video_id':['LZJSvkx13LI','otherVideo1','otherVideo2']})
+            for name in ['raw','song']:minimal.write_parquet(p/(name+'.parquet'))
+            with patch('scripts.build_catalog_master.build_catalog_master',return_value=native):
+                rebuild_catalog(p/'original.parquet',p/'raw.parquet',p/'song.parquet',p/'after.parquet',p/'work')
+            after=pl.read_parquet(p/'after.parquet');self.assertEqual(after['amount_usd'].to_list(),[40.,20.,3.])
+            self.assertEqual(after['track_title'].to_list(),original['track_title'].to_list())
+            self.assertEqual(after['catalog_artists'].to_list(),original['catalog_artists'].to_list())
+            self.assertEqual(after['video_ids'].to_list(),['LZJSvkx13LI',None,''])
+            self.assertEqual(after['catalog_aliases'].to_list(),[['VIDEO:LZJSvkx13LI'],[],[]])
+            self.assertEqual(json.loads(after['video_relationships_json'][0])[0]['confirmed_audio_isrc'],codes[0])
+
+    def test_exact_video_moves_all_months_without_merging_other_recording(self):
+        rows = []
+        for month, code, amount in [('2026-07', None, 15.01916431646), ('2026-08', 'QZTB62504366', 24.56357490115)]:
+            rows.append({'source':'fuga','account':'indyana_records','video_id':'LZJSvkx13LI',
+                'asset_isrc':code,'Asset ISRC':code,'product_upc':'199519417970',
+                'track_statement_style':'Perreo mamiyosoyelth','statement_period':month,'amount_usd':amount})
+        rows += [{**rows[1], 'video_id':'otherVideo1', 'amount_usd':100.},
+                 {**rows[1], 'account':'other_account', 'amount_usd':200.}]
+        raw=pl.DataFrame(rows);result=correct_recording_identity(raw)
+        self.assertEqual(result['asset_isrc'].to_list(), ['ARDL12600097','ARDL12600097','QZTB62504366','QZTB62504366'])
+        self.assertEqual(result['reported_asset_isrc'].to_list(), raw['asset_isrc'].to_list())
+        self.assertEqual(result['Asset ISRC'].to_list(), raw['Asset ISRC'].to_list())
+        self.assertEqual(result['amount_usd'].to_list(), raw['amount_usd'].to_list())
+        self.assertEqual(result['product_upc'][:2].to_list(), ['8721555044371']*2)
+        self.assertEqual(result['track_statement_style'][:2].to_list(), ['PERREO TICKET']*2)
+        self.assertTrue(correct_recording_identity(result).equals(result))
+
+    def test_extended_video_relation_preserves_native_audio_evidence(self):
+        raw=pl.DataFrame({'YouTube Video ID':['LZJSvkx13LI','otherVideo1'],
+            'YouTube Asset ISRC':['ARS8H2600019','QZTB62504366'],
+            'principal_asset_isrc':['QZTB62504366','QZTB62504366']})
+        result=correct_extended_identity(raw)
+        self.assertEqual(result['principal_asset_isrc'].to_list(),['ARDL12600097','QZTB62504366'])
+        self.assertEqual(result['reported_principal_asset_isrc'].to_list(),['QZTB62504366']*2)
+        self.assertEqual(result['YouTube Asset ISRC'].to_list(),raw['YouTube Asset ISRC'].to_list())
+
+    def test_unexpected_new_native_code_blocks_instead_of_silently_reassigning(self):
+        raw=pl.DataFrame([{'source':'fuga','account':'indyana_records','video_id':'LZJSvkx13LI','asset_isrc':TEST}])
+        with self.assertRaises(ValueError):correct_recording_identity(raw)
+
+
 def sale(code=OLD, **overrides):
     return {"source": "fuga", "account": "indyana_records", "asset_isrc": code,
         "asset_reference": "1001863737555", "asset_artist_statement": "Dormun", "asset_title_statement": "El Farsante",
