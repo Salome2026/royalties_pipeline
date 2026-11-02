@@ -481,10 +481,10 @@ export default function ArtistPortal() {
             </div>
           </>
         )}
-        <RoyaltyDistributionDrawer open={distributionOpen} params={appliedQuery} onClose={() => setDistributionOpen(false)} />
         <RoyaltyExplorerPending info={dashboard?.explorer} onOpen={setSelectedTrack} />
-        <RoyaltyTrackDrawer selection={selectedTrack} params={selectedTrack?.youtube_only ? explorerParams(new URLSearchParams(appliedQuery), { ...explorer, drill: { ...explorer.drill, dsp: "YouTube" } }).toString() : appliedQuery} onClose={() => setSelectedTrack(null)} />
       </section>
+      <RoyaltyDistributionDrawer open={distributionOpen} params={appliedQuery} onClose={() => setDistributionOpen(false)} />
+      <RoyaltyTrackDrawer selection={selectedTrack} params={selectedTrack?.youtube_only ? explorerParams(new URLSearchParams(appliedQuery), { ...explorer, drill: { ...explorer.drill, dsp: "YouTube" } }).toString() : appliedQuery} onClose={() => setSelectedTrack(null)} />
     </main>
   );
 }
