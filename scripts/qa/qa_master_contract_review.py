@@ -3,17 +3,117 @@ from __future__ import annotations
 import copy
 import json
 import unittest
+import subprocess
+import shutil
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from scripts.qa.qa_master_contract_metadata import recording, video
 from scripts.qa.qa_master_contract_associations import ISRC, OTHER, choice
 from app.master_contract_metadata import infer_video_evidence, with_external_titles
-from app.master_contract_associations import candidates, validate_closure
-from app.master_contract_review import evidence_by_contract, pending_details, review_state, save_review
+from app.master_contract_associations import candidates, validate_closure, review_identity_evidence, append_missing_choices
+from app.master_contract_review import evidence_by_contract, pending_details, review_state, save_review, reconcile_reviews, review_revision, enrich_review_evidence
 from app import vpo_corp_api as api
 
 
 class ContractReviewTests(unittest.TestCase):
+    def test_native_identified_recording_does_not_create_a_new_metadata_proposal(self):
+        native = video(isrcs=[OTHER], has_unassigned_rows=False)
+        result = enrich_review_evidence([recording()], [native])
+        self.assertNotIn("inferred_isrcs", result[0])
+        discovered = enrich_review_evidence([recording()], [{**native, "has_unassigned_rows": True}])
+        self.assertEqual(discovered[0]["inferred_isrcs"], [ISRC])
+
+    def test_editor_catalog_seeds_are_also_reviewed_without_a_catalog_alias(self):
+        row = video(isrcs=[], inferred_isrcs=[])
+        grouped = evidence_by_contract([row], {}, {ISRC: []}, {},
+            catalog=[{"asset_isrc": ISRC, "video_ids": row["code"]}])
+        self.assertEqual(grouped[ISRC], [row])
+
+    def test_browser_and_server_agree_on_reference_and_financial_pending_states(self):
+        native = video(isrcs=[ISRC, OTHER], only_ugc_rows=True, has_identified_rows=True, has_unassigned_rows=False)
+        old = candidates(ISRC, [video(isrcs=[ISRC])], {}, [], {})[0]
+        cases = []
+        for rows in [[native], [{**native, "has_unassigned_rows": True}],
+                     [{**native, "only_ugc_rows": False}], []]:
+            for decisions in [[choice(old)], [choice(old, False)], []]:
+                items = append_missing_choices(candidates(ISRC, rows, {}, decisions, {}), decisions)
+                cases.append({"items": items, "choices": decisions,
+                              "expected": review_state(pending_details(items, decisions))["association_pending_codes"]})
+        script = """const fs=require('fs'),ts=require('./web/node_modules/typescript');
+const source=fs.readFileSync('./web/app/features/master-contracts/associationLogic.ts','utf8');
+const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
+const m={exports:{}};new Function('exports','module',compiled)(m.exports,m);
+const rows=JSON.parse(fs.readFileSync(0,'utf8'));
+process.stdout.write(JSON.stringify(rows.map(r=>({codes:m.exports.pendingAssociationCodes(r.items,r.choices),sections:m.exports.groupedAssociations(r.items,r.choices).map(g=>g.section)}))));"""
+        completed = subprocess.run([shutil.which("node"), "-e", script], input=json.dumps(cases),
+            capture_output=True, text=True, check=True, cwd=Path(__file__).resolve().parents[2])
+        results = json.loads(completed.stdout)
+        for case, result in zip(cases, results): self.assertEqual(result["codes"], case["expected"])
+        self.assertEqual(results[0]["sections"], ["ugc"])
+
+    def test_batch_includes_identified_and_saved_codes_and_keeps_native_context(self):
+        row = video(isrcs=[ISRC], content_origins=["UGC / Content ID"], only_ugc_rows=True,
+                    has_identified_rows=True, has_unassigned_rows=False)
+        client = MagicMock(); client.query.return_value.result.return_value = [row]
+        key = json.dumps(["VIDEO", row["code"], row["source"], row["account"]], separators=(",", ":"))
+        choices = {ISRC: [{"key": key, "included": True, "evidence_signature": "previous"}]}
+        result = review_identity_evidence("release", [dict(asset_isrc=ISRC, upcs="123", video_ids=row["code"])], choices, client=client)
+        self.assertEqual(result, [row])
+        sql = client.query.call_args.args[0]
+        config = client.query.call_args.kwargs["job_config"]
+        params = {p.name: p for p in config.query_parameters}
+        self.assertIn("asset_isrc IN UNNEST(@review_isrcs)", sql)
+        self.assertIn("UNNEST(@saved_codes)", sql)
+        self.assertIn("has_unassigned_rows", sql)
+        self.assertEqual(params["review_isrcs"].values, [ISRC])
+        self.assertEqual(params["saved_codes"].values, [key])
+        self.assertTrue(params["include_unassigned"].value)
+        grouped = evidence_by_contract(result, {}, choices, {})
+        items = candidates(ISRC, grouped[ISRC], {}, choices[ISRC], {})
+        self.assertEqual(pending_details(append_missing_choices(items, choices[ISRC]), choices[ISRC]), [])
+        self.assertEqual(choices[ISRC][0]["evidence_signature"], "previous")
+
+    def test_identified_shared_ugc_does_not_reopen_saved_review_or_assign_money(self):
+        row = video(isrcs=[ISRC, OTHER], only_ugc_rows=True, has_identified_rows=True, has_unassigned_rows=False)
+        old = candidates(ISRC, [video(isrcs=[ISRC])], {}, [], {})[0]
+        decisions = [choice(old)]; before = copy.deepcopy(decisions)
+        items = candidates(ISRC, [row], {}, decisions, {})
+        self.assertEqual(pending_details(items, decisions), [])
+        self.assertFalse(items[0]["included"])
+        self.assertEqual(items[0]["status"], "blocked")
+        self.assertEqual(items[0]["isrcs"], sorted([ISRC, OTHER]))
+        self.assertEqual(decisions, before)
+
+    def test_unassigned_or_non_ugc_in_any_account_restores_financial_review(self):
+        identified = video(isrcs=[ISRC, OTHER], only_ugc_rows=True, has_identified_rows=True, has_unassigned_rows=False)
+        old = candidates(ISRC, [video(isrcs=[ISRC])], {}, [], {})[0]
+        for change in [{"has_unassigned_rows": True}, {"only_ugc_rows": False}]:
+            rows = [identified, {**identified, "source": "orchard", "account": "other", **change}]
+            items = candidates(ISRC, rows, {}, [choice(old)], {})
+            self.assertTrue(all(i["reference_group"] == "associated" for i in items))
+            self.assertTrue(pending_details(items, [choice(old)]))
+
+    def test_genuinely_missing_saved_code_still_requires_review(self):
+        old = self.items()[0]
+        choices = [choice(old)]
+        self.assertTrue(pending_details(append_missing_choices([], choices), choices))
+
+    def test_human_decision_race_aborts_before_review_writes(self):
+        conn = MagicMock()
+        conn.execute.return_value.fetchall.return_value = [{"isrc": ISRC, "payload_json": {"code_association_overrides": []}, "version": 2}]
+        with patch("app.master_contract_review.ensure_schema"), self.assertRaises(RuntimeError):
+            reconcile_reviews(conn, "release", [], {}, expected_choices={ISRC: [{"key": "new"}]})
+        self.assertFalse(any("INSERT" in c.args[0] or "UPDATE" in c.args[0] for c in conn.execute.call_args_list))
+
+    def test_same_release_rechecks_new_catalog_or_external_metadata_generation(self):
+        manifest = {"bucket": "b", "objects": {"catalog_master.parquet": {"object": "catalog", "generation": 1}}}
+        first = review_revision(manifest, {"object": "metadata", "generation": 5})
+        changed = copy.deepcopy(manifest); changed["objects"]["catalog_master.parquet"]["generation"] = 2
+        self.assertNotEqual(first, review_revision(changed, {"object": "metadata", "generation": 5}))
+        self.assertNotEqual(first, review_revision(manifest, {"object": "metadata", "generation": 6}))
+        self.assertEqual(first, review_revision(manifest, {"object": "metadata", "generation": "5", "size_bytes": 123}))
+
     def items(self, rows=None, catalog=None, choices=None):
         rows = rows or [video(titles=["Movimento Remix - DJ Plaga, MC Tota (Official Video)"])]
         enriched = infer_video_evidence(catalog or [recording()], rows)
@@ -141,6 +241,7 @@ class ContractReviewTests(unittest.TestCase):
              patch("app.royalty_reports.manifests.build_gcs_input_manifest", return_value={"release_id": "release-a"}), \
              patch("app.master_contract_review.review_published_release") as review, \
              patch("app.catalog_participant_review.review_published_participants") as participant_review, \
+             patch("app.royalty_reports.contract_identity.publish_ranking_guard"), \
              patch.dict("os.environ", {"GCS_BUCKET": "bucket"}):
             connect.return_value.__enter__.return_value = conn
             run_refresh()

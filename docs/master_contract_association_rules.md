@@ -47,6 +47,21 @@ derived contract relationship, not an inferred ISRC in a statement or catalog.
 
 ## Human decisions and closing
 
+Automated review and the contract editor use the same complete native-identity
+query. Review seeds include saved contracts, their catalog identifiers, saved
+decisions and unassigned income; every occurrence of each identifier is inspected.
+Absence from the unassigned-income list alone never means a saved code disappeared.
+Review runs are keyed by financial release, pinned catalog and external-metadata
+generations, and rule version. Concurrent decision changes abort reconciliation
+before writing review states and are retried against the latest decisions.
+
+Videos are reference-only UGC when **every** source/account occurrence is Content
+ID with an explicit ISRC and there are no unassigned occurrences. Their references
+remain visible, including shared ISRCs, but do not create closure/review alerts.
+Saved decisions, signatures and financial inclusion checks are unchanged. Any new
+unassigned or non-UGC occurrence restores normal review for the entire video scope.
+Reconciliation writes only review state/history/run tables, never contract splits.
+
 ### Sin identificar
 
 Contracts has an additional read-only `Sin identificar` view. It lists published

@@ -15,7 +15,7 @@ def association_key(kind: str, code: str, source: str, account: str) -> str:
 
 
 def identity_evidence(isrc: str, catalog_row: dict[str, Any], *, client: Any = None,
-                      release_id: str | None = None) -> list[dict[str, Any]]:
+                      release_id: str | None = None, _review_seeds: dict | None = None) -> list[dict[str, Any]]:
     query_client = client or dashboard_client(DEFAULT_PROJECT, DEFAULT_LOCATION)
     if release_id is None:
         release = next(iter(query_client.query(
@@ -44,9 +44,14 @@ def identity_evidence(isrc: str, catalog_row: dict[str, Any], *, client: Any = N
       ]) code
       WHERE code.value IS NOT NULL AND code.value != ''
     ), seeds AS (
-      SELECT DISTINCT kind, value, scope_source, scope_account FROM codes WHERE asset_isrc = @isrc
+      SELECT DISTINCT kind, value, scope_source, scope_account FROM codes
+      WHERE asset_isrc = @isrc OR asset_isrc IN UNNEST(@review_isrcs)
+        OR (@include_unassigned AND COALESCE(asset_isrc, '') = '')
       UNION DISTINCT SELECT 'UPC', value, '', '' FROM UNNEST(@upcs) value
       UNION DISTINCT SELECT 'VIDEO', value, '', '' FROM UNNEST(@videos) value
+      UNION DISTINCT SELECT JSON_VALUE(value,'$[0]'), JSON_VALUE(value,'$[1]'),
+        IF(JSON_VALUE(value,'$[0]')='TRACK',JSON_VALUE(value,'$[2]'),''),
+        IF(JSON_VALUE(value,'$[0]')='TRACK',JSON_VALUE(value,'$[3]'),'') FROM UNNEST(@saved_codes) value
     )
     SELECT c.kind, c.value AS code, c.source, c.account,
       ARRAY_AGG(DISTINCT NULLIF(c.asset_isrc, '') IGNORE NULLS) AS isrcs,
@@ -61,16 +66,36 @@ def identity_evidence(isrc: str, catalog_row: dict[str, Any], *, client: Any = N
     FROM codes c JOIN seeds s USING (kind, value, scope_source, scope_account)
     GROUP BY c.kind, c.value, c.source, c.account
     """
+    seeds = _review_seeds or {}
     config = bigquery.QueryJobConfig(
         maximum_bytes_billed=5_000_000_000,
         query_parameters=[
             bigquery.ScalarQueryParameter("release_id", "STRING", release_id),
             bigquery.ScalarQueryParameter("isrc", "STRING", isrc),
-            bigquery.ArrayQueryParameter("upcs", "STRING", split_codes(catalog_row.get("upcs"))),
-            bigquery.ArrayQueryParameter("videos", "STRING", split_codes(catalog_row.get("video_ids"))),
+            bigquery.ArrayQueryParameter("upcs", "STRING", seeds.get("upcs", split_codes(catalog_row.get("upcs")))),
+            bigquery.ArrayQueryParameter("videos", "STRING", seeds.get("videos", split_codes(catalog_row.get("video_ids")))),
+            bigquery.ArrayQueryParameter("review_isrcs", "STRING", seeds.get("isrcs", [])),
+            bigquery.ScalarQueryParameter("include_unassigned", "BOOL", bool(_review_seeds)),
+            bigquery.ArrayQueryParameter("saved_codes", "STRING", [json.dumps(row, separators=(",", ":")) for row in seeds.get("saved_codes", [])]),
         ],
     )
     return [dict(row) for row in query_client.query(sql, job_config=config, location=DEFAULT_LOCATION).result(timeout=60)]
+
+
+def review_identity_evidence(release_id: str, catalog: list[dict], choices: dict[str, list[dict]], *, client=None) -> list[dict]:
+    """Same complete evidence as the editor, batched once for every saved contract.
+
+    Discovery also includes unassigned codes. Saved and native identifiers seed
+    all their occurrences, even when every income row already has an ISRC.
+    """
+    if not choices:
+        return []
+    selected = [row for row in catalog if row.get("asset_isrc") in choices]
+    seeds = {"isrcs": sorted(choices),
+             "upcs": sorted({v for row in selected for v in split_codes(row.get("upcs"))}),
+             "videos": sorted({v for row in selected for v in split_codes(row.get("video_ids"))}),
+             "saved_codes": sorted({tuple(json.loads(c["key"])) for values in choices.values() for c in values})}
+    return identity_evidence("", {}, release_id=release_id, client=client, _review_seeds=seeds)
 
 
 def split_codes(value: Any) -> list[str]:
@@ -86,6 +111,8 @@ def unresolved_associations(items: list[dict], choices: list[dict]) -> list[str]
     known = {item["key"] for item in items}
     unresolved = []
     for item in items:
+        if item.get("reference_group") == "ugc":
+            continue
         scoped = [choice for choice in choices if decision_scope(choice["key"]) == decision_scope(item["key"])]
         choice = next((value for value in scoped if not value["included"]), None)
         choice = choice or next((value for value in scoped if value["key"] == item["key"]), None)
@@ -134,11 +161,15 @@ def candidates(
     claims: dict[str, str],
 ) -> list[dict[str, Any]]:
     all_isrcs: dict[tuple[str, ...], set[str]] = {}
+    reference_only: dict[tuple, bool] = {}
     for row in evidence:
         scope = (row["kind"], row["code"])
         if row["kind"] == "TRACK":
             scope += (row["source"], row["account"])
         all_isrcs.setdefault(scope, set()).update(row.get("isrcs") or [])
+        reference_only[scope] = reference_only.get(scope, True) and (
+            row["kind"] == "VIDEO" and row.get("only_ugc_rows") is True
+            and row.get("has_identified_rows") is True and row.get("has_unassigned_rows") is False)
     choices = {row["key"]: row for row in overrides}
     excluded_scopes = {decision_scope(row["key"]) for row in overrides if not row["included"]}
     claimed_scopes: dict[tuple, set[str]] = {}
@@ -207,10 +238,9 @@ def candidates(
         if decision_scope(key) in excluded_scopes:
             included, status = False, "excluded"
         origins = sorted(set(row.get("content_origins") or []))
-        # Presentation only: identified UGC uses do not need a new income association.
-        ugc_reference = (kind == "VIDEO" and row.get("only_ugc_rows") is True
-                         and row.get("has_identified_rows") is True
-                         and row.get("has_unassigned_rows") is False)
+        # A code is reference-only only if every source/account is identified UGC.
+        # A new unassigned or non-UGC occurrence restores normal financial review.
+        ugc_reference = reference_only[scope]
         items.append({
             "key": key, "kind": kind, "code": code, "source": source, "account": account,
             "titles": row.get("titles") or [], "artists": row.get("artists") or [],

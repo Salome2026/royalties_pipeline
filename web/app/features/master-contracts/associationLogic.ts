@@ -16,6 +16,7 @@ export function associationScope(key: string): string {
 }
 
 export function associationState(item: Association, choices: AssociationChoice[]) {
+  if (item.reference_group === "ugc") return { included: item.included, status: item.status, pending: false };
   const scoped = choices.filter((value) => associationScope(value.key) === associationScope(item.key));
   const choice = scoped.find((value) => !value.included) || scoped.find((value) => value.key === item.key);
   if (choice && !choice.included) return { included: false, status: "excluded", pending: false };
@@ -38,7 +39,6 @@ export function pendingAssociationCodes(items: Association[], choices: Associati
 
 export function groupedAssociations(items: Association[], choices: AssociationChoice[]): AssociationGroup[] {
   const groups = new Map<string, AssociationGroup>();
-  const decisions = new Set(choices.map((choice) => associationScope(choice.key)));
   for (const item of items) {
     const scope = associationScope(item.key);
     let group = groups.get(scope);
@@ -47,8 +47,9 @@ export function groupedAssociations(items: Association[], choices: AssociationCh
       groups.set(scope, group);
     }
     group.items.push(item);
-    // Doubts and saved decisions stay in the editable list, including future evidence changes.
-    if (item.reference_group !== "ugc" || associationState(item, choices).pending || decisions.has(scope)) {
+    // Already identified UGC remains read-only; saved decisions are retained in
+    // the contract and become editable again if unassigned income appears.
+    if (item.reference_group !== "ugc") {
       group.section = "associated";
     }
   }

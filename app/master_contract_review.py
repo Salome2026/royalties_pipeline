@@ -6,11 +6,11 @@ import hashlib
 import json
 
 from app.master_contract_associations import (
-    append_missing_choices, association_key, candidates, unresolved_associations,
+    append_missing_choices, association_key, candidates, unresolved_associations, decision_scope, split_codes,
 )
 from app.operational_db import is_postgres_connection
 
-REVIEW_RULE = "manual-metadata-and-version-proposals-v1"
+REVIEW_RULE = "complete-identity-evidence-v2"
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS master_contract_association_reviews (
     isrc text PRIMARY KEY,
@@ -93,9 +93,15 @@ def save_review(conn, isrc: str, version: int, release_id: str, items: list[dict
 
 
 def evidence_by_contract(evidence: list[dict], aliases: dict[str, str], choices: dict[str, list[dict]],
-                         claims: dict[str, str]) -> dict[str, list[dict]]:
+                         claims: dict[str, str], *, catalog: list[dict] | None = None) -> dict[str, list[dict]]:
     scopes: dict[tuple, list[dict]] = defaultdict(list)
     saved: dict[tuple, set[str]] = defaultdict(set)
+    for row in catalog or []:
+        root = row.get("asset_isrc")
+        if root in choices:
+            for kind, field in (("UPC", "upcs"), ("VIDEO", "video_ids")):
+                for code in split_codes(row.get(field)):
+                    saved[(kind, code)].add(root)
     for root, decisions in choices.items():
         for decision in decisions:
             kind, code, source, account = json.loads(decision["key"])
@@ -122,43 +128,85 @@ def evidence_by_contract(evidence: list[dict], aliases: dict[str, str], choices:
     return result
 
 
-def reconcile_reviews(conn, release_id: str, evidence: list[dict], aliases: dict[str, str]) -> dict:
+def reconcile_reviews(conn, release_id: str, evidence: list[dict], aliases: dict[str, str], *,
+                      expected_choices: dict | None = None, rule_version: str = REVIEW_RULE,
+                      actor: str = "statement-review", catalog: list[dict] | None = None) -> dict:
     """Re-read decisions under the same lock as human saves; never write contracts."""
     ensure_schema(conn)
     conn.execute("SELECT pg_advisory_xact_lock(%s,%s)", (20261009, 1))
     stored = conn.execute("SELECT isrc,payload_json,version FROM master_contract_splits").fetchall()
     choices = {row["isrc"]: document(row["payload_json"]).get("code_association_overrides") or [] for row in stored}
+    if expected_choices is not None and choices != expected_choices:
+        raise RuntimeError("Las decisiones cambiaron durante la verificación; se debe reintentar con la evidencia actual.")
     claims = {choice["key"]: root for root, values in choices.items() for choice in values if choice["included"]}
-    targets = evidence_by_contract(evidence, aliases, choices, claims)
+    targets = evidence_by_contract(evidence, aliases, choices, claims, catalog=catalog)
     pending_contracts = 0
     for row in stored:
         root = row["isrc"]
         items = candidates(root, targets.get(root, []), aliases, choices[root], claims)
-        state = save_review(conn, root, row["version"], release_id, items, choices[root], "statement-review")
+        state = save_review(conn, root, row["version"], release_id, items, choices[root], actor)
         pending_contracts += bool(state["association_review_pending"])
     conn.execute("""INSERT INTO master_contract_association_review_runs(release_id,rule_version)
-        VALUES (%s,%s) ON CONFLICT DO NOTHING""", (release_id, REVIEW_RULE))
+        VALUES (%s,%s) ON CONFLICT DO NOTHING""", (release_id, rule_version))
     return {"release_id": release_id, "contracts": len(stored), "pending_contracts": pending_contracts}
 
 
-def review_published_release(client, manifest: dict) -> None:
+def review_revision(manifest: dict, metadata_entry: dict | None) -> str:
+    inputs = [manifest["bucket"], *[
+        [entry["object"], str(entry["generation"])] if entry else None
+        for entry in (manifest["objects"]["catalog_master.parquet"], metadata_entry)]]
+    return REVIEW_RULE + ":" + hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()[:20]
+
+
+def enrich_review_evidence(catalog: list[dict], evidence: list[dict]) -> list[dict]:
+    """Discovery mirrors the editor: metadata proposes only unassigned scopes.
+
+    Full native evidence is still retained for saved/known identifiers. A title
+    resemblance of an already identified recording is not a new proposal.
+    """
+    from app.master_contract_metadata import infer_video_evidence
+    def scope(row):
+        return decision_scope(association_key(row["kind"], row["code"], row["source"], row["account"]))
+    unknown = {scope(row) for row in evidence if row.get("has_unassigned_rows") is True}
+    derived = {association_key(row["kind"], row["code"], row["source"], row["account"]): row
+               for row in infer_video_evidence(catalog, [r for r in evidence if scope(r) in unknown])}
+    return [{**row, **derived.get(association_key(row["kind"], row["code"], row["source"], row["account"]), {})}
+            for row in evidence]
+
+
+def review_published_release(client, manifest: dict, *, actor: str = "statement-review") -> None:
     """Called by the durable release event Job, including when the dashboard is ready."""
     from io import BytesIO
     import polars as pl
     from app.operational_db import operational_connect
-    from app.master_contract_income import published_unassigned_income
-    from app.master_contract_metadata import infer_video_evidence, with_external_titles
+    from app.master_contract_income import read_choices
+    from app.master_contract_associations import review_identity_evidence
+    from app.master_contract_metadata import with_external_titles
     from scripts.lib.catalog_report_filter import catalog_alias_lookup
     release = manifest["release_id"]
+    metadata_entry = manifest["objects"].get("catalog_release_metadata.parquet")
+    if metadata_entry is None:
+        from google.api_core.exceptions import NotFound
+        blob = client.bucket(manifest["bucket"]).blob(
+            "/".join(filter(None, [manifest.get("prefix", "").strip("/"), "catalog_release_metadata.parquet"])))
+        try:
+            blob.reload()
+            metadata_entry = {"object": blob.name, "generation": str(blob.generation)}
+        except NotFound:
+            pass
+    # A metadata-only catalog publication can change proposals without changing
+    # the financial release. Check each pinned evidence input, not just its ID.
+    revision = review_revision(manifest, metadata_entry)
     with operational_connect() as conn:
         ensure_schema(conn)
         if conn.execute("SELECT 1 FROM master_contract_association_review_runs WHERE release_id=%s AND rule_version=%s",
-                        (release, REVIEW_RULE)).fetchone():
+                        (release, revision)).fetchone():
             return
+        choices = read_choices(conn)
     frame = None
     metadata = []
     for filename in ("catalog_master.parquet", "catalog_release_metadata.parquet"):
-        entry = manifest["objects"].get(filename)
+        entry = metadata_entry if filename == "catalog_release_metadata.parquet" else manifest["objects"].get(filename)
         if entry:
             data = client.bucket(manifest["bucket"]).blob(entry["object"], generation=int(entry["generation"])).download_as_bytes()
             loaded = pl.read_parquet(BytesIO(data))
@@ -166,23 +214,13 @@ def review_published_release(client, manifest: dict) -> None:
                 frame = loaded
             else:
                 metadata = loaded.to_dicts()
-    if not metadata:
-        from google.api_core.exceptions import NotFound
-        # Optional governance metadata is outside older six-file releases; pin its generation.
-        blob = client.bucket(manifest["bucket"]).blob(
-            "/".join(filter(None, [manifest.get("prefix", "").strip("/"), "catalog_release_metadata.parquet"])))
-        try:
-            blob.reload()
-            metadata = pl.read_parquet(BytesIO(blob.download_as_bytes(if_generation_match=int(blob.generation)))).to_dicts()
-        except NotFound:
-            pass
     if frame is None:
         raise ValueError("Falta el catalogo publicado para revisar asociaciones.")
-    _, evidence = published_unassigned_income(release)
+    evidence = review_identity_evidence(release, frame.to_dicts(), choices)
     enriched = with_external_titles(frame.to_dicts(), metadata)
-    evidence = infer_video_evidence(enriched, evidence)
+    evidence = enrich_review_evidence(enriched, evidence)
     aliases = {row["alias_catalog_key"]: row["catalog_key"]
                for row in catalog_alias_lookup(catalog=frame).to_dicts()}
     with operational_connect() as conn:
-        result = reconcile_reviews(conn, release, evidence, aliases)
+        result = reconcile_reviews(conn, release, evidence, aliases, expected_choices=choices, rule_version=revision, actor=actor, catalog=enriched)
     print(json.dumps({"event": "contract_association_review_completed", **result}), flush=True)
