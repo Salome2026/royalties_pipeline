@@ -72,6 +72,7 @@ def _merge_statement_evidence(rows):
         for name in ("isrcs", "titles", "artists"):
             item[name].update(row.get(name) or [])
         item["native_ada_product"] |= bool(row.get("native_ada_product"))
+        item["has_unassigned_rows"] = bool(item.get("has_unassigned_rows")) or bool(row.get("has_unassigned_rows"))
     return [{**item, **{name: sorted(item[name]) for name in ("isrcs", "titles", "artists")}}
             for _, item in sorted(merged.items())]
 
@@ -120,6 +121,7 @@ def published_unassigned_income(release_id: str) -> tuple[list[dict], list[dict]
     )
     SELECT c.kind, c.value AS code, c.source, c.account,
       ARRAY_AGG(DISTINCT NULLIF(c.asset_isrc, '') IGNORE NULLS) AS isrcs,
+      LOGICAL_OR(COALESCE(c.asset_isrc, '') = '') AS has_unassigned_rows,
       ARRAY_AGG(DISTINCT NULLIF(c.title, '') IGNORE NULLS) AS titles,
       ARRAY_AGG(DISTINCT NULLIF(c.artist, '') IGNORE NULLS) AS artists,
       LOGICAL_OR(c.source = 'ada' AND COALESCE(c.asset_isrc, '') = ''

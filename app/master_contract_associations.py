@@ -182,12 +182,15 @@ def candidates(
         key = association_key(kind, code, source, account)
         choice = choices.get(key)
         manual = bool(choice and choice.get("manual"))
+        # Manual video links allocate only rows lacking a native ISRC. Native
+        # occurrences of the same video keep their own recording identity.
+        manual_unassigned_video = manual and kind == "VIDEO" and row.get("has_unassigned_rows") is True
         scope = (kind, code, source, account) if kind == "TRACK" else (kind, code)
         observed = sorted(all_isrcs[scope])
         canonical = aliases.get(f"{kind}:{code}") if kind != "TRACK" else None
         inferred = isrc in (row.get("inferred_isrcs") or [])
-        standalone_video = kind == "VIDEO" and canonical == f"VIDEO:{code}" and (inferred or manual)
-        blocked = bool(set(observed) - {isrc}) or bool(row.get("native_ada_product"))
+        standalone_video = (kind == "VIDEO" and canonical == f"VIDEO:{code}" and (inferred or manual)) or manual_unassigned_video
+        blocked = (bool(set(observed) - {isrc}) and not manual_unassigned_video) or bool(row.get("native_ada_product"))
         if canonical and canonical != f"ISRC:{isrc}" and not standalone_video:
             blocked = True
         other_owners = claimed_scopes.get(decision_scope(key), set()) - {isrc}
@@ -202,6 +205,8 @@ def candidates(
             reason = f"Incluido en el contrato de {', '.join(sorted(other_owners))}."
         elif row.get("native_ada_product"):
             reason = "Producto ADA sin ISRC: conserva su identidad e ingreso propios."
+        elif manual_unassigned_video:
+            reason = "Asociacion manual de ingresos sin ISRC; los ingresos con ISRC informado conservan su destino."
         elif set(observed) - {isrc}:
             reason = "Código compartido con otros ISRC; no se asignan al tema ingresos de otros assets."
         elif blocked:
@@ -232,7 +237,8 @@ def candidates(
                 included, status = True, "confirmed"
             else:
                 included, status = False, "pending"
-                reason = "La evidencia cambió desde la confirmación; requiere nueva validación. " + reason
+                if choice.get("evidence_signature"):
+                    reason = "La evidencia cambió desde la confirmación; requiere nueva validación. " + reason
         if blocked and status != "excluded":
             included, status = False, "blocked"
         if decision_scope(key) in excluded_scopes:

@@ -48,6 +48,24 @@ class ManualLinkTests(unittest.TestCase):
             with self.subTest(roots=roots), self.assertRaises(ValueError):
                 self.prepare([{**self.row, "isrcs": roots}])
 
+    def test_shared_video_manual_link_allocates_only_unidentified_income(self):
+        evidence = [{**self.row, "isrcs": [OTHER], "has_unassigned_rows": True}]
+        choice = self.prepare(evidence, aliases={"VIDEO:" + CODE: "ISRC:" + OTHER})["choices"][0]
+        index = income_association_index(evidence, {"VIDEO:" + CODE: "ISRC:" + OTHER},
+            {ISRC: [choice]}, {self.key: ISRC})
+        unidentified = {"source": "fuga", "account": "indyana_records", "video_id": CODE,
+            "asset_isrc": None, "statement_period": "2026-07", "amount_usd": 15.01916431646}
+        native = {**unidentified, "asset_isrc": OTHER, "amount_usd": 24.56357490115}
+        self.assertEqual(associated_income_isrc(unidentified, index), ISRC)
+        validate_row_destinations([unidentified], {"included": {self.key: [OTHER]}, "excluded": {}},
+            index, [self.key], ISRC)
+        self.assertIsNone(associated_income_isrc(native, index))
+        result = consolidate_associated_income([unidentified, native], evidence,
+            {"VIDEO:" + CODE: "ISRC:" + OTHER}, {ISRC: [choice]}, {self.key: ISRC}, "2026-10")
+        self.assertAlmostEqual(result[ISRC]["amount_usd"], 15.01916431646)
+        with self.assertRaises(ValueError):
+            self.prepare(evidence, claims={self.key: OTHER})
+
     def test_shared_code_other_account_blocks(self):
         with self.assertRaises(ValueError):
             self.prepare([self.row, {**self.row, "account": "other", "isrcs": [OTHER]}])

@@ -9,13 +9,18 @@ from app.master_contract_income import associated_income_isrc
 
 def validate_row_destinations(rows, old_index, new_index, keys, isrc):
     keys = set(keys)
+    # An explicit decision replaces this reference's automatic inference, but
+    # cannot override a different destination established by a secondary code.
+    remaining_index = {**old_index, "included": {
+        key: roots for key, roots in old_index.get("included", {}).items()
+        if key not in keys or json.loads(key)[0] != "VIDEO"}}
     affected = 0
     for row in rows:
         references = [association_key(kind, row[field], row["source"], row["account"])
             for kind, field in (("VIDEO", "video_id"), ("TRACK", "track_id"), ("UPC", "product_upc")) if row.get(field)]
         if not keys.intersection(references):
             continue
-        before, after = associated_income_isrc(row, old_index), associated_income_isrc(row, new_index)
+        before, after = associated_income_isrc(row, remaining_index), associated_income_isrc(row, new_index)
         if (before and before != isrc) or after != isrc:
             raise ValueError("La referencia contiene identificadores de distintos destinos; no se puede asociar entera a este tema.")
         affected += 1
