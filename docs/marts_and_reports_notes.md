@@ -314,6 +314,18 @@ El reporte nuevo usa conversion FX; el viejo usaba `net_amount` directo.
 
 ## Resumen operativo del dashboard de regalias
 
+La exploracion de ingresos y participaciones contractuales conserva el limite
+de 5.000.000.000 bytes por consulta. Si BigQuery devuelve
+`bytesBilledLimitExceeded`, primero descubre los meses seleccionados y las
+opciones sobre la misma publicacion y permisos. Despues materializa temporalmente
+solo las filas filtradas de esos meses, leyendo particiones de statement en
+ventanas anuales disjuntas, y calcula todos los totales y rankings juntos.
+La seleccion temporal se hace antes del filtro por tema; por consumo incluye
+los statements tardios y sin fecha que correspondan. Las opciones conservan
+todo el historico habilitado. No se modifica el reparto ni se ocultan otros
+errores. El resultado completo se reutiliza solo para la misma consulta,
+publicacion, contratos y alcance autorizado.
+
 `royalties_dashboard_summary.parquet` se construye desde
 `standardized_raw_all_sources.parquet` y aplica la misma policy de generacion,
 estado del catalogo que los reportes. Conserva el neto reportable base.

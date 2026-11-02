@@ -4,7 +4,7 @@ import json
 import unittest
 from unittest.mock import MagicMock, patch
 
-from google.api_core.exceptions import NotFound
+from google.api_core.exceptions import NotFound, InternalServerError, Forbidden
 from google.cloud import bigquery
 
 from app import royalty_explorer as ex
@@ -30,6 +30,49 @@ def income(amount=100, **changes):
 
 
 class ExplorerTests(unittest.TestCase):
+    def test_budget_fallback_preserves_options_and_caches_the_complete_result(self):
+        base, params, _ = ex.base_query(context(), {}, "Artista", measure="contractual", restricted=True,
+            period_basis="transaction_month", source=None, account=None, keyword="Tema",
+            start_month=None, end_month=None, drill={"track_title": "Tema"})
+        discovery = [{"section": "option_bounds", "payload": '{"first_month":"2021-07","last_month":"2026-10"}'},
+                     {"section": "scan_scope", "payload": json.dumps({"months": ["2025-12-01", "2026-01-01"],
+                         "statements": ["2025-12-01", "2026-01-01", "2026-10-01"], "undated": True})}]
+        result = [{"section": "totals", "payload": '{"amount_usd":-0.01}'}]
+        ex._dashboard_rows.cache_clear()
+        try:
+            with patch.object(ex, "_job", side_effect=[InternalServerError("Query exceeded limit for bytes billed: 5000000000."), discovery, result]) as query:
+                args = (base, json.dumps([p.to_api_repr() for p in params], sort_keys=True), "last_6_months", 10)
+                expected = result + discovery[:1]
+                self.assertEqual(ex._dashboard_rows(*args), expected)
+                self.assertEqual(ex._dashboard_rows(*args), expected)
+                self.assertEqual(query.call_count, 3)
+                sql, bounded_params = query.call_args.args
+                # Late statements and undated consumption remain in scope;
+                # disjoint statement years are aggregated together only once.
+                for window in ["BETWEEN DATE '2025-12-01' AND DATE '2025-12-01'",
+                               "BETWEEN DATE '2026-01-01' AND DATE '2026-10-01'", "statement_month IS NULL"]:
+                    self.assertIn(window, sql)
+                self.assertEqual(sql.count(context()["table"]), 3)
+                self.assertIn("SUM(amount_usd)", sql)
+                self.assertEqual(next(p.value for p in bounded_params if p.name == "beneficiary_search"), "artista")
+                months = next(p for p in bounded_params if p.name == "selected_months")
+                self.assertEqual([v.isoformat() for v in months.values], ["2025-12-01", "2026-01-01"])
+                self.assertIn("title=@drill_track_title", sql)
+        finally:
+            ex._dashboard_rows.cache_clear()
+
+    def test_budget_fallback_does_not_retry_permission_errors(self):
+        ex._dashboard_rows.cache_clear()
+        with patch.object(ex, "_job", side_effect=Forbidden("permission denied")) as query:
+            with self.assertRaises(Forbidden): ex._dashboard_rows("base", "[]", "all", 10)
+            self.assertEqual(query.call_count, 1)
+
+    def test_budget_fallback_handles_an_empty_search_without_reading_history(self):
+        sql = ex._bounded_dashboard_sql("WITH filtered AS (SELECT * FROM `p.d.t` WHERE release_id=@release)",
+            {"months": None, "statements": None, "undated": False}, 10)
+        self.assertIn("WHERE release_id=@release AND (FALSE)", sql)
+        self.assertIn("period_month IN UNNEST(@selected_months)", sql)
+
     def test_saved_eligible_nested_rules_and_zero_participant(self):
         ctx = context()
         for beneficiary, expected in [("Indyana", 54), ("Socio", 40), ("Artista", 6), ("Proyecto", 0)]:

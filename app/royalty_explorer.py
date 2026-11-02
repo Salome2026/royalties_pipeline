@@ -18,6 +18,7 @@ import time
 from zoneinfo import ZoneInfo
 
 from google.cloud import bigquery, storage
+from google.api_core.exceptions import GoogleAPICallError
 
 from app.bigquery_dashboard import (dashboard_client, month_date,
                                    normalize_search_text, personalization_factor_sql)
@@ -343,7 +344,7 @@ def _period_sql(period_mode: str) -> str:
     return f", selected_months AS (SELECT DISTINCT period_month FROM filtered ORDER BY period_month DESC{tail}), scoped AS (SELECT * FROM filtered WHERE period_month IN (SELECT period_month FROM selected_months) AND (@drill_track IS NULL OR identity_key=@drill_track) AND (@drill_track_title IS NULL OR title=@drill_track_title) AND (@track_key IS NULL OR identity_key=@track_key) AND (@track_title IS NULL OR title=@track_title))"
 
 
-def dashboard_sql(base: str, period_mode: str, limit: int) -> str:
+def dashboard_sql(base: str, period_mode: str, limit: int, *, include_options: bool = True) -> str:
     categories = {"sources": "source", "dsp": "dsp", "monetization": "monetization", "content_origin": "content_origin",
                   "territory": "territory", "sale_type": "sale_type", "artist": "artist", "title": "title", "label": "label"}
     unions = []
@@ -362,6 +363,9 @@ def dashboard_sql(base: str, period_mode: str, limit: int) -> str:
       COUNT(DISTINCT account) AS accounts,
       COUNT(DISTINCT title) AS titles,COUNT(DISTINCT artist) AS artists,
       FORMAT_DATE('%Y-%m',MIN(period_month)) AS first_month,FORMAT_DATE('%Y-%m',MAX(period_month)) AS last_month"""
+    options_sql = """UNION ALL SELECT 'option_pair',TO_JSON_STRING(t) FROM (SELECT DISTINCT source,account FROM native_scope) t
+    UNION ALL SELECT 'option_bounds',TO_JSON_STRING(t) FROM (
+      SELECT FORMAT_DATE('%Y-%m',MIN(option_month)) AS first_month,FORMAT_DATE('%Y-%m',MAX(option_month)) AS last_month FROM native_scope) t""" if include_options else ""
     return base + _period_sql(period_mode) + f""",
       youtube AS (SELECT * FROM scoped WHERE dsp='YouTube'),
       ranked AS ({rank_sql}),
@@ -377,9 +381,7 @@ def dashboard_sql(base: str, period_mode: str, limit: int) -> str:
     UNION ALL SELECT 'matrix_month',TO_JSON_STRING(t) FROM (
       SELECT source,account,FORMAT_DATE('%Y-%m',period_month) AS month,SUM(amount_usd) AS amount_usd FROM scoped GROUP BY source,account,period_month) t
     UNION ALL SELECT section,TO_JSON_STRING(t) FROM ranking t
-    UNION ALL SELECT 'option_pair',TO_JSON_STRING(t) FROM (SELECT DISTINCT source,account FROM native_scope) t
-    UNION ALL SELECT 'option_bounds',TO_JSON_STRING(t) FROM (
-      SELECT FORMAT_DATE('%Y-%m',MIN(option_month)) AS first_month,FORMAT_DATE('%Y-%m',MAX(option_month)) AS last_month FROM native_scope) t
+    {options_sql}
     UNION ALL SELECT 'contract_summary',TO_JSON_STRING(t) FROM (
       SELECT ROUND(COALESCE(SUM(base_amount_usd),0),2) AS base_amount_usd,
       ROUND(COALESCE(SUM(pending_amount_usd),0),2) AS pending_amount_usd,
@@ -388,6 +390,60 @@ def dashboard_sql(base: str, period_mode: str, limit: int) -> str:
       SELECT identity_key,ANY_VALUE(title) AS title,pending_reason AS reason,
         SUM(pending_amount_usd) AS amount_usd FROM scoped WHERE pending_reason!=''
       GROUP BY identity_key,pending_reason) t"""
+
+
+def _dashboard_discovery_sql(base: str, period_mode: str) -> str:
+    # Discover months before the track drill, exactly as in the ordinary query.
+    # No monetary columns are read here. Options retain their full-history scope.
+    return base + _period_sql(period_mode) + """
+    SELECT 'option_pair' AS section,TO_JSON_STRING(t) AS payload
+      FROM (SELECT DISTINCT source,account FROM native_scope) t
+    UNION ALL SELECT 'option_bounds',TO_JSON_STRING(t) FROM (
+      SELECT FORMAT_DATE('%Y-%m',MIN(option_month)) AS first_month,
+        FORMAT_DATE('%Y-%m',MAX(option_month)) AS last_month FROM native_scope) t
+    UNION ALL SELECT 'scan_scope',TO_JSON_STRING(t) FROM (
+      SELECT ARRAY_AGG(DISTINCT period_month ORDER BY period_month) AS months,
+        ARRAY_AGG(DISTINCT statement_month IGNORE NULLS ORDER BY statement_month) AS statements,
+        COUNTIF(statement_month IS NULL)>0 AS undated
+      FROM filtered WHERE period_month IN (SELECT period_month FROM selected_months)) t"""
+
+
+def _bounded_dashboard_sql(base: str, selection: dict, limit: int) -> str:
+    # Bound each source read with literal partition dates. A dynamic subquery of
+    # months does not prune BigQuery partitions. Temporary rows retain all facts
+    # needed for one global aggregation, including negative and pending income.
+    statements = [date.fromisoformat(value) for value in selection.get("statements") or []]
+    windows = []
+    for year in sorted({value.year for value in statements}):
+        days = [value for value in statements if value.year == year]
+        windows.append(f"statement_month BETWEEN DATE '{min(days).isoformat()}' AND DATE '{max(days).isoformat()}'")
+    if selection.get("undated"):
+        windows.append("statement_month IS NULL")
+    columns = """period_month,source,account,artist,title,dsp,monetization,content_origin,
+      territory,sale_type,label,identity_key,amount_usd,units,raw_rows,
+      base_amount_usd,pending_amount_usd,pending_reason"""
+    chunks = []
+    for index, window in enumerate(windows or ["FALSE"]):
+        bounded = base.replace("WHERE release_id=@release", f"WHERE release_id=@release AND ({window})", 1)
+        prefix = "CREATE TEMP TABLE explorer_filtered AS" if index == 0 else "INSERT INTO explorer_filtered"
+        chunks.append(f"{prefix}\n{bounded}\nSELECT {columns} FROM filtered WHERE period_month IN UNNEST(@selected_months);")
+    chunks.append(dashboard_sql("WITH filtered AS (SELECT * FROM explorer_filtered)", "all", limit, include_options=False))
+    return "\n".join(chunks)
+
+
+@lru_cache(maxsize=16)
+def _dashboard_rows(base: str, parameters: str, period_mode: str, limit: int) -> list[dict]:
+    params = [_parameter_from_api(value) for value in json.loads(parameters)]
+    try:
+        return _job(dashboard_sql(base, period_mode, limit), params)
+    except GoogleAPICallError as exc:
+        if not any(error.get("reason") == "bytesBilledLimitExceeded" for error in exc.errors or []) and "Query exceeded limit for bytes billed" not in str(exc):
+            raise
+    discovery = _job(_dashboard_discovery_sql(base, period_mode), params)
+    selection = next(json.loads(row["payload"]) for row in discovery if row["section"] == "scan_scope")
+    params.append(bigquery.ArrayQueryParameter("selected_months", "DATE", [date.fromisoformat(value) for value in selection.get("months") or []]))
+    rows = _job(_bounded_dashboard_sql(base, selection, limit), params)
+    return rows + [row for row in discovery if row["section"] != "scan_scope"]
 
 
 def format_dashboard(rows: list[dict], *, context: dict, policy: dict, beneficiary: str | None,
@@ -438,7 +494,7 @@ def dashboard(contracts: list[dict], policy: dict, scope: set[str] | None, *, me
     base, params, _ = base_query(context, policy, beneficiary, measure=measure, restricted=scope is not None,
         period_basis=period_basis, source=source, account=account, keyword=keyword or "",
         start_month=start_month, end_month=end_month, drill=drill or {})
-    rows = _job(dashboard_sql(base, period_mode, limit), params)
+    rows = _dashboard_rows(base, json.dumps([p.to_api_repr() for p in params], sort_keys=True), period_mode, limit)
     return format_dashboard(rows, context=context, policy=policy, beneficiary=beneficiary, measure=measure,
                             restricted=scope is not None, period_basis=period_basis, keyword=keyword or "")
 
