@@ -133,7 +133,7 @@ export function RoyaltyTrackDrawer({ selection, params, onClose, onParticipant }
     return () => { document.body.style.overflow = overflow; document.removeEventListener("keydown", listener); previous?.focus(); };
   }, [selection]);
   if (!selection) return null;
-  return <div className={styles.backdrop} onClick={onClose}><aside ref={panel} className={styles.drawer} role="dialog" aria-modal="true" aria-label={`Reparto de ${selection.name}`} onClick={(e) => e.stopPropagation()}>
+  return <div className={styles.backdrop} onClick={onClose}><aside ref={panel} className={`${styles.drawer} ${data?.tracks.some((track) => track.presentation_only) ? styles.presentation : ""}`} role="dialog" aria-modal="true" aria-label={`Reparto de ${selection.name}`} onClick={(e) => e.stopPropagation()}>
     <header><div><span>Reparto del tema</span><h2>{selection.name}</h2></div><button type="button" aria-label="Cerrar detalle" onClick={onClose}><X size={20} /></button></header>
     {loading && <p role="status">Consultando el reparto del período seleccionado…</p>}
     {error && <p className={styles.notice} role="alert">{error}</p>}

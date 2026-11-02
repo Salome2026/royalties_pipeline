@@ -50,3 +50,5 @@
 .scroll table { min-width:610px; }
 .pagination { display:flex; align-items:center; justify-content:flex-end; gap:9px; padding-top:12px; color:#b4cabc; font-size:12px; }
 @media(max-width:600px) { .drawer { padding:20px 15px 35px; }.drawer h2 { font-size:20px; }.pending { overflow-x:auto; }.pending table { min-width:450px; } }
+
+.presentation { background:#1a211e; }

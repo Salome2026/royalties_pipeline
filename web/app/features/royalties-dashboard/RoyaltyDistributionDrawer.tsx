@@ -61,7 +61,7 @@ export function RoyaltyDistributionDrawer({ open, params, onClose }: { open: boo
 
   if (!open) return null;
   return <div className={styles.backdrop} onClick={onClose}>
-    <aside ref={panel} className={styles.drawer} role="dialog" aria-modal="true" aria-label="Distribución del ingreso reportable" onClick={(event) => event.stopPropagation()}>
+    <aside ref={panel} className={`${styles.drawer} ${data?.presentation_only ? styles.presentation : ""}`} role="dialog" aria-modal="true" aria-label="Distribución del ingreso reportable" onClick={(event) => event.stopPropagation()}>
       <header><div><span>Ingreso reportable</span><h2>Distribución de ingresos</h2></div><button type="button" aria-label="Cerrar distribución" onClick={onClose}><X size={20} /></button></header>
       <p className={styles.distributionCaption}>{data?.presentation_only ? "Vista agrupada de socios y artistas, para el período y filtros que estás viendo." : "Reparto según los contratos guardados, para el catálogo, período y filtros que estás viendo."}</p>
       {!data && !error && <p role="status">Consultando la distribución…</p>}
