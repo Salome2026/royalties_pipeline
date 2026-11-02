@@ -89,7 +89,19 @@ function money(value: number) {
   }).format(value || 0);
 }
 
-function RankList({ title, rows, loading, onSelect }: { title: string; rows: Rank[]; loading: boolean; onSelect?: (row: Rank) => void }) {
+function RankList({ title, rows, loading, onSelect, scrollable = false }: { title: string; rows: Rank[]; loading: boolean; onSelect?: (row: Rank) => void; scrollable?: boolean }) {
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const list = listRef.current;
+    if (!scrollable || !list) return;
+    const visibleRows = Array.from(list.children).slice(0, 10);
+    const measure = () => list.style.setProperty("--rank-list-height", `${visibleRows.reduce((height, row) => height + row.getBoundingClientRect().height, 0)}px`);
+    const observer = new ResizeObserver(measure);
+    visibleRows.forEach((row) => observer.observe(row));
+    measure();
+    list.scrollTop = 0;
+    return () => observer.disconnect();
+  }, [rows, scrollable]);
   return (
     <section className={styles.rankSection}>
       <div className={styles.rankHeader}>
@@ -98,7 +110,7 @@ function RankList({ title, rows, loading, onSelect }: { title: string; rows: Ran
       </div>
       {loading && <div className={styles.empty}>Cargando...</div>}
       {!loading && rows.length === 0 && <div className={styles.empty}>Sin datos para este filtro.</div>}
-      <div className={styles.rankList}>
+      <div ref={listRef} className={`${styles.rankList}${scrollable ? ` ${styles.rankListScrollable}` : ""}`} tabIndex={scrollable ? 0 : undefined} role={scrollable ? "region" : undefined} aria-label={scrollable ? title : undefined}>
         {rows.map((row, index) => (
           <div className={styles.rankRow} key={`${title}-${row.name}-${index}`}>
             <span className={styles.rankIndex}>{index + 1}</span>
@@ -458,8 +470,8 @@ export default function ArtistPortal() {
             </section>
 
             <div className={styles.rankGrid}>
-              <RankList title="Ingresos por tema" rows={dashboard?.rankings.title || []} loading={loading} onSelect={setSelectedTrack} />
-              <RankList title={explorer.measure === "contractual" ? "Tu participación por artista del catálogo" : "Ingresos por artista"} rows={dashboard?.rankings.artist || []} loading={loading} onSelect={(r) => drill({ artist: r.name })} />
+              <RankList title="Ingresos por tema" rows={dashboard?.rankings.title || []} loading={loading} onSelect={setSelectedTrack} scrollable={currentUser?.username === "hernanlda"} />
+              <RankList title={explorer.measure === "contractual" ? "Tu participación por artista del catálogo" : "Ingresos por artista"} rows={dashboard?.rankings.artist || []} loading={loading} onSelect={(r) => drill({ artist: r.name })} scrollable={currentUser?.username === "hernanlda"} />
               <RankList title="Ingresos por plataforma" rows={dashboard?.rankings.dsp || []} loading={loading} onSelect={(r) => drill({ dsp: r.name })} />
               <RankList title="Territorios" rows={dashboard?.rankings.territory || []} loading={loading} onSelect={(r) => drill({ territory: r.name })} />
             </div>

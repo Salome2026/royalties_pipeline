@@ -10207,7 +10207,8 @@ def royalty_explorer_request(*, detail: bool, measure: str, beneficiary: str | N
         if detail:
             return royalty_explorer.detail(contracts, policy, scope, track_key=track_key, track_title=track_title,
                 juntada_presentation=clean_username(username or '') == 'hernanlda', **args)
-        return royalty_explorer.dashboard(contracts, policy, scope, measure=measure, **args)
+        return royalty_explorer.dashboard(contracts, policy, scope, measure=measure,
+            full_catalog_rankings=clean_username(username or '') == 'hernanlda', **args)
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc
     except ValueError as exc:

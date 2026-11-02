@@ -36,6 +36,35 @@ def project_context():
 
 
 class ExplorerTests(unittest.TestCase):
+    def test_complete_rankings_only_for_authenticated_juntada_portal(self):
+        from app import vpo_corp_api as api
+        for username, expected in [('hernanlda', True), ('rubene', False), ('otro', False)]:
+            with patch.object(api, 'royalty_explorer_access', return_value=([], None)), \
+                 patch.object(api, 'load_distributor_policy_document', return_value={}), \
+                 patch.object(ex, 'dashboard', return_value={}) as render:
+                api.royalty_explorer_request(detail=False, measure='income', beneficiary=None,
+                    source=None, account=None, keyword=None, period_basis='statement_period',
+                    period_mode='all', start_month=None, end_month=None, drill=None,
+                    track_key=None, track_title=None, api_key='key', username=username)
+                self.assertIs(render.call_args.kwargs['full_catalog_rankings'], expected)
+
+    def test_complete_rankings_survive_budget_fallback_and_separate_cache(self):
+        ex._dashboard_rows.cache_clear()
+        discovery = [{'section': 'scan_scope', 'payload': json.dumps({
+            'months': ['2026-07-01'], 'statements': ['2026-07-01'], 'undated': False})}]
+        try:
+            with patch.object(ex, '_job', side_effect=[InternalServerError('Query exceeded limit for bytes billed'), discovery, [], []]) as query:
+                ex._dashboard_rows('base', '[]', 'all', 10, True)
+                for index in [0, 2]:
+                    sql = query.call_args_list[index].args[0]
+                    self.assertIn("(section='ranking' AND category IN ('title','artist')) OR ROW_NUMBER()", sql)
+                    self.assertIn('identity_key)<=10', sql)
+                ex._dashboard_rows('base', '[]', 'all', 10, False)
+                self.assertEqual(query.call_count, 4)
+                self.assertNotIn("category IN ('title','artist')", query.call_args.args[0])
+        finally:
+            ex._dashboard_rows.cache_clear()
+
     def test_hernan_presentation_groups_artist_contracts_and_preserves_actual_rules(self):
         from app.royalty_reports.contractual import allocation_rows
         agreement={'allocation_model':'pools','commercialization':'master','master_pool_percent':70,

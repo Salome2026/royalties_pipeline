@@ -362,7 +362,7 @@ def _period_sql(period_mode: str) -> str:
     return f", selected_months AS (SELECT DISTINCT period_month FROM filtered ORDER BY period_month DESC{tail}), scoped AS (SELECT * FROM filtered WHERE period_month IN (SELECT period_month FROM selected_months) AND (@drill_track IS NULL OR identity_key=@drill_track) AND (@drill_track_title IS NULL OR title=@drill_track_title) AND (@track_key IS NULL OR identity_key=@track_key) AND (@track_title IS NULL OR title=@track_title))"
 
 
-def dashboard_sql(base: str, period_mode: str, limit: int, *, include_options: bool = True) -> str:
+def dashboard_sql(base: str, period_mode: str, limit: int, *, include_options: bool = True, full_catalog_rankings: bool = False) -> str:
     categories = {"sources": "source", "dsp": "dsp", "monetization": "monetization", "content_origin": "content_origin",
                   "territory": "territory", "sale_type": "sale_type", "artist": "artist", "title": "title", "label": "label"}
     unions = []
@@ -375,6 +375,7 @@ def dashboard_sql(base: str, period_mode: str, limit: int, *, include_options: b
             unions.append(f"SELECT '{'youtube_ranking' if youtube else 'ranking'}' AS section,'{category}' AS category,{field} AS name,{identity} AS identity_key,"
                 f"SUM(amount_usd) AS amount_usd,SUM(units) AS units,SUM(raw_rows) AS `rows`,SUM(pending_amount_usd) AS pending_amount_usd FROM {dataset} WHERE COALESCE({field},'')!='' GROUP BY {group}")
     rank_sql = " UNION ALL ".join(unions)
+    full_rankings = "(section='ranking' AND category IN ('title','artist')) OR " if full_catalog_rankings else ""
     stats = """ROUND(COALESCE(SUM(amount_usd),0),2) AS amount_usd,
       COALESCE(SUM(units),0) AS units,COALESCE(SUM(raw_rows),0) AS `rows`,
       COUNT(DISTINCT period_month) AS months,COUNT(DISTINCT source) AS sources,
@@ -387,7 +388,7 @@ def dashboard_sql(base: str, period_mode: str, limit: int, *, include_options: b
     return base + _period_sql(period_mode) + f""",
       youtube AS (SELECT * FROM scoped WHERE dsp='YouTube'),
       ranked AS ({rank_sql}),
-      ranking AS (SELECT * FROM ranked QUALIFY ROW_NUMBER() OVER(PARTITION BY section,category ORDER BY amount_usd DESC,name,identity_key)<={max(3,min(limit,50))})
+      ranking AS (SELECT * FROM ranked QUALIFY {full_rankings}ROW_NUMBER() OVER(PARTITION BY section,category ORDER BY amount_usd DESC,name,identity_key)<={max(3,min(limit,50))})
     SELECT 'totals' AS section,TO_JSON_STRING(t) AS payload FROM (SELECT {stats} FROM scoped) t
     UNION ALL SELECT 'youtube_totals',TO_JSON_STRING(t) FROM (SELECT {stats} FROM youtube) t
     UNION ALL SELECT 'monthly',TO_JSON_STRING(t) FROM (
@@ -428,7 +429,7 @@ def _dashboard_discovery_sql(base: str, period_mode: str) -> str:
       FROM filtered WHERE period_month IN (SELECT period_month FROM selected_months)) t"""
 
 
-def _bounded_dashboard_sql(base: str, selection: dict, limit: int, *, result_sql: str | None = None, columns: str | None = None) -> str:
+def _bounded_dashboard_sql(base: str, selection: dict, limit: int, *, result_sql: str | None = None, columns: str | None = None, full_catalog_rankings: bool = False) -> str:
     # Bound each source read with literal partition dates. A dynamic subquery of
     # months does not prune BigQuery partitions. Temporary rows retain all facts
     # needed for one global aggregation, including negative and pending income.
@@ -448,22 +449,22 @@ def _bounded_dashboard_sql(base: str, selection: dict, limit: int, *, result_sql
         prefix = "CREATE TEMP TABLE explorer_filtered AS" if index == 0 else "INSERT INTO explorer_filtered"
         chunks.append(f"{prefix}\n{bounded}\nSELECT {columns} FROM filtered WHERE period_month IN UNNEST(@selected_months);")
     materialized = "WITH filtered AS (SELECT * FROM explorer_filtered)"
-    chunks.append(materialized + _period_sql("all") + result_sql if result_sql is not None else dashboard_sql(materialized, "all", limit, include_options=False))
+    chunks.append(materialized + _period_sql("all") + result_sql if result_sql is not None else dashboard_sql(materialized, "all", limit, include_options=False, full_catalog_rankings=full_catalog_rankings))
     return "\n".join(chunks)
 
 
 @lru_cache(maxsize=16)
-def _dashboard_rows(base: str, parameters: str, period_mode: str, limit: int) -> list[dict]:
+def _dashboard_rows(base: str, parameters: str, period_mode: str, limit: int, full_catalog_rankings: bool = False) -> list[dict]:
     params = [_parameter_from_api(value) for value in json.loads(parameters)]
     try:
-        return _job(dashboard_sql(base, period_mode, limit), params)
+        return _job(dashboard_sql(base, period_mode, limit, full_catalog_rankings=full_catalog_rankings), params)
     except GoogleAPICallError as exc:
         if not any(error.get("reason") == "bytesBilledLimitExceeded" for error in exc.errors or []) and "Query exceeded limit for bytes billed" not in str(exc):
             raise
     discovery = _job(_dashboard_discovery_sql(base, period_mode), params)
     selection = next(json.loads(row["payload"]) for row in discovery if row["section"] == "scan_scope")
     params.append(bigquery.ArrayQueryParameter("selected_months", "DATE", [date.fromisoformat(value) for value in selection.get("months") or []]))
-    rows = _job(_bounded_dashboard_sql(base, selection, limit), params)
+    rows = _job(_bounded_dashboard_sql(base, selection, limit, full_catalog_rankings=full_catalog_rankings), params)
     return rows + [row for row in discovery if row["section"] != "scan_scope"]
 
 
@@ -508,7 +509,7 @@ def format_dashboard(rows: list[dict], *, context: dict, policy: dict, beneficia
 
 def dashboard(contracts: list[dict], policy: dict, scope: set[str] | None, *, measure="income", beneficiary=None,
               source=None, account=None, keyword="", period_basis="statement_period", period_mode="last_6_months",
-              start_month=None, end_month=None, drill=None, limit=10) -> dict:
+              start_month=None, end_month=None, drill=None, limit=10, full_catalog_rankings=False) -> dict:
     context = get_context(contracts)
     beneficiary = authorize_beneficiary(beneficiary, context["names"], scope)
     if measure not in {"income", "contractual"} or (measure == "contractual" and not beneficiary):
@@ -516,7 +517,7 @@ def dashboard(contracts: list[dict], policy: dict, scope: set[str] | None, *, me
     base, params, _ = base_query(context, policy, beneficiary, measure=measure, restricted=scope is not None,
         period_basis=period_basis, source=source, account=account, keyword=keyword or "",
         start_month=start_month, end_month=end_month, drill=drill or {})
-    rows = _dashboard_rows(base, json.dumps([p.to_api_repr() for p in params], sort_keys=True), period_mode, limit)
+    rows = _dashboard_rows(base, json.dumps([p.to_api_repr() for p in params], sort_keys=True), period_mode, limit, full_catalog_rankings)
     return format_dashboard(rows, context=context, policy=policy, beneficiary=beneficiary, measure=measure,
                             restricted=scope is not None, period_basis=period_basis, keyword=keyword or "")
 
