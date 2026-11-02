@@ -95,12 +95,32 @@ class ContractIncomeBudgetTests(unittest.TestCase):
         self.assertTrue(result[0]['native_ada_product'])
 
     def test_global_seeds_are_not_narrowed_to_the_output_window(self):
-        import inspect
-        from app.master_contract_income import published_unassigned_income
-        source = inspect.getsource(published_unassigned_income)
-        evidence = source.split('WITH facts AS (', 1)[1]
-        self.assertNotIn('{STATEMENT_WINDOW}', evidence.split('FROM codes c JOIN seeds', 1)[0])
-        self.assertIn('WHERE TRUE {STATEMENT_WINDOW}', evidence)
+        from unittest.mock import patch
+        from app import master_contract_income as income
+        income.published_unassigned_income.cache_clear()
+        seed = {'kind': 'VIDEO', 'value': 'abcdefghijk', 'scope_source': '', 'scope_account': ''}
+        reads = []
+        def read(client, cfg, sql, **options):
+            reads.append((sql, cfg, options))
+            if 'seed_codes' in sql:
+                values = next(p.values for p in cfg.query_parameters if p.name == 'seed_codes')
+                self.assertEqual(values[0].to_api_repr()['parameterValue']['structValues']['value']['value'], seed['value'])
+                self.assertNotIn('FROM codes WHERE', sql)
+                self.assertTrue(options['include_undated'])
+                return [{'kind': 'VIDEO', 'code': seed['value'], 'source': 'fuga', 'account': 'indyana',
+                         'isrcs': ['ARABC2600001'], 'titles': ['Later month'], 'artists': ['Lead']}]
+            if 'SELECT DISTINCT c.kind' in sql:
+                self.assertEqual(options, {'alias': 's', 'include_undated': True})
+                return [seed, seed]  # Separate windows may discover the same code.
+            return []
+        client = Client(lambda sql, params: Job([{'release_id': 'current'}]))
+        with patch.object(income, 'dashboard_client', return_value=client), patch.object(income, '_statement_rows', side_effect=read):
+            rows, evidence = income.published_unassigned_income('current')
+        self.assertEqual(rows, [])
+        self.assertEqual(evidence[0]['isrcs'], ['ARABC2600001'])
+        self.assertEqual(len(reads), 3)
+        self.assertEqual(len(next(p.values for p in reads[-1][1].query_parameters if p.name == 'seed_codes')), 1)
+        income.published_unassigned_income.cache_clear()
 
 
 if __name__ == '__main__':

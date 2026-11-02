@@ -101,6 +101,23 @@ def published_unassigned_income(release_id: str) -> tuple[list[dict], list[dict]
       product_upc, video_id, track_id, catalog_number, product_type, release_title,content_type,content_origin, statement_period
     """
     rows = _statement_rows(client, config, sql)
+    seed_sql = f"""
+    SELECT DISTINCT c.kind, c.value,
+      IF(c.kind = 'TRACK', s.source, '') AS scope_source,
+      IF(c.kind = 'TRACK', s.account, '') AS scope_account
+    FROM `{prefix}.royalty_statement_fact` s, UNNEST([
+      STRUCT('UPC' AS kind, s.product_upc AS value),
+      STRUCT('VIDEO' AS kind, s.video_id AS value),
+      STRUCT('TRACK' AS kind, s.track_id AS value)
+    ]) c
+    WHERE s.release_id = @release_id AND COALESCE(s.asset_isrc, '') = ''
+      AND c.value IS NOT NULL AND c.value != '' {STATEMENT_WINDOW}
+    """
+    # Discover membership over the entire release first. Keeping this scan in
+    # the evidence CTE repeats its full-history read in every output window.
+    seeds = _statement_rows(client, config, seed_sql, alias="s", include_undated=True)
+    seed_fields = ("kind", "value", "scope_source", "scope_account")
+    seeds = list({tuple(row[name] for name in seed_fields): row for row in seeds}.values())
     sql = f"""
     WITH facts AS (
       SELECT source, account, asset_isrc, product_upc, video_id, track_id, catalog_number, title, artist, statement_month
@@ -115,8 +132,7 @@ def published_unassigned_income(release_id: str) -> tuple[list[dict], list[dict]
         STRUCT('TRACK' AS kind, track_id AS value)
       ]) c WHERE c.value IS NOT NULL AND c.value != ''
     ), seeds AS (
-      SELECT DISTINCT kind, value, scope_source, scope_account
-      FROM codes WHERE COALESCE(asset_isrc, '') = ''
+      SELECT kind, value, scope_source, scope_account FROM UNNEST(@seed_codes)
     )
     SELECT c.kind, c.value AS code, c.source, c.account,
       ARRAY_AGG(DISTINCT NULLIF(c.asset_isrc, '') IGNORE NULLS) AS isrcs,
@@ -128,9 +144,17 @@ def published_unassigned_income(release_id: str) -> tuple[list[dict], list[dict]
     WHERE TRUE {STATEMENT_WINDOW}
     GROUP BY c.kind, c.value, c.source, c.account
     """
-    # Seeds intentionally remain global: a code without ISRC in one month can
-    # identify an ISRC-bearing sale in a different month (including undated rows).
-    evidence = _merge_statement_evidence(_statement_rows(client, config, sql, alias="c", include_undated=True))
+    # Every batch retains global membership, including codes from undated rows.
+    # Bound parameter size independently of the number of historical codes.
+    evidence_rows = []
+    for start in range(0, len(seeds), 1000):
+        scoped = bigquery.QueryJobConfig.from_api_repr(config.to_api_repr())
+        scoped.query_parameters = [*scoped.query_parameters, bigquery.ArrayQueryParameter(
+            "seed_codes", "STRUCT", [bigquery.StructQueryParameter(None, *[
+                bigquery.ScalarQueryParameter(name, "STRING", row[name]) for name in seed_fields
+            ]) for row in seeds[start:start + 1000]])]
+        evidence_rows.extend(_statement_rows(client, scoped, sql, alias="c", include_undated=True))
+    evidence = _merge_statement_evidence(evidence_rows)
     return rows, evidence
 
 
