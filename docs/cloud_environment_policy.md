@@ -61,6 +61,18 @@ El menu web se define por permisos de usuario/modulo. No hay modo temporal paral
 - No alcanza con ocultar el menu. La prueba de alta debe comprobar login,
   filtrado del dashboard y rechazo del catalogo general y de los otros modulos.
 - Si no se pueden validar permisos, no se permite consultar otros modulos.
+- El reparto completo del portal esta limitado a La Juntada de los Artistas.
+  La pertenencia al proyecto se verifica por nombre exacto en creditos publicados
+  o contratos guardados; compartir un participante no incluye otros proyectos.
+  El clic en `Ingreso reportable` se habilita cuando todos los ingresos de la
+  seleccion pertenecen a La Juntada. Este resumen muestra todos los
+  beneficiarios de esos ingresos: socios por nombre y artistas agrupados con
+  detalle desplegable. Calcula contratos cerrados y vigencias guardadas, conserva
+  centavos y separa pendientes. La ruta `/royalties-dashboard/distribution`
+  intersecta La Juntada con los permisos y alcance del usuario. Al abrir un tema
+  de La Juntada, el detalle muestra todos sus participantes y porcentajes, con
+  las mismas vigencias, filtros y alcance. Otros temas conservan la participacion
+  individual; el portal no recibe registros de origen ni acceso a otros catalogos.
 
 ### Google Cloud Run
 

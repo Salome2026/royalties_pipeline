@@ -15,6 +15,7 @@ import { PeriodControl } from "../components/PeriodControl";
 import { PeriodSelection, resolvePeriod } from "../lib/period";
 import { useSession } from "../shared/auth/useSession";
 import styles from "./portal-artista.module.css";
+import { RoyaltyDistributionDrawer } from "../features/royalties-dashboard/RoyaltyDistributionDrawer";
 import { RoyaltyContextAction, RoyaltyExplorerTrail, RoyaltyExplorerPending, RoyaltyTrackDrawer, initialExplorer, explorerActive, explorerParams, type ExplorerState, type ExplorerRank, type ExplorerInfo } from "../features/royalties-dashboard/RoyaltyExplorer";
 
 type Rank = {
@@ -146,6 +147,7 @@ export default function ArtistPortal() {
   const [explorer, setExplorer] = useState<ExplorerState>(initialExplorer);
   const [appliedQuery, setAppliedQuery] = useState("");
   const [selectedTrack, setSelectedTrack] = useState<ExplorerRank | null>(null);
+  const [distributionOpen, setDistributionOpen] = useState(false);
   const requestId = useRef(0);
   const activeUsernameRef = useRef<string | undefined>(currentUser?.username);
 
@@ -178,6 +180,7 @@ export default function ArtistPortal() {
     setExplorer(initialExplorer);
     setAppliedQuery("");
     setSelectedTrack(null);
+    setDistributionOpen(false);
     setLoading(false);
     setDisplayName("");
     setError("");
@@ -201,6 +204,7 @@ export default function ArtistPortal() {
     const id = ++requestId.current;
     const requestUsername = activeUsernameRef.current;
     setLoading(true);
+    setDistributionOpen(false);
     setError("");
     try {
       const nextKeyword = overrides?.keyword ?? keyword;
@@ -403,7 +407,7 @@ export default function ArtistPortal() {
         <RoyaltyContextAction key={currentUser?.username} state={explorer} keyword={new URLSearchParams(appliedQuery).get("keyword") || ""} restricted loading={loading} onChange={applyExplorer} />
         <RoyaltyExplorerTrail state={explorer} loading={loading} onChange={applyExplorer} />
         <div className={styles.metricBand} aria-live="polite">
-          <div className={styles.primaryMetric}><span>{explorer.measure === "contractual" ? "Tu parte según contrato" : "Ingreso reportable"}</span><strong>{loading ? "Calculando…" : dashboard ? money(dashboard.totals.amount_usd) : "—"}</strong></div>
+          <div className={styles.primaryMetric}>{explorer.measure === "income" && dashboard?.explorer?.distribution_available ? <button type="button" className={styles.metricButton} disabled={loading || !dashboard} onClick={() => setDistributionOpen(true)} aria-label="Ver distribución del ingreso reportable" aria-haspopup="dialog"><span>Ingreso reportable</span><strong>{loading ? "Calculando…" : dashboard ? money(dashboard.totals.amount_usd) : "—"}</strong></button> : <><span>{explorer.measure === "income" ? "Ingreso reportable" : "Tu parte según contrato"}</span><strong>{loading ? "Calculando…" : dashboard ? money(dashboard.totals.amount_usd) : "—"}</strong></>}</div>
           <div><span>Unidades</span><strong>{Math.round(dashboard?.totals.units || 0).toLocaleString("es-AR")}</strong></div>
           <div><span>Temas</span><strong>{(dashboard?.totals.titles || 0).toLocaleString("es-AR")}</strong></div>
           <div><span>Distribuidoras</span><strong>{dashboard?.totals.sources || 0}</strong></div>
@@ -477,6 +481,7 @@ export default function ArtistPortal() {
             </div>
           </>
         )}
+        <RoyaltyDistributionDrawer open={distributionOpen} params={appliedQuery} onClose={() => setDistributionOpen(false)} />
         <RoyaltyExplorerPending info={dashboard?.explorer} onOpen={setSelectedTrack} />
         <RoyaltyTrackDrawer selection={selectedTrack} params={selectedTrack?.youtube_only ? explorerParams(new URLSearchParams(appliedQuery), { ...explorer, drill: { ...explorer.drill, dsp: "YouTube" } }).toString() : appliedQuery} onClose={() => setSelectedTrack(null)} />
       </section>

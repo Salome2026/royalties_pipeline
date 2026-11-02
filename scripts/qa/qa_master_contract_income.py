@@ -95,13 +95,14 @@ class ContractIncomeTests(unittest.TestCase):
     def test_cache_pinned_to_release_and_money_grouped_without_identifier_expansion(self):
         published_unassigned_income.cache_clear()
         client = MagicMock()
-        client.query.return_value.result.side_effect = [[{"release_id": "release-a"}], [sale()], [evidence()], [{"release_id": "release-b"}], [], []]
+        seed = {"kind": "UPC", "value": "8721466047355", "scope_source": "", "scope_account": ""}
+        client.query.return_value.result.side_effect = [[{"release_id": "release-a"}], [sale()], [seed], [evidence()], [{"release_id": "release-b"}], [], []]
         with patch("app.master_contract_income.dashboard_client", return_value=client):
             published_unassigned_income("release-a")
             published_unassigned_income("release-a")
-            self.assertEqual(client.query.call_count, 3)
+            self.assertEqual(client.query.call_count, 4)
             published_unassigned_income("release-b")
-            self.assertEqual(client.query.call_count, 6)
+            self.assertEqual(client.query.call_count, 7)
         first = client.query.call_args_list[1]
         self.assertNotIn("UNNEST", first.args[0])
         self.assertIn("COALESCE(asset_isrc, '') = ''", first.args[0])

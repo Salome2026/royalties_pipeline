@@ -10179,7 +10179,7 @@ def royalty_explorer_options(keyword: str | None = None, x_vpo_api_key: str | No
 def royalty_explorer_request(*, detail: bool, measure: str, beneficiary: str | None, source: str | None, account: str | None,
                             keyword: str | None, period_basis: str, period_mode: str, start_month: str | None,
                             end_month: str | None, drill: str | None, track_key: str | None, track_title: str | None,
-                            api_key: str | None, username: str | None):
+                            api_key: str | None, username: str | None, distribution_summary: bool = False):
     contracts, scope = royalty_explorer_access(api_key, username)
     from app import royalty_explorer
     try:
@@ -10189,6 +10189,8 @@ def royalty_explorer_request(*, detail: bool, measure: str, beneficiary: str | N
         args = dict(beneficiary=beneficiary, source=source, account=account, keyword=keyword or "", period_basis=period_basis,
                     period_mode=period_mode, start_month=start_month, end_month=end_month, drill=filters)
         policy = load_distributor_policy_document()
+        if distribution_summary:
+            return royalty_explorer.distribution(contracts, policy, scope, **args)
         if detail:
             return royalty_explorer.detail(contracts, policy, scope, track_key=track_key, track_title=track_title, **args)
         return royalty_explorer.dashboard(contracts, policy, scope, measure=measure, **args)
@@ -10210,6 +10212,18 @@ def royalty_explorer_dashboard(measure: Literal["income", "contractual"] = "inco
     return royalty_explorer_request(detail=False, measure=measure, beneficiary=beneficiary, source=source, account=account,
         keyword=keyword, period_basis=period_basis, period_mode=period_mode, start_month=start_month, end_month=end_month,
         drill=drill, track_key=None, track_title=None, api_key=x_vpo_api_key, username=x_vpo_username)
+
+
+@app.get("/royalties-dashboard/distribution")
+def royalty_explorer_distribution(beneficiary: str | None = None, source: str | None = None, account: str | None = None,
+    keyword: str | None = None, period_basis: Literal["statement_period", "transaction_month"] = "statement_period",
+    period_mode: Literal["last_6_months", "last_12_months", "all", "single_month", "closed_range"] = "last_6_months",
+    start_month: str | None = None, end_month: str | None = None, drill: str | None = None,
+    x_vpo_api_key: str | None = Header(default=None), x_vpo_username: str | None = Header(default=None)):
+    return royalty_explorer_request(detail=False, distribution_summary=True, measure="income", beneficiary=beneficiary,
+        source=source, account=account, keyword=keyword, period_basis=period_basis, period_mode=period_mode,
+        start_month=start_month, end_month=end_month, drill=drill, track_key=None, track_title=None,
+        api_key=x_vpo_api_key, username=x_vpo_username)
 
 
 @app.get("/royalties-dashboard/track")

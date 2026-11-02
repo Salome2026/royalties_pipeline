@@ -29,7 +29,92 @@ def income(amount=100, **changes):
             "units": 123, "rows": 2, **changes}
 
 
+def project_context():
+    ctx = context()
+    ctx["snapshot"]["contracts"][0]["split"]["agreements"][0]["allocation"]["principal"] = "La Juntada de los Artistas"
+    return ctx
+
+
 class ExplorerTests(unittest.TestCase):
+    def test_project_distribution_excludes_other_projects_of_the_same_participant(self):
+        ctx = project_context()
+        foreign = deepcopy(ctx["snapshot"]["contracts"][0])
+        foreign["isrc"] = "ARDL12600002"
+        foreign["split"]["agreements"][0]["allocation"]["principal"] = "Otro proyecto"
+        ctx["snapshot"]["contracts"].append(foreign)
+        ctx["snapshot"]["catalog"].append({"isrc": foreign["isrc"], "title": "Tema ajeno", "artists_informed": "Artista"})
+        self.assertEqual(ex.juntada_roots(ctx), {"ARDL12600001"})
+        original = deepcopy(ctx)
+        with patch.object(ex, "get_context", return_value=ctx), patch.object(ex, "_job", return_value=[]) as query:
+            result = ex.distribution([], {}, {"Artista"}, keyword="Artista")
+            params = query.call_args.args[1]
+            self.assertEqual(next(p for p in params if p.name == "roots").values, ["ARDL12600001"])
+            self.assertFalse(next(p.value for p in params if p.name == "all_tracks"))
+            self.assertEqual(result["amount_usd"], 0)
+        self.assertEqual(ctx, original)
+        with patch.object(ex, "get_context", return_value=ctx), patch.object(ex, "_job", return_value=[]) as query:
+            ex.distribution([], {}, None)
+            params = query.call_args.args[1]
+            self.assertFalse(next(p.value for p in params if p.name == "all_tracks"))
+            self.assertEqual(next(p for p in params if p.name == "roots").values, ["ARDL12600001"])
+        # The participant's ordinary scope still contains both tracks.
+        self.assertEqual(len(ex.compiled_rules(ctx, "Artista")[0]), 2)
+
+    def test_project_track_shows_all_shares_but_other_projects_keep_private_projection(self):
+        for ctx, full in [(project_context(), True), (context(), False)]:
+            with patch.object(ex, "get_context", return_value=ctx), patch.object(ex, "_job", return_value=[income()]):
+                track = ex.detail([], {}, {"Artista"}, track_key="ISRC:ARDL12600001")["tracks"][0]
+            self.assertEqual(track["distribution_visible"], full)
+            self.assertEqual("shares" in track["segments"][0], full)
+            self.assertNotIn("records", track)
+            if full:
+                self.assertAlmostEqual(sum(s["amount_usd"] for s in track["segments"][0]["shares"]), track["base_amount_usd"])
+
+    def test_distribution_groups_saved_partners_and_artists_and_conserves_cents(self):
+        ctx = context()
+        agreement = ctx["snapshot"]["contracts"][0]["split"]["agreements"][0]
+        agreement["owners"] = [{"name": name, "percent": None} for name in ["Indyana", "Hernan", "Claudio"]]
+        _, _, rules = ex.compiled_rules(ctx, "Artista")
+        for amount in [100, -100, 0.01, 100.005]:
+            rows = [{"isrc": "ARDL12600001", "statement_month": "2026-07", "pending_reason": "", "amount_usd": amount},
+                    {"isrc": None, "statement_month": "2026-07", "pending_reason": "Contrato abierto", "amount_usd": 7.13}]
+            result = ex.format_distribution(rows, rules)
+            groups = {r["name"]: r for r in result["groups"]}
+            self.assertEqual(set(groups), {"Indyana", "Hernan", "Claudio", "Artistas"})
+            self.assertEqual(groups["Artistas"]["members"][0]["name"], "Artista")
+            self.assertAlmostEqual(sum(r["amount_usd"] for r in groups.values()), result["distributed_amount_usd"])
+            self.assertAlmostEqual(result["distributed_amount_usd"] + result["pending_amount_usd"], result["amount_usd"])
+            self.assertEqual(sum(r["amount_usd"] for r in result["pending"]), result["pending_amount_usd"])
+        self.assertEqual(ex.format_distribution([], {})["amount_usd"], 0)
+
+    def test_distribution_cannot_override_artist_scope_and_keeps_track_detail_private(self):
+        with patch.object(ex, "get_context", return_value=context()), patch.object(ex, "_job") as query:
+            with self.assertRaises(PermissionError):
+                ex.distribution([], {}, {"Artista"}, beneficiary="Socio")
+            query.assert_not_called()
+        row = {"isrc": "ARDL12600001", "statement_month": "2026-07", "pending_reason": "", "amount_usd": 100}
+        with patch.object(ex, "get_context", return_value=project_context()), patch.object(ex, "_job", return_value=[row]) as query:
+            result = ex.distribution([], {}, {"Artista"}, source="fuga", period_mode="last_6_months", drill={"dsp": "YouTube"})
+            sql, params = query.call_args.args
+            self.assertIn("WHERE t.root IS NOT NULL", sql)
+            self.assertIn("n.statement_month BETWEEN r.start AND r.end", sql)
+            self.assertEqual(next(p.value for p in params if p.name == "drill_dsp"), "YouTube")
+            self.assertEqual(next(p.value for p in params if p.name == "source"), "fuga")
+            self.assertEqual({r["name"]: r["amount_usd"] for r in result["groups"]}, {"Indyana": 54, "Socio": 40, "Artistas": 6})
+        with patch.object(ex, "get_context", return_value=context()), patch.object(ex, "_job", return_value=[income(100)]):
+            private = ex.detail([], {}, {"Artista"}, track_key="ISRC:ARDL12600001")
+            self.assertNotIn("shares", private["tracks"][0]["segments"][0])
+
+    def test_distribution_budget_fallback_materializes_only_selected_income(self):
+        discovery = [{"section": "scan_scope", "payload": json.dumps({"months": ["2026-07-01"], "statements": ["2026-07-01"], "undated": False})}]
+        row = {"isrc": "ARDL12600001", "statement_month": "2026-07", "pending_reason": "", "amount_usd": 100}
+        with patch.object(ex, "get_context", return_value=project_context()), patch.object(ex, "_job", side_effect=[InternalServerError("Query exceeded limit for bytes billed"), discovery, [row]]) as query:
+            self.assertEqual(ex.distribution([], {}, {"Artista"})["distributed_amount_usd"], 100)
+            sql, params = query.call_args.args
+            self.assertIn("statement_month BETWEEN DATE '2026-07-01' AND DATE '2026-07-01'", sql)
+            self.assertIn("SUM(base_amount_usd)", sql)
+            self.assertIn("FROM explorer_filtered", sql)
+
     def test_budget_fallback_preserves_options_and_caches_the_complete_result(self):
         base, params, _ = ex.base_query(context(), {}, "Artista", measure="contractual", restricted=True,
             period_basis="transaction_month", source=None, account=None, keyword="Tema",
