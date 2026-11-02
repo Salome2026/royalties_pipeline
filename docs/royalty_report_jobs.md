@@ -202,6 +202,11 @@ Se retiran en el mismo corte que activa Cloud Run Jobs. No quedan como fallback.
 
 ## Tipos iniciales registrados
 
+El tipo `royalty_executive` tambien admite `executive_mode=artist_settlement`:
+[liquidacion individual de regalias](artist_settlement_pdf.md), con un solo
+artista, contratos congelados y campos de cobro vacios. Comparte los permisos
+y el circuito del PDF contractual.
+
 | `report_key` | Formato | Reglas del pedido |
 | --- | --- | --- |
 | `royalty_keyword` | `excel` | Requiere keywords; admite periodo, base de periodo, modo y limite de detalle. |

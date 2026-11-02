@@ -46,14 +46,18 @@ class ReportEngine:
         request = ReportRequest.from_job(job, keywords=normalized_keywords)
         if ((job.get('input_manifest') or {}).get('royalty_scope') or 'regular') != request.royalty_scope:
             raise RuntimeError('El ámbito del manifiesto no coincide con el pedido del reporte.')
-        if request.royalty_scope == 'wml' and request.executive_mode == 'contractual':
+        if request.royalty_scope == 'wml' and request.executive_mode in {'contractual', 'artist_settlement'}:
             raise ValueError('WML utiliza informes de ingresos al 100%; las referencias no generan un reparto automático.')
 
         self.runtime.report_stage(request.job_id, "reading_data")
-        if request.executive_mode == "contractual":
+        if request.executive_mode in {"contractual", "artist_settlement"}:
             from app.royalty_reports.contract_pdf import build_contractual_pdf
             self.runtime.report_stage(request.job_id, "building")
-            built = build_contractual_pdf(request, job, self.runtime.output_dir)
+            if request.executive_mode == "artist_settlement":
+                from app.royalty_reports.artist_settlement import build_individual_pdf
+                built = build_individual_pdf(request, job, self.runtime.output_dir)
+            else:
+                built = build_contractual_pdf(request, job, self.runtime.output_dir)
             return self.store(request, built)
         extra_files = ['wml_isrc_references.parquet'] if request.royalty_scope == 'wml' else []
         from scripts.lib.product_income import FILE as PRODUCT_INCOME_FILE, use_product_income

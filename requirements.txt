@@ -13,4 +13,5 @@ psycopg[binary,pool]
 pyarrow
 requests
 reportlab
+pypdf>=6.19,<7
 uvicorn

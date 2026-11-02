@@ -13,6 +13,7 @@ export type RoyaltyReportSourceAccount = {
 
 export type RoyaltyReportOptions = {
   excel_contracts_supported?: boolean;
+  artist_settlement_supported?: boolean;
   sources: string[];
   source_accounts: RoyaltyReportSourceAccount[];
 };
@@ -20,7 +21,7 @@ export type RoyaltyReportOptions = {
 export type RoyaltyReportPayload = {
   include_contracts?: boolean;
   contract_columns?: "matching" | "all";
-  executive_mode?: "income" | "contractual";
+  executive_mode?: "income" | "contractual" | "artist_settlement";
   contract_artists?: string[];
   keywords: string[];
   start_month: string | null;
