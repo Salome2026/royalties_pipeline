@@ -158,7 +158,7 @@ def run() -> None:
             os.environ['VPO_PRODUCT_INCOME_PATH'] = str(updated/'product_income_allocations.json')
         event('raw_context_preserved', **totals(updated/raw_name))
         song_paths = []
-        for source in ['ada', 'dashgo', 'fuga', 'onerpm', 'orchard', 'soundon']:
+        for source in (['fuga'] if identity_repair else ['ada', 'dashgo', 'fuga', 'onerpm', 'orchard', 'soundon']):
             module = importlib.import_module(f'scripts.build_song_level_{source}')
             module.INPUT_PATH = root/f'raw_{source}.parquet'
             module.OUTPUT_PATH = root/f'song_level_{source}.parquet'
@@ -168,7 +168,16 @@ def run() -> None:
             song_paths.append(module.OUTPUT_PATH)
             module.INPUT_PATH.unlink()
         from scripts.build_consolidated_marts import consolidate
-        consolidate(song_paths, updated/song_name)
+        if identity_repair:
+            from scripts.lib.catalog_identity_corrections import correct_recording_identity
+            fuga_song = pl.scan_parquet(song_paths[0])
+            if 'mart_source_file' in pl.scan_parquet(original/song_name).collect_schema().names():
+                fuga_song = fuga_song.with_columns(pl.lit('song_level_fuga.parquet').alias('mart_source_file'))
+            corrected = correct_recording_identity(fuga_song)
+            pl.concat([pl.scan_parquet(original/song_name).filter(pl.col('source') != 'fuga'), corrected],
+                how='diagonal_relaxed').sink_parquet(updated/song_name, compression='zstd')
+        else:
+            consolidate(song_paths, updated/song_name)
         assert_money_preserved(original/song_name, updated/song_name)
         for path in song_paths:
             path.unlink()
