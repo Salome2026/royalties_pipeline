@@ -44,6 +44,12 @@ def rebuild_catalog(original: Path, raw: Path, song: Path, output: Path, work: P
     for rule in rules:
         target = 'ISRC:' + rule['canonical_isrc']
         alias = 'VIDEO:' + rule['video_id']
+        if alias in by_key:
+            stub = by_key[alias]
+            if any(float(stub.get(name) or 0) != 0 for name in ['amount_usd', 'observed_amount_usd',
+                'transfer_amount_usd', 'policy_unmatched_amount_usd', 'units', 'song_level_rows']):
+                raise ValueError('Video identity stub has its own economic rows; cannot collapse it')
+            del by_key[alias]
         for code in codes:
             key = 'ISRC:' + code
             row = by_key[key]
@@ -64,10 +70,12 @@ def rebuild_catalog(original: Path, raw: Path, song: Path, output: Path, work: P
                 relationships.append(next(r for r in decisions['entries'] if r['video_isrc'] == rule['video_isrc']))
             row['video_relationships_json'] = json.dumps(sorted(relationships, key=lambda r:r['video_isrc']), ensure_ascii=False, sort_keys=True)
     after = pl.DataFrame(list(by_key.values()), schema=before.schema)
-    if before.height != after.height:
+    removed = {r['video_id'] for r in rules if 'VIDEO:' + r['video_id'] in set(before['catalog_key'])}
+    if before.height - len(removed) != after.height:
         raise ValueError('Identity repair changed catalog membership')
-    unchanged_before = before.filter(~pl.col('asset_isrc').is_in(codes)).sort('catalog_key')
-    unchanged_after = after.filter(~pl.col('asset_isrc').is_in(codes)).sort('catalog_key')
+    unrelated = ~pl.col('asset_isrc').is_in(codes).fill_null(False) & ~pl.col('catalog_key').is_in(['VIDEO:' + v for v in removed])
+    unchanged_before = before.filter(unrelated).sort('catalog_key')
+    unchanged_after = after.filter(unrelated).sort('catalog_key')
     if not unchanged_before.equals(unchanged_after):
         raise ValueError('Unrelated catalog entries changed')
     after.write_parquet(output)
