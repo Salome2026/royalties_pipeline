@@ -40,6 +40,7 @@ _LOCK = threading.RLock()
 # This explicit equivalence preserves the existing Candu login without granting
 # access by substring, or renaming recipients in any saved contract.
 PORTAL_SCOPE_LABELS = {"candu": "candu dominguez"}
+JUNTADA_PROJECT = "la juntada de los artistas"
 
 
 def scope_keys(scope: set[str] | None) -> set[str] | None:
@@ -248,6 +249,22 @@ def compiled_rules(context: dict, beneficiary: str | None, *, restrict_tracks: b
     return selected, rules, all_rules
 
 
+def juntada_roots(context: dict) -> set[str]:
+    # Project membership is exact, from published credits or saved contracts.
+    # A participant's name alone never makes another project part of La Juntada.
+    roots = {row["asset_isrc"] for row in context["catalog"] if row.get("asset_isrc")
+             and any(beneficiary_key(name) == JUNTADA_PROJECT for name in _credit_names(row))}
+    roots.update(row["isrc"] for row in context["snapshot"]["contracts"]
+                 if any(beneficiary_key(name) == JUNTADA_PROJECT for name in _contract_names(row["split"])))
+    return roots
+
+
+def juntada_context(context: dict) -> dict:
+    roots = juntada_roots(context)
+    return {**context, "snapshot": {**context["snapshot"],
+            "catalog": [row for row in context["snapshot"]["catalog"] if row["isrc"] in roots]}}
+
+
 def _struct_array(name: str, fields: list[tuple[str, str]], rows: list[dict]):
     struct = bigquery.StructQueryParameterType(*[bigquery.ScalarQueryParameterType(kind, name=key) for key, kind in fields])
     values = [bigquery.StructQueryParameter(None, *[bigquery.ScalarQueryParameter(key, kind, row.get(key)) for key, kind in fields]) for row in rows]
@@ -279,6 +296,7 @@ def base_query(context: dict, policy: dict, beneficiary: str | None, *, measure:
               bigquery.ScalarQueryParameter("all_tracks", "BOOL", not restricted),
               bigquery.ScalarQueryParameter("restricted", "BOOL", restricted),
               bigquery.ArrayQueryParameter("roots", "STRING", sorted(roots)),
+              bigquery.ArrayQueryParameter("distribution_keys", "STRING", ["ISRC:" + root for root in sorted(juntada_roots(context))]),
               _struct_array("tracks", [("root", "STRING"), ("title", "STRING"), ("reason", "STRING")], tracks),
               _struct_array("rules", [("root", "STRING"), ("start", "DATE"), ("end", "DATE"), ("percent", "FLOAT64"), ("version", "INT64")], rules),
               _struct_array("bindings", [(k, "STRING") for k in ("source", "account", "sheet", "month", "kind", "code", "root")], bindings)]
@@ -386,6 +404,8 @@ def dashboard_sql(base: str, period_mode: str, limit: int, *, include_options: b
       SELECT ROUND(COALESCE(SUM(base_amount_usd),0),2) AS base_amount_usd,
       ROUND(COALESCE(SUM(pending_amount_usd),0),2) AS pending_amount_usd,
       COUNT(DISTINCT IF(pending_reason!='',identity_key,NULL)) AS pending_tracks FROM scoped) t
+    UNION ALL SELECT 'distribution_scope',TO_JSON_STRING(t) FROM (
+      SELECT COUNT(*)>0 AND COUNTIF(identity_key NOT IN UNNEST(@distribution_keys))=0 AS available FROM scoped) t
     UNION ALL SELECT 'pending',TO_JSON_STRING(t) FROM (
       SELECT identity_key,ANY_VALUE(title) AS title,pending_reason AS reason,
         SUM(pending_amount_usd) AS amount_usd FROM scoped WHERE pending_reason!=''
@@ -481,6 +501,7 @@ def format_dashboard(rows: list[dict], *, context: dict, policy: dict, beneficia
                     **(sections["option_bounds"][0] if sections["option_bounds"] else {})},
         "catalog_refresh": {"status": "ready"},
         "explorer": {"measure": measure, "beneficiary": beneficiary, "restricted": restricted,
+                     "distribution_available": bool((sections["distribution_scope"] or [{}])[0].get("available", False)),
                      "registry_revision": context["revision"], "release_id": context["release"],
                      "computed_at": datetime.now(timezone.utc).isoformat(), **summary, "pending": pending}}
 
@@ -543,14 +564,13 @@ def format_distribution(rows: list[dict], rules: dict) -> dict:
 def distribution(contracts: list[dict], policy: dict, scope: set[str] | None, *, beneficiary=None,
                  source=None, account=None, keyword="", period_basis="statement_period", period_mode="last_6_months",
                  start_month=None, end_month=None, drill=None) -> dict:
-    context = get_context(contracts)
+    context = juntada_context(get_context(contracts))
     beneficiary = authorize_beneficiary(beneficiary, context["names"], scope)
-    base, params, rules = base_query(context, policy, beneficiary, measure="income", restricted=scope is not None,
+    base, params, rules = base_query(context, policy, beneficiary, measure="income", restricted=True,
         period_basis=period_basis, source=source, account=account, keyword=keyword or "",
         start_month=start_month, end_month=end_month, drill=drill or {})
-    # Read the same filtered income as the dashboard. Only this explicit summary
-    # exposes all recipients of the caller's authorized tracks; track detail and
-    # other artist permissions keep their existing private projections.
+    # Intersect project membership with the caller's existing artist scope.
+    # Recipient names never expand this selection to their other projects.
     tail = """ SELECT isrc,FORMAT_DATE('%Y-%m',statement_month) AS statement_month,pending_reason,
       SUM(base_amount_usd) AS amount_usd FROM scoped GROUP BY isrc,statement_month,pending_reason"""
     try:
@@ -620,6 +640,7 @@ def detail(contracts: list[dict], policy: dict, scope: set[str] | None, *, benef
     for row in rows:
         groups[row["identity_key"]].append(row)
     tracks = []
+    project_roots = juntada_roots(context)
     for identity, income in groups.items():
         segments = defaultdict(lambda: {"amount_usd": 0.0, "units": 0.0, "months": set(), "rule": None})
         pending = defaultdict(float)
@@ -637,10 +658,12 @@ def detail(contracts: list[dict], policy: dict, scope: set[str] | None, *, benef
             segment["units"] += row["units"] or 0
             segment["months"].add(row["statement_month"])
             segment["rule"] = agreement
-        displayed_segments = _display_segments(segments, beneficiary, scope is not None)
+        distribution_visible = scope is None or income[0]["isrc"] in project_roots
+        displayed_segments = _display_segments(segments, beneficiary, scope is not None and not distribution_visible)
         track = {"identity_key": identity, "isrc": income[0]["isrc"], "title": income[0]["title"], "row_title": track_title,
                  "base_amount_usd": round_money(sum(r["amount_usd"] for r in income)),
                  "units": sum(r["units"] or 0 for r in income), "segments": displayed_segments,
+                 "distribution_visible": distribution_visible,
                  "pending": [{"reason": reason, "amount_usd": round_money(amount)} for reason, amount in pending.items()]}
         if scope is None:
             track["records"] = [{k: r[k] for k in ("statement_month", "transaction_month", "source", "account", "dsp", "territory", "monetization", "content_origin", "amount_usd", "units", "rows")} for r in income]
