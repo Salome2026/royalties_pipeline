@@ -38,6 +38,25 @@ def totals(path: Path, amount: str = 'amount_usd') -> dict:
     return lf.select(pl.len().alias('rows'), pl.col(amount).sum().alias('amount_usd')).collect().to_dicts()[0]
 
 
+def rewrite_identity_batches(source: Path, target: Path, batch_size=25000):
+    """Bound wide native rows in memory independently of the historical size."""
+    import pyarrow.parquet as pq
+    from scripts.lib.catalog_identity_corrections import correct_recording_identity
+    writer = None
+    try:
+        for number, batch in enumerate(pq.ParquetFile(source).iter_batches(batch_size=batch_size, use_threads=False), 1):
+            frame = preserve_video_context(correct_recording_identity(pl.from_arrow(batch)))
+            table = frame.to_arrow()
+            if writer is None:
+                writer = pq.ParquetWriter(target, table.schema, compression='zstd')
+            writer.write_table(table)
+            if number % 100 == 0:
+                event('identity_raw_batch', batch=number)
+    finally:
+        if writer is not None:
+            writer.close()
+
+
 def assert_money_preserved(before: Path, after: Path) -> None:
     def grouped(path):
         return pl.scan_parquet(path).group_by(['source', 'account', 'transaction_month']).agg(
@@ -121,9 +140,9 @@ def run() -> None:
         raw_frame = pl.scan_parquet(original/raw_name)
         identity_repair = os.environ.get('VPO_RECORDING_IDENTITY_REPAIR') == '1'
         if identity_repair:
-            from scripts.lib.catalog_identity_corrections import correct_recording_identity
-            raw_frame = correct_recording_identity(raw_frame)
-        preserve_video_context(raw_frame).sink_parquet(updated/raw_name, compression='zstd')
+            rewrite_identity_batches(original/raw_name, updated/raw_name)
+        else:
+            preserve_video_context(raw_frame).sink_parquet(updated/raw_name, compression='zstd')
         if totals(original/raw_name)['rows'] != totals(updated/raw_name)['rows']:
             raise RuntimeError('El reproceso cambia la cantidad de filas originales.')
         assert_money_preserved(original/raw_name, updated/raw_name)
