@@ -9749,15 +9749,20 @@ def build_digital_income_summary_mart(standardized_path: Path, refresh_cache: bo
         "Album Title",
     ]
     search_fields = [field for field in artist_fields + title_fields + ["_income_origin_search"] if field in columns]
+    native_artist = pl.coalesce([non_empty_text_expr(field) for field in artist_fields if field in columns] or [pl.lit("")]).fill_null("")
+    current_artist = display_credit_expr(native_artist)
+    native_search = pl.concat_str([text_expr(field) for field in search_fields] or [pl.lit("")], separator=" ").str.to_lowercase()
+    search = pl.when(current_artist != native_artist).then(
+        pl.concat_str([native_search, current_artist.str.to_lowercase()], separator=" ")
+    ).otherwise(native_search)
 
     base = lf.with_columns([
         text_expr("source").alias("source"),
         text_expr("account").alias("account"),
         text_expr("statement_period").alias("statement_period"),
-        display_credit_expr(
-            pl.coalesce([non_empty_text_expr(field) for field in artist_fields if field in columns] or [pl.lit("")]).fill_null("")).alias("artist"),
+        current_artist.alias("artist"),
         pl.coalesce([non_empty_text_expr(field) for field in title_fields if field in columns] or [pl.lit("")]).fill_null("").alias("title"),
-        pl.concat_str([text_expr(field) for field in search_fields] or [pl.lit("")], separator=" ").str.to_lowercase().alias("search_text"),
+        search.alias("search_text"),
         amount_usd.alias("total_usd"),
         numeric_expr("net_amount_eur").fill_null(0.0).alias("total_eur"),
         (

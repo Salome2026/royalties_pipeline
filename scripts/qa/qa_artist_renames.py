@@ -56,5 +56,24 @@ class ArtistRenameTests(unittest.TestCase):
         self.assertEqual(result['artist_variants'], 'ACIT x | Acita')
         self.assertEqual(frame['artist_statement'][0], 'ACIT x')
 
+    def test_future_digital_rebuild_keeps_both_names_searchable(self):
+        from pathlib import Path
+        import tempfile
+        from unittest.mock import patch
+        from app import vpo_corp_api as api
+        from scripts.lib.text_search import contains_search_expr
+        with tempfile.TemporaryDirectory() as temporary:
+            source, target = Path(temporary)/'source.parquet', Path(temporary)/'summary.parquet'
+            pl.DataFrame({'source':['soundon'],'account':['soundon'],'statement_period':['2025-12'],
+                'artist_statement_style':['ACIT x'],'track_statement_style':['Fancy'],'amount_usd':[4.]}).write_parquet(source)
+            with patch.object(api,'DIGITAL_INCOME_SUMMARY_PATH',target), \
+                 patch('scripts.lib.product_income.current_index',return_value=None), \
+                 patch('scripts.lib.product_income.allocate_income',side_effect=lambda frame,**kw:frame):
+                api.build_digital_income_summary_mart(source,True)
+            frame=pl.read_parquet(target)
+            self.assertEqual(frame['artist'][0], 'Acita')
+            for name in ('ACIT x','Acita'):
+                self.assertEqual(frame.filter(contains_search_expr(pl.col('search_text'),name))['total_usd'].sum(), 4.)
+
 
 if __name__ == '__main__':unittest.main()
