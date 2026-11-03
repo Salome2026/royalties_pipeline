@@ -10205,6 +10205,7 @@ def query_royalties_dashboard_from_bigquery(
     period_mode: str,
     limit: int,
     artist_scope: set[str] | None = None,
+    full_catalog_rankings: bool = False,
 ) -> dict[str, Any]:
     from app.catalog_refresh import dashboard_state, enabled
     return query_royalties_dashboard_bigquery(
@@ -10220,6 +10221,7 @@ def query_royalties_dashboard_from_bigquery(
         period_mode=period_mode,
         limit=limit,
         artist_scope=artist_scope,
+        full_catalog_rankings=full_catalog_rankings,
         project=VPO_BIGQUERY_PROJECT,
         dataset=active_bigquery_dataset(),
         location=VPO_BIGQUERY_LOCATION,
@@ -10257,7 +10259,8 @@ def royalty_explorer_options(keyword: str | None = None, x_vpo_api_key: str | No
 def royalty_explorer_request(*, detail: bool, measure: str, beneficiary: str | None, source: str | None, account: str | None,
                             keyword: str | None, period_basis: str, period_mode: str, start_month: str | None,
                             end_month: str | None, drill: str | None, track_key: str | None, track_title: str | None,
-                            api_key: str | None, username: str | None, distribution_summary: bool = False):
+                            api_key: str | None, username: str | None, distribution_summary: bool = False,
+                            full_catalog_rankings: bool = False):
     contracts, scope = royalty_explorer_access(api_key, username)
     from app import royalty_explorer
     try:
@@ -10274,7 +10277,7 @@ def royalty_explorer_request(*, detail: bool, measure: str, beneficiary: str | N
             return royalty_explorer.detail(contracts, policy, scope, track_key=track_key, track_title=track_title,
                 juntada_presentation=clean_username(username or '') == 'hernanlda', **args)
         return royalty_explorer.dashboard(contracts, policy, scope, measure=measure,
-            full_catalog_rankings=clean_username(username or '') == 'hernanlda', **args)
+            full_catalog_rankings=full_catalog_rankings or clean_username(username or '') == 'hernanlda', **args)
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc
     except ValueError as exc:
@@ -10289,10 +10292,12 @@ def royalty_explorer_dashboard(measure: Literal["income", "contractual"] = "inco
     period_basis: Literal["statement_period", "transaction_month"] = "statement_period",
     period_mode: Literal["last_6_months", "last_12_months", "all", "single_month", "closed_range"] = "last_6_months",
     start_month: str | None = None, end_month: str | None = None, drill: str | None = None,
+    full_catalog_rankings: bool = False,
     x_vpo_api_key: str | None = Header(default=None), x_vpo_username: str | None = Header(default=None)):
     return royalty_explorer_request(detail=False, measure=measure, beneficiary=beneficiary, source=source, account=account,
         keyword=keyword, period_basis=period_basis, period_mode=period_mode, start_month=start_month, end_month=end_month,
-        drill=drill, track_key=None, track_title=None, api_key=x_vpo_api_key, username=x_vpo_username)
+        drill=drill, track_key=None, track_title=None, api_key=x_vpo_api_key, username=x_vpo_username,
+        full_catalog_rankings=full_catalog_rankings)
 
 
 @app.get("/royalties-dashboard/distribution")
@@ -10331,6 +10336,7 @@ def royalties_dashboard(
     period_basis: Literal["statement_period", "transaction_month"] = "statement_period",
     period_mode: Literal["last_6_months", "last_12_months", "all", "single_month", "closed_range"] = "last_6_months",
     limit: int = 10,
+    full_catalog_rankings: bool = False,
     refresh_cache: bool = False,
     x_vpo_api_key: str | None = Header(default=None),
     x_vpo_username: str | None = Header(default=None),
@@ -10362,6 +10368,7 @@ def royalties_dashboard(
                 period_mode=period_mode,
                 limit=limit,
                 artist_scope=artist_scope,
+                full_catalog_rankings=full_catalog_rankings,
             )
         except Exception as exc:
             elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
@@ -10528,8 +10535,8 @@ def royalties_dashboard(
         pl.max(period_col).alias("last_month"),
     ])
 
-    def rank_plan(field: str, frame: pl.LazyFrame) -> pl.LazyFrame:
-        return (
+    def rank_plan(field: str, frame: pl.LazyFrame, *, full: bool = False) -> pl.LazyFrame:
+        plan = (
             frame
             .filter(pl.col(field).is_not_null() & (pl.col(field) != ""))
             .group_by(field)
@@ -10539,8 +10546,8 @@ def royalties_dashboard(
                 pl.sum("raw_rows").alias("rows"),
             ])
             .sort("amount_usd", descending=True)
-            .limit(safe_limit)
         )
+        return plan if full else plan.limit(safe_limit)
 
     def format_rank(field: str, df: pl.DataFrame, denominator: float) -> list[dict]:
         rows: list[dict] = []
@@ -10625,7 +10632,7 @@ def royalties_dashboard(
         monthly_plan,
         matrix_plan,
         youtube_totals_plan,
-        *(rank_plan(field, scoped) for _, field in ranking_fields),
+        *(rank_plan(field, scoped, full=full_catalog_rankings and field in {"artist", "title"}) for _, field in ranking_fields),
         *(rank_plan(field, youtube_scope) for _, field in youtube_ranking_fields),
     ], engine="streaming")
     totals = results[0].to_dicts()[0]

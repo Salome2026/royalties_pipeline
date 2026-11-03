@@ -36,7 +36,7 @@ def project_context():
 
 
 class ExplorerTests(unittest.TestCase):
-    def test_complete_rankings_only_for_authenticated_juntada_portal(self):
+    def test_complete_rankings_default_for_juntada_and_opt_in_for_dashboard(self):
         from app import vpo_corp_api as api
         for username, expected in [('hernanlda', True), ('rubene', False), ('otro', False)]:
             with patch.object(api, 'royalty_explorer_access', return_value=([], None)), \
@@ -47,6 +47,14 @@ class ExplorerTests(unittest.TestCase):
                     period_mode='all', start_month=None, end_month=None, drill=None,
                     track_key=None, track_title=None, api_key='key', username=username)
                 self.assertIs(render.call_args.kwargs['full_catalog_rankings'], expected)
+
+        with patch.object(api, 'royalty_explorer_access', return_value=([], {'Artista'})), \
+             patch.object(api, 'load_distributor_policy_document', return_value={}), \
+             patch.object(ex, 'dashboard', return_value={}) as render:
+            api.royalty_explorer_dashboard(x_vpo_api_key='key', x_vpo_username='rubene',
+                                          full_catalog_rankings=True)
+            self.assertTrue(render.call_args.kwargs['full_catalog_rankings'])
+            self.assertEqual(render.call_args.args[2], {'Artista'})
 
     def test_complete_rankings_survive_budget_fallback_and_separate_cache(self):
         ex._dashboard_rows.cache_clear()

@@ -4108,6 +4108,7 @@ export default function Home() {
       params.set("period_basis", periodBasis);
       params.set("limit", "10");
       const query = filters?.query !== undefined ? new URLSearchParams(filters.query) : params;
+      query.set("full_catalog_rankings", "true");
       for (const name of ["measure", "beneficiary", "drill"]) query.delete(name);
       let selection = filters?.explorer || royaltiesExplorer;
       if (!filters?.explorer && filters?.query === undefined && keyword.trim() !== (new URLSearchParams(royaltiesDashboardQuery).get("keyword") || "")) {
@@ -7450,6 +7451,7 @@ export default function Home() {
   }
 
   function renderRoyaltiesRankTable(title: string, rows: RoyaltiesDashboardRank[], dimension?: string, emptyText = "Sin datos para este filtro.") {
+    const scrollable = royaltiesDashboardTab === "overview" && (dimension === "title" || dimension === "artist");
     return (
       <section className={royaltyDashboardStyles.rankSection}>
         <div className={royaltyDashboardStyles.rankHeader}>
@@ -7458,7 +7460,12 @@ export default function Home() {
         </div>
         {royaltiesDashboardLoading && <div className={royaltyDashboardStyles.empty}>Cargando...</div>}
         {!royaltiesDashboardLoading && rows.length === 0 && <div className={royaltyDashboardStyles.empty}>{emptyText}</div>}
-        <div className={royaltyDashboardStyles.rankList}>
+        <div
+          className={`${royaltyDashboardStyles.rankList}${scrollable ? ` ${royaltyDashboardStyles.rankListScrollable}` : ""}`}
+          tabIndex={scrollable && rows.length > 0 ? 0 : undefined}
+          role={scrollable ? "region" : undefined}
+          aria-label={scrollable ? title : undefined}
+        >
           {rows.map((row, idx) => (
             <div className={royaltyDashboardStyles.rankRow} key={`${title}-${row.name}-${idx}`}>
               <span className={royaltyDashboardStyles.rankIndex}>{idx + 1}</span>

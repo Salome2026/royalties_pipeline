@@ -252,7 +252,8 @@ ranking_aggregated AS (
 ranking_totals AS (
   SELECT *
   FROM ranking_aggregated
-  QUALIFY ROW_NUMBER() OVER (PARTITION BY category ORDER BY amount_usd DESC, name) <= @ranking_limit
+  QUALIFY (@full_catalog_rankings AND category IN ('artist', 'title'))
+    OR ROW_NUMBER() OVER (PARTITION BY category ORDER BY amount_usd DESC, name) <= @ranking_limit
 ),
 youtube_scope AS (
   SELECT * FROM scoped WHERE dsp = 'YouTube'
@@ -406,6 +407,7 @@ def query_rows(
     ranking_limit: int,
     maximum_bytes_billed: int | None,
     client: bigquery.Client | None = None,
+    full_catalog_rankings: bool = False,
 ) -> list[dict[str, Any]]:
     query_client = client or dashboard_client(project, location)
     config = bigquery.QueryJobConfig(
@@ -421,6 +423,7 @@ def query_rows(
             bigquery.ScalarQueryParameter("use_all_months", "BOOL", use_all_months),
             bigquery.ScalarQueryParameter("month_limit", "INT64", month_limit),
             bigquery.ScalarQueryParameter("ranking_limit", "INT64", ranking_limit),
+            bigquery.ScalarQueryParameter("full_catalog_rankings", "BOOL", full_catalog_rankings),
         ]
     )
     return [dict(row.items()) for row in query_client.query(sql, job_config=config, location=location).result()]
@@ -689,6 +692,7 @@ def royalties_dashboard_bigquery(
     period_basis: str = "statement_period",
     period_mode: str = "last_6_months",
     limit: int = 10,
+    full_catalog_rankings: bool = False,
     project: str = DEFAULT_PROJECT,
     dataset: str = DEFAULT_DATASET,
     location: str = DEFAULT_LOCATION,
@@ -749,6 +753,7 @@ def royalties_dashboard_bigquery(
         use_all_months=use_all_months,
         month_limit=month_limit,
         ranking_limit=safe_limit,
+        full_catalog_rankings=full_catalog_rankings,
         maximum_bytes_billed=maximum_bytes_billed,
         client=query_client,
     )

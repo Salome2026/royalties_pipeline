@@ -51,6 +51,17 @@ a inferir como parte de esta reparacion de columnas.
 7. Fijar `bigquery` en `cloudbuild.yaml` para que el siguiente despliegue no
    cambie accidentalmente el motor.
 
+## Rankings completos del dashboard
+
+El resumen de ingresos por tema y por artista permite recorrer todos los
+resultados del filtro en listas independientes de hasta 360 px, con encabezado
+visible y scroll por rueda, tacto o teclado. La web solicita
+`full_catalog_rankings=true` tanto en el resumen normal como en la exploracion
+contractual. BigQuery y el retorno Parquet aplican esta opcion solo a los
+rankings generales de temas y artistas; mantienen filtros, permisos, totales y
+el limite existente para las otras categorias y YouTube. Sin la opcion se
+conserva el limite anterior.
+
 ## Retorno inmediato
 
 El retorno operativo consiste en asignar nuevamente 100% del trafico a la
