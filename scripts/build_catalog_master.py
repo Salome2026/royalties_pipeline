@@ -8,7 +8,7 @@ import polars as pl
 from lib.identity import valid_youtube_channel_id_expr
 from lib.distributor_policy_store import load_distributor_policy_document
 from lib.ada_identity import ada_catalog_key_expr
-from lib.catalog_manual_metadata import apply_catalog_manual_metadata
+from lib.catalog_manual_metadata import apply_catalog_manual_metadata, materialize_confirmed_references
 from lib.fuga_catalog_artists import enrich_fuga_catalog_file
 from lib.fuga_video_automatic import apply_automatic_extended
 from lib.onerpm_catalog_artists import METADATA_FILE, enrich_onerpm_catalog_file, materialize_onerpm_identity_file
@@ -696,6 +696,7 @@ def build_catalog_master(*, native_only: bool = False) -> pl.DataFrame:
     # Native metadata and admission of money are separate. Shares-only ISRCs
     # must exist before release metadata/manual corrections/artist enrichment.
     catalog = materialize_onerpm_identity_file(catalog, MARTS_DIR / METADATA_FILE)
+    catalog = materialize_confirmed_references(catalog)
 
     release_lookup = build_release_lookup()
     if not release_lookup.is_empty():

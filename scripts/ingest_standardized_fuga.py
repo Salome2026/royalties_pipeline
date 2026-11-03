@@ -19,6 +19,7 @@ from lib.statement_period import from_fuga_filename, fuga_correction, FUGA_CORRE
 from lib.fuga_extended import audit_directory
 from lib.catalog_identity_corrections import correct_recording_identity
 from lib.ingestion_controls import controlled_ingestion, select_inputs, validate_amounts, stage_controls
+from lib.native_csv import read_native_csv
 
 
 # =========================
@@ -63,13 +64,7 @@ def extract_statement_period(file_name: str) -> str:
 
 
 def read_fuga_csv(file_path: Path) -> pl.DataFrame:
-    return pl.read_csv(
-        file_path,
-        separator=",",
-        quote_char='"',
-        ignore_errors=True,
-        infer_schema_length=10000,
-    )
+    return read_native_csv(file_path)
 
 
 def clean_columns(df: pl.DataFrame) -> pl.DataFrame:

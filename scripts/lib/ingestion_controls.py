@@ -110,13 +110,14 @@ def validate_amounts(frame: pl.DataFrame, *, source: str, path: Path, field: str
 
 
 class Batch:
-    def __init__(self, source: str, output: Path):
+    def __init__(self, source: str, output: Path, *, accounts: dict | None = None):
         self.source, self.output, self.records, self.incidents = source, output, [], []
         self.inputs, self.prior_contexts = {}, set()
         self.receipt = output.parent / f"ingestion_control_{source}.parquet"
         self.failure = output.parent.parent / "registry" / f"ingestion_failure_{source}.json"
         self.prior_names = set()
         self.reader_hash = ""
+        self.accounts = accounts
         self.staged = None
         if self.receipt.exists():
             previous = pl.read_parquet(self.receipt).filter(pl.col("status") == "selected")
@@ -180,6 +181,18 @@ class Batch:
                 written_hashes = set(scan.select(pl.col("statement_file_hash").drop_nulls().unique()).collect().to_series().to_list())
                 if written_hashes - {row["file_hash"] for row in selected}:
                     raise IngestionControlError("UNAPPLIED_REPLACEMENT", "La salida conserva una version de archivo que ya no fue seleccionada. Se bloquea la publicacion; revisar la correccion vacia o el lote.")
+            from .native_identity_integrity import validate_original_input_batch
+            try:
+                native_proofs = validate_original_input_batch(self.source, Path(economic_path), selected, self.inputs,
+                                                             accounts=self.accounts)
+            except ValueError as error:
+                raise IngestionControlError("NATIVE_IDENTITY_LOSS", str(error), source=self.source) from error
+            if native_proofs:
+                destination = self.output.parent / f"ingestion_control_{self.source}_native_identity.json"
+                temporary = destination.with_suffix(".tmp.json")
+                temporary.write_text(json.dumps({"rule": "native-original-identity-1", "files": native_proofs},
+                                                ensure_ascii=True, sort_keys=True), encoding="utf-8")
+                staged.append((temporary, destination))
         if self.records:
             unique = {json.dumps(row, sort_keys=True): row for row in self.records}
             frame = pl.DataFrame(list(unique.values()), schema=FILE_SCHEMA).sort("account", "period", "kind", "file_name")
@@ -206,7 +219,7 @@ def controlled_ingestion(source):
     def decorate(function):
         @wraps(function)
         def run(*args, **kwargs):
-            batch = Batch(source, function.__globals__["OUTPUT_PATH"])
+            batch = Batch(source, function.__globals__["OUTPUT_PATH"], accounts=function.__globals__.get("ACCOUNTS"))
             batch.reader_hash = checksum(Path(function.__globals__["__file__"]))
             token = _CURRENT.set(batch)
             try:

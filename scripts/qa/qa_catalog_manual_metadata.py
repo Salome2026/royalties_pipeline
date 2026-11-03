@@ -8,10 +8,21 @@ import polars as pl
 from polars.testing import assert_frame_equal
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from lib.catalog_manual_metadata import CORRECTIONS_PATH, apply_catalog_manual_metadata
+from lib.catalog_manual_metadata import CORRECTIONS_PATH, apply_catalog_manual_metadata, materialize_confirmed_references
 
 
 class CatalogManualMetadataTests(unittest.TestCase):
+    def test_external_reference_survives_rebuild_without_inventing_revenue_or_splits(self):
+        before = self.catalog()
+        after = materialize_confirmed_references(before)
+        ref = after.filter(pl.col("asset_isrc") == "CLEM42100943")
+        self.assertEqual(ref.height, 1)
+        self.assertEqual(ref["amount_usd"][0], 0)
+        self.assertEqual(ref["units"][0], 0)
+        self.assertEqual(ref["catalog_artists"][0].to_list(), ["Jairo Vera", "Gusty DJ"])
+        assert_frame_equal(after.filter(pl.col("asset_isrc") != "CLEM42100943").select(before.columns), before)
+        self.assertEqual(materialize_confirmed_references(after).height, after.height)
+
     def catalog(self):
         return pl.DataFrame({
             "catalog_key": ["ISRC:ARDL12400086", "ISRC:ARDL12400080", "ISRC:OTHER"],

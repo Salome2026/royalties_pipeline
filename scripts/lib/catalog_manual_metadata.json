@@ -1,6 +1,27 @@
 {
   "version": 1,
+  "recording_references": [
+    {
+      "id": "SESSION12-DALE-TURRO-20261102",
+      "isrc": "CLEM42100943",
+      "title": "Dale Turro / Session en el Barrio #12",
+      "artists": ["Jairo Vera", "Gusty DJ"],
+      "confirmed_by": "Ruben Mariano Elkowich",
+      "confirmed_on": "2026-11-02",
+      "reason": "Audio distributed externally; Ruben confirmed the recording identity and requested this reference for the separately received Gusty video income. No external income or percentages are inferred.",
+      "evidence_url": "https://api.deezer.com/track/2434853305",
+      "match_url": "https://open.spotify.com/track/1Ds2QYmrzQcunE2JVWU99K"
+    }
+  ],
   "corrections": [
+    {
+      "id": "SESSION12-TITLE-20261102",
+      "catalog_key": "ISRC:CLEM42100943",
+      "track_title": "Dale Turro / Session en el Barrio #12",
+      "confirmed_by": "Ruben Mariano Elkowich",
+      "confirmed_on": "2026-11-02",
+      "reason": "Keep the Gusty video series title next to the externally distributed audio title. Confirmed in this chat."
+    },
     {
       "id": "FUGA-META-ARDL12400086-20261013",
       "catalog_key": "ISRC:ARDL12400086",

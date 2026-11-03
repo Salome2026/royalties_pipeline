@@ -71,6 +71,9 @@ def consolidate(paths: list[Path], output_path: Path, add_reporting_dimensions: 
         compression="zstd",
         engine="streaming",
     )
+    if output_path.name == "standardized_raw_all_sources.parquet":
+        from lib.native_identity_integrity import publication_witnesses
+        publication_witnesses(temporary_path)
     temporary_path.replace(output_path)
 
     result = pl.scan_parquet(output_path)

@@ -8,6 +8,7 @@ import polars as pl
 
 from lib.statement_period import from_column, legacy_manual
 from lib.ingestion_controls import controlled_ingestion, select_inputs, validate_amounts, stage_controls
+from lib.native_csv import read_native_csv
 
 
 BASE_DIR = Path(r"C:\royalties_pipeline")
@@ -38,14 +39,7 @@ def sha256_file(file_path: Path) -> str:
 
 
 def read_orchard_csv(file_path: Path) -> pl.DataFrame:
-    return pl.read_csv(
-        file_path,
-        separator=",",
-        quote_char='"',
-        ignore_errors=True,
-        infer_schema_length=10000,
-        encoding="utf8-lossy",
-    )
+    return read_native_csv(file_path, encoding="utf8-lossy")
 
 
 def clean_columns(df: pl.DataFrame) -> pl.DataFrame:

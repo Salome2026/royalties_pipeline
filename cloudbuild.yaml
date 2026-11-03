@@ -27,6 +27,9 @@ steps:
       - scripts.qa.qa_fuga_catalog_artists
       - scripts.qa.qa_soundon_catalog_artists
       - scripts.qa.qa_ingestion_controls
+      - scripts.qa.qa_native_identity_integrity
+      - scripts.qa.qa_catalog_manual_metadata
+      - scripts.qa.qa_onerpm_catalog_artists
       - scripts.qa.qa_contract_income_budget
       - scripts.qa.qa_artist_renames
       - scripts.qa.qa_royalty_explorer

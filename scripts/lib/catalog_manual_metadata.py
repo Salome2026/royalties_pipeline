@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import polars as pl
@@ -18,6 +19,57 @@ AUDIT_FIELDS = {
     "catalog_manual_correction_confirmed_by": "confirmed_by",
     "catalog_manual_correction_confirmed_on": "confirmed_on",
 }
+
+
+def materialize_confirmed_references(catalog: pl.DataFrame, *, corrections_path: Path = CORRECTIONS_PATH) -> pl.DataFrame:
+    """Keep owner-confirmed external recordings without inventing their revenue."""
+    document = json.loads(corrections_path.read_text(encoding="utf-8"))
+    if document.get("version") != 1:
+        raise ValueError("Unsupported manual catalog metadata version.")
+    refs = document.get("recording_references", [])
+    if not refs:
+        return catalog
+    for name, dtype in {
+        "catalog_artists": pl.List(pl.String), "catalog_artist_statement": pl.String,
+        "catalog_artist_evidence": pl.String, "catalog_artist_rule": pl.String,
+        "catalog_identity_rule": pl.String, "catalog_identity_evidence": pl.String,
+        "catalog_identity_reference_only": pl.Boolean,
+    }.items():
+        if name not in catalog.columns:
+            catalog = catalog.with_columns(pl.lit(None, dtype=dtype).alias(name))
+    seen = set()
+    present = set(catalog["asset_isrc"].drop_nulls())
+    additions = []
+    zeros = {"amount_usd", "observed_amount_usd", "transfer_amount_usd", "policy_unmatched_amount_usd",
+             "units", "song_level_rows", "source_count", "account_count", "identity_amount_usd", "identity_rows"}
+    for reference in refs:
+        code = reference.get("isrc", "")
+        if code in seen or not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{3}[0-9]{7}", code) or not reference.get("confirmed_by"):
+            raise ValueError("An external recording reference requires a unique ISRC and owner confirmation.")
+        seen.add(code)
+        if code in present:
+            continue
+        artists = reference.get("artists")
+        if not artists or not all(isinstance(a, str) and a.strip() for a in artists):
+            raise ValueError("External reference artists must be explicitly confirmed.")
+        row = {name: (0 if name in zeros else None) for name in catalog.columns}
+        title, artist = reference["title"], " / ".join(artists)
+        values = dict(catalog_key="ISRC:" + code, asset_isrc=code, track_title=title, artist_statement=artist,
+                      track_title_normalized=" ".join(title.casefold().split()), artist_statement_normalized=" ".join(artist.casefold().split()),
+                      catalog_artists=artists, catalog_artist_statement=artist, isrcs=code,
+                      catalog_artist_evidence=json.dumps([{"source": "manual", "field": "confirmed_external_recording", **reference}]),
+                      catalog_artist_rule="CONFIRMED-EXTERNAL-REFERENCE-1", catalog_identity_rule="CONFIRMED-EXTERNAL-REFERENCE-1",
+                      catalog_identity_reference_only=True, catalog_identity_evidence=json.dumps(reference),
+                      catalog_aliases=[], video_isrcs=[], catalog_identity_upcs=[],
+                      external_match_url=reference.get("match_url"), external_metadata_status="manually_confirmed_external_reference")
+        row.update({k: v for k, v in values.items() if k in row})
+        additions.append(row)
+    if not additions:
+        return catalog
+    result = pl.concat([catalog, pl.DataFrame(additions, schema=catalog.schema)], how="vertical")
+    if result["catalog_key"].n_unique() != result.height:
+        raise ValueError("Conflicting external recording reference key.")
+    return result
 
 
 def apply_catalog_manual_metadata(

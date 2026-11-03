@@ -843,6 +843,13 @@ def main() -> None:
         )
         print(f"SOURCE OK: {filename}")
 
+    from scripts.lib.native_identity_integrity import PROOF_FILE, publication_witnesses
+    if PROOF_FILE not in manifest["files"]:
+        raise RuntimeError("El release no tiene evidencia de identificadores contrastada con los originales.")
+    ensure_source_file(client=client, bucket_name=args.bucket, entry=manifest["files"][PROOF_FILE],
+                       filename=PROOF_FILE, source_dir=source_dir)
+    publication_witnesses(source_paths["detail"])
+
     prepared = {
         "detail": prepared_dir / "royalty_detail.parquet",
         "dashboard": prepared_dir / "dashboard_rankings.parquet",

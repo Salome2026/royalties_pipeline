@@ -15,7 +15,7 @@ from lib.identity import (
     first_valid_youtube_video_id_expr,
 )
 from lib.statement_period import from_onerpm_filename
-from lib.onerpm_catalog_artists import METADATA_FILE, read_onerpm_metadata
+from lib.onerpm_catalog_artists import METADATA_FILE, read_onerpm_metadata, read_native_workbook
 from lib.distributor_policy_store import load_distributor_policy_document
 
 
@@ -646,7 +646,7 @@ def standardize_youtube_channels(df: pl.DataFrame, file_path: Path, account: str
 
 
 def read_excel_sheet(file_path: Path, sheet_name: str) -> pl.DataFrame:
-    return pl.read_excel(file_path, sheet_name=sheet_name, raise_if_empty=False)
+    return read_native_workbook(file_path, sheet_name)
 
 
 def process_account(account: str, config: dict, selected_files: list[Path] | None = None) -> list[Path]:

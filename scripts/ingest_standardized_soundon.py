@@ -65,13 +65,8 @@ def decimal_expr(col: str) -> pl.Expr:
 
 
 def read_soundon_csv(file_path: Path) -> pl.DataFrame:
-    return pl.read_csv(
-        file_path,
-        infer_schema_length=10000,
-        ignore_errors=False,
-        encoding="utf8",
-        schema_overrides={"ISRC": pl.Utf8, "UPC Code": pl.Utf8, "Track ID": pl.Utf8},
-    )
+    from lib.native_csv import read_native_csv
+    return read_native_csv(file_path)
 
 
 def standardize_detail_file(df: pl.DataFrame, file_path: Path, statement_type: str) -> pl.DataFrame:

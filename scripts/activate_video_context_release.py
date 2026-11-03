@@ -48,6 +48,9 @@ def activate(candidate_uri: str, *, project='vpo-corp-royalties', dataset='royal
         if load_distributor_policy_document()['policy_version'] != candidate['policy_version']:
             raise RuntimeError('Cambio la politica de distribuidoras; debe prepararse nuevamente.')
     check_base()
+    from scripts.lib.native_identity_integrity import PROOF_FILE
+    if PROOF_FILE not in manifest["files"] or not candidate.get("original_identity_check"):
+        raise RuntimeError("El candidato no certifica los identificadores contra sus archivos originales.")
     def query(sql):
         return list(bq.query(sql, location='US', job_config=bigquery.QueryJobConfig(
             # The administrative transaction reads historic partitions as well

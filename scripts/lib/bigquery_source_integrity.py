@@ -1,4 +1,9 @@
-"""Independent checks against native source fields, before a BigQuery load."""
+"""Reconcile projections against retained native fields, before a BigQuery load.
+
+This intermediate-file check complements, and never replaces, the independent
+original-file witnesses in native_identity_integrity/publication_witnesses.
+Two already-damaged intermediates agreeing is not a native-reader certificate.
+"""
 from pathlib import Path
 import polars as pl
 

@@ -135,6 +135,12 @@ def run() -> None:
         for filename in SOURCE_FILES.values():
             item = manifest['files'][filename]
             bucket.blob(item['object_name'], generation=int(item['generation'])).download_to_filename(str(original/filename))
+        from scripts.lib.native_identity_integrity import PROOF_FILE, publication_witnesses
+        if PROOF_FILE not in manifest['files']:
+            raise RuntimeError('Falta la certificacion de identificadores desde los archivos originales.')
+        proof = manifest['files'][PROOF_FILE]
+        bucket.blob(proof['object_name'], generation=int(proof['generation'])).download_to_filename(str(original/PROOF_FILE))
+        publication_witnesses(original/SOURCE_FILES['detail'])
         # Keep every other immutable manifest entry and every catalog field verbatim.
         raw_name, song_name = SOURCE_FILES['detail'], SOURCE_FILES['song']
         raw_frame = pl.scan_parquet(original/raw_name)
@@ -146,6 +152,9 @@ def run() -> None:
         if totals(original/raw_name)['rows'] != totals(updated/raw_name)['rows']:
             raise RuntimeError('El reproceso cambia la cantidad de filas originales.')
         assert_money_preserved(original/raw_name, updated/raw_name)
+        import shutil
+        shutil.copy2(original/PROOF_FILE, updated/PROOF_FILE)
+        _, original_identity_check = publication_witnesses(updated/raw_name)
         if identity_repair and 'product_income_allocations.json' in manifest['files']:
             entry = manifest['files']['product_income_allocations.json']
             allocation = json.loads(bucket.blob(entry['object_name'], generation=int(entry['generation'])).download_as_text())
@@ -231,6 +240,7 @@ def run() -> None:
             'base_release_id': manifest['release_id'], 'base_manifest_generation': base_generation,
             'catalog_generation': status_generation, 'policy_version': policy['policy_version'],
             'prepared': prepared_entries, 'expected': expected, 'native_check': native_check,
+            'original_identity_check': original_identity_check,
             'reconciliation': reconciliation,
         }
         pointer.reload()

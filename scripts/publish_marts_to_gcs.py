@@ -115,6 +115,11 @@ def upload_to_gcs(
         from scripts.lib.ingestion_controls import CONTROL_FILE, validate_no_failed_batches
     for directory in {item.local_path.parent for item in uploads}:
         validate_no_failed_batches(directory)
+    from scripts.lib.native_identity_integrity import publication_witnesses
+    original_witness = None
+    for item in uploads:
+        if item.local_path.name == "standardized_raw_all_sources.parquet":
+            original_witness, _ = publication_witnesses(item.local_path)
     from google.cloud import storage
 
     client = storage.Client.from_service_account_json(credentials_path)
@@ -129,6 +134,8 @@ def upload_to_gcs(
         control = uploads[0].local_path.parent / CONTROL_FILE
         if control.exists():
             files.append((CONTROL_FILE, control))
+        if original_witness is not None:
+            files.append((original_witness.name, original_witness))
         release = publish_with_participant_review(
             bucket,
             prefix,

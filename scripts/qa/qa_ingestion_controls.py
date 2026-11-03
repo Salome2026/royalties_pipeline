@@ -228,12 +228,14 @@ class IngestionControlsTests(unittest.TestCase):
         marts.mkdir(parents=True)
         control = marts / CONTROL_FILE
         control.write_bytes(b"audit fixture")
+        pl.DataFrame({"probe": [1]}).write_parquet(marts / "standardized_raw_all_sources.parquet")
         inputs = [UploadItem(marts / name, "marts/" + name, 1) for name in DEFAULT_FILES]
         result = {"files": {}, "manifest_object_name": "marts/release_manifest.json", "manifest_generation": "1"}
         with patch("google.cloud.storage.Client.from_service_account_json", return_value=Mock()), patch(
                 "app.catalog_participant_review.publish_with_participant_review", return_value=result) as publish:
             self.assertEqual(upload_to_gcs("private", "not-read.json", "marts", inputs), result)
         self.assertIn((CONTROL_FILE, control), publish.call_args.args[2])
+        self.assertIn(("native_identity_proofs.json", marts / "native_identity_proofs.json"), publish.call_args.args[2])
 
     def test_unknown_roles_are_visible_even_with_a_known_performer(self):
         frame = self.metadata()

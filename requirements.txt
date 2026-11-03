@@ -8,7 +8,7 @@ google-cloud-storage
 httpx
 openpyxl
 pandas
-polars
+polars==1.40.0
 psycopg[binary,pool]
 pyarrow
 requests

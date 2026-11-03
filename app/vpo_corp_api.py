@@ -2034,13 +2034,15 @@ def publish_required_marts_to_gcs() -> dict:
     preparation = prepare_analytics_package_for_publish()
     validate_no_failed_batches(BASE / "warehouse" / "marts")
     validation = validate_analytics_package_for_publish()
+    from lib.native_identity_integrity import publication_witnesses, PROOF_FILE
+    publication_witnesses(BASE / "warehouse" / "marts" / STANDARDIZED_FILE)
 
     client = gcs_client()
     bucket = client.bucket(GCS_BUCKET)
     prefix = GCS_PREFIX.strip("/")
     uploads = []
     uploaded = []
-    optional_fuga = [FUGA_EXTENDED_AUDIT_FILE, FUGA_EXTENDED_METADATA_FILE, CONTROL_FILE]
+    optional_fuga = [FUGA_EXTENDED_AUDIT_FILE, FUGA_EXTENDED_METADATA_FILE, CONTROL_FILE, PROOF_FILE]
     publication_files = [*REQUIRED_MART_FILES, 'product_income_allocations.json', *[
         filename for filename in optional_fuga
         if (BASE / "warehouse" / "marts" / filename).exists()

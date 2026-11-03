@@ -100,11 +100,20 @@ def physical_rows(path: Path, sheet: str) -> list[int]:
         return rows
 
 
+def read_native_workbook(path: Path, sheet_name: str | None = None):
+    # Preserve text IDs/UPCs even after long numeric prefixes. Financial and
+    # role interpretation remains in the existing sheet-specific adapters.
+    return pl.read_excel(path, sheet_name=sheet_name,
+                         sheet_id=0 if sheet_name is None else None,
+                         infer_schema_length=None, read_options={"dtypes": "string"},
+                         raise_if_empty=False)
+
+
 def read_file_metadata(path: Path, account: str) -> list[dict]:
     period = re.match(r"^(20\d\d-(?:0[1-9]|1[0-2]))-", path.name)
     if not period:
         raise ValueError(f"ONErpm: nombre de statement no reconocido: {path.name}")
-    books = pl.read_excel(path, sheet_id=0, infer_schema_length=None, raise_if_empty=False)
+    books = read_native_workbook(path)
     if set(books) != SHEETS:
         raise ValueError(f"ONErpm: hojas nuevas o faltantes: {path.name}")
     checksum = file_hash(path)

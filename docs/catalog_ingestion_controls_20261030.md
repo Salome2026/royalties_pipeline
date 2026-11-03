@@ -1,5 +1,10 @@
 # Cierre de controles de ingesta del catalogo
 
+Actualizacion obligatoria: `native_original_identity_integrity_20261102.md`.
+Los controles de esta version no bastaban para certificar identificadores
+contra los CSV originales. La actualizacion agrega esa comprobacion sin
+sustituir los lectores economicos ni las reglas de contratos.
+
 ## Alcance
 
 Se conservan los lectores aprobados de ADA Excel, FUGA, ONErpm, Orchard,
