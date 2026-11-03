@@ -605,7 +605,91 @@ def report_identity_expr(columns: set[str]) -> pl.Expr:
     return pl.coalesce([separate_channel_video_expr(columns), catalog_key, fallback_identity]).alias("_report_identity")
 
 
-def build_track_summary_lf(base_lf: pl.LazyFrame, *, include_identity: bool = False) -> pl.LazyFrame:
+DASHGO_GROUP_TITLE = "Agrupación por ingresos menores a 10 centavos"
+DASHGO_GROUP_ARTIST = "Intérpretes agrupados"
+JULI_VIDEO = "hSW8SzhOfHQ"
+
+
+def dashgo_summary_metadata(columns: set[str]) -> list[pl.Expr]:
+    def field(*names):
+        return _summary_text_expr(columns, list(names)).fill_null("")
+
+    dashgo = field("source") == "dashgo"
+    # Verified in the MAWZ Ads and Premium statements, November 2025 to June 2026.
+    witness = (
+        dashgo & (field("account") == "mawzrecords")
+        & (field("asset_isrc", "ISRC") == "")
+        & (field("track_statement_style").str.to_lowercase().str.replace_all(r"\s+", " ")
+           == "juli savioli - te prestaría mis ojos (official video)")
+        & field("transaction_month").is_between(pl.lit("2025-11"), pl.lit("2026-06"))
+        & ~field("content_origin_normalized").is_in(["UGC / Content ID", "Shorts", "Music / Art Track"])
+    )
+    channel = field("channel_id")
+    video = field("video_id", "track_id")
+    ads = witness & channel.is_in(["", "UCnyowdvLv8WNs7RVasOWPDA"]) & (video == "") & (field("report_code") == "")
+    premium = witness & channel.is_in(["", "UCnyowdvLv8WNs7RVasOWPDA"]) & (video == JULI_VIDEO)
+    role = pl.when(ads).then(pl.lit("ads")).when(premium).then(pl.lit("premium")).otherwise(pl.lit(""))
+    return [
+        dashgo.all().alias("_dashgo_only"),
+        pl.when(role.n_unique() == 1).then(role.first()).otherwise(pl.lit("")).alias("_dashgo_video_role"),
+    ]
+
+
+def present_dashgo_summary(table: pd.DataFrame, summary: pl.DataFrame) -> pd.DataFrame:
+    """Consolidate display rows after calculating their contractual allocations."""
+    if not summary["_dashgo_only"].any():
+        return table
+    result = table.copy()
+    attrs = dict(table.attrs)
+    contract_amounts = [
+        table.columns[position - 1]
+        for position, fmt in attrs.get("contract_formats", {}).items()
+        if fmt != "0.00%"
+    ]
+    measures = ["Ingresos USD", "Unidades", *contract_amounts]
+    roles = summary["_dashgo_video_role"].to_list()
+    eligible = pd.Series(summary["_dashgo_only"].to_list(), index=table.index)
+
+    def combine(indices, labels):
+        selected = result.loc[indices]
+        row = {column: None for column in table.columns}
+        for column in measures:
+            row[column] = selected[column].sum(min_count=1)
+        for column, aggregate in (("Desde", min), ("Hasta", max)):
+            dates = selected[column].dropna().tolist()
+            row[column] = aggregate(dates) if dates else None
+        row.update(labels)
+        return pd.DataFrame([row], columns=table.columns)
+
+    ads = [i for i, role in zip(table.index, roles) if role == "ads"]
+    premium = [i for i, role in zip(table.index, roles) if role == "premium"]
+    for indices, label in ((ads, "No informado"), (premium, "Partner-provided")):
+        if indices:
+            result.loc[indices, "Tipo de contenido"] = label
+    if len(ads) == len(premium) == 1:
+        indices = ads + premium
+        row = combine(indices, {
+            "Tema": result.at[premium[0], "Tema"],
+            "Artista": result.at[premium[0], "Artista"],
+            "Codigo": JULI_VIDEO, "Tipo codigo": "Video ID", "Codigos originales": JULI_VIDEO,
+            "Tipo de contenido": "Ads (origen no informado) | Premium (Partner-provided)",
+        })
+        row.index = premium
+        result = pd.concat([result.drop(indices), row]).sort_index()
+
+    small = result.index[
+        eligible.reindex(result.index, fill_value=False)
+        & result["Ingresos USD"].between(0, 0.10, inclusive="left")
+        & result["Unidades"].between(0, 100, inclusive="left")
+    ]
+    if len(small):
+        row = combine(small, {"Tema": DASHGO_GROUP_TITLE, "Artista": DASHGO_GROUP_ARTIST})
+        result = pd.concat([result.drop(small), row], ignore_index=True)
+    result.attrs = attrs
+    return result
+
+
+def build_track_summary_lf(base_lf: pl.LazyFrame, *, include_identity: bool = False, include_dashgo_metadata: bool = False) -> pl.LazyFrame:
     """Build one economic row per resolved catalog identity."""
     columns = set(base_lf.collect_schema().names())
     title = _summary_text_expr(columns, ["track_statement_style", "asset_title_statement"])
@@ -642,6 +726,7 @@ def build_track_summary_lf(base_lf: pl.LazyFrame, *, include_identity: bool = Fa
         ])
         .group_by("_report_identity")
         .agg([
+            *(dashgo_summary_metadata(columns) if include_dashgo_metadata else []),
             pl.col("_summary_channel_video").all().alias("_all_channel_video"),
             pl.col("_summary_title")
             .sort_by(pl.col("amount_usd").abs(), descending=True)
@@ -727,6 +812,7 @@ def build_track_summary_lf(base_lf: pl.LazyFrame, *, include_identity: bool = Fa
         ])
         .select([
             *(["_report_identity"] if include_identity else []),
+            *(["_dashgo_only", "_dashgo_video_role"] if include_dashgo_metadata else []),
             "track_statement_style",
             "artist_statement_style",
             "report_code",
@@ -1002,6 +1088,11 @@ def prepare_sheet(ws):
     ws.freeze_panes = "A2"
     ws.auto_filter.ref = ws.dimensions
 
+    if ws.title == "resumen por tema" and ws.cell(ws.max_row, 1).value == DASHGO_GROUP_TITLE:
+        ws.row_dimensions[ws.max_row].height = 32
+        for column in (1, 2):
+            ws.cell(ws.max_row, column).alignment = Alignment(wrap_text=True, vertical="center")
+
     for cell in ws[1]:
         cell.fill = HEADER_FILL
         cell.font = HEADER_FONT
@@ -1043,7 +1134,9 @@ def prepare_sheet(ws):
         max_len = 0
 
         for cell in column_cells[:300]:
-            if cell.value is not None:
+            if ws.title == "resumen por tema" and cell.column == 2 and cell.value == DASHGO_GROUP_ARTIST:
+                max_len = max(max_len, len("Intérpretes"))
+            elif cell.value is not None:
                 max_len = max(max_len, len(str(cell.value)))
 
         ws.column_dimensions[col_letter].width = min(max_len + 2, 50)
@@ -1583,7 +1676,7 @@ def build_report_tables(
             .sort("report_territory")
         )
 
-        track_summary_lf = build_track_summary_lf(statement_base_lf, include_identity=contract_snapshot is not None)
+        track_summary_lf = build_track_summary_lf(statement_base_lf, include_identity=contract_snapshot is not None, include_dashgo_metadata=True)
 
         raw_matches_lf, raw_detail_columns = build_filtered_raw_detail_lf(
             keywords=keywords,
@@ -1653,12 +1746,14 @@ def build_report_tables(
             "resumen mensual": display_dataframe(monthly_summary.to_pandas()),
             "resumen por store": display_dataframe(store_summary.to_pandas()),
             "resumen por territorio": display_dataframe(territory_summary.to_pandas()),
-            "resumen por tema": display_dataframe(track_summary.drop("_report_identity", strict=False).to_pandas()),
+            "resumen por tema": display_dataframe(track_summary.drop("_report_identity", "_dashgo_only", "_dashgo_video_role", strict=False).to_pandas()),
         }
 
         if contract_snapshot is not None:
             from app.royalty_reports.excel_contracts import enrich_tables
             enrich_tables(tables, track_summary, statement_base_lf, contract_snapshot, keywords, contract_columns)
+
+        tables["resumen por tema"] = present_dashgo_summary(tables["resumen por tema"], track_summary)
 
         if not raw_sample.empty:
             tables["detalle"] = raw_sample
@@ -1729,7 +1824,7 @@ def build_report_tables(
         .sort("period_month")
     )
 
-    track_summary = build_track_summary_lf(song.lazy(), include_identity=contract_snapshot is not None).collect()
+    track_summary = build_track_summary_lf(song.lazy(), include_identity=contract_snapshot is not None, include_dashgo_metadata=True).collect()
 
     raw_sample = pd.DataFrame()
     store_summary = pl.DataFrame()
@@ -1820,7 +1915,7 @@ def build_report_tables(
         "resumen mensual": display_dataframe(monthly_summary.to_pandas()),
         "resumen por store": display_dataframe(store_summary.to_pandas()),
         "resumen por territorio": display_dataframe(territory_summary.to_pandas()),
-        "resumen por tema": display_dataframe(track_summary.drop("_report_identity", strict=False).to_pandas()),
+        "resumen por tema": display_dataframe(track_summary.drop("_report_identity", "_dashgo_only", "_dashgo_video_role", strict=False).to_pandas()),
     }
 
     if contract_snapshot is not None:
@@ -1828,6 +1923,8 @@ def build_report_tables(
         if not standardized_path.exists():
             raise ValueError("Falta el detalle publicado para verificar las vigencias de los contratos.")
         enrich_tables(tables, track_summary, raw_matches_lf, contract_snapshot, keywords, contract_columns)
+
+    tables["resumen por tema"] = present_dashgo_summary(tables["resumen por tema"], track_summary)
 
     if not raw_sample.empty:
         tables["detalle"] = raw_sample
