@@ -2214,8 +2214,11 @@ export default function Home() {
   const [royaltiesDashboardQuery, setRoyaltiesDashboardQuery] = useState("");
   const [royaltiesTrack, setRoyaltiesTrack] = useState<ExplorerRank | null>(null);
   const royaltiesDashboardRequest = useRef(0);
+  const [contractDashboardReturn, setContractDashboardReturn] = useState<{ isrc: string; title: string; scroll: number } | null>(null);
+
   useEffect(() => {
     royaltiesDashboardRequest.current++;
+    setContractDashboardReturn(null);
     setRoyaltiesDashboard(null);
     setRoyaltiesDashboardLoading(false);
     setRoyaltiesExplorer(initialExplorer);
@@ -6442,9 +6445,28 @@ export default function Home() {
   }
 
   function openView(nextView: View) {
+    if (nextView !== "royalties-dashboard" && nextView !== "master-contracts") setContractDashboardReturn(null);
     setView(nextView);
     setMessage(null);
     setLastFile("");
+  }
+
+  function openContractDashboard(track: { isrc: string; title: string }) {
+    if (!canShowMenuView("royalties-dashboard") || !canShowMenuView("master-contracts")) return;
+    setContractDashboardReturn({ ...track, scroll: window.scrollY });
+    setRoyaltiesDashboardKeyword(wmlScope ? track.isrc : "");
+    setRoyaltiesDashboardSource(""); setRoyaltiesDashboardAccount("");
+    setRoyaltiesExplorer(wmlScope ? initialExplorer : { ...initialExplorer, drill: { track: `ISRC:${track.isrc}` }, trackName: track.title });
+    setRoyaltiesTrack(null); setRoyaltiesDashboard(null); setRoyaltiesDashboardQuery("");
+    setRoyaltiesDashboardTab("overview");
+    openView("royalties-dashboard"); window.scrollTo(0, 0);
+  }
+
+  function returnToContract() {
+    if (!contractDashboardReturn || !canShowMenuView("master-contracts")) return;
+    const scroll = contractDashboardReturn.scroll;
+    openView("master-contracts"); setContractDashboardReturn(null);
+    requestAnimationFrame(() => window.scrollTo(0, scroll));
   }
 
   function resetDigitalIncomeFilters() {
@@ -7763,6 +7785,7 @@ export default function Home() {
                 <p>Ingresos reportables consolidados por distribuidora, cuenta y período.</p>
               </div>
               <div className={digitalStyles.headerActions}>
+                {contractDashboardReturn && canShowMenuView("master-contracts") && <button type="button" className={digitalStyles.pdfButton} onClick={returnToContract}><ArrowLeft size={16} />Volver al contrato</button>}
                 <div className={royaltyDashboardStyles.policyStatus}>
                   <ShieldCheck size={17} aria-hidden="true" />
                   <div>
@@ -8143,8 +8166,11 @@ export default function Home() {
         {view === "catalog" && (
           <CatalogModule canEdit={canEditModule("catalog")} initialFilter={catalogInitialFilter} onMessage={setMessage} />
         )}
-        {view === "master-contracts" && (
-          <MasterContractsModule canEdit={canEditModule("master_contracts")} canApprove={canApproveModule("master_contracts")} onMessage={setMessage} />
+        {canShowMenuView("master-contracts") && (view === "master-contracts" || (view === "royalties-dashboard" && contractDashboardReturn)) && (
+          <div hidden={view !== "master-contracts"}>
+            <MasterContractsModule canEdit={canEditModule("master_contracts")} canApprove={canApproveModule("master_contracts")} onMessage={setMessage}
+              onOpenDashboard={canShowMenuView("royalties-dashboard") ? openContractDashboard : undefined} />
+          </div>
         )}
         {view === "distributor-config" && (
           <section className="panel wide-panel">

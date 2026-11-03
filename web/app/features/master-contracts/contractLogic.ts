@@ -217,6 +217,13 @@ export function agreementIncome(agreement: MasterAgreement | undefined, income: 
 export type PreviewRow = { artist: string; percent: number; amount: number; origins: Array<{ label: string; percent: number }> };
 
 export function previewAllocation(agreement: MasterAgreement, allocation: Allocation, amount: number): PreviewRow[] | null {
+  const shares = repartition(agreement, allocation);
+  return shares ? assignAmounts(shares.map(row => ({ ...row, amount: 0 })), amount) : null;
+}
+
+export type RepartitionRow = Omit<PreviewRow, "amount">;
+const factorPercent = (value: number) => value.toLocaleString("es-AR", { maximumFractionDigits: 4 });
+export function repartition(agreement: MasterAgreement, allocation: Allocation): RepartitionRow[] | null {
   if (contractErrors([agreement], allocation).length) return null;
   if (!allocation.principal.trim() || allocation.principal_percent === null
     || allocation.participants.some((item) => !item.artist.trim() || item.percent === null)
@@ -226,27 +233,22 @@ export function previewAllocation(agreement: MasterAgreement, allocation: Alloca
     ? !agreement.owners.length || agreement.owners.some((owner) => !owner.name.trim()
       || (agreement.owner_split_mode !== "equal" && owner.percent === null))
     : agreement.allocation_model !== "pools" && allocation.indyana_percent === null) return null;
-  if (agreement.allocation_model === "pools") return previewPools(agreement, allocation, amount);
+  if (agreement.allocation_model === "pools") return previewPools(agreement, allocation);
   const rows = agreement.commercialization === "master"
-    ? agreement.owners.map((owner) => ({ artist: owner.name, percent: owner.percent || 0 }))
-    : [{ artist: "Indyana", percent: allocation.indyana_percent || 0 }];
-  let retained = 0;
+    ? agreement.owners.map((owner) => ({ artist: owner.name, percent: owner.percent || 0, label: "Titular del master" }))
+    : [{ artist: "Indyana", percent: allocation.indyana_percent || 0, label: "Distribución inicial" }];
   const guests = allocation.participants.map((item) => {
     const base = item.percent || 0;
-    const retention = allocation.apply_guest_contracts ? base * (item.internal_contract_indyana_percent || 0) / 100 : 0;
-    retained += retention;
-    return { artist: item.artist, percent: base - retention };
+    const retainedPercent = allocation.apply_guest_contracts ? item.internal_contract_indyana_percent || 0 : 0;
+    const retention = base * retainedPercent / 100;
+    if (retention) rows.push({ artist: "Indyana", percent: retention, label: `Contrato de ${item.artist} (${factorPercent(base)}% × ${factorPercent(retainedPercent)}%)` });
+    return { artist: item.artist, percent: base - retention,
+      label: retainedPercent ? `Participación de ${item.artist} (${factorPercent(base)}% × ${factorPercent(100 - retainedPercent)}%)` : "Participación directa" };
   });
-  if (retained) {
-    const indyana = rows.find((row) => row.artist.trim().toLowerCase() === "indyana");
-    if (indyana) indyana.percent += retained;
-    else rows.push({ artist: "Indyana", percent: retained });
-  }
-  return settleRows([...rows, { artist: allocation.principal, percent: allocation.principal_percent }, ...guests]
-    .map((row) => ({ ...row, label: "Reparto guardado" })), amount);
+  return settleRows([...rows, { artist: allocation.principal, percent: allocation.principal_percent, label: "Participación directa" }, ...guests]);
 }
 
-function previewPools(agreement: MasterAgreement, allocation: Allocation, amount: number): PreviewRow[] | null {
+function previewPools(agreement: MasterAgreement, allocation: Allocation): RepartitionRow[] | null {
   if (agreement.master_pool_percent == null || (agreement.commercialization === "master"
     && Math.abs(ownershipTotal(agreement) - 100) > tolerance)) return null;
   if (agreement.commercialization === "distribution" && (agreement.distribution_recipients == null
@@ -254,7 +256,7 @@ function previewPools(agreement: MasterAgreement, allocation: Allocation, amount
   const rows: Array<{ artist: string; percent: number; label: string }> = [];
   function owners(base: number, label: string) {
     const total = ownershipTotal(agreement);
-    agreement.owners.forEach((owner) => rows.push({ artist: owner.name, label,
+    agreement.owners.forEach((owner) => rows.push({ artist: owner.name, label: `${label} (${factorPercent(base)}% × ${factorPercent(agreement.owner_split_mode === "equal" ? 100 / agreement.owners.length : owner.percent || 0)}%)`,
       percent: base * (agreement.owner_split_mode === "equal" ? 1 / agreement.owners.length : (owner.percent || 0) / total) }));
   }
   if (agreement.commercialization === "master") owners(agreement.master_pool_percent, "Titular del master");
@@ -268,28 +270,31 @@ function previewPools(agreement: MasterAgreement, allocation: Allocation, amount
     else if (rule.treatment === "artist_contract") {
       if (rule.beneficiaries != null) {
         for (const beneficiary of rule.beneficiaries) rows.push({ artist: beneficiary.name,
-          percent: base * (beneficiary.percent || 0) / 100, label: `Contrato de ${row.artist}` });
+          percent: base * (beneficiary.percent || 0) / 100, label: `Contrato de ${row.artist} (${factorPercent(base)}% × ${factorPercent(beneficiary.percent || 0)}%)` });
         continue;
       }
       if (rule.retained_percent == null || !rule.retained_recipient?.trim()) return null;
       const retained = base * rule.retained_percent / 100;
-      rows.push({ artist: rule.retained_recipient, percent: retained, label: `Contrato de ${row.artist}` });
-      rows.push({ artist: row.artist, percent: base - retained, label: "Participación después de contrato" });
+      rows.push({ artist: rule.retained_recipient, percent: retained, label: `Contrato de ${row.artist} (${factorPercent(base)}% × ${factorPercent(rule.retained_percent)}%)` });
+      rows.push({ artist: row.artist, percent: base - retained, label: `Participación de ${row.artist} (${factorPercent(base)}% × ${factorPercent(100 - rule.retained_percent)}%)` });
     } else rows.push({ artist: row.artist, percent: base, label: "Participación directa" });
   }
-  return settleRows(rows, amount);
+  return settleRows(rows);
 }
 
-function settleRows(rows: Array<{ artist: string; percent: number; label: string }>, amount: number): PreviewRow[] {
-  const grouped = new Map<string, PreviewRow>();
+function settleRows(rows: Array<{ artist: string; percent: number; label: string }>): RepartitionRow[] {
+  const grouped = new Map<string, RepartitionRow>();
   for (const row of rows) {
     const key = beneficiaryKey(row.artist);
-    const result = grouped.get(key) || { artist: row.artist.trim(), percent: 0, amount: 0, origins: [] };
+    const result = grouped.get(key) || { artist: row.artist.trim(), percent: 0, origins: [] };
     result.percent += row.percent;
     result.origins.push({ label: row.label, percent: row.percent });
     grouped.set(key, result);
   }
-  const result = [...grouped.values()];
+  return [...grouped.values()];
+}
+
+function assignAmounts(result: PreviewRow[], amount: number): PreviewRow[] {
   const totalPercent = result.reduce((sum, row) => sum + row.percent, 0);
   // Round once, after consolidation; largest remainders assign every cent, including adjustments.
   const cents = Math.round(Math.abs(amount) * 100 + 1e-8);
@@ -307,7 +312,7 @@ function settleRows(rows: Array<{ artist: string; percent: number; label: string
 export function simpleMasterAgreement(agreement: MasterAgreement, allocation: Allocation,
   proposed?: ContractBeneficiary[]): MasterAgreement | null {
   const preview = proposed ? null : previewAllocation(agreement, allocation, 100)
-    || (agreement.allocation_model === "pools" ? previewPools(agreement, allocation, 100) : null);
+    || (agreement.allocation_model === "pools" ? previewPools(agreement, allocation) : null);
   if (!proposed && agreement.allocation_model === "pools" && !preview) return null;
   const amounts = new Map<string, { name: string; percent: number | null }>();
   const add = (name: string, value: number | null) => {

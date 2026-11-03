@@ -7,7 +7,10 @@ async function forward(request: NextRequest, context: Context, method: "GET" | "
   const config = await apiConfig();
   if ("error" in config) return config.error;
   const { isrc } = await context.params;
-  const response = await fetch(`${config.apiUrl}/master-contracts/${encodeURIComponent(isrc)}`, {
+  const query = new URLSearchParams();
+  const includeIncome = request.nextUrl.searchParams.get("include_income");
+  if (method === "GET" && (includeIncome === "true" || includeIncome === "false")) query.set("include_income", includeIncome);
+  const response = await fetch(`${config.apiUrl}/master-contracts/${encodeURIComponent(isrc)}${query.size ? `?${query}` : ""}`, {
     method,
     headers: {
       ...royaltyHeaders(config),

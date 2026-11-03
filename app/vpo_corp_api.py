@@ -8633,7 +8633,16 @@ def master_contract_associated_income(choices: dict[str, list[dict]]) -> dict[st
         raise HTTPException(status_code=503, detail="No se pudo calcular el ingreso de los códigos asociados. Volvé a intentar.") from exc
 
 
-def master_contract_catalog(associated_income: dict[str, dict] | None = None) -> pl.DataFrame:
+def master_contract_catalog(associated_income: dict[str, dict] | None = None, *, include_income: bool = True) -> pl.DataFrame:
+    if not include_income:
+        from app.master_contract_editor_metadata import metadata_catalog, statement_dates
+        paths = ensure_marts(filenames=[CATALOG_MASTER_FILE, ROYALTIES_DASHBOARD_SUMMARY_FILE])
+        catalog = pl.read_parquet(paths[CATALOG_MASTER_FILE])
+        if not is_wml():
+            from app.catalog_metadata_review import apply_approved
+            catalog = catalog_artist_display(apply_approved(catalog))
+        dates_path = paths[ROYALTIES_DASHBOARD_SUMMARY_FILE]
+        return metadata_catalog(catalog, statement_dates(str(dates_path), dates_path.stat().st_mtime_ns, is_wml()))
     if is_wml():
         path=ensure_marts(filenames=[CATALOG_MASTER_FILE])[CATALOG_MASTER_FILE]
         catalog=pl.read_parquet(path).filter(pl.col('asset_isrc').is_not_null()).unique(subset=['asset_isrc'])
@@ -8720,7 +8729,7 @@ def list_master_contract_models(
             "SELECT isrc, payload_json, is_closed, version FROM master_contract_splits WHERE is_closed = ?"),
             (1,)).fetchall()]
     from app.master_contract_models import closed_models
-    items = closed_models(master_contract_catalog().to_dicts(), saved)
+    items = closed_models(master_contract_catalog(include_income=False).to_dicts(), saved)
     return {"items": items, "total": len(items), "reports_effective": False}
 
 
@@ -8735,6 +8744,7 @@ def list_master_contracts(
     account: str | None = None,
     x_vpo_api_key: str | None = Header(default=None),
     x_vpo_username: str | None = Header(default=None),
+    include_income: bool = True,
 ):
     require_api_key(x_vpo_api_key)
     with operational_connect() as conn:
@@ -8749,7 +8759,7 @@ def list_master_contracts(
             raise HTTPException(status_code=400, detail="El tipo de contrato se filtra sobre temas identificados.")
         return master_contract_unidentified_income(choices, keyword=keyword or "", source=source,
             account=account, offset=offset, limit=limit)
-    catalog = master_contract_catalog(master_contract_associated_income(choices))
+    catalog = master_contract_catalog(master_contract_associated_income(choices) if include_income else None, include_income=include_income)
     memberships = master_contract_source_accounts().join(catalog.select("asset_isrc"), on="asset_isrc", how="semi")
     source_accounts = memberships.select("source", "account").drop_nulls().unique().sort(["source", "account"]).to_dicts()
     if source or account:
@@ -8815,6 +8825,7 @@ def list_master_contracts(
         "pool_contracts_supported": True,
         "commercialization_filter_supported": True,
         "reports_effective": False,
+        "income_included": include_income,
     }
 
 
@@ -8936,7 +8947,7 @@ def post_unidentified_link(reference_id: str, request: MasterUnidentifiedLinkReq
     require_api_key(x_vpo_api_key)
     try:
         clean = clean_isrc(request.isrc)
-        template = get_master_contract(clean, x_vpo_api_key, x_vpo_username)["split"] if request.expected_version == 0 else None
+        template = get_master_contract(clean, x_vpo_api_key, x_vpo_username, include_income=False)["split"] if request.expected_version == 0 else None
         with operational_connect() as conn:
             actor = require_master_contract_user(conn, x_vpo_username, "edit")
             if is_wml() or not is_postgres_connection(conn):
@@ -9025,6 +9036,7 @@ def get_master_contract(
     isrc: str,
     x_vpo_api_key: str | None = Header(default=None),
     x_vpo_username: str | None = Header(default=None),
+    include_income: bool = True,
 ):
     require_api_key(x_vpo_api_key)
     try:
@@ -9039,14 +9051,15 @@ def get_master_contract(
         review = read_association_review_states(conn).get(clean, {})
         from app.master_contract_participants import read_participant_history
         participant_history = read_participant_history(conn, clean) if not is_wml() and saved and not saved["closed"] and is_postgres_connection(conn) else []
-    extras = master_contract_associated_income(choices)
-    matches = master_contract_catalog(extras).filter(pl.col("asset_isrc") == clean)
+    extras = master_contract_associated_income(choices) if include_income else {}
+    matches = master_contract_catalog(extras, include_income=include_income).filter(pl.col("asset_isrc") == clean)
     if matches.is_empty():
         raise HTTPException(status_code=404, detail="El ISRC no figura en el catálogo publicado.")
     catalog_row = matches.row(0, named=True)
     raw_path = None
     try:
-        raw_path = ensure_marts(filenames=[STANDARDIZED_FILE])[STANDARDIZED_FILE]
+        if include_income or catalog_row.get("catalog_artists") is None:
+            raw_path = ensure_marts(filenames=[STANDARDIZED_FILE])[STANDARDIZED_FILE]
     except Exception:
         pass
     suggestions = artist_suggestions(
@@ -9055,9 +9068,11 @@ def get_master_contract(
     )
     first_sale_date = suggestions.get("first_sale_date") or catalog_row.get("first_transaction_month")
     first_sale_precision = suggestions.get("first_sale_precision") or ("month" if first_sale_date else None)
-    income = combined_contract_income(float(catalog_row.get("isrc_amount_usd") or 0), extras.get(clean), master_contract_statement_income(clean))
+    income = (combined_contract_income(float(catalog_row.get("isrc_amount_usd") or 0), extras.get(clean), master_contract_statement_income(clean))
+              if include_income else {"statement_income": [], "isrc_amount_usd": 0.0, "associated_amount_usd": 0.0, "associated_income_groups": []})
     statement_income = income["statement_income"]
-    first_statement_date = f"{statement_income[0]['statement_month']}-01" if statement_income else None
+    first_month = statement_income[0]["statement_month"] if statement_income else catalog_row.get("_contract_first_statement_month")
+    first_statement_date = f"{first_month}-01" if first_month else None
     proposed = saved["split"] if saved else suggested_split(
         suggestions["artists"] if catalog_row.get("catalog_artists") is not None or not suggestions.get("principal_uncertain") else [],
         contracts, first_statement_date, principal_uncertain=bool(suggestions.get("principal_uncertain")),
@@ -9100,6 +9115,7 @@ def get_master_contract(
         "amount_basis": "wml_contractual_base_100" if is_wml() else "dashboard_net_statement_usd",
         "pool_contracts_supported": True,
         "reports_effective": False,
+        "income_included": include_income,
     }
 
 
@@ -9117,7 +9133,7 @@ def put_master_contract(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     with operational_connect() as conn:
         actor = require_master_contract_user(conn, x_vpo_username, "edit")
-        if master_contract_catalog().filter(pl.col("asset_isrc") == clean).is_empty():
+        if master_contract_catalog(include_income=False).filter(pl.col("asset_isrc") == clean).is_empty():
             raise HTTPException(status_code=404, detail="El ISRC no figura en el catálogo publicado.")
         previous = read_split(conn, clean)
         if bool(previous and previous["closed"]) or request.closed or request.complete_association_review or request.future_reports_selected != bool(previous and previous["future_reports_selected"]):

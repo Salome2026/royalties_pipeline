@@ -50,7 +50,8 @@ try {
   assert.match(panel, /body\.version !== version/);
   const main = fs.readFileSync(new URL("../app/features/master-contracts/MasterContractsModule.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(main, /associations\?include_income=false/);
-  assert.match(main, /refreshed\.income/);
+  assert.doesNotMatch(main, /refreshed\.income/);
+  assert.match(main, /include_income=false/);
   console.log("Association fast read: default income, explicit modes, unchanged auth, error handling, version guard and post-save totals: PASS");
 } finally {
   delete globalThis.__associationRouteQa;

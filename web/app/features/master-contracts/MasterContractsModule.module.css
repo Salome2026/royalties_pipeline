@@ -491,3 +491,18 @@
   .totalLine small { width: 100%; text-align: left; }
   .detailHeader { flex-wrap: wrap; }
 }
+
+/* Keep the existing contractual preview surface, expressed only as percentages. */
+.dashboardTitle { display: inline-flex; align-items: center; gap: 10px; border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.dashboardTitle:hover, .dashboardTitle:focus-visible { color: #77e4c9; }
+.dashboardTitle svg { flex-shrink: 0; color: #89c9bd; }
+.repartitionAgreement { margin-bottom: 16px; }
+.repartitionAgreement > summary { display: flex; justify-content: space-between; gap: 10px; cursor: pointer; color: #d7ebe9; font-size: .85rem; padding: 8px 0; }
+.repartitionAgreement .previewRows > div { grid-template-columns: minmax(0, 1fr) auto; }
+.leaveDialog { width: min(480px, 100%); box-sizing: border-box; padding: 24px; border: 1px solid rgba(183,215,213,.32); border-radius: 8px; background: #091a18; color: #edf4f5; }
+.leaveDialog h2 { font-size: 1.1rem; }
+.leaveDialog p { color: #a9bec4; line-height: 1.5; }
+.identityLine { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.table th:nth-child(4), .table td:nth-child(4) { text-align: left; }
+.table.selectTable th:nth-child(5) { text-align: left; }
+@media (max-width: 700px) { .identityLine { grid-template-columns: 1fr; } .identityLine > div { border-left: 0; padding-left: 0; } }

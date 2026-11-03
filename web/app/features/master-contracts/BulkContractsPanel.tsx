@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import type { ContractDetail, ContractItem, Split } from "./MasterContractsModule";
 import { pendingAssociationCodes, type Association } from "./associationLogic";
-import { agreementAllocation, beneficiaryKey, contractErrors, previewAllocation, type MasterAgreement } from "./contractLogic";
+import { agreementAllocation, beneficiaryKey, contractErrors, repartition, type MasterAgreement } from "./contractLogic";
 import { applyContractModel, closingErrors, detailAgreements, matchingModelPeriods, modelErrors, participantDifference, participantSignature, type ContractModel } from "./bulkContractLogic";
 import { MasterAgreementsEditor } from "./MasterAgreementsEditor";
 import { PoolsAllocationEditor } from "./PoolsAllocationEditor";
@@ -54,7 +54,7 @@ export function BulkContractsPanel({ items, canApprove, onBack, onOpen }: {
   useEffect(() => {
     mounted.current = true;
     void mapLimited(items, async (item) => {
-      try { return { detail: await request<ContractDetail>(endpoint(item.isrc)), error: "" }; }
+      try { return { detail: await request<ContractDetail>(`${endpoint(item.isrc)}?include_income=false`), error: "" }; }
       catch (e) { return { detail: null, error: `${item.title}: ${e instanceof Error ? e.message : "No se pudo cargar"}` }; }
     }).then((loaded) => {
       if (!mounted.current) return;
@@ -81,7 +81,7 @@ export function BulkContractsPanel({ items, canApprove, onBack, onOpen }: {
   const source = model ? detailAgreements(model)[modelIndex] : undefined;
   const sourceErrors = model ? [...modelErrors(model, modelIndex, choice === "define"),
     ...(choice === "existing" && !matchingModelPeriods(model, signature).includes(modelIndex) ? ["Elegí de nuevo un contrato compatible con los participantes seleccionados."] : [])] : [];
-  const preview = model && source ? previewAllocation(source, agreementAllocation(source, model.split), 100) : null;
+  const preview = model && source ? repartition(source, agreementAllocation(source, model.split)) : null;
   function update(isrc: string, patch: Partial<Selection>) {
     setSelection((value) => ({ ...value, [isrc]: { ...value[isrc], ...patch } })); setReviews(null); setConfirmed(false);
   }
@@ -129,7 +129,7 @@ export function BulkContractsPanel({ items, canApprove, onBack, onOpen }: {
         if (diff.extra.length && !s.accepted) errors.push("Confirmá los participantes distintos antes de aplicar.");
         if (errors.length) return { detail, split, pending: null, reason: "", error: errors.join(" ") };
         try {
-          const a = await request<{ items: Association[]; version: number }>(`${endpoint(detail.isrc)}/associations`);
+          const a = await request<{ items: Association[]; version: number }>(`${endpoint(detail.isrc)}/associations?include_income=false`);
           if (a.version !== detail.version) return { detail, split, pending: null, reason: "", error: "La ficha cambió. Volvé al catálogo y prepará una nueva selección." };
           const pending = pendingAssociationCodes(a.items, detail.split.code_association_overrides || []).length;
           const reason = [...closingErrors(split), ...(pending ? [`${pending} códigos por validar`] : [])].join(" · ");
@@ -146,7 +146,7 @@ export function BulkContractsPanel({ items, canApprove, onBack, onOpen }: {
     if (!model || !reviews || !confirmed || saving.current || busy) return;
     saving.current = true; setBusy(true); setError(""); const done: Result[] = [];
     try {
-      const current = await request<ContractDetail>(endpoint(model.isrc));
+      const current = await request<ContractDetail>(`${endpoint(model.isrc)}?include_income=false`);
       if (current.version !== model.version) throw new Error("El modelo cambió desde la revisión. Volvé a preparar la selección.");
       if (choice === "existing" && (!current.closed || !matchingModelPeriods(current, signature).includes(modelIndex))) throw new Error("El modelo ya no es un contrato cerrado compatible. Volvé a elegirlo.");
       for (const row of reviews) {
@@ -164,7 +164,7 @@ export function BulkContractsPanel({ items, canApprove, onBack, onOpen }: {
           catch (original) {
             if (!closed) throw original;
             // New evidence can arrive after preview. Only downgrade closure when that is the confirmed cause.
-            const now = await request<{ items: Association[]; version: number }>(`${endpoint(row.detail.isrc)}/associations`);
+            const now = await request<{ items: Association[]; version: number }>(`${endpoint(row.detail.isrc)}/associations?include_income=false`);
             if (now.version !== row.detail.version || !pendingAssociationCodes(now.items, row.detail.split.code_association_overrides || []).length) throw original;
             saved = await save(false); reason = "Aparecieron códigos por validar después de la revisión.";
           }

@@ -12,7 +12,7 @@ import { ContractAssociationsPanel, type AssociationChoice, type AssociationVali
 import { UnidentifiedIncomeTable, type UnidentifiedIncome } from "./UnidentifiedIncomeTable";
 import { AssociateIncomeDialog } from "./AssociateIncomeDialog";
 import { BulkContractsPanel } from "./BulkContractsPanel";
-import { simpleMasterAgreement, agreementAllocation, agreementIncome, allocationTotals, contractErrors, previewAllocation, type Allocation, type StatementIncome } from "./contractLogic";
+import { simpleMasterAgreement, agreementAllocation, allocationTotals, contractErrors, repartition, type Allocation, type StatementIncome } from "./contractLogic";
 
 export type Split = Allocation & {
   code_association_overrides?: AssociationChoice[] | null;
@@ -81,6 +81,7 @@ type Props = {
   canEdit: boolean;
   canApprove: boolean;
   onMessage: (message: Message | null) => void;
+  onOpenDashboard?: (track: { isrc: string; title: string }) => void;
 };
 
 const PAGE_SIZE = 50;
@@ -94,7 +95,7 @@ type ContractType = typeof CONTRACT_TYPES[number]["value"];
 const ACCOUNT_LABELS: Record<string, string> = { indyana_records: "INDYANA", mawzrecords: "MAWZ", gusty_dj: "GUSTY", henry_remix: "HENRY" };
 const accountLabel = (account: string) => ACCOUNT_LABELS[account] || account.replace(/_/g, " ").toUpperCase();
 const money = (value: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 }).format(value || 0);
-const percent = (value: number) => new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 }).format(value);
+const percent = (value: number) => new Intl.NumberFormat("es-AR", { maximumFractionDigits: 4 }).format(value);
 const artistKey = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().replace(/\s+/g, " ").toLocaleLowerCase();
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -104,7 +105,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props) {
+export function MasterContractsModule({ canEdit, canApprove, onMessage, onOpenDashboard }: Props) {
   const [mode, setMode] = useState<"isrc" | "artists">("isrc");
   const [keyword, setKeyword] = useState("");
   const [appliedKeyword, setAppliedKeyword] = useState("");
@@ -128,7 +129,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingArtist, setEditingArtist] = useState<string | null>(null);
-  const [incomeOpen, setIncomeOpen] = useState(false);
+  const [leaveForDashboard, setLeaveForDashboard] = useState(false);
   const [associating, setAssociating] = useState<UnidentifiedIncome | null>(null);
   const [associationValidation, setAssociationValidation] = useState<AssociationValidation>({ loading: true, pending: 0, error: "" });
   const [selectedIsrcs, setSelectedIsrcs] = useState<string[]>([]);
@@ -143,7 +144,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
     setList(null);
     setListError("");
     try {
-      const params = new URLSearchParams({ status, commercialization: contractType, limit: String(PAGE_SIZE), offset: String(offset) });
+      const params = new URLSearchParams({ include_income: "false", status, commercialization: contractType, limit: String(PAGE_SIZE), offset: String(offset) });
       if (appliedKeyword) params.set("keyword", appliedKeyword);
       if (sourceAccount) {
         const [source, account] = sourceAccount.split("/");
@@ -169,12 +170,13 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
 
   useEffect(() => { void loadList(); }, [loadList]);
   useEffect(() => {
-    if (!editingArtist) return;
+    if (!editingArtist && !leaveForDashboard) return;
     const previousFocus = document.activeElement as HTMLElement | null;
     const overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const frame = requestAnimationFrame(() => document.querySelector<HTMLElement>('[role="dialog"] button')?.focus());
     function trapFocus(event: KeyboardEvent) {
+      if (event.key === "Escape" && leaveForDashboard && !saving) { setLeaveForDashboard(false); return; }
       if (event.key !== "Tab") return;
       const controls = [...(document.querySelector('[role="dialog"]')?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)') || [])].filter((item) => item.offsetParent !== null);
       const first = controls[0], last = controls.at(-1);
@@ -187,19 +189,18 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
       cancelAnimationFrame(frame); document.removeEventListener("keydown", trapFocus);
       document.body.style.overflow = overflow; previousFocus?.focus();
     };
-  }, [editingArtist]);
+  }, [editingArtist, leaveForDashboard, saving]);
 
-  async function openDetail(isrc: string, showIncome = false) {
+  async function openDetail(isrc: string) {
     setLoading(true);
     try {
-      const loaded = await requestJson<ContractDetail>(`/api/master-contracts/${encodeURIComponent(isrc)}`);
+      const loaded = await requestJson<ContractDetail>(`/api/master-contracts/${encodeURIComponent(isrc)}?include_income=false`);
       loaded.isrc_amount_usd ??= loaded.amount_usd;
       loaded.associated_amount_usd ??= 0;
       loaded.associated_income_groups ??= [];
       setDetail(loaded);
       setDraft(structuredClone(loaded.split));
       setOpenAgreementId(null);
-      setIncomeOpen(showIncome);
       setClosed(loaded.closed);
       setFutureSelected(loaded.future_reports_selected);
       setAssociationValidation({ loading: true, pending: 0, error: "" });
@@ -226,8 +227,6 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
     ...(detail?.distribution_recipients_supported !== true && agreements.some(agreement => agreement.distribution_recipients != null)
       ? ["La version del servicio no admite estos destinatarios. Volve a abrir la ficha antes de guardar."] : [])] : [];
   const associationsIncomplete = associationValidation.loading || !!associationValidation.error || associationValidation.pending > 0;
-  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-  const periodIncome = detail ? agreementIncome(activeAgreement, detail.statement_income || [], today) : null;
 
   function returnToList() {
     if (dirty && !window.confirm("Hay cambios sin guardar. ¿Volver al catálogo?")) return;
@@ -290,7 +289,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
     setSaving(true);
     try {
       if (agreements.some((item) => item.allocation_model === "pools") && !detail.pool_contracts_supported) {
-        const current = await requestJson<ContractDetail>(`/api/master-contracts/${encodeURIComponent(detail.isrc)}`);
+        const current = await requestJson<ContractDetail>(`/api/master-contracts/${encodeURIComponent(detail.isrc)}?include_income=false`);
         if (!current.pool_contracts_supported) throw new Error("El servicio de contratos se está actualizando. Tu borrador no se guardó; volvé a intentar en unos minutos.");
         setDetail((value) => value ? { ...value, pool_contracts_supported: true } : value);
       }
@@ -314,23 +313,21 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
       setClosed(saved.closed);
       setFutureSelected(saved.future_reports_selected);
       onMessage({ type: "ok", text: saved.closed ? "Reparto guardado y cerrado. Los reportes actuales no cambiaron." : "Borrador guardado. Los reportes actuales no cambiaron." });
-      if (JSON.stringify(draft.code_association_overrides || []) !== JSON.stringify(detail.split.code_association_overrides || [])) try {
-        const refreshed = await requestJson<{ version: number; income: Pick<ContractDetail, "amount_usd" | "isrc_amount_usd" | "associated_amount_usd" | "associated_income_groups" | "statement_income"> }>(`/api/master-contracts/${encodeURIComponent(detail.isrc)}/associations`);
-        if (refreshed.version !== saved.version) throw new Error("La ficha volvió a cambiar. Volvé a abrirla.");
-        setDetail((current) => current?.isrc === detail.isrc && current.version === saved.version ? { ...current, ...refreshed.income } : current);
-      } catch {
-        onMessage({ type: "error", text: "El reparto quedó guardado, pero no se pudo actualizar su ingreso. Volvé a abrir la ficha." });
-      }
       void loadList();
+      return true;
     } catch (error) {
       onMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo guardar el reparto." });
+      return false;
     } finally {
       setSaving(false);
     }
   }
 
-  const preview = activeAgreement && allocation && periodIncome !== null && errors.length === 0
-    ? previewAllocation(activeAgreement, allocation, periodIncome) : null;
+  function openDashboard() {
+    if (!detail || !onOpenDashboard) return;
+    if (dirty) { setLeaveForDashboard(true); return; }
+    onOpenDashboard({ isrc: detail.isrc, title: detail.title });
+  }
 
   function submitSearch(event: FormEvent) {
     event.preventDefault();
@@ -352,7 +349,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
           <button type="button" className={styles.iconButton} title="Volver al catálogo" aria-label="Volver al catálogo" onClick={returnToList}><ArrowLeft size={19} /></button>
           <div className={styles.heading}>
             <span>Contratos / {detail.isrc}</span>
-            <h1>{detail.title || "Sin título"}</h1>
+            <h1>{onOpenDashboard ? <button type="button" className={styles.dashboardTitle} title="Ver ingresos de este tema en el dashboard" onClick={openDashboard}>{detail.title || "Sin título"}<Link2 size={16} /></button> : detail.title || "Sin título"}</h1>
             <p>{detail.artist_suggestions.artists.join(", ") || "Participantes por confirmar"}</p>
           </div>
           <span className={`${styles.status} ${closed && !associationValidation.pending ? styles.closed : styles.open}`}>{associationValidation.pending ? "Revisión pendiente" : closed ? "Cerrado" : "Abierto"}</span>
@@ -361,25 +358,9 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
 
         <div className={styles.identityLine}>
           <div><span>ISRC</span><strong>{detail.isrc}</strong></div>
-          <div><span>Ingreso acumulado</span><strong>{money(detail.amount_usd)}</strong><small>ISRC + asociados</small></div>
-          <div><span>Actividad</span><strong>{detail.first_month || "-"} a {detail.last_month || "-"}</strong></div>
+          <div><span>Período de reportes</span><strong>{detail.first_month || "-"} a {detail.last_month || "-"}</strong></div>
           <div><span>Distribuidoras</span><strong>{detail.sources || "-"}</strong></div>
         </div>
-
-        <details className={styles.incomeBreakdown} open={incomeOpen} onToggle={(event) => setIncomeOpen(event.currentTarget.open)}>
-          <summary>Desglose de ingresos<ChevronDown size={14} /></summary>
-          <div className={styles.incomeRows}>
-            <div><span><strong>ISRC {detail.isrc}</strong></span><strong>{money(detail.isrc_amount_usd)}</strong></div>
-            {detail.associated_income_groups.map((group, index) => <div key={index}>
-              <span>{group.codes.map((code) => <span key={`${code.kind}/${code.code}/${code.source}/${code.account}`}>
-                {code.kind === "VIDEO" ? "Video / UGC" : code.kind === "TRACK" ? "ID de plataforma" : code.kind} {code.code}<small>{code.source.toUpperCase()} / {accountLabel(code.account)}</small>
-              </span>)}</span><strong>{money(group.amount_usd)}</strong>
-            </div>)}
-            {detail.associated_income_groups.length === 0 && <div><span>Asociados · sin ingresos adicionales</span><strong>{money(0)}</strong></div>}
-          </div>
-          <div className={styles.incomeTotal}><span>Total ISRC + asociados</span><strong>{money(detail.amount_usd)}</strong></div>
-          {JSON.stringify(draft.code_association_overrides || []) !== JSON.stringify(detail.split.code_association_overrides || []) && <p className={styles.auditLine}>Asociaciones sin guardar</p>}
-        </details>
 
         {wml && <WmlReferences isrc={detail.isrc} />}
         {!wml && closed && associationValidation.pending > 0 && <p className={styles.warning} role="status">Hay {associationValidation.pending} códigos por validar. La revisión de asociaciones está abierta; el reparto aprobado sigue vigente para los ingresos ya identificados.</p>}
@@ -388,7 +369,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
           onValidationChange={setAssociationValidation} />
         {!wml && closed && (detail.association_review_pending || dirty) && canEditCurrent && <button type="button" className={styles.primaryButton} disabled={saving || associationsIncomplete || errors.length > 0} onClick={() => void save(closed, futureSelected, true)}>Finalizar revisión de asociaciones</button>}
 
-        <div className={`${styles.detailColumns} ${openAgreementId ? "" : styles.detailColumnsSolo}`}>
+        <div className={styles.detailColumns}>
           <div className={styles.formColumn}>
             <MasterAgreementsEditor
               agreements={agreements}
@@ -440,16 +421,22 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
             </>}
           </div>
 
-          {openAgreementId && <aside className={styles.previewColumn}>
+          <aside className={styles.previewColumn}>
             <section className={styles.previewBand}>
-              <div className={styles.sectionHeading}><h2>Simulación en USD</h2></div>
-              <div className={styles.periodBase}><span>Ingreso en vigencia</span><strong>{periodIncome === null ? "-" : money(periodIncome)}</strong><small>{activeAgreement?.effective_from || "Desde sin definir"} a {activeAgreement?.effective_until || "Actual"}</small></div>
-              {preview ? <div className={styles.previewRows}>
-                {preview.map((item, index) => <div key={index}><span>{item.artist}</span><strong>{money(item.amount)}</strong><small>{percent(item.percent)}%</small>
-                  <details className={styles.previewOrigins}><summary>Composición</summary>{item.origins.map((origin, position) => <p key={position}>{origin.label}: {percent(origin.percent)}%</p>)}</details>
-                </div>)}
-                <div className={styles.previewTotal}><span>Total distribuido</span><strong>{money(preview.reduce((sum, item) => sum + item.amount, 0))}</strong><small>100%</small></div>
-              </div> : <p className={styles.previewEmpty}>Completá todos los participantes y un reparto que sume 100% para ver la simulación.</p>}
+              <div className={styles.sectionHeading}><h2>Reparto</h2></div>
+              {(activeAgreement ? [activeAgreement] : agreements).map((agreement) => {
+                const shares = repartition(agreement, agreementAllocation(agreement, draft));
+                return <details className={styles.repartitionAgreement} key={agreement.id} open>
+                  <summary>{agreement.label || "Contrato"}<ChevronDown size={14} /></summary>
+                  <div className={styles.periodBase}><small>{agreement.effective_from || "Desde sin definir"} a {agreement.effective_until || "Actual"}</small></div>
+                  {shares ? <div className={styles.previewRows}>
+                    {shares.map((item) => <div key={artistKey(item.artist)}><span>{item.artist}</span><strong>{percent(item.percent)}%</strong>
+                      <details className={styles.previewOrigins}><summary>Ver cómo se calcula</summary>{item.origins.map((origin, position) => <p key={position}>{origin.label}: {percent(origin.percent)}% del total</p>)}</details>
+                    </div>)}
+                    <div className={styles.previewTotal}><span>Total del reparto</span><strong>{percent(shares.reduce((sum, item) => sum + item.percent, 0))}%</strong></div>
+                  </div> : <p className={styles.previewEmpty}>Completá los participantes y un reparto que sume 100% para ver los porcentajes finales.</p>}
+                </details>;
+              })}
             </section>
             <section className={styles.evidenceBand}>
               <div className={styles.sectionHeading}><h2>Participantes sugeridos</h2></div>
@@ -459,8 +446,20 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
                 {detail.artist_suggestions.evidence.map((item, index) => <div className={styles.evidenceRow} key={index}><strong>{item.source} · {item.field}{item.used === false ? " (contexto)" : ""}</strong><span>{item.raw}</span></div>)}
               </details>
             </section>
-          </aside>}
+          </aside>
         </div>
+        {leaveForDashboard && <div className={styles.modalBackdrop}>
+          <div className={styles.leaveDialog} role="dialog" aria-modal="true" aria-labelledby="leave-contract-title">
+            <h2 id="leave-contract-title">Hay cambios sin guardar</h2>
+            <p>Guardá el contrato antes de ver los ingresos del tema.</p>
+            <div className={styles.actions}>
+              <button type="button" className={styles.secondaryButton} disabled={saving} onClick={() => setLeaveForDashboard(false)}>Seguir en el contrato</button>
+              <button type="button" className={styles.primaryButton} disabled={saving || errors.length > 0} onClick={async () => {
+                if (await save()) { setLeaveForDashboard(false); onOpenDashboard?.({ isrc: detail.isrc, title: detail.title }); }
+              }}>{saving ? "Guardando..." : "Guardar y ver ingresos"}</button>
+            </div>
+          </div>
+        </div>}
         {editingArtist && <div className={styles.modalBackdrop}>
           <div className={styles.artistModal} role="dialog" aria-modal="true" aria-label={`Contrato de ${editingArtist}`}>
             <ArtistContractsPanel canEdit={canEditCurrent} initialArtist={editingArtist} onBack={() => setEditingArtist(null)} onMessage={onMessage}
@@ -474,7 +473,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
   return (
     <section className={styles.workspace}>
       <header className={styles.listHeader}>
-        <div className={styles.heading}><span>Catálogo y distribución</span><h1>Contratos</h1><p>Repartos por ISRC ordenados por ingreso acumulado.</p></div>
+        <div className={styles.heading}><span>Catálogo y distribución</span><h1>Contratos</h1><p>Participantes, porcentajes y códigos asociados por ISRC.</p></div>
         {!wml && <button type="button" className={styles.secondaryButton} onClick={() => setMode("artists")}>Contratos de artistas</button>}
         <button type="button" className={styles.iconButton} title="Actualizar catálogo" aria-label="Actualizar catálogo" disabled={loading} onClick={() => void loadList()}><RefreshCw size={18} /></button>
       </header>
@@ -522,15 +521,15 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage }: Props)
         <button type="button" className={styles.primaryButton} disabled={loading || selectedIsrcs.length < 2} onClick={() => setBulkOpen(true)}>Aplicar contrato a seleccionados</button>
       </div>}
       <div className={styles.tableWrap}><table className={`${styles.table} ${selectable ? styles.selectTable : ""}`}>
-        <thead><tr>{selectable && <th>Elegir</th>}<th>Tema</th><th>ISRC</th><th>Crédito en catálogo</th><th>Ingreso acumulado</th><th>Estado</th></tr></thead>
+        <thead><tr>{selectable && <th>Elegir</th>}<th>Tema</th><th>ISRC</th><th>Crédito en catálogo</th><th>Estado</th></tr></thead>
         <tbody>
-          {!loading && list?.items.length === 0 && <tr><td colSpan={selectable ? 6 : 5} className={styles.empty}>No hay ISRC para este filtro.</td></tr>}
+          {!loading && list?.items.length === 0 && <tr><td colSpan={selectable ? 5 : 4} className={styles.empty}>No hay ISRC para este filtro.</td></tr>}
           {(list?.items || []).map((item) => <tr key={item.isrc}>
             {selectable && <td><input type="checkbox" aria-label={`Seleccionar ${item.title || item.isrc}`} checked={selectedIsrcs.includes(item.isrc)} onChange={(event) => setSelectedIsrcs((current) => event.target.checked ? [...current, item.isrc] : current.filter((isrc) => isrc !== item.isrc))} /></td>}
             <td><button type="button" className={styles.titleButton} onClick={() => void openDetail(item.isrc)}>{item.title || "Sin título"}</button>{item.commercialization_types?.some((kind) => kind !== "pending") && <small className={styles.typeBadge}>{item.commercialization_types.filter((kind) => kind !== "pending").map((kind) => kind === "master" ? "Máster" : "Distribución").join(" · ")}</small>}</td>
             <td><button type="button" className={styles.isrcButton} onClick={() => void openDetail(item.isrc)}>{item.isrc}</button></td>
             <td className={styles.artistCell} title={item.artists_informed || ""}>{item.artists_informed || "-"}</td>
-            <td className={styles.amountCell}><button type="button" className={styles.incomeButton} title="Ver ingreso del ISRC y asociados" aria-label={`Ingreso de ${item.isrc} y asociados`} onClick={() => void openDetail(item.isrc, true)}>{money(item.amount_usd)}<Link2 size={13} /></button>{Boolean(item.associated_amount_usd) && <small className={styles.incomeExtra}>Asociados: {money(item.associated_amount_usd)}</small>}</td>
+
             <td><span className={`${styles.status} ${item.closed && !item.association_review_pending ? styles.closed : styles.open}`}>{item.association_review_pending ? "Revisión pendiente" : item.closed ? "Cerrado" : "Abierto"}</span>{item.association_review_pending && <small className={styles.futureNote}>{item.association_pending_count} códigos por validar{item.closed ? " · Reparto aprobado" : ""}</small>}{item.future_reports_selected && <small className={styles.futureNote}>Futura aplicación</small>}</td>
           </tr>)}
         </tbody>
