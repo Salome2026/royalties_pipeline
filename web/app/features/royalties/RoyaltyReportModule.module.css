@@ -205,6 +205,15 @@
 }
 
 .artistEntry { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 8px; }
+.contractEntry { display: flex; flex-wrap: wrap; gap: 8px; }
+.contractEntry input { flex: 1 1 180px; min-width: 0; }
+.contractEntry button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; width: auto; min-height: 44px; margin: 0; padding: 0 12px; border-radius: 7px; font: inherit; font-size: .76rem; cursor: pointer; }
+.contractPicker { display: grid; gap: 10px; padding: 14px; border: 1px solid rgba(101,217,200,.25); border-radius: 7px; background: rgba(3,12,20,.6); }
+.contractList { display: grid; max-height: 240px; overflow-y: auto; }
+.contractList > button { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; padding: 12px 8px; width: 100%; border: 0; border-bottom: 1px solid rgba(164,188,199,.14); border-radius: 0; background: transparent; color: #dfe8eb; text-align: left; cursor: pointer; box-shadow: none; }
+.contractList > button:hover, .contractList > button[aria-pressed="true"] { background: rgba(29,158,140,.12); color: #69dfcd; transform: none; }
+.contractList > button:disabled { opacity: .5; cursor: default; }
+.contractList > button > span { display: grid; gap: 4px; }
 .artistEntry button, .artistSelection button {
   display: grid; place-items: center; padding: 0; margin: 0; border: 1px solid rgba(164, 188, 199, 0.23);
   border-radius: 6px; background: rgba(29, 158, 140, 0.12); color: #69dfcd; cursor: pointer; box-shadow: none;

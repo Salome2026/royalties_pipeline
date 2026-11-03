@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { apiConfig, royaltyHeaders } from "../_auth";
 
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 export async function POST(request: NextRequest) {
   const config = await apiConfig();
