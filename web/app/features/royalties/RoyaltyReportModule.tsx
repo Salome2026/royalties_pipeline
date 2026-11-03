@@ -5,6 +5,8 @@ import { AlertCircle, CheckCircle2, Clock3, Download, ExternalLink, FileSpreadsh
 import { PeriodControl } from "../../components/PeriodControl";
 import { isResolvedPeriodInvalid, resolvePeriod, type PeriodSelection } from "../../lib/period";
 import { prepareContractArtists, resolveContractArtist } from "./contractArtistSelection";
+import { ContractNumberFilter } from "./ContractNumberFilter";
+import { parseContractNumbers } from "./contractNumberSelection";
 import {
   createRoyaltyReportJob,
   requestRecentRoyaltyReportJobs,
@@ -42,6 +44,7 @@ export function RoyaltyReportModule({ onMessage }: Props) {
   const individual = output === "executive_pdf" && executiveMode === "artist_settlement";
   const contractual = output === "executive_pdf" && executiveMode !== "income";
   const [keywords, setKeywords] = useState("");
+  const [contractNumbers, setContractNumbers] = useState("");
   const [period, setPeriod] = useState<PeriodSelection>({ mode: "all" });
   const [periodBasis, setPeriodBasis] = useState<RoyaltyPeriodBasis>("transaction_month");
   const [wml,setWml] = useState(false);
@@ -190,6 +193,11 @@ export function RoyaltyReportModule({ onMessage }: Props) {
       return null;
     }
     const terms = keywords.split(/[;,]/).map((item) => item.trim()).filter(Boolean);
+    const contracts = parseContractNumbers(wml ? "" : contractNumbers);
+    if (contracts.error) {
+      onMessage({ type: "error", text: contracts.error });
+      return null;
+    }
     if (output === "excel" && !wml && includeContracts && !options?.excel_contracts_supported) {
       onMessage({ type: "error", text: "La opción de contratos todavía no está disponible. Recargá la pantalla." });
       return null;
@@ -211,8 +219,8 @@ export function RoyaltyReportModule({ onMessage }: Props) {
       }
       artists = selection.artists;
     }
-    if (output === "excel" && terms.length === 0 && !wml) {
-      onMessage({ type: "error", text: "Ingresá al menos una palabra clave para el Excel detallado." });
+    if (output === "excel" && terms.length === 0 && !contracts.numbers.length && !wml) {
+      onMessage({ type: "error", text: "Ingresá una palabra clave o un número de contrato para el Excel detallado." });
       return null;
     }
     const parsedRawLimit = Number(rawLimit);
@@ -230,6 +238,7 @@ export function RoyaltyReportModule({ onMessage }: Props) {
     }
     return {
       keywords: terms,
+      ...(contracts.numbers.length ? { distribution_contract_numbers: contracts.numbers } : {}),
       start_month: resolved.startMonth,
       end_month: resolved.endMonth,
       period_basis: contractual ? "statement_period" : periodBasis,
@@ -402,10 +411,12 @@ export function RoyaltyReportModule({ onMessage }: Props) {
                 value={keywords}
                 onChange={(event) => setKeywords(event.target.value)}
                 placeholder={wml ? "Todo WML o una búsqueda puntual" : contractual ? "Todos los temas o un ISRC puntual" : output === "executive_pdf" ? "Todo el alcance o una búsqueda puntual" : "Ej. Gusty DJ, ISRC, nombre del tema"}
-                required={output === "excel" && !wml}
+                required={output === "excel" && !wml && !contractNumbers.trim()}
               />
               <small>{wml ? "Dejá vacío para incluir todo WML, respetando los demás filtros." : "Separá varias búsquedas con coma o punto y coma."}</small>
             </div>
+
+            {!wml && <ContractNumberFilter value={contractNumbers} onChange={setContractNumbers} />}
 
             <div className={styles.periodField}>
               <PeriodControl
@@ -582,7 +593,7 @@ export function RoyaltyReportModule({ onMessage }: Props) {
                 <span className={`${styles.statusDot} ${styles[job.status]}`} aria-hidden="true" />
                 <div>
                   <strong>{job.params.executive_mode === "artist_settlement" ? "Liquidación individual del artista" : job.params.executive_mode === "contractual" ? "PDF de reparto contractual" : job.output_format === "executive_pdf" ? "PDF ejecutivo" : job.output_format === "google_sheet" ? "Google Sheet" : "Excel detallado"}</strong>
-                  <span>{job.params.contract_artists?.join(", ") || job.params.keywords?.join(", ") || "Todas las regalías"} · #{job.id}</span>
+                  <span>{job.params.distribution_contract_numbers?.length ? `Contratos ${job.params.distribution_contract_numbers.join(", ")}${job.params.keywords?.length ? ` · ${job.params.keywords.join(", ")}` : ""}` : job.params.contract_artists?.join(", ") || job.params.keywords?.join(", ") || "Todas las regalías"} · #{job.id}</span>
                 </div>
                 <span className={styles.recentState}>{job.status === "completed" ? "Listo" : job.status === "failed" ? "Error" : job.status === "running" ? "Procesando" : "En cola"}</span>
                 {job.status === "completed" && job.output_format !== "google_sheet" && <a href={royaltyReportJobDownloadUrl(job.id)} aria-label={`Descargar reporte ${job.id}`}><Download size={16} /></a>}

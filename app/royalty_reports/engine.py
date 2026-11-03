@@ -44,6 +44,11 @@ class ReportEngine:
         params = dict(job.get("params") or {})
         normalized_keywords = self.runtime.normalize_keywords(params.get("keywords") or [])
         request = ReportRequest.from_job(job, keywords=normalized_keywords)
+        from app.royalty_reports.contract_filter import require_filter, use_filter
+        contract_filter = None
+        if request.distribution_contract_numbers:
+            contract_filter = require_filter((job.get('input_manifest') or {}).get('distribution_contract_filter'),
+                request.distribution_contract_numbers, (job.get('input_manifest') or {}).get('release_id'))
         if ((job.get('input_manifest') or {}).get('royalty_scope') or 'regular') != request.royalty_scope:
             raise RuntimeError('El ámbito del manifiesto no coincide con el pedido del reporte.')
         if request.royalty_scope == 'wml' and request.executive_mode in {'contractual', 'artist_settlement'}:
@@ -94,7 +99,7 @@ class ReportEngine:
         self.runtime.report_stage(request.job_id, "building")
         from app.royalty_scope import use_scope
         allocation = json.loads(marts[PRODUCT_INCOME_FILE].read_text(encoding="utf-8")) if PRODUCT_INCOME_FILE in marts else None
-        with use_product_income(allocation), use_scope(request.royalty_scope,marts=marts,
+        with use_filter(contract_filter), use_product_income(allocation), use_scope(request.royalty_scope,marts=marts,
                        catalog_status=job.get('input_manifest',{}).get('catalog_status_snapshot')), use_distributor_policy_snapshot(policy_snapshot):
             built = build_registered_report(
                 request,

@@ -19,6 +19,7 @@ export type RoyaltyReportOptions = {
 };
 
 export type RoyaltyReportPayload = {
+  distribution_contract_numbers?: number[];
   include_contracts?: boolean;
   contract_columns?: "matching" | "all";
   executive_mode?: "income" | "contractual" | "artist_settlement";
@@ -76,6 +77,13 @@ export async function requestContractReportArtists(): Promise<string[]> {
   const response = await fetch("/api/report-contract-options", { cache: "no-store" });
   if (!response.ok) throw await responseError(response, "No se pudieron cargar los artistas de contratos.");
   return (await response.json()).artists || [];
+}
+
+export type DistributionReportContract = { number: number; label: string; sublabel: string };
+export async function requestDistributionReportContracts(): Promise<DistributionReportContract[]> {
+  const response = await fetch("/api/report-distribution-contracts", { cache: "no-store" });
+  if (!response.ok) throw await responseError(response, "No se pudieron cargar los contratos.");
+  return (await response.json()).items || [];
 }
 
 export async function createRoyaltyReportJob(payload: RoyaltyReportPayload, output: RoyaltyReportJobOutput) {

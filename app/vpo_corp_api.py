@@ -306,6 +306,7 @@ class RoyaltyReportJobRequest(BaseModel):
     contract_artists: list[str] = Field(default_factory=list, max_length=20)
     include_contracts: bool = False
     contract_columns: Literal["matching", "all"] = "all"
+    distribution_contract_numbers: list[int] = Field(default_factory=list, max_length=100)
     keywords: list[str] = Field(default_factory=list, max_length=100)
     start_month: str | None = None
     end_month: str | None = None
@@ -7430,8 +7431,18 @@ def canonical_royalty_report_params(
 ) -> dict[str, Any]:
     params = request.model_dump(exclude={"output", "executive_mode", "contract_artists", "include_contracts", "contract_columns"})
     params["keywords"] = normalize_keywords(params.get("keywords") or [])
-    if request.output in {"excel", "google_sheet"} and not params["keywords"] and not is_wml():
-        raise HTTPException(status_code=400, detail="Ingresa al menos una palabra clave.")
+    if request.distribution_contract_numbers:
+        from app.royalty_reports.contract_filter import normalize_numbers
+        try:
+            params['distribution_contract_numbers'] = normalize_numbers(request.distribution_contract_numbers)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        if is_wml():
+            raise HTTPException(400, 'Los contratos de distribución corresponden al catálogo habitual.')
+    else:
+        params.pop('distribution_contract_numbers', None)
+    if request.output in {"excel", "google_sheet"} and not params["keywords"] and not request.distribution_contract_numbers and not is_wml():
+        raise HTTPException(status_code=400, detail="Ingresá una palabra clave o un número de contrato.")
     if request.start_month and request.end_month and request.start_month > request.end_month:
         raise HTTPException(status_code=400, detail="El periodo desde no puede ser mayor que hasta.")
     if request.executive_mode in {"contractual", "artist_settlement"}:
@@ -7484,7 +7495,7 @@ def canonical_royalty_report_params(
 def require_report_job_access(username: str, job: dict[str, Any], action: Literal["access", "create"] = "access") -> dict:
     with operational_connect() as conn:
         permission = require_module_permission(conn, username, "royalty_reports", action)
-        if (job.get("params") or {}).get("executive_mode") in {"contractual", "artist_settlement"} or (job.get("params") or {}).get("include_contracts"):
+        if (job.get("params") or {}).get("executive_mode") in {"contractual", "artist_settlement"} or (job.get("params") or {}).get("include_contracts") or (job.get('params') or {}).get('distribution_contract_numbers'):
             require_contract_report_permission(conn, username, action)
     if not permission.get("is_admin") and str(job.get("requested_by") or "").casefold() != username.casefold():
         raise HTTPException(status_code=403, detail="No tenes permiso para ver este reporte.")
@@ -7512,9 +7523,13 @@ def royalty_report_detail_count(
         raise HTTPException(status_code=401, detail="Usuario requerido.")
     with operational_connect() as conn:
         require_module_permission(conn, username, "royalty_reports", "create")
+        if request.distribution_contract_numbers:
+            require_contract_report_permission(conn, username)
 
     policy_snapshot = load_distributor_policy_document()
     params = canonical_royalty_report_params(request, policy_snapshot)
+    if request.distribution_contract_numbers:
+        return distribution_filter_detail_count(request, params)
     try:
         rows = query_royalty_detail_count_bigquery(
             keywords=params["keywords"],
@@ -7540,6 +7555,58 @@ def royalty_report_detail_count(
         "excel_max_data_rows": EXCEL_MAX_DATA_ROWS,
         "exceeds_excel_limit": rows > EXCEL_MAX_DATA_ROWS,
     }
+
+
+def capture_distribution_filter(numbers, manifest, snapshot=None):
+    from app.distribution_contracts import list_distribution_contracts
+    from app.royalty_reports.contract_snapshot import published_catalog_frame, stored_contracts
+    from app.royalty_reports.excel_contracts import freeze_snapshot
+    from app.royalty_reports.contract_filter import freeze_filter
+    with operational_connect() as conn:
+        conn.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
+        templates = list_distribution_contracts(conn)
+        contracts = stored_contracts(conn)
+    missing = set(numbers) - {item['number'] for item in templates}
+    if missing:
+        raise ValueError('No existen los contratos: ' + ', '.join(map(str, sorted(missing))))
+    if snapshot is None:
+        snapshot = freeze_snapshot(published_catalog_frame(gcs_client(), manifest), contracts, manifest)
+    return freeze_filter(numbers, templates, snapshot)
+
+
+def distribution_filter_detail_count(request, params):
+    from app.royalty_reports.contract_filter import use_filter
+    from scripts.build_keyword_royalty_report import count_report_detail_rows
+    from app.royalty_scope import use_scope
+    from scripts.lib.product_income import FILE, use_product_income
+    manifest = build_gcs_input_manifest(client=gcs_client(), bucket_name=GCS_BUCKET, prefix=GCS_PREFIX)
+    try:
+        snapshot = capture_distribution_filter(params['distribution_contract_numbers'], manifest)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    filenames = [STANDARDIZED_FILE, CATALOG_MASTER_FILE, 'catalog_status.parquet']
+    if FILE in manifest.get('objects', {}):
+        filenames.append(FILE)
+    marts = ensure_marts(filenames=filenames)
+    if mart_release_cache().status().get('active_release_id') != manifest['release_id']:
+        raise HTTPException(409, 'Los datos publicados cambiaron; volvé a calcular el detalle.')
+    allocation = json.loads(marts[FILE].read_text(encoding='utf-8')) if FILE in marts else None
+    with use_scope('regular', marts=marts), use_product_income(allocation), use_filter(snapshot):
+        rows = count_report_detail_rows(keywords=params['keywords'], mode=params['mode'],
+            start_month=params['start_month'], end_month=params['end_month'], period_basis=params['period_basis'],
+            standardized_path=marts[STANDARDIZED_FILE], source=params['source'], account=params['account'])
+    return {'rows': rows, 'excel_max_data_rows': EXCEL_MAX_DATA_ROWS, 'exceeds_excel_limit': rows > EXCEL_MAX_DATA_ROWS}
+
+
+@app.get('/reports/royalty/distribution-contract-options')
+def royalty_distribution_contract_options(x_vpo_api_key: str | None = Header(default=None),
+                                          x_vpo_username: str | None = Header(default=None)):
+    require_api_key(x_vpo_api_key)
+    from app.distribution_contracts import list_distribution_contracts
+    with operational_connect() as conn:
+        require_contract_report_permission(conn, clean_username(x_vpo_username or ''))
+        items = list_distribution_contracts(conn)
+    return {'items': [{'number': row['number'], 'label': row['label'], 'sublabel': row['sublabel']} for row in items]}
 
 
 @app.get("/reports/royalty/contract-options")
@@ -7571,7 +7638,7 @@ def create_royalty_report_job(
         raise HTTPException(status_code=401, detail="Usuario requerido.")
     with operational_connect() as conn:
         require_module_permission(conn, username, "royalty_reports", "create")
-        if request.executive_mode in {"contractual", "artist_settlement"} or request.include_contracts:
+        if request.executive_mode in {"contractual", "artist_settlement"} or request.include_contracts or request.distribution_contract_numbers:
             require_contract_report_permission(conn, username)
 
     policy_snapshot = load_distributor_policy_document()
@@ -7588,7 +7655,7 @@ def create_royalty_report_job(
                 'catalog_master.parquet','catalog_status.parquet','wml_isrc_references.parquet')} if is_wml() else
                {'filenames': ('song_level_all_sources.parquet','standardized_raw_all_sources.parquet',
                 'catalog_master.parquet','catalog_status.parquet',CATALOG_RELEASE_METADATA_FILE)}
-               if request.executive_mode in {"contractual", "artist_settlement"} or request.include_contracts else {}),
+               if request.executive_mode in {"contractual", "artist_settlement"} or request.include_contracts or request.distribution_contract_numbers else {}),
         )
         if is_wml():
             from app.royalty_workspace_store import records
@@ -7637,6 +7704,18 @@ def create_royalty_report_job(
         except Exception as exc:
             raise HTTPException(status_code=503, detail="No se pudieron validar los contratos del Excel. Volve a intentar.") from exc
 
+    if request.distribution_contract_numbers:
+        try:
+            input_manifest['distribution_contract_filter'] = capture_distribution_filter(
+                params['distribution_contract_numbers'], input_manifest, input_manifest.get('excel_contract_snapshot'))
+            if 'contract_snapshot' in input_manifest:
+                selected = set(input_manifest['distribution_contract_filter']['isrcs'])
+                snapshot = input_manifest['contract_snapshot']
+                snapshot['catalog'] = [row for row in snapshot['catalog'] if row['isrc'] in selected]
+                snapshot['contracts'] = [row for row in snapshot['contracts'] if row['isrc'] in selected]
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
     report_key = {
         "excel": "royalty_keyword",
         "executive_pdf": "royalty_executive",
@@ -7681,7 +7760,7 @@ def recent_royalty_report_jobs(
             reconcile_report_job_if_stale(job)
             for job in list_report_jobs(requested_by, limit=limit,royalty_scope='wml' if is_wml() else 'regular')
             if (job.get("params") or {}).get("royalty_scope","regular") == ("wml" if is_wml() else "regular")
-            if not ((job.get("params") or {}).get("executive_mode") in {"contractual", "artist_settlement"} or (job.get("params") or {}).get("include_contracts")) or permission.get("is_admin") or can_read_contracts
+            if not ((job.get("params") or {}).get("executive_mode") in {"contractual", "artist_settlement"} or (job.get("params") or {}).get("include_contracts") or (job.get('params') or {}).get('distribution_contract_numbers')) or permission.get("is_admin") or can_read_contracts
         ]
     }
 

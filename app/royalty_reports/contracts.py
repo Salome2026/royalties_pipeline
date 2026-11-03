@@ -33,6 +33,7 @@ class ReportRequest:
     royalty_scope: str = 'regular'
     include_contracts: bool = False
     contract_columns: str = "all"
+    distribution_contract_numbers: tuple[int, ...] = ()
 
     @classmethod
     def from_job(cls, job: dict[str, Any], *, keywords: list[str]) -> "ReportRequest":
@@ -52,7 +53,11 @@ class ReportRequest:
         if start_month and end_month and start_month > end_month:
             raise ValueError("El periodo desde no puede ser mayor que hasta.")
         royalty_scope = str(params.get('royalty_scope') or 'regular')
-        if output_format in {"excel", "google_sheet"} and not keywords and royalty_scope != 'wml':
+        from app.royalty_reports.contract_filter import normalize_numbers
+        numbers = normalize_numbers(params.get('distribution_contract_numbers') or [])
+        if numbers and royalty_scope != 'regular':
+            raise ValueError('Los contratos de distribución corresponden al catálogo habitual.')
+        if output_format in {"excel", "google_sheet"} and not keywords and not numbers and royalty_scope != 'wml':
             raise ValueError("El reporte requiere al menos una palabra clave.")
         executive_mode = str(params.get("executive_mode") or "income")
         if executive_mode not in {"income", "contractual", "artist_settlement"}:
@@ -91,6 +96,7 @@ class ReportRequest:
             royalty_scope=royalty_scope,
             include_contracts=include_contracts,
             contract_columns=contract_columns,
+            distribution_contract_numbers=tuple(numbers),
         )
 
 

@@ -162,6 +162,10 @@ ORDER BY statement_month, isrc, upc, title, artist, source, account
     rows = [dict(row.items()) for row in result]
     if version == 2:
         rows = select_associated_rankings(rows, request, snapshot)
+    if getattr(request, 'distribution_contract_numbers', ()):
+        from app.royalty_reports.contract_filter import require_filter
+        selected = require_filter(manifest.get('distribution_contract_filter'), request.distribution_contract_numbers, release)
+        rows = [row for row in rows if row.get('isrc') in selected['isrcs']]
     if not rows:
         raise ValueError("No hay ingresos para los artistas y el período seleccionados.")
     return rows

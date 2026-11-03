@@ -36,6 +36,7 @@ steps:
       - scripts.qa.qa_royalty_explorer
       - scripts.qa.qa_common_participant_resolution
       - scripts.qa.qa_artist_settlement
+      - scripts.qa.qa_report_contract_filter
       - -q
 
   - id: Push

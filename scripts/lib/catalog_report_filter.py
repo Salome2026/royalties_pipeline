@@ -499,6 +499,8 @@ def filter_reportable_catalog(lf: pl.LazyFrame, schema: set[str] | None = None) 
 def filter_reportable_generation(lf: pl.LazyFrame, schema: set[str] | None = None) -> pl.LazyFrame:
     schema = schema or set(lf.collect_schema().names())
     enriched = with_distributor_policy(with_catalog_report_status(lf, schema), schema)
+    from app.royalty_reports.contract_filter import filter_income
+    enriched = filter_income(enriched)
     policy_statement_view = pl.col("policy_statement_view").fill_null("").str.to_lowercase()
     return enriched.filter(
         (pl.col("include_in_reports") == True)
