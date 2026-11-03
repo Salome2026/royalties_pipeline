@@ -93,6 +93,12 @@ class ContractFilterTests(unittest.TestCase):
                         with use_filter(selection([10010])):
                             args['keywords']=['Outside']
                             self.assertEqual(report.count_report_detail_rows(**args),0)
+                with use_filter(selection()):
+                    prepared = report.prepare_keyword_source(raw, root/'prepared.parquet', [], 'any', batch_size=1)
+                    materialized = pl.read_parquet(prepared)
+                    self.assertEqual(materialized.height, 1)
+                    self.assertEqual(materialized['asset_isrc'].to_list(), [A])
+                    self.assertEqual(materialized['amount_usd'].sum(), 100.)
 
 
 if __name__ == '__main__': unittest.main()

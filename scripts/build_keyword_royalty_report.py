@@ -390,7 +390,13 @@ def prepare_keyword_source(source: Path, output: Path, keywords: list[str], mode
             original=pl.from_arrow(batch)
             frame=allocate_income(original.lazy(),index).collect(engine='streaming') if index is not None else original
             missing=[pl.lit(None,dtype=dtype).alias(name) for name,dtype in schema.items() if name not in frame.columns]
-            frame=filter_report_keyword_values(frame.with_columns(missing).select(list(schema)),keywords,mode).cast(schema,strict=False)
+            frame=frame.with_columns(missing).select(list(schema))
+            # Contract-only searches must not materialize the entire catalogue first.
+            from app.royalty_reports.contract_filter import CURRENT,filter_income
+            if CURRENT.get() is not None:
+                from lib.catalog_report_filter import with_catalog_report_status
+                frame=filter_income(with_catalog_report_status(frame.lazy())).select(list(schema)).collect(engine='streaming')
+            frame=filter_report_keyword_values(frame,keywords,mode).cast(schema,strict=False)
             candidate=pl.col('_income_allocated').is_not_null()
             for part,condition in enumerate([~candidate,candidate]):
                 selected=frame.filter(condition)
