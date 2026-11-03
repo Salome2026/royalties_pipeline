@@ -163,6 +163,8 @@ export default function ArtistPortal() {
   const requestId = useRef(0);
   const activeUsernameRef = useRef<string | undefined>(currentUser?.username);
 
+  const isJuntadaPortal = currentUser?.username === "hernanlda";
+  const effectivePeriodBasis = isJuntadaPortal ? "statement_period" : periodBasis;
   const permission = permissions?.find((item) => item.module_key === "royalties_dashboard");
   const artistScope = permission?.scope?.filter((item) => item.scope_type === "artist" && item.scope_ref) || [];
   const hasPortalAccess = Boolean(
@@ -223,7 +225,7 @@ export default function ArtistPortal() {
       const nextSource = overrides?.source ?? source;
       const nextAccount = overrides?.account ?? account;
       const nextPeriod = overrides?.period ?? period;
-      const nextBasis = overrides?.periodBasis ?? periodBasis;
+      const nextBasis = isJuntadaPortal ? "statement_period" : overrides?.periodBasis ?? effectivePeriodBasis;
       const resolved = resolvePeriod(nextPeriod, "dashboard_period");
       const params = new URLSearchParams({
         period_mode: resolved.mode,
@@ -261,7 +263,7 @@ export default function ArtistPortal() {
     } finally {
       if (activeUsernameRef.current === requestUsername && id === requestId.current) setLoading(false);
     }
-  }, [account, keyword, period, periodBasis, source, explorer, appliedQuery, artistScope.length]);
+  }, [account, keyword, period, effectivePeriodBasis, isJuntadaPortal, source, explorer, appliedQuery, artistScope.length]);
 
   function applyExplorer(next: ExplorerState) {
     setExplorer(next); setSelectedTrack(null);
@@ -379,7 +381,7 @@ export default function ArtistPortal() {
           </button>
         </header>
 
-        <form className={styles.filters} onSubmit={(event) => { event.preventDefault(); void loadDashboard(); }}>
+        <form className={`${styles.filters}${isJuntadaPortal ? ` ${styles.statementOnlyFilters}` : ""}`} onSubmit={(event) => { event.preventDefault(); void loadDashboard(); }}>
           <div className={`${styles.field} ${styles.searchField}`}>
             <label htmlFor="artist_portal_keyword">Artista / tema / ISRC</label>
             <div className={styles.inputShell}><Search size={16} /><input id="artist_portal_keyword" value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="Buscar en tu catálogo" /></div>
@@ -398,13 +400,15 @@ export default function ArtistPortal() {
               {accountOptions.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
           </div>
-          <div className={styles.field}>
-            <label htmlFor="artist_portal_basis">Base temporal</label>
-            <select id="artist_portal_basis" value={periodBasis} onChange={(event) => setPeriodBasis(event.target.value as "statement_period" | "transaction_month")}>
-              <option value="statement_period">Statement</option>
-              <option value="transaction_month">Consumo</option>
-            </select>
-          </div>
+          {!isJuntadaPortal && (
+            <div className={styles.field}>
+              <label htmlFor="artist_portal_basis">Base temporal</label>
+              <select id="artist_portal_basis" value={periodBasis} onChange={(event) => setPeriodBasis(event.target.value as "statement_period" | "transaction_month")}>
+                <option value="statement_period">Statement</option>
+                <option value="transaction_month">Consumo</option>
+              </select>
+            </div>
+          )}
           <div className={styles.periodField}>
             <PeriodControl id="artist_portal_period" label="Período" profile="dashboard_period" selection={period} presets={["last_6_months", "last_12_months", "all"]} minMonth={dashboard?.options.first_month} maxMonth={dashboard?.options.last_month} onChange={setPeriod} />
           </div>
@@ -429,7 +433,7 @@ export default function ArtistPortal() {
         <div className={styles.scopeLine}>
           <span>Catálogo: <strong>{artistScope.map((item) => item.scope_ref).join(", ")}</strong></span>
           <span>Fuente disponible: <strong>{dashboard?.options.first_month || "-"} a {dashboard?.options.last_month || "-"}</strong></span>
-          <span>Base: <strong>{periodBasis === "statement_period" ? "statement" : "consumo"}</strong></span>
+          <span>Base: <strong>{effectivePeriodBasis === "statement_period" ? "statement" : "consumo"}</strong></span>
         </div>
 
         <div className={styles.tabs} role="tablist" aria-label="Vista del dashboard">
@@ -440,7 +444,7 @@ export default function ArtistPortal() {
         {tab === "overview" && (
           <>
             <section className={styles.section}>
-              <div className={styles.sectionTitle}><h2>Evolución mensual</h2><span>USD reportable por {periodBasis === "statement_period" ? "mes de statement" : "mes de consumo"}</span></div>
+              <div className={styles.sectionTitle}><h2>Evolución mensual</h2><span>USD reportable por {effectivePeriodBasis === "statement_period" ? "mes de statement" : "mes de consumo"}</span></div>
               <div className={styles.trendRows}>
                 {!loading && !dashboard?.monthly.length && <div className={styles.empty}>Sin datos para este filtro.</div>}
                 {(dashboard?.monthly || []).map((month) => (
@@ -470,8 +474,8 @@ export default function ArtistPortal() {
             </section>
 
             <div className={styles.rankGrid}>
-              <RankList title="Ingresos por tema" rows={dashboard?.rankings.title || []} loading={loading} onSelect={setSelectedTrack} scrollable={currentUser?.username === "hernanlda"} />
-              <RankList title={explorer.measure === "contractual" ? "Tu participación por artista del catálogo" : "Ingresos por artista"} rows={dashboard?.rankings.artist || []} loading={loading} onSelect={(r) => drill({ artist: r.name })} scrollable={currentUser?.username === "hernanlda"} />
+              <RankList title="Ingresos por tema" rows={dashboard?.rankings.title || []} loading={loading} onSelect={setSelectedTrack} scrollable={isJuntadaPortal} />
+              <RankList title={explorer.measure === "contractual" ? "Tu participación por artista del catálogo" : "Ingresos por artista"} rows={dashboard?.rankings.artist || []} loading={loading} onSelect={(r) => drill({ artist: r.name })} scrollable={isJuntadaPortal} />
               <RankList title="Ingresos por plataforma" rows={dashboard?.rankings.dsp || []} loading={loading} onSelect={(r) => drill({ dsp: r.name })} />
               <RankList title="Territorios" rows={dashboard?.rankings.territory || []} loading={loading} onSelect={(r) => drill({ territory: r.name })} />
             </div>
