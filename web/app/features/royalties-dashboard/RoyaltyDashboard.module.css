@@ -126,6 +126,24 @@
   scrollbar-width: thin;
   scrollbar-color: #536c60 transparent;
   padding-right: 10px;
+  overflow-anchor: none;
+  contain: layout paint;
+}
+
+.rankListScrollable > .rankList {
+  display: block;
+}
+
+.rankVirtualRow {
+  height: var(--rank-row-height);
+}
+
+.rankVirtualRow .rankName {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .rankListScrollable::-webkit-scrollbar {

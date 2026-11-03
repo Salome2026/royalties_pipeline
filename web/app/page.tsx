@@ -17,6 +17,7 @@ import { selectedRoyaltyScope } from './features/wml/WmlScopeControl';
 import { StatementReportModule } from "./features/statements/StatementReportModule";
 import digitalStyles from "./features/digital-income/DigitalIncome.module.css";
 import royaltyDashboardStyles from "./features/royalties-dashboard/RoyaltyDashboard.module.css";
+import { RoyaltyRankList } from "./features/royalties-dashboard/RoyaltyRankList";
 import { RoyaltyContextAction, RoyaltyExplorerTrail, RoyaltyExplorerPending, RoyaltyTrackDrawer, initialExplorer, explorerActive, explorerParams, type ExplorerState, type ExplorerRank, type ExplorerInfo } from "./features/royalties-dashboard/RoyaltyExplorer";
 import SelectionMenu, { type SelectionIntent } from "./features/digital-income/SelectionMenu";
 import type { DigitalIncomeReportScope } from "./features/digital-income/exportPdf";
@@ -7453,37 +7454,11 @@ export default function Home() {
   function renderRoyaltiesRankTable(title: string, rows: RoyaltiesDashboardRank[], dimension?: string, emptyText = "Sin datos para este filtro.") {
     const scrollable = royaltiesDashboardTab === "overview" && (dimension === "title" || dimension === "artist");
     return (
-      <section className={royaltyDashboardStyles.rankSection}>
-        <div className={royaltyDashboardStyles.rankHeader}>
-          <h2>{title}</h2>
-          <span>{rows.length ? `${rows.length} resultados` : "Sin datos"}</span>
-        </div>
-        {royaltiesDashboardLoading && <div className={royaltyDashboardStyles.empty}>Cargando...</div>}
-        {!royaltiesDashboardLoading && rows.length === 0 && <div className={royaltyDashboardStyles.empty}>{emptyText}</div>}
-        <div
-          className={`${royaltyDashboardStyles.rankList}${scrollable ? ` ${royaltyDashboardStyles.rankListScrollable}` : ""}`}
-          tabIndex={scrollable && rows.length > 0 ? 0 : undefined}
-          role={scrollable ? "region" : undefined}
-          aria-label={scrollable ? title : undefined}
-        >
-          {rows.map((row, idx) => (
-            <div className={royaltyDashboardStyles.rankRow} key={`${title}-${row.name}-${idx}`}>
-              <span className={royaltyDashboardStyles.rankIndex}>{idx + 1}</span>
-              <div className={royaltyDashboardStyles.rankMain}>
-                {!wmlScope && dimension ? <button type="button" className={royaltyDashboardStyles.rankName} disabled={royaltiesDashboardLoading} onClick={() => dimension === "title" ? setRoyaltiesTrack({ ...row, youtube_only: royaltiesDashboardTab === "youtube" }) : drillRoyalties({ [dimension]: row.name })}>{row.name || "-"}</button> : <strong>{row.name || "-"}</strong>}
-                <small>{Math.round(row.units || 0).toLocaleString("es-AR")} unidades</small>
-              </div>
-              <div className={royaltyDashboardStyles.rankValue}>
-                <strong>{royaltiesExplorer.measure === "contractual" && row.pending_amount_usd && !row.amount_usd ? "Por validar" : moneyCents(row.amount_usd || 0)}</strong>
-                <span>{(row.percentage || 0).toLocaleString("es-AR", { maximumFractionDigits: 2 })}%</span>
-              </div>
-              <div className={royaltyDashboardStyles.rankBar} aria-hidden="true">
-                <span style={{ width: `${Math.max(2, Math.min(100, row.percentage || 0))}%` }} />
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
+      <RoyaltyRankList title={title} rows={rows} loading={royaltiesDashboardLoading}
+        scrollable={scrollable} contractual={royaltiesExplorer.measure === "contractual"} emptyText={emptyText}
+        onSelect={!wmlScope && dimension ? (row) => dimension === "title"
+          ? setRoyaltiesTrack({ ...row, youtube_only: royaltiesDashboardTab === "youtube" })
+          : drillRoyalties({ [dimension]: row.name }) : undefined} />
     );
   }
 

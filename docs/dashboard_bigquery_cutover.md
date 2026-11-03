@@ -62,6 +62,15 @@ rankings generales de temas y artistas; mantienen filtros, permisos, totales y
 el limite existente para las otras categorias y YouTube. Sin la opcion se
 conserva el limite anterior.
 
+Las listas generales de temas y artistas dibujan solamente las filas visibles
+y cuatro filas adicionales a cada lado de la ventana. El espacio restante
+conserva la altura del listado completo y permite llegar al ultimo resultado
+con la rueda, el pulgar del scroll, tacto o teclado. El desplazamiento se
+actualiza dentro de cada lista, sin reconstruir el dashboard. Los formatos
+numericos se reutilizan y la ventana vuelve al inicio al cambiar los datos.
+Las pruebas de fluidez cubren tambien el scroll de la pagina completa con
+miles de resultados, ademas de los clics, filtros y listas pequenas o vacias.
+
 ## Retorno inmediato
 
 El retorno operativo consiste en asignar nuevamente 100% del trafico a la
