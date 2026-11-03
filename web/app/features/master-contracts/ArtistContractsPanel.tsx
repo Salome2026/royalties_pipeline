@@ -189,7 +189,7 @@ export function ArtistContractsPanel({ canEdit, onBack, onMessage, initialArtist
           <label className={styles.checkboxLine}><input type="checkbox" disabled={!canEdit} checked={draft.is_project} onChange={(event) => setDraft({ ...draft, is_project: event.target.checked })} /><span>Proyecto con invitados que pueden tener contrato propio</span></label>
           <label className={styles.checkboxLine}><input type="checkbox" disabled={!canEdit} checked={draft.is_active} onChange={(event) => setDraft({ ...draft, is_active: event.target.checked })} /><span>Usar como propuesta en fichas nuevas</span></label>
           <label className={styles.notesLabel}>Notas<textarea rows={3} maxLength={3000} disabled={!canEdit} value={draft.notes} onChange={(event) => setDraft({ ...draft, notes: event.target.value })} /></label>
-          <p className={styles.safetyNote}>Una ficha de ISRC puede tener un reparto distinto. Ningún contrato se aplica automáticamente a los informes.</p>
+          <p className={styles.safetyNote}>Una ficha de ISRC puede tener un reparto distinto. Los repartos cerrados se usan automáticamente en dashboards y reportes contractuales.</p>
           {selected && <p className={styles.auditLine}>Último guardado: {selected.updated_at} por {selected.updated_by}.</p>}
           {canEdit && <div className={styles.actions}><button type="submit" className={styles.primaryButton} disabled={saving || !changed || errors.length > 0 || draft.has_contract === null}><FilePenLine size={16} />{saving ? "Guardando..." : "Guardar contrato"}</button></div>}
         </form>

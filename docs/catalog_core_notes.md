@@ -624,3 +624,34 @@ en regalías habituales. Las referencias informado/deducido/hipótesis nunca
 completan el reparto editable ni alteran importes. Las aprobaciones de metadata
 y contratos generales de artistas del ámbito habitual no se trasladan a WML.
 Véase [WML 91230](wml_pipeline_notes.md).
+
+
+# Contratos de distribución reutilizables
+
+`Contratos de distribución` permite dar de alta y editar plantillas del reparto
+inicial con el mismo editor de bolsas y destinatarios de la ficha por ISRC.
+La numeración comienza en 10010, es automática e inmutable; la asignación y
+la unicidad se serializan en Postgres. Sello es obligatorio; subsello es opcional.
+La combinación sello/subsello es única, ignorando mayúsculas, acentos y espacios
+sobrantes. Un mismo sello puede tener contratos con subsellos diferentes.
+
+Desde un contrato principal con comercialización Distribución, `Aplicar contrato`
+copia el porcentaje de comercialización, la bolsa complementaria y los
+destinatarios. No reemplaza participantes, tratamientos ni vigencias del tema.
+Cada aplicación conserva número, versión y una copia editable del reparto inicial;
+editar la plantilla no modifica fichas existentes. Los cálculos, el cierre del
+reparto y la validación de códigos asociados conservan su comportamiento.
+
+Se elimina la selección individual para futura aplicación a reportes. Los
+consumidores contractuales usan todos los repartos cerrados y válidos, sin
+consultar esa marca. Los borradores siguen sujetos al cierre existente. Las
+columnas históricas se conservan por compatibilidad; las nuevas escrituras no
+requieren ni activan la marca. No se agrega filtro por contrato a reportes.
+
+Antes de publicar API y web, aplicar `018_distribution_contracts.sql`. Crea
+el contador, el registro y el historial de versiones sin alterar repartos
+existentes. Las plantillas corresponden al ámbito habitual; no se trasladan a WML.
+
+Validación: `qa_distribution_contracts.py`, `qa_distribution_recipients.py`,
+`web/scripts/qa_distribution_contracts.mjs` y
+`web/scripts/qa_distribution_contracts_ui.cjs` (datos ficticios interceptados).

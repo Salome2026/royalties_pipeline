@@ -7,6 +7,7 @@ import { pendingAssociationCodes, type Association } from "./associationLogic";
 import { agreementAllocation, beneficiaryKey, contractErrors, repartition, type MasterAgreement } from "./contractLogic";
 import { applyContractModel, closingErrors, detailAgreements, matchingModelPeriods, modelErrors, participantDifference, participantSignature, type ContractModel } from "./bulkContractLogic";
 import { MasterAgreementsEditor } from "./MasterAgreementsEditor";
+import { DistributionContractPicker } from "./DistributionContractPicker";
 import { PoolsAllocationEditor } from "./PoolsAllocationEditor";
 import { ArtistContractsPanel } from "./ArtistContractsPanel";
 import styles from "./MasterContractsModule.module.css";
@@ -156,7 +157,7 @@ export function BulkContractsPanel({ items, canApprove, onBack, onOpen }: {
         const save = (close: boolean) => request<{ closed: boolean }>(endpoint(row.detail.isrc), {
           method: "PUT", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ split: row.split, closed: close, expected_version: row.detail.version,
-            future_reports_selected: false, complete_association_review: false }),
+            complete_association_review: false }),
         });
         try {
           let saved: { closed: boolean }; let reason = row.reason;
@@ -204,6 +205,9 @@ export function BulkContractsPanel({ items, canApprove, onBack, onOpen }: {
           artistOptions={definedModel.artist_suggestions.artists} firstStatementDate={definedModel.first_statement_date}
           openId={editorOpen} onOpenChange={setEditorOpen} onChange={(agreements) => editModel(agreements[0])} />
         {editorOpen && <>
+          {source?.commercialization === "distribution" && <DistributionContractPicker key={source.id}
+            agreement={source} allocation={agreementAllocation(source, definedModel.split)} contracts={definedModel.distribution_contracts || []}
+            canEdit={!busy} onChange={editModel} />}
           <PoolsAllocationEditor agreement={source} allocation={agreementAllocation(source, definedModel.split)} canEdit={!busy}
             distributionRecipientsSupported={definedModel.distribution_recipients_supported === true}
             artistOptions={[...new Set([...definedModel.artist_suggestions.artists, ...definedModel.artist_contracts.map((c) => c.artist_name)])]}

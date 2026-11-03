@@ -149,7 +149,7 @@ class MasterContractsPilotTests(unittest.TestCase):
             self.assertEqual(result["first_statement_date"], "2026-03-01")
             self.assertEqual(result["split"]["agreements"][0]["effective_from"], "2026-03-01")
             self.assertEqual(result["statement_income"], monthly[:1])
-            self.assertFalse(result["reports_effective"])
+            self.assertTrue(result["reports_effective"])
             self.assertTrue(result["pool_contracts_supported"])
             stored = {"agreements": [{"id": "principal", "effective_from": "2026-05-14"}]}
             saved.return_value = {"split": stored, "closed": False, "future_reports_selected": False,
@@ -396,7 +396,7 @@ class MasterContractsPilotTests(unittest.TestCase):
                 {"source": "ada", "account": "indyana_records", "report_net_adjustment_pct": 0},
             ],
         }
-        with use_distributor_policy_snapshot(policy):
+        with use_distributor_policy_snapshot(policy), patch("scripts.lib.catalog_report_filter.load_distributor_policy_document", return_value=policy):
             adjusted = apply_report_net_personalization(baseline.lazy(), set(baseline.columns))
             by_isrc = adjusted.group_by("asset_isrc").agg([
                 pl.sum("amount_usd").alias("amount_usd"),
@@ -603,8 +603,7 @@ class MasterContractsPilotTests(unittest.TestCase):
             validate_split({**split, "principal_percent": 9}, True, False)
         with self.assertRaisesRegex(ValueError, "único"):
             validate_split({**split, "participants": [{"artist": "La Juntada de los Artistas", "percent": 20}]}, False, False)
-        with self.assertRaisesRegex(ValueError, "Solo un ISRC cerrado"):
-            validate_split(split, False, True)
+        validate_split(split, False, True)  # Legacy opt-in is ignored.
         with self.assertRaisesRegex(ValueError, "otro artista"):
             validate_split({**split, "master_type": "indyana_and_other", "other_master_artist": None}, True, False)
         validate_split({**split, "master_type": "mawz_and_other", "other_master_artist": "Aneley", "effective_from": "2026-02-27"}, True, False)
@@ -634,7 +633,7 @@ class MasterContractsPilotTests(unittest.TestCase):
                 future_reports_selected=True, expected_version=1, actor="ruben",
             )
             self.assertEqual(second["version"], 2)
-            self.assertTrue(read_split(conn, "ARDL12500056")["future_reports_selected"])
+            self.assertFalse(read_split(conn, "ARDL12500056")["future_reports_selected"])
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM master_contract_split_history").fetchone()[0], 2)
             with self.assertRaisesRegex(ValueError, "cambió"):
                 save_split(

@@ -376,6 +376,7 @@
 .artistList, .artistForm { min-width: 0; padding-top: 20px; }
 .artistListTools { display: flex; gap: 8px; }
 .artistListTools .searchBox { max-width: none; }
+.artistListTools .searchBox input { padding-left: 39px; }
 .artistListTools .iconButton { flex: 0 0 38px; }
 .artistRows { border-top: 1px solid rgba(164, 188, 199, .18); }
 .artistRow { display: flex; justify-content: space-between; align-items: center; width: 100%; min-height: 58px; padding: 9px 11px; gap: 12px; border: 0; border-bottom: 1px solid rgba(164, 188, 199, .13); border-radius: 0; color: #eff8f7; background: transparent; text-align: left; box-shadow: none; transform: none; }

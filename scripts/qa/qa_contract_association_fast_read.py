@@ -71,7 +71,7 @@ class FastAssociationReadTests(unittest.TestCase):
         self.assertEqual(light, {k: v for k, v in full.items() if k != "income"})
         self.assertEqual(light["items"], self.items)
         self.assertEqual(light["version"], 7)
-        self.assertFalse(light["reports_effective"])
+        self.assertTrue(light["reports_effective"])
 
     def test_light_read_still_checks_permissions_and_latest_claims(self):
         self.get(include_income=False)

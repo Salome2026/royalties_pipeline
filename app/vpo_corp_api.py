@@ -374,6 +374,8 @@ class MasterContractAllocation(BaseModel):
 
 
 class MasterAgreement(BaseModel):
+    distribution_contract_number: int | None = Field(default=None, ge=10010)
+    distribution_contract_version: int | None = Field(default=None, ge=1)
     id: str = Field(..., min_length=1, max_length=100)
     label: str = Field(default="", max_length=120)
     commercialization: Literal["pending", "distribution", "master"] = "pending"
@@ -420,7 +422,6 @@ class MasterContractSplit(MasterContractAllocation):
 class MasterContractSaveRequest(BaseModel):
     split: MasterContractSplit
     closed: bool = False
-    future_reports_selected: bool = False
     expected_version: int = Field(default=0, ge=0)
     complete_association_review: bool = False
 
@@ -433,6 +434,17 @@ class MasterArtistContractSaveRequest(BaseModel):
     effective_from: str | None = None
     is_project: bool = False
     is_active: bool = True
+    notes: str = Field(default="", max_length=3000)
+    expected_version: int = Field(default=0, ge=0)
+
+
+class MasterDistributionContractSaveRequest(BaseModel):
+    number: int | None = Field(default=None, ge=10010)
+    label: str = Field(..., min_length=1, max_length=200)
+    sublabel: str = Field(default="", max_length=200)
+    master_pool_percent: float = Field(..., ge=0, le=100, allow_inf_nan=False)
+    company_name: str = Field(default="Indyana", max_length=200)
+    distribution_recipients: list[MasterAgreementOwner] | None = Field(default=None, min_length=1, max_length=12)
     notes: str = Field(default="", max_length=3000)
     expected_version: int = Field(default=0, ge=0)
 
@@ -8684,6 +8696,39 @@ def require_master_contract_user(conn: Any, username: str | None, action: Litera
     return clean
 
 
+@app.get("/master-contract-distribution")
+def get_master_contract_distribution(
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+):
+    require_api_key(x_vpo_api_key)
+    from app.distribution_contracts import list_distribution_contracts
+    with operational_connect() as conn:
+        require_master_contract_user(conn, x_vpo_username, "access")
+        try:
+            items = list_distribution_contracts(conn)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+    return {"items": items, "total": len(items)}
+
+
+@app.put("/master-contract-distribution")
+def put_master_contract_distribution(
+    request: MasterDistributionContractSaveRequest,
+    x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
+):
+    require_api_key(x_vpo_api_key)
+    from app.distribution_contracts import save_distribution_contract
+    with operational_connect() as conn:
+        actor = require_master_contract_user(conn, x_vpo_username, "edit")
+        try:
+            return save_distribution_contract(conn, request.model_dump(), number=request.number,
+                expected_version=request.expected_version, actor=actor)
+        except ValueError as exc:
+            raise HTTPException(409 if "cambió desde" in str(exc) or "ya pertenecen" in str(exc) else 400, str(exc)) from exc
+
+
 @app.get("/master-contract-artists")
 def get_master_contract_artists(
     x_vpo_api_key: str | None = Header(default=None),
@@ -8693,7 +8738,7 @@ def get_master_contract_artists(
     with operational_connect() as conn:
         require_master_contract_user(conn, x_vpo_username, "access")
         items = list_artist_contracts(conn)
-    return {"items": items, "total": len(items), "reports_effective": False}
+    return {"items": items, "total": len(items), "reports_effective": not is_wml()}
 
 
 @app.put("/master-contract-artists")
@@ -8712,7 +8757,7 @@ def put_master_contract_artist(
         except ValueError as exc:
             status_code = 409 if "cambió desde" in str(exc) else 400
             raise HTTPException(status_code=status_code, detail=str(exc)) from exc
-    return {**saved, "reports_effective": False}
+    return {**saved, "reports_effective": not is_wml()}
 
 
 @app.get("/master-contract-models")
@@ -8730,7 +8775,7 @@ def list_master_contract_models(
             (1,)).fetchall()]
     from app.master_contract_models import closed_models
     items = closed_models(master_contract_catalog(include_income=False).to_dicts(), saved)
-    return {"items": items, "total": len(items), "reports_effective": False}
+    return {"items": items, "total": len(items), "reports_effective": not is_wml()}
 
 
 @app.get("/master-contracts")
@@ -8824,7 +8869,7 @@ def list_master_contracts(
         "amount_basis": "wml_contractual_base_100" if is_wml() else "dashboard_net_statement_usd",
         "pool_contracts_supported": True,
         "commercialization_filter_supported": True,
-        "reports_effective": False,
+        "reports_effective": not is_wml(),
         "income_included": include_income,
     }
 
@@ -9020,7 +9065,7 @@ def get_master_contract_associations(
     choices = ((saved or {}).get("split") or {}).get("code_association_overrides") or []
     items = master_contract_associations(clean, choices, claims)
     result = {"isrc": clean, "items": items, "version": (saved or {}).get("version", 0),
-              "pending_codes": unresolved_associations(items, choices), "reports_effective": False}
+              "pending_codes": unresolved_associations(items, choices), "reports_effective": not is_wml()}
     if include_income:
         extras = master_contract_associated_income(all_choices)
         baseline = master_contract_income_baseline().filter(pl.col("asset_isrc") == clean)
@@ -9047,6 +9092,8 @@ def get_master_contract(
         require_master_contract_user(conn, x_vpo_username, "access")
         saved = read_split(conn, clean)
         contracts = active_artist_contracts(conn)
+        from app.distribution_contracts import list_distribution_contracts
+        distribution_contracts = list_distribution_contracts(conn) if not is_wml() and is_postgres_connection(conn) else []
         choices = read_contract_association_choices(conn)
         review = read_association_review_states(conn).get(clean, {})
         from app.master_contract_participants import read_participant_history
@@ -9091,6 +9138,7 @@ def get_master_contract(
         "artists_informed": catalog_row.get("artist_statement"),
         "artist_suggestions": suggestions,
         "artist_contracts": list(contracts.values()),
+        "distribution_contracts": distribution_contracts,
         "first_sale_date": first_sale_date,
         "first_sale_precision": first_sale_precision,
         "first_statement_date": first_statement_date,
@@ -9114,7 +9162,7 @@ def get_master_contract(
         "updated_at": saved["updated_at"] if saved else None,
         "amount_basis": "wml_contractual_base_100" if is_wml() else "dashboard_net_statement_usd",
         "pool_contracts_supported": True,
-        "reports_effective": False,
+        "reports_effective": not is_wml(),
         "income_included": include_income,
     }
 
@@ -9136,7 +9184,7 @@ def put_master_contract(
         if master_contract_catalog(include_income=False).filter(pl.col("asset_isrc") == clean).is_empty():
             raise HTTPException(status_code=404, detail="El ISRC no figura en el catálogo publicado.")
         previous = read_split(conn, clean)
-        if bool(previous and previous["closed"]) or request.closed or request.complete_association_review or request.future_reports_selected != bool(previous and previous["future_reports_selected"]):
+        if bool(previous and previous["closed"]) or request.closed or request.complete_association_review:
             require_master_contract_user(conn, actor, "approve")
         try:
             split = preserve_contract_associations(request.split.model_dump(), previous)
@@ -9165,7 +9213,7 @@ def put_master_contract(
             saved = save_split(
                 conn, clean, split,
                 closed=request.closed,
-                future_reports_selected=request.future_reports_selected,
+                future_reports_selected=False,
                 expected_version=request.expected_version,
                 actor=actor,
             )
@@ -9177,7 +9225,7 @@ def put_master_contract(
         except ValueError as exc:
             status_code = 409 if "cambió desde" in str(exc) else 400
             raise HTTPException(status_code=status_code, detail=str(exc)) from exc
-    return {**saved, "reports_effective": False}
+    return {**saved, "reports_effective": not is_wml()}
 
 
 def royalties_dashboard_input_columns() -> set[str]:

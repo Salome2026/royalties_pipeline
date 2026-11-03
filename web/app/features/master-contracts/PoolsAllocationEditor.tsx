@@ -8,7 +8,8 @@ import { beneficiaryKey, distributionRecipients, withDistributionRecipients, sim
 const numberOrNull = (value: string) => value.trim() === "" ? null : Number(value);
 const percent = (value: number) => value.toLocaleString("es-AR", { maximumFractionDigits: 4 });
 
-export function PoolsAllocationEditor({ agreement, allocation, canEdit, artistOptions, artistContracts, onChange, onEditArtist, distributionRecipientsSupported }: {
+export function PoolsAllocationEditor({ agreement, allocation, canEdit, artistOptions, artistContracts, onChange, onEditArtist, distributionRecipientsSupported, initialOnly = false }: {
+  initialOnly?: boolean;
   agreement: MasterAgreement;
   allocation: Allocation;
   canEdit: boolean;
@@ -96,8 +97,7 @@ export function PoolsAllocationEditor({ agreement, allocation, canEdit, artistOp
     </div>
   </section>;
 
-  return <>
-    <section className={styles.band}>
+  const initialEditor = <section className={styles.band}>
       <div className={styles.sectionHeading}><h2>Reparto inicial</h2></div>
       {isMaster && <div className={styles.segmented} aria-label="Tipo de contrato">
         {(["simple", "project"] as const).map((kind) => <button type="button" key={kind} disabled={!canEdit} aria-pressed={(agreement.contract_kind || "simple") === kind}
@@ -132,7 +132,11 @@ export function PoolsAllocationEditor({ agreement, allocation, canEdit, artistOp
           </div>)}
         </div>}
       </div>
-    </section>
+    </section>;
+
+  if (initialOnly) return <>{initialEditor}<datalist id={optionsId}>{[...new Set(["Indyana", "Mawz", ...artistOptions])].map((name) => <option value={name} key={name} />)}</datalist></>;
+  return <>
+    {initialEditor}
 
     {isMaster && <section className={styles.band}>
       <div className={styles.sectionHeading}><h2>{isProject ? "Titulares y socios" : "Titulares del master"}</h2><span className={Math.abs(ownershipTotal(agreement) - 100) < .0001 ? styles.counterOk : styles.counterPending}>Titularidad {percent(ownershipTotal(agreement))}%</span></div>

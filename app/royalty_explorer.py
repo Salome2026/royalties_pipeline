@@ -51,8 +51,8 @@ def scope_keys(scope: set[str] | None) -> set[str] | None:
 
 def registry_rows(conn) -> list[dict]:
     return [{"isrc": r["isrc"], "split": json.loads(r["payload_json"]), "is_closed": bool(r["is_closed"]),
-             "future_reports_selected": bool(r["future_reports_selected"]), "version": int(r["version"])}
-            for r in conn.execute("SELECT isrc,payload_json,is_closed,future_reports_selected,version FROM master_contract_splits ORDER BY isrc").fetchall()]
+             "version": int(r["version"])}
+            for r in conn.execute("SELECT isrc,payload_json,is_closed,version FROM master_contract_splits ORDER BY isrc").fetchall()]
 
 
 def participant_names(catalog: list[dict], contracts: list[dict]) -> dict[str, str]:

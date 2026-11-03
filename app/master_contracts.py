@@ -628,8 +628,7 @@ def validate_split(split: dict[str, Any], closed: bool, future_reports_selected:
             _period_start(str(effective_from))
         except ValueError as exc:
             raise ValueError("La fecha de vigencia no es válida.") from exc
-    if future_reports_selected and not closed:
-        raise ValueError("Solo un ISRC cerrado puede quedar seleccionado para una futura aplicación.")
+    # Legacy report opt-in is ignored; consumers use closed, validated agreements.
     if closed and not split.get("agreement_confirmed"):
         raise ValueError("Para cerrar, confirmá el acuerdo y el artista principal.")
     agreements = split.get("agreements")
@@ -841,6 +840,9 @@ def save_split(
     expected_version: int,
     actor: str,
 ) -> dict[str, Any]:
+    from app.distribution_contracts import validate_distribution_references
+    validate_distribution_references(conn, split)
+    future_reports_selected = False  # Retired field retained only for old history readers.
     if split.get("code_association_overrides") and not is_postgres_connection(conn):
         raise ValueError("Los códigos asociados usan exclusivamente Cloud SQL Postgres.")
     if any(agreement.get("allocation_model") == "pools" for agreement in split.get("agreements") or []) and not is_postgres_connection(conn):

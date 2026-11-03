@@ -27,6 +27,8 @@ export type Allocation = {
 };
 
 export type MasterAgreement = {
+  distribution_contract_number?: number | null;
+  distribution_contract_version?: number | null;
   id: string;
   label: string;
   commercialization: "pending" | "distribution" | "master";

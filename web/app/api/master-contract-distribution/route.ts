@@ -1,0 +1,29 @@
+import { NextRequest, NextResponse } from "next/server";
+import { apiConfig, royaltyHeaders } from "../_auth";
+
+export async function GET() {
+  const config = await apiConfig();
+  if ("error" in config) return config.error;
+  const response = await fetch(`${config.apiUrl}/master-contract-distribution`, {
+    headers: { ...royaltyHeaders(config) },
+    cache: "no-store",
+  });
+  const payload = await response.json().catch(() => ({}));
+  return NextResponse.json(response.ok ? payload : { error: payload.detail || `Error API ${response.status}` }, { status: response.status });
+}
+
+export async function PUT(request: NextRequest) {
+  const config = await apiConfig();
+  if ("error" in config) return config.error;
+  const response = await fetch(`${config.apiUrl}/master-contract-distribution`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...royaltyHeaders(config),
+    },
+    body: await request.text(),
+    cache: "no-store",
+  });
+  const payload = await response.json().catch(() => ({}));
+  return NextResponse.json(response.ok ? payload : { error: payload.detail || `Error API ${response.status}` }, { status: response.status });
+}

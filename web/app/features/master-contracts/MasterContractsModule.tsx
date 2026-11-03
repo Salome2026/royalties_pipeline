@@ -5,6 +5,9 @@ import { WmlReferences } from "../wml/WmlReferences";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowLeft, Check, ChevronDown, ChevronLeft, ChevronRight, Disc3, FilePenLine, Link2, RefreshCw, Search, X } from "lucide-react";
 import styles from "./MasterContractsModule.module.css";
+import { DistributionContractsPanel } from "./DistributionContractsPanel";
+import { DistributionContractPicker } from "./DistributionContractPicker";
+import type { DistributionContract } from "./distributionContractLogic";
 import { ArtistContractsPanel, artistBeneficiaries, type ArtistContract } from "./ArtistContractsPanel";
 import { MasterAgreementsEditor, visibleAgreements, type MasterAgreement } from "./MasterAgreementsEditor";
 import { PoolsAllocationEditor } from "./PoolsAllocationEditor";
@@ -36,7 +39,6 @@ export type ContractItem = {
   last_month: string | null;
   sources: string | null;
   closed: boolean;
-  future_reports_selected: boolean;
   version: number;
   association_review_pending?: boolean;
   association_pending_count?: number;
@@ -63,6 +65,7 @@ export type ContractDetail = ContractItem & {
     warnings: string[];
   };
   artist_contracts: ArtistContract[];
+  distribution_contracts?: DistributionContract[];
   first_sale_date: string | null;
   first_sale_precision: "day" | "month" | null;
   first_statement_date: string | null;
@@ -70,7 +73,7 @@ export type ContractDetail = ContractItem & {
   split: Split;
   updated_by: string | null;
   updated_at: string | null;
-  reports_effective: false;
+  reports_effective: boolean;
   pool_contracts_supported?: boolean;
   participant_proposal?: { status: string; added: Record<string, string[]>; capacity_exceeded: boolean } | null;
   distribution_recipients_supported?: boolean;
@@ -106,7 +109,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export function MasterContractsModule({ canEdit, canApprove, onMessage, onOpenDashboard }: Props) {
-  const [mode, setMode] = useState<"isrc" | "artists">("isrc");
+  const [mode, setMode] = useState<"isrc" | "artists" | "distribution">("isrc");
   const [keyword, setKeyword] = useState("");
   const [appliedKeyword, setAppliedKeyword] = useState("");
   const [status, setStatus] = useState<"all" | "open" | "closed" | "review" | "unidentified">("all");
@@ -125,7 +128,6 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage, onOpenDa
   const [draft, setDraft] = useState<Split | null>(null);
   const [openAgreementId, setOpenAgreementId] = useState<string | null>(null);
   const [closed, setClosed] = useState(false);
-  const [futureSelected, setFutureSelected] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingArtist, setEditingArtist] = useState<string | null>(null);
@@ -202,7 +204,6 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage, onOpenDa
       setDraft(structuredClone(loaded.split));
       setOpenAgreementId(null);
       setClosed(loaded.closed);
-      setFutureSelected(loaded.future_reports_selected);
       setAssociationValidation({ loading: true, pending: 0, error: "" });
     } catch (error) {
       onMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo abrir el ISRC." });
@@ -214,7 +215,6 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage, onOpenDa
   const dirty = detail && draft && (
     JSON.stringify(draft) !== JSON.stringify(detail.split)
     || closed !== detail.closed
-    || futureSelected !== detail.future_reports_selected
     || (!detail.closed && detail.version > 0 && Object.keys(detail.participant_proposal?.added || {}).length > 0)
   );
   const canEditCurrent = canEdit && (!closed || canApprove);
@@ -277,7 +277,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage, onOpenDa
     });
   }
 
-  async function save(nextClosed = closed, nextSelected = futureSelected, completeReview = false) {
+  async function save(nextClosed = closed, completeReview = false) {
     if (!detail || !draft || !canEditCurrent) return;
     if (errors.length) { onMessage({ type: "error", text: errors[0] }); return; }
     if ((completeReview || (nextClosed && !detail.closed)) && associationsIncomplete) {
@@ -294,7 +294,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage, onOpenDa
         setDetail((value) => value ? { ...value, pool_contracts_supported: true } : value);
       }
       const saved = await requestJson<{
-        split: Split; closed: boolean; future_reports_selected: boolean; version: number;
+        split: Split; closed: boolean; version: number;
         updated_by: string; updated_at: string;
         association_review_pending?: boolean; association_pending_count?: number;
       }>(`/api/master-contracts/${encodeURIComponent(detail.isrc)}`, {
@@ -303,7 +303,6 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage, onOpenDa
         body: JSON.stringify({
           split: { ...draft, agreements },
           closed: nextClosed,
-          future_reports_selected: nextSelected,
           expected_version: detail.version,
           complete_association_review: completeReview,
         }),
@@ -311,8 +310,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage, onOpenDa
       setDetail({ ...detail, ...saved, participant_proposal: null });
       setDraft(structuredClone(saved.split));
       setClosed(saved.closed);
-      setFutureSelected(saved.future_reports_selected);
-      onMessage({ type: "ok", text: saved.closed ? "Reparto guardado y cerrado. Los reportes actuales no cambiaron." : "Borrador guardado. Los reportes actuales no cambiaron." });
+      onMessage({ type: "ok", text: saved.closed ? "Reparto guardado y cerrado. Se usa automáticamente en dashboards y reportes contractuales." : "Borrador guardado." });
       void loadList();
       return true;
     } catch (error) {
@@ -336,6 +334,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage, onOpenDa
     if (keyword.trim() === appliedKeyword && offset === 0) void loadList();
   }
 
+  if (mode === "distribution") return <DistributionContractsPanel canEdit={canEdit} onBack={() => setMode("isrc")} onMessage={onMessage} />;
   if (mode === "artists") return <ArtistContractsPanel canEdit={canEdit} onBack={() => setMode("isrc")} onMessage={onMessage} />;
   if (bulkOpen) return <BulkContractsPanel items={(list?.items || []).filter((item) => selectedIsrcs.includes(item.isrc))}
     canApprove={canApprove} onBack={() => { setBulkOpen(false); setSelectedIsrcs([]); void loadList(); }}
@@ -367,7 +366,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage, onOpenDa
         <ContractAssociationsPanel key={detail.isrc} isrc={detail.isrc} version={detail.version} canEdit={canEditCurrent && !saving}
           choices={draft.code_association_overrides || []} onChange={(choices) => updateDraft({ code_association_overrides: choices })}
           onValidationChange={setAssociationValidation} />
-        {!wml && closed && (detail.association_review_pending || dirty) && canEditCurrent && <button type="button" className={styles.primaryButton} disabled={saving || associationsIncomplete || errors.length > 0} onClick={() => void save(closed, futureSelected, true)}>Finalizar revisión de asociaciones</button>}
+        {!wml && closed && (detail.association_review_pending || dirty) && canEditCurrent && <button type="button" className={styles.primaryButton} disabled={saving || associationsIncomplete || errors.length > 0} onClick={() => void save(closed, true)}>Finalizar revisión de asociaciones</button>}
 
         <div className={styles.detailColumns}>
           <div className={styles.formColumn}>
@@ -388,6 +387,9 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage, onOpenDa
                 <span>Contrato de {contractFor(allocation.principal)?.artist_name}: {artistBeneficiaries(contractFor(allocation.principal)!).map((item) => `${item.name}: ${percent(item.percent || 0)}%`).join(" · ")}</span>
                 {canEditCurrent && <button type="button" className={styles.secondaryButton} onClick={() => applyPrincipalContract(contractFor(allocation.principal)!)}>Usar propuesta</button>}
               </div>}
+              {!wml && activeAgreement?.commercialization === "distribution" && <DistributionContractPicker key={activeAgreement.id}
+                agreement={activeAgreement} allocation={allocation} contracts={detail.distribution_contracts || []} canEdit={canEditCurrent}
+                onChange={(next) => updateDraft({ has_contract: true, agreements: agreements.map((item) => item.id === next.id ? next : item) })} />}
               {activeAgreement && <PoolsAllocationEditor agreement={activeAgreement} allocation={allocation} canEdit={canEditCurrent}
                 distributionRecipientsSupported={detail.distribution_recipients_supported === true}
                 artistOptions={artistOptions} artistContracts={detail.artist_contracts} onEditArtist={setEditingArtist}
@@ -407,15 +409,11 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage, onOpenDa
                 <span>Acuerdo y porcentajes confirmados</span>
               </label>
               <label className={styles.notesLabel}>Notas del acuerdo<textarea disabled={!canEditCurrent} rows={3} value={draft.notes} onChange={(event) => updateDraft({ notes: event.target.value })} /></label>
-              <label className={styles.checkboxLine}>
-                <input type="checkbox" disabled={!canEditCurrent || !canApprove || !closed} checked={futureSelected} onChange={(event) => setFutureSelected(event.target.checked)} />
-                <span>Seleccionado para futura aplicación a reportes</span>
-              </label>
-              <p className={styles.safetyNote}>Esta selección no modifica ningún reporte ni dashboard actual.</p>
+              <p className={styles.fieldHint}>Los repartos cerrados se usan automáticamente en dashboards y reportes contractuales.</p>
               {detail.updated_at && <p className={styles.auditLine}>Último guardado: {detail.updated_at} por {detail.updated_by || "-"}.</p>}
               <div className={styles.actions}>
                 {canEditCurrent && <button type="button" className={styles.secondaryButton} disabled={saving || errors.length > 0 || (!dirty && detail.version > 0)} onClick={() => void save()}><FilePenLine size={16} />{saving ? "Guardando..." : "Guardar"}</button>}
-                {canApprove && canEdit && <button type="button" className={styles.primaryButton} disabled={saving || errors.length > 0 || (!closed && associationsIncomplete)} onClick={() => void save(!closed, closed ? false : futureSelected)}><Check size={16} />{closed ? "Reabrir" : "Cerrar reparto"}</button>}
+                {canApprove && canEdit && <button type="button" className={styles.primaryButton} disabled={saving || errors.length > 0 || (!closed && associationsIncomplete)} onClick={() => void save(!closed)}><Check size={16} />{closed ? "Reabrir" : "Cerrar reparto"}</button>}
               </div>
             </section>
             </>}
@@ -474,7 +472,8 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage, onOpenDa
     <section className={styles.workspace}>
       <header className={styles.listHeader}>
         <div className={styles.heading}><span>Catálogo y distribución</span><h1>Contratos</h1><p>Participantes, porcentajes y códigos asociados por ISRC.</p></div>
-        {!wml && <button type="button" className={styles.secondaryButton} onClick={() => setMode("artists")}>Contratos de artistas</button>}
+        {!wml && <><button type="button" className={styles.secondaryButton} onClick={() => setMode("artists")}>Contratos de artistas</button>
+        <button type="button" className={styles.secondaryButton} onClick={() => setMode("distribution")}>Contratos de distribución</button></>}
         <button type="button" className={styles.iconButton} title="Actualizar catálogo" aria-label="Actualizar catálogo" disabled={loading} onClick={() => void loadList()}><RefreshCw size={18} /></button>
       </header>
       <form className={styles.toolbar} onSubmit={submitSearch}>
@@ -530,7 +529,7 @@ export function MasterContractsModule({ canEdit, canApprove, onMessage, onOpenDa
             <td><button type="button" className={styles.isrcButton} onClick={() => void openDetail(item.isrc)}>{item.isrc}</button></td>
             <td className={styles.artistCell} title={item.artists_informed || ""}>{item.artists_informed || "-"}</td>
 
-            <td><span className={`${styles.status} ${item.closed && !item.association_review_pending ? styles.closed : styles.open}`}>{item.association_review_pending ? "Revisión pendiente" : item.closed ? "Cerrado" : "Abierto"}</span>{item.association_review_pending && <small className={styles.futureNote}>{item.association_pending_count} códigos por validar{item.closed ? " · Reparto aprobado" : ""}</small>}{item.future_reports_selected && <small className={styles.futureNote}>Futura aplicación</small>}</td>
+            <td><span className={`${styles.status} ${item.closed && !item.association_review_pending ? styles.closed : styles.open}`}>{item.association_review_pending ? "Revisión pendiente" : item.closed ? "Cerrado" : "Abierto"}</span>{item.association_review_pending && <small className={styles.futureNote}>{item.association_pending_count} códigos por validar{item.closed ? " · Reparto aprobado" : ""}</small>}</td>
           </tr>)}
         </tbody>
       </table></div></>}
