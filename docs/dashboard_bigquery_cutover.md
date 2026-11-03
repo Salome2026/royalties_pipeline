@@ -51,25 +51,23 @@ a inferir como parte de esta reparacion de columnas.
 7. Fijar `bigquery` en `cloudbuild.yaml` para que el siguiente despliegue no
    cambie accidentalmente el motor.
 
-## Rankings completos del dashboard
+## Vista general y detalle del dashboard
 
-El resumen de ingresos por tema y por artista permite recorrer todos los
-resultados del filtro en listas independientes de hasta 360 px, con encabezado
-visible y scroll por rueda, tacto o teclado. La web solicita
-`full_catalog_rankings=true` tanto en el resumen normal como en la exploracion
-contractual. BigQuery y el retorno Parquet aplican esta opcion solo a los
-rankings generales de temas y artistas; mantienen filtros, permisos, totales y
-el limite existente para las otras categorias y YouTube. Sin la opcion se
-conserva el limite anterior.
+El buscador y los filtros guardan el borrador en el formulario. Solo al aplicar
+se vuelve a consultar el dashboard. El histórico mantiene los totales del período
+y presenta la tabla en ventanas de 12 meses, con un gráfico por año que permite
+abrir sus meses. Los formatos monetarios se reutilizan.
 
-Las listas generales de temas y artistas dibujan solamente las filas visibles
-y cuatro filas adicionales a cada lado de la ventana. El espacio restante
-conserva la altura del listado completo y permite llegar al ultimo resultado
-con la rueda, el pulgar del scroll, tacto o teclado. El desplazamiento se
-actualiza dentro de cada lista, sin reconstruir el dashboard. Los formatos
-numericos se reutilizan y la ventana vuelve al inicio al cambiar los datos.
-Las pruebas de fluidez cubren tambien el scroll de la pagina completa con
-miles de resultados, ademas de los clics, filtros y listas pequenas o vacias.
+Con `paged_rankings=true`, el resumen devuelve hasta 50 artistas y 50 temas. Cada
+recuadro conserva su scroll y solicita por separado el siguiente bloque, con su
+categoría, desplazamiento y versión de los datos. Los bloques comparten los
+filtros, permisos y denominador del período. Un cambio de versión requiere
+actualizar el resumen antes de seguir. Las demás categorías y los consumidores
+que usan el modo anterior conservan sus límites.
+
+Las listas dibujan solo las filas visibles y un margen adicional, tanto al abrir
+como después de incorporar más resultados. Las pruebas verifican apertura,
+escritura, scroll general y navegación histórica con 64 meses y miles de temas.
 
 ## Retorno inmediato
 

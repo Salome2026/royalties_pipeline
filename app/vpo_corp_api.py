@@ -82,6 +82,7 @@ from app.master_contract_income import (
     published_unassigned_income,
     read_choices as read_contract_association_choices,
 )
+from app.dashboard_rank_page import PAGE_SIZE, RankPage, RankSnapshotChanged, rank_snapshot
 from app.bigquery_dashboard import (
     royalties_dashboard_bigquery as query_royalties_dashboard_bigquery,
     royalty_detail_count_bigquery as query_royalty_detail_count_bigquery,
@@ -10285,6 +10286,7 @@ def query_royalties_dashboard_from_bigquery(
     limit: int,
     artist_scope: set[str] | None = None,
     full_catalog_rankings: bool = False,
+    rank_page: RankPage | None = None,
 ) -> dict[str, Any]:
     from app.catalog_refresh import dashboard_state, enabled
     return query_royalties_dashboard_bigquery(
@@ -10301,6 +10303,7 @@ def query_royalties_dashboard_from_bigquery(
         limit=limit,
         artist_scope=artist_scope,
         full_catalog_rankings=full_catalog_rankings,
+        rank_page=rank_page,
         project=VPO_BIGQUERY_PROJECT,
         dataset=active_bigquery_dataset(),
         location=VPO_BIGQUERY_LOCATION,
@@ -10339,7 +10342,7 @@ def royalty_explorer_request(*, detail: bool, measure: str, beneficiary: str | N
                             keyword: str | None, period_basis: str, period_mode: str, start_month: str | None,
                             end_month: str | None, drill: str | None, track_key: str | None, track_title: str | None,
                             api_key: str | None, username: str | None, distribution_summary: bool = False,
-                            full_catalog_rankings: bool = False):
+                            full_catalog_rankings: bool = False, rank_page: RankPage | None = None):
     contracts, scope = royalty_explorer_access(api_key, username)
     from app import royalty_explorer
     try:
@@ -10355,8 +10358,10 @@ def royalty_explorer_request(*, detail: bool, measure: str, beneficiary: str | N
         if detail:
             return royalty_explorer.detail(contracts, policy, scope, track_key=track_key, track_title=track_title,
                 juntada_presentation=clean_username(username or '') == 'hernanlda', **args)
-        return royalty_explorer.dashboard(contracts, policy, scope, measure=measure,
-            full_catalog_rankings=full_catalog_rankings or clean_username(username or '') == 'hernanlda', **args)
+        result = royalty_explorer.dashboard(contracts, policy, scope, measure=measure,
+            full_catalog_rankings=full_catalog_rankings or clean_username(username or '') == 'hernanlda',
+            rank_page=rank_page, **args)
+        return dashboard_rank_response(rank_page, result)
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc
     except ValueError as exc:
@@ -10372,11 +10377,28 @@ def royalty_explorer_dashboard(measure: Literal["income", "contractual"] = "inco
     period_mode: Literal["last_6_months", "last_12_months", "all", "single_month", "closed_range"] = "last_6_months",
     start_month: str | None = None, end_month: str | None = None, drill: str | None = None,
     full_catalog_rankings: bool = False,
+    paged_rankings: bool = False, rank_category: Literal["artist", "title"] | None = None, rank_offset: int = 0,
+    rank_snapshot_token: str | None = None,
     x_vpo_api_key: str | None = Header(default=None), x_vpo_username: str | None = Header(default=None)):
     return royalty_explorer_request(detail=False, measure=measure, beneficiary=beneficiary, source=source, account=account,
         keyword=keyword, period_basis=period_basis, period_mode=period_mode, start_month=start_month, end_month=end_month,
         drill=drill, track_key=None, track_title=None, api_key=x_vpo_api_key, username=x_vpo_username,
-        full_catalog_rankings=full_catalog_rankings)
+        full_catalog_rankings=full_catalog_rankings,
+        rank_page=dashboard_rank_page(paged_rankings, rank_category, rank_offset, rank_snapshot_token))
+
+
+def dashboard_rank_page(paged: bool, category: str | None, offset: int, snapshot: str | None) -> RankPage | None:
+    try:
+        return RankPage(category, offset, snapshot) if paged or category or offset else None
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+def dashboard_rank_response(page: RankPage | None, result: dict) -> dict:
+    try:
+        return page.response(result) if page else result
+    except RankSnapshotChanged as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @app.get("/royalties-dashboard/distribution")
@@ -10416,11 +10438,16 @@ def royalties_dashboard(
     period_mode: Literal["last_6_months", "last_12_months", "all", "single_month", "closed_range"] = "last_6_months",
     limit: int = 10,
     full_catalog_rankings: bool = False,
+    paged_rankings: bool = False,
+    rank_category: Literal["artist", "title"] | None = None,
+    rank_offset: int = 0,
+    rank_snapshot_token: str | None = None,
     refresh_cache: bool = False,
     x_vpo_api_key: str | None = Header(default=None),
     x_vpo_username: str | None = Header(default=None),
 ):
     require_api_key(x_vpo_api_key)
+    rank_page = dashboard_rank_page(paged_rankings, rank_category, rank_offset, rank_snapshot_token)
     artist_scope = None
     dashboard_username = x_vpo_username if isinstance(x_vpo_username, str) else None
     if clean_username(dashboard_username or ""):
@@ -10448,6 +10475,7 @@ def royalties_dashboard(
                 limit=limit,
                 artist_scope=artist_scope,
                 full_catalog_rankings=full_catalog_rankings,
+                rank_page=rank_page,
             )
         except Exception as exc:
             elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
@@ -10464,7 +10492,7 @@ def royalties_dashboard(
             elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
             response.headers["X-VPO-Dashboard-Backend"] = "bigquery"
             log_dashboard_backend_event(backend="bigquery", outcome="ok", elapsed_ms=elapsed_ms)
-            return result
+            return dashboard_rank_response(rank_page, result)
     safe_limit = max(3, min(int(limit or 10), 50))
     period_col = "transaction_month" if period_basis == "transaction_month" else "statement_period"
 
@@ -10484,6 +10512,15 @@ def royalties_dashboard(
     summary_path, catalog_refresh_status = fallback_summary(summary_path)
     base = pl.scan_parquet(summary_path)
     policy_document = load_distributor_policy_document()
+    snapshot = None
+    if rank_page:
+        from app.royalty_scope import RELEASE
+        release_id = RELEASE.get() if is_wml() else mart_release_cache().release_id_for(summary_path)
+        snapshot = rank_snapshot(
+            "parquet", summary_path.name, release_id or summary_path.stat().st_mtime_ns,
+            policy_document, sorted(artist_scope) if artist_scope is not None else None,
+            source, account, keyword, artist_keyword, period_basis, period_mode, start_month, end_month,
+        )
     base = apply_report_net_personalization(
         base,
         set(base.collect_schema().names()),
@@ -10547,7 +10584,7 @@ def royalties_dashboard(
             "first_month": None,
             "last_month": None,
         }
-        return {
+        result = {
             "report_personalization": personalization_state,
             "period_basis": period_basis,
             "period_column": period_col,
@@ -10576,6 +10613,9 @@ def royalties_dashboard(
             },
             "options": options,
         }
+        if rank_page:
+            result["ranking_snapshot"] = snapshot
+        return dashboard_rank_response(rank_page, result)
 
     if start_month or end_month or period_mode in {"single_month", "closed_range", "all"}:
         months = available_months
@@ -10614,7 +10654,7 @@ def royalties_dashboard(
         pl.max(period_col).alias("last_month"),
     ])
 
-    def rank_plan(field: str, frame: pl.LazyFrame, *, full: bool = False) -> pl.LazyFrame:
+    def rank_plan(field: str, frame: pl.LazyFrame, *, full: bool = False, page: RankPage | None = None) -> pl.LazyFrame:
         plan = (
             frame
             .filter(pl.col(field).is_not_null() & (pl.col(field) != ""))
@@ -10624,8 +10664,10 @@ def royalties_dashboard(
                 pl.sum("units").round(0).alias("units"),
                 pl.sum("raw_rows").alias("rows"),
             ])
-            .sort("amount_usd", descending=True)
+            .sort(["amount_usd", field], descending=[True, False])
         )
+        if page and field in {"artist", "title"}:
+            return plan.slice(page.offset, PAGE_SIZE + 1)
         return plan if full else plan.limit(safe_limit)
 
     def format_rank(field: str, df: pl.DataFrame, denominator: float) -> list[dict]:
@@ -10640,6 +10682,17 @@ def royalties_dashboard(
                 "percentage": round((amount / denominator * 100), 2) if denominator else 0.0,
             })
         return rows
+
+    if rank_page and rank_page.category:
+        category = rank_page.category
+        totals_frame, rank_frame = pl.collect_all(
+            [totals_plan, rank_plan(category, scoped, page=rank_page)], engine="streaming"
+        )
+        denominator = float(totals_frame.item(0, "amount_usd") or 0)
+        return dashboard_rank_response(rank_page, {
+            "rankings": {category: format_rank(category, rank_frame, denominator)},
+            "ranking_snapshot": snapshot,
+        })
 
     monthly_plan = (
         scoped
@@ -10711,7 +10764,7 @@ def royalties_dashboard(
         monthly_plan,
         matrix_plan,
         youtube_totals_plan,
-        *(rank_plan(field, scoped, full=full_catalog_rankings and field in {"artist", "title"}) for _, field in ranking_fields),
+        *(rank_plan(field, scoped, full=full_catalog_rankings and field in {"artist", "title"}, page=rank_page) for _, field in ranking_fields),
         *(rank_plan(field, youtube_scope) for _, field in youtube_ranking_fields),
     ], engine="streaming")
     totals = results[0].to_dicts()[0]
@@ -10740,7 +10793,7 @@ def royalties_dashboard(
         for index, (name, field) in enumerate(youtube_ranking_fields)
     }
 
-    return {
+    result = {
         "catalog_refresh": {"status": catalog_refresh_status},
         "report_personalization": personalization_state,
         "period_basis": period_basis,
@@ -10757,6 +10810,9 @@ def royalties_dashboard(
         },
         "options": options,
     }
+    if rank_page:
+        result["ranking_snapshot"] = snapshot
+    return dashboard_rank_response(rank_page, result)
 
 
 @app.get("/royalties-dashboard/bigquery-shadow")

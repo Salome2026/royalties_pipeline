@@ -9,6 +9,8 @@ from typing import Any, Iterable
 
 from google.cloud import bigquery
 
+from app.dashboard_rank_page import RankPage, rank_snapshot
+
 
 DEFAULT_PROJECT = os.environ.get("VPO_BIGQUERY_PROJECT", "vpo-corp-royalties")
 DEFAULT_DATASET = os.environ.get("VPO_BIGQUERY_DATASET", "royalties_analytics")
@@ -84,6 +86,7 @@ def dashboard_sql(
     period_basis: str,
     policy_document: dict[str, Any],
     refreshed_catalog: bool = False,
+    rank_page: RankPage | None = None,
 ) -> str:
     if period_basis == "transaction_month":
         period_column = "transaction_month"
@@ -91,6 +94,10 @@ def dashboard_sql(
         period_column = "statement_month"
     else:
         raise ValueError(f"Base temporal no soportada: {period_basis}")
+    rank_position = "ROW_NUMBER() OVER (PARTITION BY category ORDER BY amount_usd DESC, name)"
+    rank_filter = (rank_page.predicate(rank_position, "@ranking_limit") if rank_page else
+                   f"(@full_catalog_rankings AND category IN ('artist', 'title')) OR {rank_position} <= @ranking_limit")
+    output_filter = "WHERE section IN ('ranking', 'totals', 'selected_month')" if rank_page and rank_page.category else ""
     factor_sql = personalization_factor_sql(policy_document)
     table_name = "royalty_catalog_dashboard" if refreshed_catalog else "royalty_dashboard_rankings"
     table = f"`{project}.{dataset}.{table_name}`"
@@ -105,14 +112,19 @@ def dashboard_sql(
         ("title", "title"),
         ("label", "label"),
     ]
-    ranking_sql = "\nUNION ALL\n".join(
-        f"SELECT '{category}' AS category, {field} AS name, amount_usd, units, raw_rows FROM scoped"
-        for category, field in ranking_unions
-    )
-    youtube_ranking_sql = "\nUNION ALL\n".join(
-        f"SELECT '{category}' AS category, {field} AS name, amount_usd, units, raw_rows FROM youtube_scope"
-        for category, field in ranking_unions
-        if category in YOUTUBE_RANKING_CATEGORIES
+    def expand_ranks(frame: str, categories: list[tuple[str, str]]) -> str:
+        items = ", ".join(f"STRUCT('{category}' AS category, {field} AS name)" for category, field in categories)
+        return (
+            f"SELECT item.category, item.name, amount_usd, units, raw_rows "
+            f"FROM {frame} CROSS JOIN UNNEST([{items}]) AS item"
+        )
+
+    main_categories = ranking_unions
+    if rank_page and rank_page.category:
+        main_categories = [(category, field) for category, field in ranking_unions if category == rank_page.category]
+    ranking_sql = expand_ranks("scoped", main_categories)
+    youtube_ranking_sql = expand_ranks(
+        "youtube_scope", [(category, field) for category, field in ranking_unions if category in YOUTUBE_RANKING_CATEGORIES]
     )
     return rf"""
 WITH option_base AS (
@@ -252,8 +264,7 @@ ranking_aggregated AS (
 ranking_totals AS (
   SELECT *
   FROM ranking_aggregated
-  QUALIFY (@full_catalog_rankings AND category IN ('artist', 'title'))
-    OR ROW_NUMBER() OVER (PARTITION BY category ORDER BY amount_usd DESC, name) <= @ranking_limit
+  QUALIFY {rank_filter}
 ),
 youtube_scope AS (
   SELECT * FROM scoped WHERE dsp = 'YouTube'
@@ -322,6 +333,7 @@ output AS (
   FROM youtube_ranking_totals
 )
 SELECT * FROM output
+{output_filter}
 ORDER BY section, category, amount_usd DESC, month, source, account, name
 """.strip()
 
@@ -693,6 +705,7 @@ def royalties_dashboard_bigquery(
     period_mode: str = "last_6_months",
     limit: int = 10,
     full_catalog_rankings: bool = False,
+    rank_page: RankPage | None = None,
     project: str = DEFAULT_PROJECT,
     dataset: str = DEFAULT_DATASET,
     location: str = DEFAULT_LOCATION,
@@ -738,6 +751,7 @@ def royalties_dashboard_bigquery(
         period_basis=period_basis,
         policy_document=policy_document,
         refreshed_catalog=dashboard_release != release["release_id"],
+        rank_page=rank_page,
     )
     rows = query_rows(
         sql=sql,
@@ -764,4 +778,9 @@ def royalties_dashboard_bigquery(
         keyword=search,
     )
     result["catalog_refresh"] = {"status": refresh_status}
+    if rank_page:
+        result["ranking_snapshot"] = rank_snapshot(
+            "bigquery", project, dataset, dashboard_release, policy_document, artist_scope_tokens,
+            source, account, search, period_basis, period_mode, start_month, end_month,
+        )
     return result

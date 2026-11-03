@@ -51,6 +51,22 @@ class DashboardCatalogRankingsTests(unittest.TestCase):
                     self.assertEqual(full["rankings"][category][:10], default["rankings"][category])
                 self.assertEqual(full["rankings"]["title"][-1]["name"], "Tema 001")
                 self.assertEqual(full["totals"], default["totals"])
+                first = request(paged_rankings="true")
+                self.assertEqual(first["totals"], full["totals"])
+                self.assertEqual(first["matrix"], full["matrix"])
+                self.assertEqual(first["ranking_next"], {"artist": 50, "title": 50})
+                for category in ("artist", "title"):
+                    following = request(rank_category=category, rank_offset=50,
+                                        rank_snapshot_token=first["ranking_snapshot"])
+                    self.assertEqual(first["rankings"][category] + following["rows"], full["rankings"][category])
+                    self.assertIsNone(following["next_offset"])
+                small = request(paged_rankings="true", account="A")
+                self.assertEqual(len(small["rankings"]["title"]), 33)
+                self.assertIsNone(small["ranking_next"]["title"])
+                stale = client.get("/royalties-dashboard", params={
+                    "rank_category": "title", "rank_offset": 50, "rank_snapshot_token": "old",
+                }, headers={"X-VPO-API-Key": "scroll-qa"})
+                self.assertEqual(stale.status_code, 409)
                 self.assertEqual(full["youtube"], default["youtube"])
                 for category in ("territory", "label", "dsp"):
                     self.assertEqual(full["rankings"][category], default["rankings"][category])

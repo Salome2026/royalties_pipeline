@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import type { ExplorerRank } from "./RoyaltyExplorer";
 import styles from "./RoyaltyDashboard.module.css";
 
@@ -12,15 +12,57 @@ const percentage = new Intl.NumberFormat("es-AR", { maximumFractionDigits: 2 });
 const VIEWPORT_HEIGHT = 360;
 const OVERSCAN = 4;
 
-export function RoyaltyRankList({ title, rows, loading, scrollable, contractual, onSelect, emptyText = "Sin datos para este filtro." }: {
+export function RoyaltyRankList({ title, rows: initialRows, loading, scrollable, contractual, onSelect, nextOffset, onLoadMore, emptyText = "Sin datos para este filtro." }: {
   title: string;
   rows: RoyaltyRank[];
   loading: boolean;
   scrollable: boolean;
   contractual: boolean;
   onSelect?: (row: RoyaltyRank) => void;
+  nextOffset?: number | null;
+  onLoadMore?: (offset: number, signal: AbortSignal) => Promise<{ rows: RoyaltyRank[]; next_offset: number | null }>;
   emptyText?: string;
 }) {
+  const [additional, setAdditional] = useState<RoyaltyRank[]>([]);
+  const [pageOffset, setPageOffset] = useState(nextOffset);
+  const [pageError, setPageError] = useState("");
+  const [pageLoading, setPageLoading] = useState(false);
+  const request = useRef<AbortController | null>(null);
+  const rows = additional.length ? [...initialRows, ...additional] : initialRows;
+
+  useEffect(() => () => request.current?.abort(), []);
+  useLayoutEffect(() => {
+    request.current?.abort();
+    request.current = null;
+    setAdditional([]);
+    setPageOffset(nextOffset);
+    setPageError("");
+    setPageLoading(false);
+  }, [initialRows, nextOffset]);
+
+  async function loadMore() {
+    if (!onLoadMore || pageOffset == null || request.current) return;
+    const controller = new AbortController();
+    request.current = controller;
+    setPageLoading(true);
+    setPageError("");
+    try {
+      const page = await onLoadMore(pageOffset, controller.signal);
+      if (controller.signal.aborted) return;
+      setAdditional((previous) => [...previous, ...page.rows]);
+      setPageOffset(page.next_offset);
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setPageError(error instanceof Error ? error.message : "No se pudieron cargar más resultados.");
+      }
+    } finally {
+      if (!controller.signal.aborted) {
+        request.current = null;
+        setPageLoading(false);
+      }
+    }
+  }
+
   const viewport = useRef<HTMLDivElement>(null);
   const [firstVisible, setFirstVisible] = useState(0);
   // Match the existing one-line row spacing, including its separator and bar.
@@ -31,7 +73,7 @@ export function RoyaltyRankList({ title, rows, loading, scrollable, contractual,
   useLayoutEffect(() => {
     if (viewport.current) viewport.current.scrollTop = 0;
     setFirstVisible(0);
-  }, [rows, scrollable, rowHeight]);
+  }, [initialRows, scrollable, rowHeight]);
 
   function revealFocusedRow(index: number) {
     const element = viewport.current;
@@ -49,7 +91,7 @@ export function RoyaltyRankList({ title, rows, loading, scrollable, contractual,
     <section className={styles.rankSection}>
       <div className={styles.rankHeader}>
         <h2>{title}</h2>
-        <span>{rows.length ? `${rows.length} resultados` : "Sin datos"}</span>
+        <span>{rows.length ? `${rows.length}${pageOffset != null ? "+" : ""} resultados` : "Sin datos"}</span>
       </div>
       {loading && <div className={styles.empty}>Cargando...</div>}
       {!loading && rows.length === 0 && <div className={styles.empty}>{emptyText}</div>}
@@ -87,6 +129,14 @@ export function RoyaltyRankList({ title, rows, loading, scrollable, contractual,
           {scrollable && end < rows.length && <div aria-hidden="true" style={{ height: (rows.length - end) * rowHeight }} />}
         </div>
       </div>
+      {pageOffset != null && onLoadMore && (
+        <div className={styles.detailNavigation}>
+          <button type="button" disabled={loading || pageLoading} onClick={() => void loadMore()}>
+            {pageLoading ? "Cargando…" : "Mostrar 50 más"}
+          </button>
+          {pageError && <span role="alert">{pageError}</span>}
+        </div>
+      )}
     </section>
   );
 }

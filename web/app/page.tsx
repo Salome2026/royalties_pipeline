@@ -17,6 +17,8 @@ import { selectedRoyaltyScope } from './features/wml/WmlScopeControl';
 import { StatementReportModule } from "./features/statements/StatementReportModule";
 import digitalStyles from "./features/digital-income/DigitalIncome.module.css";
 import royaltyDashboardStyles from "./features/royalties-dashboard/RoyaltyDashboard.module.css";
+import { RoyaltyDashboardFilters, type DashboardFilters } from "./features/royalties-dashboard/RoyaltyDashboardFilters";
+import { RoyaltyDashboardHistory } from "./features/royalties-dashboard/RoyaltyDashboardHistory";
 import { RoyaltyRankList } from "./features/royalties-dashboard/RoyaltyRankList";
 import { RoyaltyContextAction, RoyaltyExplorerTrail, RoyaltyExplorerPending, RoyaltyTrackDrawer, initialExplorer, explorerActive, explorerParams, type ExplorerState, type ExplorerRank, type ExplorerInfo } from "./features/royalties-dashboard/RoyaltyExplorer";
 import SelectionMenu, { type SelectionIntent } from "./features/digital-income/SelectionMenu";
@@ -1023,6 +1025,8 @@ type RoyaltiesDashboardMatrixRow = {
 
 type RoyaltiesDashboardData = {
   explorer?: ExplorerInfo;
+  ranking_snapshot?: string;
+  ranking_next?: Record<"artist" | "title", number | null>;
   catalog_refresh?: { status: "ready" | "pending" };
   report_personalization: {
     enabled: boolean;
@@ -2203,22 +2207,27 @@ export default function Home() {
   const digitalIncomeLimit = 500;
   const [royaltiesDashboard, setRoyaltiesDashboard] = useState<RoyaltiesDashboardData | null>(null);
   const [royaltiesDashboardLoading, setRoyaltiesDashboardLoading] = useState(false);
-  const [royaltiesDashboardKeyword, setRoyaltiesDashboardKeyword] = useState("");
-  const [royaltiesDashboardSource, setRoyaltiesDashboardSource] = useState("");
-  const [royaltiesDashboardAccount, setRoyaltiesDashboardAccount] = useState("");
-  const [royaltiesDashboardPeriod, setRoyaltiesDashboardPeriod] = useState<PeriodSelection>({ mode: "last_6_months" });
-  const [wmlScope,setWmlScope] = useState(false);
-  useEffect(() => { if (selectedRoyaltyScope() === 'wml') { setWmlScope(true); setRoyaltiesDashboardPeriod({mode:'all'}); } },[]);
-  const [royaltiesDashboardPeriodBasis, setRoyaltiesDashboardPeriodBasis] = useState<"statement_period" | "transaction_month">("statement_period");
+  const [royaltiesDashboardFilters, setRoyaltiesDashboardFilters] = useState<DashboardFilters>({
+    keyword: "", source: "", account: "", period: { mode: "last_6_months" }, periodBasis: "statement_period",
+  });
+  const [wmlScope, setWmlScope] = useState(false);
+  useEffect(() => {
+    if (selectedRoyaltyScope() === "wml") {
+      setWmlScope(true);
+      setRoyaltiesDashboardFilters((current) => ({ ...current, period: { mode: "all" } }));
+    }
+  }, []);
   const [royaltiesDashboardTab, setRoyaltiesDashboardTab] = useState<"overview" | "youtube">("overview");
   const [royaltiesExplorer, setRoyaltiesExplorer] = useState<ExplorerState>(initialExplorer);
   const [royaltiesDashboardQuery, setRoyaltiesDashboardQuery] = useState("");
   const [royaltiesTrack, setRoyaltiesTrack] = useState<ExplorerRank | null>(null);
   const royaltiesDashboardRequest = useRef(0);
+  const royaltiesDashboardAbort = useRef<AbortController | null>(null);
   const [contractDashboardReturn, setContractDashboardReturn] = useState<{ isrc: string; title: string; scroll: number } | null>(null);
 
   useEffect(() => {
     royaltiesDashboardRequest.current++;
+    royaltiesDashboardAbort.current?.abort();
     setContractDashboardReturn(null);
     setRoyaltiesDashboard(null);
     setRoyaltiesDashboardLoading(false);
@@ -2571,19 +2580,6 @@ export default function Home() {
       digitalIncomeSelectedSources === null || digitalIncomeSelectedSources.includes(item.source)
     );
   }, [digitalIncome, digitalIncomeSelectedSources]);
-
-  const royaltiesDashboardAccountOptions = useMemo(() => {
-    if (!royaltiesDashboard) return [];
-    if (!royaltiesDashboardSource) return royaltiesDashboard.options.accounts;
-    return royaltiesDashboard.options.source_accounts
-      .filter((item) => item.source === royaltiesDashboardSource)
-      .map((item) => item.account);
-  }, [royaltiesDashboard, royaltiesDashboardSource]);
-
-  const royaltiesDashboardMonthlyMax = useMemo(() => Math.max(
-    1,
-    ...(royaltiesDashboard?.monthly || []).map((item) => Math.abs(item.amount_usd || 0)),
-  ), [royaltiesDashboard]);
 
   const pieStyle = useMemo(() => {
     if (!participation?.items.length) return { background: "#e4e7ec" };
@@ -4091,13 +4087,16 @@ export default function Home() {
     query?: string;
   }) {
     const requestId = ++royaltiesDashboardRequest.current;
+    royaltiesDashboardAbort.current?.abort();
+    const controller = new AbortController();
+    royaltiesDashboardAbort.current = controller;
     setRoyaltiesDashboardLoading(true);
     try {
-      const keyword = filters?.keyword ?? royaltiesDashboardKeyword;
-      const source = filters?.source ?? royaltiesDashboardSource;
-      const account = filters?.account ?? royaltiesDashboardAccount;
-      const period = filters?.period ?? royaltiesDashboardPeriod;
-      const periodBasis = filters?.periodBasis ?? royaltiesDashboardPeriodBasis;
+      const keyword = filters?.keyword ?? royaltiesDashboardFilters.keyword;
+      const source = filters?.source ?? royaltiesDashboardFilters.source;
+      const account = filters?.account ?? royaltiesDashboardFilters.account;
+      const period = filters?.period ?? royaltiesDashboardFilters.period;
+      const periodBasis = filters?.periodBasis ?? royaltiesDashboardFilters.periodBasis;
       const dashboardPeriod = resolvePeriod(period, "dashboard_period");
       const params = new URLSearchParams();
       if (keyword.trim()) params.set("keyword", keyword.trim());
@@ -4109,7 +4108,9 @@ export default function Home() {
       params.set("period_basis", periodBasis);
       params.set("limit", "10");
       const query = filters?.query !== undefined ? new URLSearchParams(filters.query) : params;
+      // Older API revisions still provide complete virtual lists during deployment.
       query.set("full_catalog_rankings", "true");
+      query.set("paged_rankings", "true");
       for (const name of ["measure", "beneficiary", "drill"]) query.delete(name);
       let selection = filters?.explorer || royaltiesExplorer;
       if (!filters?.explorer && filters?.query === undefined && keyword.trim() !== (new URLSearchParams(royaltiesDashboardQuery).get("keyword") || "")) {
@@ -4119,7 +4120,7 @@ export default function Home() {
       }
       const enhanced = !wmlScope && explorerActive(selection);
       if (enhanced) explorerParams(query, selection);
-      const response = await fetch(`/api/royalties-dashboard${enhanced ? "/explore" : ""}?${query}`, { cache: "no-store" });
+      const response = await fetch(`/api/royalties-dashboard${enhanced ? "/explore" : ""}?${query}`, { cache: "no-store", signal: controller.signal });
       if (requestId !== royaltiesDashboardRequest.current) return;
       if (!response.ok) {
         const payload = await response.json().catch(() => ({ error: "No se pudo cargar dashboard de regalias." }));
@@ -4160,10 +4161,10 @@ export default function Home() {
   }
 
   useEffect(() => {
-    if (view !== "royalties-dashboard" || royaltiesDashboard?.catalog_refresh?.status !== "pending") return;
-    const timer = window.setTimeout(() => void loadRoyaltiesDashboard(), 15000);
+    if (view !== "royalties-dashboard" || royaltiesDashboardLoading || royaltiesDashboard?.catalog_refresh?.status !== "pending") return;
+    const timer = window.setTimeout(() => void loadRoyaltiesDashboard({ query: royaltiesDashboardQuery }), 15000);
     return () => window.clearTimeout(timer);
-  }, [view, royaltiesDashboard]);
+  }, [view, royaltiesDashboard, royaltiesDashboardLoading, royaltiesDashboardQuery]);
 
   async function loadDistributorConfig() {
     setDistributorConfigLoading(true);
@@ -6456,8 +6457,7 @@ export default function Home() {
   function openContractDashboard(track: { isrc: string; title: string }) {
     if (!canShowMenuView("royalties-dashboard") || !canShowMenuView("master-contracts")) return;
     setContractDashboardReturn({ ...track, scroll: window.scrollY });
-    setRoyaltiesDashboardKeyword(wmlScope ? track.isrc : "");
-    setRoyaltiesDashboardSource(""); setRoyaltiesDashboardAccount("");
+    setRoyaltiesDashboardFilters((current) => ({ ...current, keyword: wmlScope ? track.isrc : "", source: "", account: "" }));
     setRoyaltiesExplorer(wmlScope ? initialExplorer : { ...initialExplorer, drill: { track: `ISRC:${track.isrc}` }, trackName: track.title });
     setRoyaltiesTrack(null); setRoyaltiesDashboard(null); setRoyaltiesDashboardQuery("");
     setRoyaltiesDashboardTab("overview");
@@ -6480,11 +6480,7 @@ export default function Home() {
 
   function resetRoyaltiesDashboardFilters() {
     const period: PeriodSelection = { mode: wmlScope ? "all" : "last_6_months" };
-    setRoyaltiesDashboardKeyword("");
-    setRoyaltiesDashboardSource("");
-    setRoyaltiesDashboardAccount("");
-    setRoyaltiesDashboardPeriodBasis("statement_period");
-    setRoyaltiesDashboardPeriod(period);
+    setRoyaltiesDashboardFilters({ keyword: "", source: "", account: "", period, periodBasis: "statement_period" });
     setRoyaltiesExplorer(initialExplorer); setRoyaltiesTrack(null);
     void loadRoyaltiesDashboard({
       explorer: initialExplorer,
@@ -7452,10 +7448,25 @@ export default function Home() {
   }
 
   function renderRoyaltiesRankTable(title: string, rows: RoyaltiesDashboardRank[], dimension?: string, emptyText = "Sin datos para este filtro.") {
-    const scrollable = royaltiesDashboardTab === "overview" && (dimension === "title" || dimension === "artist");
+    const category = dimension === "title" || dimension === "artist" ? dimension : undefined;
+    const scrollable = royaltiesDashboardTab === "overview" && !!category;
     return (
-      <RoyaltyRankList title={title} rows={rows} loading={royaltiesDashboardLoading}
+      <RoyaltyRankList key={`${dimension ?? title}:${royaltiesDashboardRequest.current}`} title={title} rows={rows} loading={royaltiesDashboardLoading}
         scrollable={scrollable} contractual={royaltiesExplorer.measure === "contractual"} emptyText={emptyText}
+        nextOffset={scrollable && category ? royaltiesDashboard?.ranking_next?.[category] : null}
+        onLoadMore={scrollable && category ? async (offset, signal) => {
+          const query = new URLSearchParams(royaltiesDashboardQuery);
+          query.set("rank_category", category);
+          query.set("rank_offset", String(offset));
+          if (royaltiesDashboard?.ranking_snapshot) {
+            query.set("rank_snapshot_token", royaltiesDashboard.ranking_snapshot);
+          }
+          const path = query.has("measure") ? "/explore" : "";
+          const response = await fetch(`/api/royalties-dashboard${path}?${query}`, { cache: "no-store", signal });
+          if (response.status === 409) throw new Error("Los datos cambiaron. Actualizá el dashboard para seguir explorando.");
+          if (!response.ok) throw new Error("No se pudieron cargar más resultados.");
+          return response.json();
+        } : undefined}
         onSelect={!wmlScope && dimension ? (row) => dimension === "title"
           ? setRoyaltiesTrack({ ...row, youtube_only: royaltiesDashboardTab === "youtube" })
           : drillRoyalties({ [dimension]: row.name }) : undefined} />
@@ -7785,73 +7796,19 @@ export default function Home() {
               </div>
             </header>
 
-            <form className={`${digitalStyles.filters} ${royaltyDashboardStyles.filters}`} onSubmit={(event) => { event.preventDefault(); void loadRoyaltiesDashboard(); }}>
-              <div className={`${digitalStyles.field} ${royaltyDashboardStyles.searchField}`}>
-                <label htmlFor="royalties_dashboard_keyword">Artista / tema / ISRC</label>
-                <div className={digitalStyles.inputShell}>
-                  <Search size={16} aria-hidden="true" />
-                  <input id="royalties_dashboard_keyword" value={royaltiesDashboardKeyword} onChange={(event) => setRoyaltiesDashboardKeyword(event.target.value)} placeholder="Buscar en el catálogo" />
-                </div>
-              </div>
-              <div className={digitalStyles.field}>
-                <label htmlFor="royalties_dashboard_source">Distribuidora</label>
-                <select
-                  id="royalties_dashboard_source"
-                  value={royaltiesDashboardSource}
-                  onChange={(event) => {
-                    setRoyaltiesDashboardSource(event.target.value);
-                    setRoyaltiesDashboardAccount("");
-                  }}
-                >
-                  <option value="">Todas</option>
-                  {royaltiesDashboard?.options.sources.map((item) => (
-                    <option key={item} value={item}>{item}</option>
-                  ))}
-                </select>
-              </div>
-              <div className={digitalStyles.field}>
-                <label htmlFor="royalties_dashboard_account">Cuenta</label>
-                <select
-                  id="royalties_dashboard_account"
-                  value={royaltiesDashboardAccount}
-                  onChange={(event) => setRoyaltiesDashboardAccount(event.target.value)}
-                >
-                  <option value="">Todas</option>
-                  {royaltiesDashboardAccountOptions.map((item) => (
-                    <option key={item} value={item}>{item}</option>
-                  ))}
-                </select>
-              </div>
-              <div className={digitalStyles.field}>
-                <label htmlFor="royalties_dashboard_basis">Base temporal</label>
-                <select
-                  id="royalties_dashboard_basis"
-                  value={royaltiesDashboardPeriodBasis}
-                  onChange={(event) => {setRoyaltiesDashboardPeriodBasis(event.target.value as "statement_period" | "transaction_month"); if (wmlScope) setRoyaltiesDashboardPeriod({mode:'all'});}}
-                >
-                  <option value="statement_period">Statement</option>
-                  <option value="transaction_month">Consumo</option>
-                </select>
-              </div>
-              <div className={digitalStyles.periodField}>
-                <PeriodControl id="royalties_dashboard_period" label="Período" profile="dashboard_period" selection={royaltiesDashboardPeriod} frequency={wmlScope && royaltiesDashboardPeriodBasis === 'statement_period' ? 'semiannual' : 'monthly'} presets={wmlScope ? ['all'] : ["last_6_months", "last_12_months", "all"]} minMonth={royaltiesDashboard?.options.first_month} maxMonth={royaltiesDashboard?.options.last_month} onChange={setRoyaltiesDashboardPeriod} />
-              </div>
-              <div className={digitalStyles.filterActions}>
-                <button type="button" className={digitalStyles.iconButton} onClick={resetRoyaltiesDashboardFilters} disabled={royaltiesDashboardLoading} aria-label="Limpiar filtros" title="Limpiar filtros">
-                  <RotateCcw size={17} aria-hidden="true" />
-                </button>
-                <button type="submit" className={digitalStyles.applyButton} disabled={royaltiesDashboardLoading}>
-                  <Search size={16} aria-hidden="true" />
-                  {royaltiesDashboardLoading ? "Cargando" : "Aplicar"}
-                </button>
-              </div>
-            </form>
+            <RoyaltyDashboardFilters initial={royaltiesDashboardFilters} options={royaltiesDashboard?.options}
+              loading={royaltiesDashboardLoading} wmlScope={wmlScope}
+              onApply={(filters) => {
+                setRoyaltiesDashboardFilters(filters);
+                void loadRoyaltiesDashboard(filters);
+              }} onReset={resetRoyaltiesDashboardFilters} />
 
             {!wmlScope && <><RoyaltyContextAction key={currentUser?.username} state={royaltiesExplorer} keyword={new URLSearchParams(royaltiesDashboardQuery).get("keyword") || ""} loading={royaltiesDashboardLoading} onChange={applyRoyaltiesExplorer} />
               <RoyaltyExplorerTrail state={royaltiesExplorer} loading={royaltiesDashboardLoading} onChange={applyRoyaltiesExplorer} /></>}
             <div className={`${digitalStyles.metricBand} ${royaltyDashboardStyles.metricBand}`} aria-live="polite">
               <div className={digitalStyles.primaryMetric}>
-                <span>{royaltiesExplorer.measure === "contractual" && !wmlScope ? `Parte de ${royaltiesExplorer.beneficiary} según contrato` : "Ingreso reportable"}</span>
+                <span>{royaltiesExplorer.measure === "contractual" && !wmlScope ? `Parte de ${royaltiesExplorer.beneficiary} según contrato` : royaltiesDashboard?.period_months.length && royaltiesDashboard.period_months.length > 12
+                    ? `Ingreso total de ${royaltiesDashboard.period_months.length} meses` : "Ingreso reportable"}</span>
                 <strong>{royaltiesDashboardLoading ? "Calculando…" : !royaltiesDashboard && explorerActive(royaltiesExplorer) ? "—" : moneyCents(royaltiesDashboard?.totals.amount_usd || 0)}</strong>
               </div>
               <div>
@@ -7879,7 +7836,7 @@ export default function Home() {
             <div className={digitalStyles.scopeLine}>
               <span>Rango consultado: <strong>{royaltiesDashboard?.totals.first_month || "-"} a {royaltiesDashboard?.totals.last_month || "-"}</strong></span>
               <span>Fuente disponible: <strong>{royaltiesDashboard?.options.first_month || "-"} a {royaltiesDashboard?.options.last_month || "-"}</strong></span>
-              <span>Base: <strong>{royaltiesDashboardPeriodBasis === "statement_period" ? "statement" : "consumo"}</strong></span>
+              <span>Base: <strong>{(royaltiesDashboard?.period_basis ?? royaltiesDashboardFilters.periodBasis) === "statement_period" ? "statement" : "consumo"}</strong></span>
             </div>
 
             <div className={digitalStyles.tabs} role="tablist" aria-label="Vista del dashboard">
@@ -7893,55 +7850,9 @@ export default function Home() {
 
             {royaltiesDashboardTab === "overview" && (
               <>
-                <section className={digitalStyles.trendSection}>
-                  <div className={digitalStyles.sectionTitle}>
-                    <h2>{wmlScope && royaltiesDashboardPeriodBasis === 'statement_period' ? 'Evolución semestral' : 'Evolución mensual'}</h2>
-                    <span>USD reportable por {royaltiesDashboardPeriodBasis === "statement_period" ? (wmlScope ? 'semestre de statement' : "mes de statement") : "mes de consumo"}</span>
-                  </div>
-                  <div className={digitalStyles.trendRows}>
-                    {!royaltiesDashboardLoading && !royaltiesDashboard?.monthly.length && <div className={digitalStyles.emptyState}>Sin datos para este filtro.</div>}
-                    {(royaltiesDashboard?.monthly || []).map((month) => (
-                      <button type="button" disabled={royaltiesDashboardLoading || wmlScope} className={`${digitalStyles.trendRow} ${royaltyDashboardStyles.trendButton}`} key={month.month} onClick={() => drillRoyalties({ month: month.month })} aria-label={`Explorar ${month.month}`}>
-                        <span>{wmlScope && royaltiesDashboardPeriodBasis === 'statement_period' ? `${month.month.slice(0,4)} H${month.month.endsWith('06') ? '1' : '2'}` : month.month}</span>
-                        <div className={digitalStyles.trendTrack} aria-hidden="true">
-                          <div className={month.amount_usd < 0 ? digitalStyles.negativeBar : digitalStyles.trendBar} style={{ width: `${Math.max(1, Math.abs(month.amount_usd) / royaltiesDashboardMonthlyMax * 100)}%` }} />
-                        </div>
-                        <strong className={month.amount_usd < 0 ? digitalStyles.negativeAmount : undefined}>{moneyCents(month.amount_usd)}</strong>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-
-                <section className={digitalStyles.tableSection}>
-                  <div className={digitalStyles.sectionTitle}>
-                    <h2>{wmlScope && royaltiesDashboardPeriodBasis === 'statement_period' ? 'Semestres por distribuidora' : 'Meses por distribuidora'}</h2>
-                    <span>{royaltiesDashboard?.matrix.length || 0} cuentas</span>
-                  </div>
-                  <div className={digitalStyles.tableScroll}>
-                    <table className={`${digitalStyles.table} ${digitalStyles.matrixTable} ${royaltyDashboardStyles.matrixTable}`}>
-                      <thead>
-                        <tr>
-                          <th>Distribuidora / cuenta</th>
-                          {(royaltiesDashboard?.period_months || []).map((month) => <th key={month}><button type="button" className={royaltyDashboardStyles.cellButton} disabled={royaltiesDashboardLoading || wmlScope} onClick={() => drillRoyalties({ month })}>{wmlScope && royaltiesDashboardPeriodBasis === 'statement_period' ? `${month.slice(0,4)} H${month.endsWith('06') ? '1' : '2'}` : month}</button></th>)}
-                          <th>Total</th>
-                          <th>Temas</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {royaltiesDashboardLoading && <tr><td className={digitalStyles.emptyCell} colSpan={(royaltiesDashboard?.period_months.length || 0) + 3}>Cargando dashboard...</td></tr>}
-                        {!royaltiesDashboardLoading && royaltiesDashboard?.matrix.length === 0 && <tr><td className={digitalStyles.emptyCell} colSpan={(royaltiesDashboard?.period_months.length || 0) + 3}>Sin datos para este filtro.</td></tr>}
-                        {royaltiesDashboard?.matrix.map((item) => (
-                          <tr key={`${item.source}-${item.account}`}>
-                            <td className={digitalStyles.accountCell}><button type="button" className={royaltyDashboardStyles.cellButton} disabled={royaltiesDashboardLoading || wmlScope} onClick={() => drillRoyalties({ source: item.source, account: item.account })}><strong>{item.source}</strong><span>{item.account}</span></button></td>
-                            {royaltiesDashboard.period_months.map((month) => <td key={month}><button type="button" className={royaltyDashboardStyles.cellButton} disabled={royaltiesDashboardLoading || wmlScope} onClick={() => drillRoyalties({ source: item.source, account: item.account, month })}>{moneyCents(item.months[month] || 0)}</button></td>)}
-                            <td className={digitalStyles.totalCell}><button type="button" className={royaltyDashboardStyles.cellButton} disabled={royaltiesDashboardLoading || wmlScope} onClick={() => drillRoyalties({ source: item.source, account: item.account })}>{moneyCents(item.amount_usd || 0)}</button></td>
-                            <td>{item.titles.toLocaleString("es-AR")}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
+                <RoyaltyDashboardHistory key={royaltiesDashboardRequest.current} data={royaltiesDashboard}
+                  loading={royaltiesDashboardLoading} semester={wmlScope && (royaltiesDashboard?.period_basis ?? royaltiesDashboardFilters.periodBasis) === "statement_period"}
+                  readOnly={wmlScope} onDrill={drillRoyalties} />
 
                 <div className={royaltyDashboardStyles.rankGrid}>
                   {renderRoyaltiesRankTable("Ingresos por tema", royaltiesDashboard?.rankings.title || [], "title")}

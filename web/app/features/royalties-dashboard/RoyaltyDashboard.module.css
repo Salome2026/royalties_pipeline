@@ -114,6 +114,44 @@
   text-transform: uppercase;
 }
 
+.detailNavigation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 8px 0;
+  color: var(--dashboard-muted);
+  font-size: 12px;
+}
+
+.detailNavigation button {
+  min-height: 32px;
+  width: auto;
+  margin: 0;
+  padding: 6px 12px;
+  color: var(--dashboard-accent);
+  background: transparent;
+  border: 1px solid var(--dashboard-line);
+  border-radius: 6px;
+  box-shadow: none;
+  font: inherit;
+}
+
+.detailNavigation button:hover:not(:disabled) {
+  background: rgba(121, 203, 182, .08);
+  border-color: var(--dashboard-accent);
+  transform: none;
+}
+
+.detailNavigation button:disabled {
+  opacity: .5;
+}
+
+.yearMonths {
+  padding-left: 14px;
+  border-left: 1px solid var(--dashboard-line);
+}
+
 .rankList {
   display: grid;
 }
