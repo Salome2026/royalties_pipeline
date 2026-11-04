@@ -79,3 +79,29 @@ inventar Art Track o video oficial si la fila no lo demuestra.
 UGC se presenta como `UGC / Content ID`; partner-provided como
 `Audio Library / Partner Provided`. El contrato completo esta en
 `docs/store_dsp_taxonomy_policy.md`.
+
+## Correccion de admision de pies, 2026-11-04
+
+`scripts/lib/dashgo_row_classes.py` reconoce ventas, controles y separadores
+antes de validar Payable. Verifica la correspondencia de cada registro CSV con
+la lectura y la estructura fisica del pie: cinco controles de trece campos,
+sus etiquetas y secuencia, y tres registros separadores. Un pie incompleto o
+alterado se rechaza; una venta sin importe sigue siendo una venta invalida.
+
+La validacion monetaria se aplica solo a ventas. La salida standardized conserva
+todas las filas y celdas originales, incluidos controles y separadores. No se
+cambian formulas, identidades, contratos, asociados, clasificacion ni reportes.
+Esta entrega publica codigo; no reconstruye ni reemplaza datos historicos.
+
+La guarda comun agregada el 2026-10-30 validaba tambien los pies como ventas y
+rechazaba los 35 originales. La prueba aislada de la correccion conserva
+499.977 ventas, USD 28.212,27238360, 50.739.925 unidades, 175 controles y 105
+separadores. Los nueve auxiliares Mechanical Royalty historicos incompletos
+siguen fuera del alcance; su recuperacion al releer ya existe en el lector
+publicado desde la preservacion lexical de noviembre, no en esta correccion.
+
+Regresion permanente: `scripts/qa/qa_dashgo_row_classes.py`, incluida en
+`cloudbuild.yaml`. Evidencia aislada inmutable:
+`C:/royalties_pipeline/tmp/dashgo_footer_trial_20261104/evidence`.
+Evidencia de publicacion y comprobaciones antes/despues:
+`C:/royalties_pipeline/staging/catalogo_lectura/20261104_dashgo_footer_release`.

@@ -6,6 +6,7 @@ from pathlib import Path
 import polars as pl
 from lib.ingestion_controls import controlled_ingestion, select_inputs, validate_amounts, stage_controls
 from lib.native_csv import read_native_csv
+from lib.dashgo_row_classes import classify_dashgo_rows
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.append(str(SCRIPT_DIR))
@@ -104,6 +105,7 @@ def standardize_dashgo(df: pl.DataFrame, file_path: Path) -> pl.DataFrame:
     if missing:
         raise ValueError(f"Faltan columnas requeridas: {missing}")
 
+    row_classes = classify_dashgo_rows(df, file_path)
     file_hash = sha256_file(file_path)
     statement_info = from_dashgo_filename(file_path.name)
     statement_period = statement_info.period
@@ -215,7 +217,8 @@ def standardize_dashgo(df: pl.DataFrame, file_path: Path) -> pl.DataFrame:
         pl.lit(ingested_at).alias("ingested_at"),
     ])
 
-    validate_amounts(df, source=SOURCE, path=file_path, field="Payable")
+    # Keep every original row in the output; only native sales carry Payable.
+    validate_amounts(df.filter(row_classes.sale_mask()), source=SOURCE, path=file_path, field="Payable")
     return df
 
 
