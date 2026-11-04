@@ -105,3 +105,93 @@ Regresion permanente: `scripts/qa/qa_dashgo_row_classes.py`, incluida en
 `C:/royalties_pipeline/tmp/dashgo_footer_trial_20261104/evidence`.
 Evidencia de publicacion y comprobaciones antes/despues:
 `C:/royalties_pipeline/staging/catalogo_lectura/20261104_dashgo_footer_release`.
+
+## Retiro de excepcion de presentacion, 2026-11-04
+
+Se retira del codigo la excepcion por titulo, video, canal y periodo de
+Te Prestaria Mis Ojos. No se reemplaza por una inferencia general por nombre.
+Una referencia sin codigo y otra con VideoId mantienen identidades separadas
+hasta que exista evidencia de catalogo independiente de los contratos.
+
+La presentacion no asigna un VideoId a la fila textual ni combina sus importes
+o columnas contractuales con otra identidad. La regla previa de compactacion
+de importes pequenos es independiente y no se modifica en este retiro.
+
+La revision completa de DashGo abarca todos los originales disponibles,
+identidad de grabacion/video/producto/referencia, Store, monetizacion, origen,
+periodos, unidades y trazabilidad. No define derechos ni porcentajes.
+Evidencia: `C:/royalties_pipeline/tmp/dashgo_complete_audit_20261104`.
+El retiro se entrega como cambio de codigo sin reconstruir datos. Su activacion
+y comprobaciones constan en
+`C:/royalties_pipeline/staging/catalogo_lectura/20261104_dashgo_remove_report_exception/certification.json`.
+La definicion general siguiente permanece como propuesta; no crea asociaciones.
+
+## Revision integral y definicion propuesta, 2026-11-04
+
+Alcance comprobado: todos los 35 CSV disponibles de mawzrecords, tres firmas de
+columnas, octubre de 2023 a agosto de 2026. No certifica otras cuentas o formatos
+de DashGo que no esten en esos originales. Se examinaron 499.977 ventas,
+USD 28.212,27238360 y 50.739.925 unidades; los 175 controles y 105 separadores
+se verificaron aparte. Los originales y los datos publicados quedan intactos.
+
+La evidencia confirma 119 grabaciones/119 fichas con DASHGO-LECTURA-1, todas con
+resolucion comun de participantes valida. Se conservan los 15 creditos textuales
+de pista distintos; un credito puede representar un grupo, no una persona legal.
+La clasificacion publicada coincide con la regla central en todas las ventas.
+
+| Nivel nativo | Ventas | Payable USD |
+| --- | ---: | ---: |
+| ISRC valido | 492.643 | 27.732,70231956 |
+| VideoId, sin ISRC ni UPC | 483 | 35,70891346 |
+| UPC de producto, sin ISRC ni VideoId | 12 | 46,79245380 |
+| Sin esos tres identificadores | 6.839 | 397,06869678 |
+
+Se observan 1.601 VideoId: 113 se relacionan con varios ISRC. Ocho UPC contienen
+varias grabaciones. Lucete y Fluye en mi tienen dos ISRC cada uno. Son casos
+previstos por D05, no motivos para fusionar grabaciones. Las 330 combinaciones
+nativas de titulo/Artist Name/canal sin codigo pertenecen al mismo ChannelId:
+24 tienen importe y 306 contienen solo ventas cero. No son 330 canciones
+confirmadas; cero es una venta y conserva sus unidades, no un control de pie.
+
+Hay 173 perfiles Store/Use Type/Product Type con monetizacion No informado,
+por USD 5.108,05322009 ya contabilizados. Esto conserva la regla aprobada: campo
+ausente o codigo sin significado acreditado no autoriza a inventar Premium/Ads.
+La evidencia incluye Amazon con Use Type vacio y codigos como PDS/PDIB/FAMIB.
+Una ampliacion semantica exige evidencia de fuente y cambios en la taxonomia
+central. No es una perdida de dinero ni una reclasificacion realizada aqui.
+
+La definicion completa propuesta conserva las capas ya aprobadas:
+
+1. Observacion: una venta original con archivo/SHA-256/registro CSV, cuenta,
+   fechas de statement y consumo, pais, campos nativos, importe y unidades.
+   Vincular identidad no elimina ni duplica observaciones, incluso las de cero.
+2. Entidades independientes: grabacion (ISRC), video (VideoId), producto (UPC)
+   y referencia de origen incompleta. Una venta puede informar varias entidades.
+   Un video no es un alias universal de una grabacion; las relaciones multiples
+   se conservan con procedencia, nivel, estado y evidencia.
+3. Resolucion: una correspondencia confirmada se registra aparte, versionada y
+   acotada a la evidencia de origen. No rellena el campo nativo vacio ni convierte
+   tokens de titulos en codigos nativos. Nombres o contratos cerrados no prueban
+   identidad. Los casos incompletos/conflictivos permanecen visibles.
+4. Dimensiones: DSP, monetizacion y origen provienen de la taxonomia central y
+   se mantienen por observacion. Resolver identidad no copia la monetizacion o
+   el origen de otra venta. No informado conserva su evidencia y razon.
+5. Consumo: catalogo, consultas y reportes usan la misma resolucion versionada.
+   Un resumen por identidad puede mostrar totales; un corte por monetizacion y
+   origen conserva esas claves. Nunca se reconstruye el detalle desde un resumen
+   que haya descartado dimensiones. La compactacion visual no resuelve identidad.
+6. Contratos: etapa posterior e independiente para derechos, porcentajes y
+   vigencias. El catalogo no los define ni usa sus inclusiones para decidir que
+   dos entidades fisicas son una sola. Esta revision solo verifica su preservacion.
+
+Pendientes explicitamente separados: correspondencias sin identificador;
+semantica no acreditada de modalidades; etiqueta legacy ugc por ausencia de
+ISRC; compactacion visual de importes pequenos; nueve auxiliares historicos;
+compatibilidad futura de unidades desconocidas (ORCH-INT-02). No se reemplaza
+el lector financiero ni se aplican esos cambios durante esta auditoria.
+
+Resultados y ejemplos ajenos a Juli en source_summary.json, identity_levels.json,
+business_dimensions.json, native_monetization_unresolved_profiles.json,
+multiple_recordings_per_video.json y same_title_distinct_recordings.json bajo
+la carpeta de evidencia indicada arriba. La definicion es propuesta para revision;
+no instala asociaciones nuevas ni define contratos.

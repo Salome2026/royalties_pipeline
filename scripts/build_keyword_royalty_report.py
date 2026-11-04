@@ -607,36 +607,15 @@ def report_identity_expr(columns: set[str]) -> pl.Expr:
 
 DASHGO_GROUP_TITLE = "Agrupación por ingresos menores a 10 centavos"
 DASHGO_GROUP_ARTIST = "Intérpretes agrupados"
-JULI_VIDEO = "hSW8SzhOfHQ"
 
 
 def dashgo_summary_metadata(columns: set[str]) -> list[pl.Expr]:
-    def field(*names):
-        return _summary_text_expr(columns, list(names)).fill_null("")
-
-    dashgo = field("source") == "dashgo"
-    # Verified in the MAWZ Ads and Premium statements, November 2025 to June 2026.
-    witness = (
-        dashgo & (field("account") == "mawzrecords")
-        & (field("asset_isrc", "ISRC") == "")
-        & (field("track_statement_style").str.to_lowercase().str.replace_all(r"\s+", " ")
-           == "juli savioli - te prestaría mis ojos (official video)")
-        & field("transaction_month").is_between(pl.lit("2025-11"), pl.lit("2026-06"))
-        & ~field("content_origin_normalized").is_in(["UGC / Content ID", "Shorts", "Music / Art Track"])
-    )
-    channel = field("channel_id")
-    video = field("video_id", "track_id")
-    ads = witness & channel.is_in(["", "UCnyowdvLv8WNs7RVasOWPDA"]) & (video == "") & (field("report_code") == "")
-    premium = witness & channel.is_in(["", "UCnyowdvLv8WNs7RVasOWPDA"]) & (video == JULI_VIDEO)
-    role = pl.when(ads).then(pl.lit("ads")).when(premium).then(pl.lit("premium")).otherwise(pl.lit(""))
-    return [
-        dashgo.all().alias("_dashgo_only"),
-        pl.when(role.n_unique() == 1).then(role.first()).otherwise(pl.lit("")).alias("_dashgo_video_role"),
-    ]
+    dashgo = _summary_text_expr(columns, ["source"]).fill_null("") == "dashgo"
+    return [dashgo.all().alias("_dashgo_only")]
 
 
 def present_dashgo_summary(table: pd.DataFrame, summary: pl.DataFrame) -> pd.DataFrame:
-    """Consolidate display rows after calculating their contractual allocations."""
+    """Apply the existing small-income presentation rule without inferring identities."""
     if not summary["_dashgo_only"].any():
         return table
     result = table.copy()
@@ -647,7 +626,6 @@ def present_dashgo_summary(table: pd.DataFrame, summary: pl.DataFrame) -> pd.Dat
         if fmt != "0.00%"
     ]
     measures = ["Ingresos USD", "Unidades", *contract_amounts]
-    roles = summary["_dashgo_video_role"].to_list()
     eligible = pd.Series(summary["_dashgo_only"].to_list(), index=table.index)
 
     def combine(indices, labels):
@@ -660,22 +638,6 @@ def present_dashgo_summary(table: pd.DataFrame, summary: pl.DataFrame) -> pd.Dat
             row[column] = aggregate(dates) if dates else None
         row.update(labels)
         return pd.DataFrame([row], columns=table.columns)
-
-    ads = [i for i, role in zip(table.index, roles) if role == "ads"]
-    premium = [i for i, role in zip(table.index, roles) if role == "premium"]
-    for indices, label in ((ads, "No informado"), (premium, "Partner-provided")):
-        if indices:
-            result.loc[indices, "Tipo de contenido"] = label
-    if len(ads) == len(premium) == 1:
-        indices = ads + premium
-        row = combine(indices, {
-            "Tema": result.at[premium[0], "Tema"],
-            "Artista": result.at[premium[0], "Artista"],
-            "Codigo": JULI_VIDEO, "Tipo codigo": "Video ID", "Codigos originales": JULI_VIDEO,
-            "Tipo de contenido": "Ads (origen no informado) | Premium (Partner-provided)",
-        })
-        row.index = premium
-        result = pd.concat([result.drop(indices), row]).sort_index()
 
     small = result.index[
         eligible.reindex(result.index, fill_value=False)
@@ -812,7 +774,7 @@ def build_track_summary_lf(base_lf: pl.LazyFrame, *, include_identity: bool = Fa
         ])
         .select([
             *(["_report_identity"] if include_identity else []),
-            *(["_dashgo_only", "_dashgo_video_role"] if include_dashgo_metadata else []),
+            *(["_dashgo_only"] if include_dashgo_metadata else []),
             "track_statement_style",
             "artist_statement_style",
             "report_code",
@@ -1746,7 +1708,7 @@ def build_report_tables(
             "resumen mensual": display_dataframe(monthly_summary.to_pandas()),
             "resumen por store": display_dataframe(store_summary.to_pandas()),
             "resumen por territorio": display_dataframe(territory_summary.to_pandas()),
-            "resumen por tema": display_dataframe(track_summary.drop("_report_identity", "_dashgo_only", "_dashgo_video_role", strict=False).to_pandas()),
+            "resumen por tema": display_dataframe(track_summary.drop("_report_identity", "_dashgo_only", strict=False).to_pandas()),
         }
 
         if contract_snapshot is not None:
@@ -1915,7 +1877,7 @@ def build_report_tables(
         "resumen mensual": display_dataframe(monthly_summary.to_pandas()),
         "resumen por store": display_dataframe(store_summary.to_pandas()),
         "resumen por territorio": display_dataframe(territory_summary.to_pandas()),
-        "resumen por tema": display_dataframe(track_summary.drop("_report_identity", "_dashgo_only", "_dashgo_video_role", strict=False).to_pandas()),
+        "resumen por tema": display_dataframe(track_summary.drop("_report_identity", "_dashgo_only", strict=False).to_pandas()),
     }
 
     if contract_snapshot is not None:
