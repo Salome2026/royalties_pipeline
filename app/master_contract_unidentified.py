@@ -27,11 +27,14 @@ def reference(row):
         return ("TRACK", row["track_id"], row["source"], row["account"])
     if row.get("product_upc"):
         return ("UPC", row["product_upc"])
-    return ("TEXT", normalized(row.get("title")), normalized(row.get("artist")), row["source"], row["account"])
+    from app.contract_text_reference import reference_code
+    code = reference_code(row)
+    return ("TEXT", code, row["source"], row["account"]) if code else (
+        "UNSUPPORTED", row.get("title") or "", row.get("artist") or "", row["source"], row["account"])
 
 
 def unidentified_income(rows, evidence, catalog, aliases, choices, *, keyword="", source=None,
-                        account=None, offset=0, limit=50, reference_id=None):
+                        account=None, offset=0, limit=50, reference_id=None, include_zero=False):
     """Subtract actual assignments first, then group remaining money once.
 
     Candidate discovery/exclusion is not allocation. Use the same current
@@ -65,11 +68,10 @@ def unidentified_income(rows, evidence, catalog, aliases, choices, *, keyword=""
         item["accounts"].add((row["source"], row["account"]))
         if row.get("statement_period"):
             item["periods"].add(row["statement_period"])
-        for kind, field in [("VIDEO", "video_id"), ("UPC", "product_upc"), ("TRACK", "track_id")]:
-            if not row.get(field):
-                continue
-            item["codes"].add((kind, row[field]))
-            k = association_key(kind, row[field], row["source"], row["account"])
+        from app.contract_text_reference import row_keys
+        for k in row_keys(row):
+            kind, code, _, _ = json.loads(k)
+            item["codes"].add((kind, code))
             for root, state in index["proposed"].get(k, {}).items():
                 if root not in known:
                     continue
@@ -80,7 +82,7 @@ def unidentified_income(rows, evidence, catalog, aliases, choices, *, keyword=""
                 candidate["reasons"].add(state["reason"])
     items = []
     for key, value in grouped.items():
-        if not value["has_money"]:
+        if not value["has_money"] and not include_zero:
             continue
         title = min(value["titles"], key=lambda t: (-value["titles"][t], t)) if value["titles"] else "Sin título informado"
         artist = min(value["artists"], key=lambda t: (-value["artists"][t], t)) if value["artists"] else "No identificado"
@@ -92,7 +94,9 @@ def unidentified_income(rows, evidence, catalog, aliases, choices, *, keyword=""
         candidates = [{**c, "statuses": sorted(c["statuses"]), "reasons": sorted(c["reasons"])}
                       for _, c in sorted(value["candidates"].items())]
         item = {"id": hashlib.sha256(json.dumps(key).encode()).hexdigest(), "kind": key[0],
-            "code": key[1] if key[0] != "TEXT" else None, "title": title, "artist": artist,
+            "code": key[1] if key[0] not in {"TEXT", "UNSUPPORTED"} else None, "title": title, "artist": artist,
+            "association_supported": key[0] in {"TEXT", "VIDEO", "TRACK", "UPC"},
+            **({"association_code": key[1]} if key[0] == "TEXT" else {}),
             "titles": sorted(value["titles"]), "artists": sorted(value["artists"]),
             "video_url": "https://www.youtube.com/watch?v=" + video if video else None,
             "amount_usd": math.fsum(value["amounts"]),
@@ -101,7 +105,7 @@ def unidentified_income(rows, evidence, catalog, aliases, choices, *, keyword=""
             "candidates": candidates}
         if reference_id is not None and item["id"] != reference_id:
             continue
-        text = normalized(" ".join([*item["titles"], *item["artists"], key[1], *[c["isrc"] for c in candidates], *[c["title"] for c in candidates]]))
+        text = normalized(" ".join([*item["titles"], *item["artists"], key[1] or "", *[c["isrc"] for c in candidates], *[c["title"] for c in candidates]]))
         if all(token in text for token in normalized(keyword).split()):
             items.append(item)
     items.sort(key=lambda i: (-abs(i["amount_usd"]), i["id"]))

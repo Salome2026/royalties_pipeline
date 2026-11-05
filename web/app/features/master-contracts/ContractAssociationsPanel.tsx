@@ -33,12 +33,12 @@ function AssociationTable({ groups, isrc, choices, canEdit, ugc = false, onDecid
           const artTrack = group.items.every((item) => item.content_origins?.length === 1 && item.content_origins[0] === "Music / Art Track");
           return <tr key={group.scope}>
             <td>{ugc ? <span className={shared ? styles.associationsCount : styles.associationValid}>{shared ? "Compartido" : "Identificado"}</span>
-              : canEdit ? <select className={styles.associationDecision} aria-label={`Validación ${group.code}`} title={labels[state.status]} value={decision} onChange={(event) => onDecide(group, event.target.value)}>
+              : canEdit ? <select className={styles.associationDecision} aria-label={`Validación ${group.kind === "TEXT" ? group.items[0].titles.join(" / ") : group.code}`} title={labels[state.status]} value={decision} onChange={(event) => onDecide(group, event.target.value)}>
                 <option value={state.automatic ? "automatic" : "pending"}>{state.automatic ? "Automático" : state.selectable || state.pending ? "Por validar" : "No asignable"}</option>
                 <option value="included" disabled={!state.selectable}>Incluir</option><option value="excluded">Descartar</option>
                 {decision === "pending" && state.automatic && <option value="pending" disabled>Por validar</option>}
               </select> : <span className={state.included || state.status === "excluded" ? styles.associationValid : styles.associationPending}>{labels[state.status]}</span>}</td>
-            <td><small>{ugc ? "Video / UGC" : group.kind === "VIDEO" ? artTrack ? "Audio YouTube" : "Video" : group.kind === "TRACK" ? "ID de plataforma" : group.kind}</small>{group.kind === "VIDEO" ? <a href={`https://www.youtube.com/watch?v=${encodeURIComponent(group.code)}`} target="_blank" rel="noopener noreferrer">{group.code}</a> : <strong>{group.code}</strong>}</td>
+            <td><small>{ugc ? "Video / UGC" : group.kind === "TEXT" ? "Referencia sin código" : group.kind === "VIDEO" ? artTrack ? "Audio YouTube" : "Video" : group.kind === "TRACK" ? "ID de plataforma" : group.kind}</small>{group.kind === "VIDEO" ? <a href={`https://www.youtube.com/watch?v=${encodeURIComponent(group.code)}`} target="_blank" rel="noopener noreferrer">{group.code}</a> : <strong>{group.kind === "TEXT" ? "—" : group.code}</strong>}</td>
             <td>{group.items.map((item) => <div className={styles.associationSource} key={item.key}>{item.source.toUpperCase()}<small>{item.account.replace(/_/g, " ")}</small></div>)}</td>
             <td>{unique(group.items.flatMap((item) => item.titles)).join(" / ") || "Sin título"}<small>{unique(group.items.flatMap((item) => item.artists)).join(" / ")}</small></td>
             <td>{ugc ? isrcs.map((value) => <small key={value}>{value}</small>) : <>{unique(group.items.map((item) => item.reason)).map((reason) => <small key={reason}>{reason}</small>)}{unique(group.items.flatMap((item) => item.proposed_isrcs || [])).map((value) => <small key={value}>ISRC propuesto: {value}</small>)}{shared && <small>{isrcs.join(" · ")}</small>}</>}</td>
@@ -87,12 +87,12 @@ export function ContractAssociationsPanel({ isrc, version, canEdit, choices, onC
     const state = associationGroupState(group, choices);
     if (!canEdit || (decision === "included" && !state.selectable)) return;
     const reason = [...new Set(group.items.map((item) => item.reason))].join("\n");
-    if (decision === "included" && !state.automatic && !window.confirm(`${reason}\n\n¿Confirmás que ${group.code} corresponde al contrato de ${isrc}?`)) return;
+    if (decision === "included" && !state.automatic && !window.confirm(`${reason}\n\n¿Confirmás que ${group.kind === "TEXT" ? group.items[0].titles.join(" / ") : group.code} corresponde al contrato de ${isrc}?`)) return;
     const scope = group.scope;
     const next = choices.filter((choice) => associationScope(choice.key) !== scope);
     if (decision === "included" || decision === "excluded") {
       for (const row of items.filter((value) => associationScope(value.key) === scope)) {
-        next.push({ key: row.key, included: decision === "included", evidence_signature: row.evidence_signature, ...(row.manual ? { manual: true } : {}) });
+        next.push({ key: row.key, included: decision === "included", evidence_signature: row.evidence_signature, ...(row.manual ? { manual: true } : {}), ...(row.text_reference ? { text_reference: row.text_reference } : {}) });
       }
     }
     onChange(next);
@@ -122,12 +122,12 @@ export function ContractAssociationsPanel({ isrc, version, canEdit, choices, onC
       {loading ? <p className={styles.auditLine} role="status">Verificando asociaciones...</p> : error ? <p className={styles.warning} role="alert">{error}</p> : items.length === 0 ? <p className={styles.auditLine}>Sin otros códigos asociados en los statements publicados.</p> : <>
         <div className={styles.associationsControls}>
           <select aria-label="Tipo de código asociado" value={kind} onChange={(event) => setKind(event.target.value)}>
-            <option value="">Todos los códigos</option><option value="UPC">UPC</option><option value="VIDEO">Video / audio</option><option value="TRACK">ID de plataforma</option>
+            <option value="">Todos los códigos</option><option value="UPC">UPC</option><option value="VIDEO">Video / audio</option><option value="TRACK">ID de plataforma</option><option value="TEXT">Referencia sin código</option>
           </select>
           <label><Search size={14} /><input aria-label="Buscar código asociado" placeholder="Buscar código" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
         </div>
         <h4 className={styles.associationsSectionTitle}>Asociados del contrato</h4>
-        <p className={styles.auditLine}>Las coincidencias de título, versión o participantes son propuestas. Confirmá o descartá cada pendiente; sus ingresos no se asignan por parecido.</p>
+        <p className={styles.auditLine}>Las coincidencias de título, versión o participantes son propuestas. Sus ingresos se asignan al confirmarlas. Las referencias sin código pueden quedar sin asignar.</p>
         <AssociationTable key={`associated:${tableKey}`} groups={associated} isrc={isrc} choices={choices} canEdit={canEdit} onDecide={decide} />
         {ugcCount > 0 && <div className={styles.associationsUgc}>
           <div className={styles.associationsHeading}>

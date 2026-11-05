@@ -38,9 +38,10 @@ derived contract relationship, not an inferred ISRC in a statement or catalog.
   proposal needs full credits in the video title, not merely the channel name.
 - Canonical full credits establish a strong match. Alternate catalog credits
   can reveal a competing ISRC but cannot turn missing guests into strong proof.
-- Exactly one consistent ISRC, complete credits and compatible version evidence
-  allow automatic inclusion. Conflicting titles, incomplete credits, competing
-  ISRCs or inconsistent versions produce a pending proposal instead.
+- Even one consistent ISRC with complete credits and compatible version evidence
+  is a proposal requiring confirmation. Metadata never creates automatic coverage.
+  Conflicting titles, incomplete credits, competing ISRCs or inconsistent versions
+  remain pending or blocked under the existing native-identity rules.
 - Explicit identifiers, other catalog assets and claims by another contract
   take precedence over metadata. Contradictions prohibit inclusion.
 - Product UPCs and arbitrary platform IDs do not receive title-only inference.
@@ -86,6 +87,38 @@ nonzero monthly movements remain visible. Embedded IDs in old text provide links
 not financial associations. Candidate links open the existing contract editor;
 the choices and save/permission rules are unchanged. Search and pagination filter
 visibility only, never global ownership. WML remains isolated.
+
+### Uncoded financial references: contract-text-reference-v1
+
+An uncoded catalog item can explicitly share another item's economic agreement
+without being the same asset. Store this decision in the existing overrides as
+`TEXT`, with its original source/account/sheet/channel/full title/full artist.
+The internal context digest is a contractual reference key, never an invented
+ISRC, VideoId, catalog alias or public code. Keep case, accents and versions;
+normalize only Unicode composition and whitespace. Product allocation remains
+subject to the verified product rule, and native identifiers always take priority.
+
+For DashGo, a native video observed with the exact full title in the same
+source/account/channel can propose its existing financial destination. Prefer
+its already confirmed destination and honor existing discards. An embedded
+`Auto generated asset` token is only a proposal clue when independently witnessed
+as a native video in that same context. Never promote that token into a native ID.
+The editor may choose a different valid agreement manually: financial coverage
+does not assert physical identity. Every new TEXT inclusion needs confirmation.
+
+One financial owner per TEXT context; normal permissions, optimistic versions,
+release checks, evidence signatures, global lock and audit history still apply.
+New months or amounts do not invalidate decisions. New contradictory native
+anchors suspend them. Untouched suggestions are optional and do not reopen or
+invalidate a closed agreement. A stale included decision does require review.
+The catalog, detail rows, monetization and origin remain separate. Report summary
+identity is independent of contractual coverage.
+
+Excel and contractual/individual PDFs consume the same confirmed assignments.
+New PDF requests use snapshot v3 to freeze exact uncoded reference owners and
+their gross amount/row counts. Workers reconcile them before applying contracts,
+retain blank native codes and distinct items, and preserve v1/v2 reproducibility.
+Uncovered selected income remains present with empty contractual allocations.
 
 - Choices are Automatic, Include or Discard; absence of a choice for a doubtful
   proposal means Pending, not Discard.

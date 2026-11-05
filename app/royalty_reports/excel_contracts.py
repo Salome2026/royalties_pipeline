@@ -18,7 +18,7 @@ from app.royalty_reports.contractual import allocation_rows, beneficiary_key
 
 def freeze_snapshot(frame: pl.DataFrame, contracts: list[dict], manifest: dict) -> dict:
     from app.master_contract_income import income_association_index, published_unassigned_income
-    from app.master_contract_metadata import infer_video_evidence, with_external_titles
+    from app.master_contract_metadata import contract_evidence, with_external_titles
     from scripts.lib.catalog_report_filter import catalog_alias_lookup
     from google.cloud import storage
 
@@ -40,7 +40,7 @@ def freeze_snapshot(frame: pl.DataFrame, contracts: list[dict], manifest: dict) 
         generation=int(allocation['generation'])).download_as_bytes()) if allocation else None
     with use_product_income(document):
         aliases = {row["alias_catalog_key"]: row["catalog_key"] for row in catalog_alias_lookup(catalog=frame).to_dicts()}
-        index = income_association_index(infer_video_evidence(catalog, evidence), aliases, choices, claims)
+        index = income_association_index(contract_evidence(catalog, evidence, aliases, choices, claims), aliases, choices, claims)
     fields = ("catalog_key", "asset_isrc", "artist_statement", "catalog_artists")
     return {"schema_version": 1, "kind": "excel_contract_columns", "release_id": release,
         "captured_at": datetime.now(timezone.utc).isoformat(),
@@ -69,13 +69,14 @@ def _text(columns: set[str], names: tuple[str, ...]) -> pl.Expr:
 
 
 def reference_fragments(frame: pl.LazyFrame) -> pl.DataFrame:
+    from app.contract_text_reference import TITLE_FIELDS, ARTIST_FIELDS
     from scripts.build_keyword_royalty_report import report_identity_expr
     columns = set(frame.collect_schema().names())
     track = pl.when(_text(columns, ("source",)) == "ada").then(
         _text(columns, ("source_asset_id", "catalog_number"))).otherwise(
         _text(columns, ("track_id", "Label Track ID", "Track ID", "gpid")))
     keys = ["identity", "source", "account", "statement_period", "asset_isrc",
-            "product_upc", "video_id", "track_id", "catalog_number",'_income_product_pending','_income_upc_pending']
+            "product_upc", "video_id", "track_id", "catalog_number", "source_sheet", "channel_id", "title", "artist", "product_type", '_income_product_pending','_income_upc_pending']
     return frame.select(
         report_identity_expr(columns).alias("identity"),
         *[_text(columns, (name,)).fill_null("").alias(name) for name in ("source", "account")],
@@ -85,6 +86,11 @@ def reference_fragments(frame: pl.LazyFrame) -> pl.DataFrame:
         _text(columns, ("video_id", "Video ID", "VideoId")).alias("video_id"),
         track.alias("track_id"),
         _text(columns, ("catalog_number",)).alias("catalog_number"),
+        *[_text(columns, names).fill_null("").alias(name) for name, names in (
+            ("source_sheet", ("source_sheet",)), ("channel_id", ("channel_id", "Channel ID", "ChannelId", "YOUTUBE CHANNEL ID")),
+            ("title", TITLE_FIELDS),
+            ("artist", ARTIST_FIELDS),
+            ("product_type", ("product_type", "asset_product_type")))],
         *[(pl.col(name).cast(pl.Boolean,strict=False).fill_null(False) if name in columns else pl.lit(False)).alias(name)
           for name in ('_income_product_pending','_income_upc_pending')],
         pl.col("amount_usd"),

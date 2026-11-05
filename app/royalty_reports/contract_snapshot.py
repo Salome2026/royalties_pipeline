@@ -34,7 +34,8 @@ def published_contract_catalog(client, manifest: dict) -> list[dict]:
 def freeze_contract_associations(snapshot: dict, frame: pl.DataFrame, contracts: list[dict], release_id: str,
                                 *, input_manifest: dict, ranking_guard: frozenset[str] | None = None) -> dict:
     from app.master_contract_income import associated_income_isrc, income_association_index, published_unassigned_income
-    from app.master_contract_metadata import infer_video_evidence, with_external_titles
+    from app.master_contract_metadata import contract_evidence, with_external_titles
+    from app.contract_text_reference import context
     from scripts.lib.catalog_report_filter import catalog_alias_lookup
     from app.royalty_reports.contract_identity import unsafe_ranking_slot_keys
 
@@ -55,7 +56,7 @@ def freeze_contract_associations(snapshot: dict, frame: pl.DataFrame, contracts:
         metadata_bytes = storage.Client().bucket(input_manifest["bucket"]).blob(
             metadata_entry["object"], generation=int(metadata_entry["generation"])).download_as_bytes()
         catalog_rows = with_external_titles(catalog_rows, pl.read_parquet(BytesIO(metadata_bytes)).to_dicts())
-    index = income_association_index(infer_video_evidence(catalog_rows, evidence), aliases, choices, claims)
+    index = income_association_index(contract_evidence(catalog_rows, evidence, aliases, choices, claims), aliases, choices, claims)
     codes: dict[str, set[tuple[str, str]]] = {}
     for row in evidence:
         if row["kind"] in {"VIDEO", "TRACK"}:
@@ -72,10 +73,13 @@ def freeze_contract_associations(snapshot: dict, frame: pl.DataFrame, contracts:
             continue
         slot = row.get("video_id") or row.get("track_id")
         code = slot or row.get("product_upc")
-        if not code or not row.get("statement_period"):
+        reference = context(row)
+        if (not code and not reference) or not row.get("statement_period"):
             continue
-        key = json.dumps([row["source"], row["account"], row.get("source_sheet") or "", row["statement_period"],
-                          "ID" if slot else "UPC", code.lower() if slot else code], separators=(",", ":"))
+        values = [row["source"], row["account"], row.get("source_sheet") or "", row["statement_period"]]
+        values += (["TEXT", reference["title"], reference["artist"], reference["channel_id"]] if reference else
+                   ["ID" if slot else "UPC", code.lower() if slot else code])
+        key = json.dumps(values, separators=(",", ":"))
         roots[key].add(associated_income_isrc(row, index))
         total = totals.setdefault(key, {"amount_usd": 0.0, "raw_rows": 0})
         total["amount_usd"] += float(row.get("amount_usd") or 0)
@@ -87,7 +91,7 @@ def freeze_contract_associations(snapshot: dict, frame: pl.DataFrame, contracts:
         include_upc = any(json.loads(key)[4] == "UPC" for key in owners)
         unsafe = ranking_guard if ranking_guard is not None else unsafe_ranking_slot_keys(input_manifest["bucket"], entry["object"], int(entry["generation"]), include_upc=include_upc)
         owners = {key: value for key, value in owners.items() if key not in unsafe}
-    return {**snapshot, "schema_version": 2,
+    return {**snapshot, "schema_version": 3,
             "associations": {"release_id": release_id, "ranking_layout": "artist-title-isrc-upc-id-v1",
                              "search_codes": search_codes, "ranking_owners": owners, **index}}
 

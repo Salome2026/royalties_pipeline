@@ -24,7 +24,11 @@ El historial registra usuario, fecha y version mediante `save_split`.
   ningun vinculo puede quitar ingresos de otro destino o duplicarlos.
 - Cualquier ISRC nativo incompatible, UPC compartido o reclamo previo bloquea.
 - Los productos ADA sin ISRC conservan su identidad propia; no se asignan a una cancion.
-- Las referencias sin codigo estable no se asignan por texto.
+- Las referencias sin codigo nativo se pueden asignar explicitamente por su
+  contexto completo: distribuidora, cuenta, hoja, canal, titulo y artista.
+  La clave contractual interna no se presenta como codigo ni modifica el asset.
+  La coincidencia propone; nunca confirma por si sola. Es posible elegir otro
+  contrato manualmente sin afirmar que se trata del mismo asset.
 - La decision sirve en ingestas posteriores para el mismo codigo y su ambito;
   cambios en evidencia nativa invalidan la decision en vez de forzarla.
 - Descartar desde Codigos asociados conserva la exclusion manual.

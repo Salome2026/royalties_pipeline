@@ -222,7 +222,7 @@ class LinkEndpointTests(unittest.TestCase):
         self.mocks["prepare_unidentified_link"].return_value = (self.prepared, None)
         with patch.object(api, "get_master_contract", return_value={"split": {"principal_percent": None}}) as detail:
             self.run_post()
-            detail.assert_called_once_with(ISRC, "key", "editor")
+            detail.assert_called_once_with(ISRC, "key", "editor", include_income=False)
         self.assertIsNone(self.mocks["save_split"].call_args.args[2]["principal_percent"])
 
     def test_reference_policy_is_read_with_the_existing_connection(self):

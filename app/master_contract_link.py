@@ -16,8 +16,8 @@ def validate_row_destinations(rows, old_index, new_index, keys, isrc):
         if key not in keys or json.loads(key)[0] != "VIDEO"}}
     affected = 0
     for row in rows:
-        references = [association_key(kind, row[field], row["source"], row["account"])
-            for kind, field in (("VIDEO", "video_id"), ("TRACK", "track_id"), ("UPC", "product_upc")) if row.get(field)]
+        from app.contract_text_reference import row_keys
+        references = row_keys(row)
         if not keys.intersection(references):
             continue
         before, after = associated_income_isrc(row, remaining_index), associated_income_isrc(row, new_index)
@@ -30,13 +30,15 @@ def validate_row_destinations(rows, old_index, new_index, keys, isrc):
 
 def prepare_link(reference, isrc, evidence, aliases, claims, choices, release_id, version):
     kind, code = reference["kind"], reference.get("code")
+    if kind == "TEXT":
+        code = reference.get("association_code")
     if kind == "PRODUCT":
         raise ValueError("Este producto sin ISRC conserva su identidad propia; no se puede asignar entero a una cancion.")
-    if kind not in {"VIDEO", "TRACK", "UPC"} or not code:
+    if kind not in {"VIDEO", "TRACK", "UPC", "TEXT"} or not code:
         raise ValueError("Esta referencia no tiene un codigo estable. No se puede asociar solamente por el texto.")
     accounts = {(r["source"], r["account"]) for r in reference["source_accounts"]}
     scope = [row for row in evidence if row["kind"] == kind and row["code"] == code
-             and (kind != "TRACK" or (row["source"], row["account"]) in accounts)]
+             and (kind not in {"TRACK", "TEXT"} or (row["source"], row["account"]) in accounts)]
     keys = {association_key(kind, code, source, account) for source, account in accounts}
     proposed = [dict(key=key, included=True, manual=True, evidence_signature="") for key in sorted(keys)]
     available = {row["key"]: row for row in candidates(isrc, scope, aliases, proposed, claims)}
@@ -50,6 +52,10 @@ def prepare_link(reference, isrc, evidence, aliases, claims, choices, release_id
                  and (decision_scope(row["key"]) not in scopes or row["included"])]
     decisions.extend(dict(key=key, included=True, manual=True, evidence_signature=available[key]["evidence_signature"])
                      for key in sorted(keys))
+    if kind == "TEXT":
+        for decision in decisions:
+            if decision["key"] in keys:
+                decision["text_reference"] = deepcopy(available[decision["key"]]["text_reference"])
     if len(decisions) > 2000:
         raise ValueError("El contrato supera el limite de 2000 decisiones de codigos asociados.")
     signature = hashlib.sha256(json.dumps([reference, isrc, release_id, version,

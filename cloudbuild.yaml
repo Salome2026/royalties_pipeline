@@ -39,6 +39,7 @@ steps:
       - scripts.qa.qa_common_participant_resolution
       - scripts.qa.qa_artist_settlement
       - scripts.qa.qa_report_contract_filter
+      - scripts.qa.qa_contract_text_reference
       - -q
 
   - id: Push
@@ -72,6 +73,21 @@ steps:
       - --region=${_REGION}
       - --quiet
 
+  # The worker accepts frozen v1/v2 requests before the API starts creating v3.
+  - id: Deploy report Job
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - jobs
+      - update
+      - ${_REPORT_JOB}
+      - --image=${_IMAGE_REPOSITORY}/vpo-corp-platform:${COMMIT_SHA}
+      - --set-cloudsql-instances=${_CLOUDSQL_CONNECTION_NAME}
+      - --update-env-vars=VPO_CLOUDSQL_CONNECTION_NAME=${_CLOUDSQL_CONNECTION_NAME},VPO_POSTGRES_APPLICATION_NAME=vpo-report-job,VPO_POSTGRES_POOL_MIN_SIZE=0,VPO_POSTGRES_POOL_MAX_SIZE=2,VPO_POSTGRES_POOL_TIMEOUT_SECONDS=10,VPO_POSTGRES_POOL_MAX_WAITING=4,VPO_POSTGRES_POOL_MAX_LIFETIME_SECONDS=1800,VPO_POSTGRES_POOL_MAX_IDLE_SECONDS=300,POLARS_MAX_THREADS=2
+      - --region=${_REGION}
+      - --quiet
+
   - id: Deploy API
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     entrypoint: gcloud
@@ -87,20 +103,6 @@ steps:
       - --update-env-vars=VPO_CLOUDSQL_CONNECTION_NAME=${_CLOUDSQL_CONNECTION_NAME},VPO_POSTGRES_APPLICATION_NAME=vpo-corp-api,VPO_POSTGRES_POOL_MIN_SIZE=1,VPO_POSTGRES_POOL_MAX_SIZE=4,VPO_POSTGRES_POOL_TIMEOUT_SECONDS=10,VPO_POSTGRES_POOL_MAX_WAITING=16,VPO_POSTGRES_POOL_MAX_LIFETIME_SECONDS=1800,VPO_POSTGRES_POOL_MAX_IDLE_SECONDS=300,VPO_ROYALTIES_DASHBOARD_BACKEND=bigquery,VPO_ROYALTIES_DASHBOARD_BIGQUERY_FALLBACK=1,VPO_BIGQUERY_PROJECT=vpo-corp-royalties,VPO_BIGQUERY_DATASET=royalties_analytics,VPO_BIGQUERY_LOCATION=US,VPO_BIGQUERY_MAX_BYTES_BILLED=5000000000,VPO_CATALOG_REFRESH_JOB=vpo-catalog-refresh,VPO_CATALOG_EVENT_AUDIENCE=https://vpo-corp-api-259971998447.us-central1.run.app/catalog/refresh-event,VPO_CATALOG_EVENT_SERVICE_ACCOUNT=vpo-marts-publisher@vpo-corp-royalties.iam.gserviceaccount.com
       - --update-secrets=SPOTIFY_CLIENT_ID=spotify-client-id:latest,SPOTIFY_CLIENT_SECRET=spotify-client-secret:latest,YOUTUBE_API_KEY=youtube-api-key:latest
       - --max=2
-      - --region=${_REGION}
-      - --quiet
-
-  - id: Deploy report Job
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
-    entrypoint: gcloud
-    args:
-      - run
-      - jobs
-      - update
-      - ${_REPORT_JOB}
-      - --image=${_IMAGE_REPOSITORY}/vpo-corp-platform:${COMMIT_SHA}
-      - --set-cloudsql-instances=${_CLOUDSQL_CONNECTION_NAME}
-      - --update-env-vars=VPO_CLOUDSQL_CONNECTION_NAME=${_CLOUDSQL_CONNECTION_NAME},VPO_POSTGRES_APPLICATION_NAME=vpo-report-job,VPO_POSTGRES_POOL_MIN_SIZE=0,VPO_POSTGRES_POOL_MAX_SIZE=2,VPO_POSTGRES_POOL_TIMEOUT_SECONDS=10,VPO_POSTGRES_POOL_MAX_WAITING=4,VPO_POSTGRES_POOL_MAX_LIFETIME_SECONDS=1800,VPO_POSTGRES_POOL_MAX_IDLE_SECONDS=300,POLARS_MAX_THREADS=2
       - --region=${_REGION}
       - --quiet
 

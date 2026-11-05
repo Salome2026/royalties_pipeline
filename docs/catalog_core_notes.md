@@ -607,6 +607,11 @@ que las decisiones humanas vuelve a leer todos los contratos antes de guardar.
 Solo escribe las tablas Postgres `master_contract_association_reviews`,
 `master_contract_association_review_history` y `master_contract_association_review_runs`.
 Nunca reabre el acuerdo economico, modifica sus porcentajes, ni confirma asociaciones.
+Las propuestas contractuales de referencias sin codigo conservan el contexto
+completo y no modifican la identidad del catalogo. Son opcionales: dejarlas sin
+decision no invalida un acuerdo aprobado ni exige cubrir todo el catalogo.
+Confirmar aplica ese contrato al item, sin fusionarlo; una decision incluida cuya
+evidencia cambie si requiere revision. Ver `master_contract_association_rules.md`.
 Cambios de importes/meses o reintentos identicos no generan otro evento de revision.
 Un fallo no marca la revision completada: el Job conserva su mecanismo de reintento.
 Los GET no hacen la conciliacion pesada ni confirman decisiones.

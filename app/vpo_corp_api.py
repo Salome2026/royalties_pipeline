@@ -74,7 +74,7 @@ from app.master_contract_associations import (
     validate_choices as validate_contract_associations,
     validate_closure as validate_contract_association_closure,
 )
-from app.master_contract_metadata import infer_video_evidence, with_external_titles
+from app.master_contract_metadata import contract_evidence, with_external_titles
 from app.master_contract_review import read_states as read_association_review_states, save_review as save_association_review
 from app.master_contract_income import (
     combined_income as combined_contract_income,
@@ -398,6 +398,7 @@ class MasterCodeAssociationChoice(BaseModel):
     included: bool
     evidence_signature: str = Field(..., pattern=r"^[a-f0-9]{64}$")
     manual: bool = False
+    text_reference: dict[str, str] | None = None
 
 
 class MasterUnidentifiedLinkRequest(BaseModel):
@@ -8712,9 +8713,9 @@ def master_contract_associated_income(choices: dict[str, list[dict]]) -> dict[st
                 return {}
             aliases = {row["alias_catalog_key"]: row["catalog_key"]
                        for row in catalog_alias_lookup(marts[CATALOG_MASTER_FILE]).to_dicts()}
-            evidence = infer_video_evidence(contract_metadata_catalog(pl.read_parquet(marts[CATALOG_MASTER_FILE]).to_dicts()), evidence)
             claims = {choice["key"]: root for root, values in choices.items()
                       for choice in values if choice.get("included")}
+            evidence = contract_evidence(contract_metadata_catalog(pl.read_parquet(marts[CATALOG_MASTER_FILE]).to_dicts()), evidence, aliases, choices, claims)
             schema = {key: pl.Int64 if key == "raw_rows" else pl.Utf8 for key in rows[0] if key != "amount_usd"}
             frame = pl.DataFrame(rows, schema_overrides=schema).lazy()
             eligible = filter_reportable_generation(frame, set(schema) | {"amount_usd"})
@@ -8981,7 +8982,8 @@ def master_contract_unidentified_income(choices: dict, **filters) -> dict:
         with use_product_income_marts(marts):
             aliases = {r["alias_catalog_key"]: r["catalog_key"]
                        for r in catalog_alias_lookup(marts[CATALOG_MASTER_FILE]).to_dicts()}
-            return {**unidentified_income(rows, infer_video_evidence(catalog, evidence), catalog, aliases,
+            claims = {c["key"]: root for root, values in choices.items() for c in values if c.get("included")}
+            return {**unidentified_income(rows, contract_evidence(catalog, evidence, aliases, choices, claims), catalog, aliases,
                 choices, **filters), "release_id": release_id}
     except Exception as exc:
         raise HTTPException(status_code=503,
@@ -9023,7 +9025,7 @@ def prepare_unidentified_link(conn, reference_id, isrc):
     choices = read_contract_association_choices(conn)
     # Reuse this transaction's policy read instead of waiting for another pooled connection.
     with use_distributor_policy_snapshot(load_document_in_transaction(conn)):
-        document = master_contract_unidentified_income(choices, reference_id=reference_id)
+        document = master_contract_unidentified_income(choices, reference_id=reference_id, include_zero=True)
     references = document["unidentified_items"]
     if not references:
         raise HTTPException(409, "La referencia ya fue asociada o cambio. Actualiza la lista.")
@@ -9036,10 +9038,11 @@ def prepare_unidentified_link(conn, reference_id, isrc):
     rows, evidence = published_unassigned_income(document["release_id"])
     aliases = {row["alias_catalog_key"]: row["catalog_key"] for row in catalog_alias_lookup(path).to_dicts()}
     claims = read_contract_association_claims(conn)
+    evidence = contract_evidence(contract_metadata_catalog(catalog.to_dicts()), evidence, aliases, choices, claims)
     prepared = prepare_link(references[0], isrc, evidence, aliases, claims,
         ((saved or {}).get("split") or {}).get("code_association_overrides") or [],
         document["release_id"], (saved or {}).get("version", 0))
-    inferred = infer_video_evidence(contract_metadata_catalog(catalog.to_dicts()), evidence)
+    inferred = evidence
     updated = {**choices, isrc: prepared["choices"]}
     next_claims = {choice["key"]: root for root, values in updated.items() for choice in values if choice.get("included")}
     validate_row_destinations(rows, income_association_index(inferred, aliases, choices, claims),
@@ -9109,7 +9112,8 @@ def master_contract_associations(isrc: str, choices: list[dict[str, Any]], claim
         if not release_id:
             raise ValueError("No hay una version publicada disponible.")
         _, published = published_unassigned_income(release_id)
-        inferred = infer_video_evidence(contract_metadata_catalog(catalog.to_dicts()), published)
+        aliases = {row["alias_catalog_key"]: row["catalog_key"] for row in catalog_alias_lookup(path).to_dicts()}
+        inferred = contract_evidence(contract_metadata_catalog(catalog.to_dicts()), published, aliases, {isrc: choices}, claims)
         evidence = contract_identity_evidence(isrc, matches.row(0, named=True), release_id=release_id)
         by_key = {json.dumps([row["kind"], row["code"], row["source"], row["account"]], separators=(",", ":")): row
                   for row in evidence}

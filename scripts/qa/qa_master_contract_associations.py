@@ -85,7 +85,7 @@ class ContractAssociationTests(unittest.TestCase):
              patch.object(api.pl, "read_parquet", return_value=catalog), \
              patch.object(api, "mart_release_cache") as cache, \
              patch.object(api, "published_unassigned_income", return_value=([], [inferred])), \
-             patch.object(api, "infer_video_evidence", return_value=[inferred]), \
+             patch.object(api, "contract_evidence", return_value=[inferred]), \
              patch.object(api, "contract_identity_evidence", return_value=[exact]), \
              patch.object(api, "catalog_alias_lookup", return_value=pl.DataFrame({
                  "alias_catalog_key": ["VIDEO:abcdefghijk"], "catalog_key": [f"ISRC:{ISRC}"]})):
@@ -162,7 +162,7 @@ class ContractAssociationTests(unittest.TestCase):
         choices = [choice(self.items()[0], False)]
         request = api.MasterContractSaveRequest(split={"code_association_overrides": choices})
         self.assertEqual(request.split.model_dump()["code_association_overrides"],
-                         [{**item, "manual": False} for item in choices])
+                         [{**item, "manual": False, "text_reference": None} for item in choices])
 
     def test_parameterized_query_inspects_all_statements_without_financial_changes(self):
         client = MagicMock()
@@ -200,7 +200,7 @@ class ContractAssociationTests(unittest.TestCase):
             result = api.get_master_contract_associations(ISRC, "key", "reader")
             auth.assert_called_once_with(conn, "reader", "access")
             conn.execute.assert_not_called()
-            self.assertFalse(result["reports_effective"])
+            self.assertTrue(result["reports_effective"])
 
     def test_choice_saved_in_same_postgres_payload_and_history(self):
         conn = MagicMock()

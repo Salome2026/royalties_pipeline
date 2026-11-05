@@ -10,7 +10,7 @@ from app.master_contract_associations import (
 )
 from app.operational_db import is_postgres_connection
 
-REVIEW_RULE = "complete-identity-evidence-v3"
+REVIEW_RULE = "complete-identity-evidence-v4"
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS master_contract_association_reviews (
     isrc text PRIMARY KEY,
@@ -105,10 +105,10 @@ def evidence_by_contract(evidence: list[dict], aliases: dict[str, str], choices:
     for root, decisions in choices.items():
         for decision in decisions:
             kind, code, source, account = json.loads(decision["key"])
-            saved[(kind, code, source, account) if kind == "TRACK" else (kind, code)].add(root)
+            saved[(kind, code, source, account) if kind in {"TRACK", "TEXT"} else (kind, code)].add(root)
     for row in evidence:
         scope = (row["kind"], row["code"])
-        if row["kind"] == "TRACK":
+        if row["kind"] in {"TRACK", "TEXT"}:
             scope += (row["source"], row["account"])
         scopes[scope].append(row)
     result: dict[str, list[dict]] = defaultdict(list)
@@ -190,7 +190,7 @@ def review_published_release(client, manifest: dict, *, actor: str = "statement-
     from io import BytesIO
     import polars as pl
     from app.operational_db import operational_connect
-    from app.master_contract_income import read_choices
+    from app.master_contract_income import read_choices, published_unassigned_income
     from app.master_contract_associations import review_identity_evidence
     from app.master_contract_metadata import with_external_titles
     from scripts.lib.catalog_report_filter import catalog_alias_lookup
@@ -236,6 +236,10 @@ def review_published_release(client, manifest: dict, *, actor: str = "statement-
         product_index = json.loads(client.bucket(manifest["bucket"]).blob(
             product_entry["object"], generation=int(product_entry["generation"])).download_as_bytes())
     aliases = review_aliases(frame, product_index)
+    from app.contract_text_reference import enrich_text_proposals
+    _, published = published_unassigned_income(release)
+    evidence = enrich_text_proposals(evidence + [r for r in published if r["kind"] == "TEXT"], enriched,
+        aliases, choices, {c["key"]: root for root, values in choices.items() for c in values if c.get("included")})
     with operational_connect() as conn:
         result = reconcile_reviews(conn, release, evidence, aliases, expected_choices=choices, rule_version=revision, actor=actor, catalog=enriched)
     print(json.dumps({"event": "contract_association_review_completed", **result}), flush=True)

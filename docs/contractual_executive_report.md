@@ -24,7 +24,7 @@ input_manifest_json existente, junto con policy/version y parametros. No crea
 tablas ni migra datos operativos. La copia de contratos se lee en una transaccion
 Postgres REPEATABLE READ READ ONLY; futuras ediciones no alteran ese pedido.
 
-Los nuevos pedidos congelan tambien el indice de asociados (snapshot v2): mismas
+Los pedidos congelan tambien el indice de asociados (snapshot v2): mismas
 reglas de Contratos, catalogo completo, decisiones y reclamos de todos los contratos,
 con el mismo release. No se aplica el corte de junio de la pantalla de validacion.
 El Cloud Run Job conserva exclusivamente la base elegible publicada de
@@ -40,6 +40,16 @@ Un control privado proyecta exclusivamente las columnas de identidad del Parquet
 crudo fijado por generacion: veta slots cuya precedencia difiera entre productores.
 Usa lectura en dos pasos, poda por estadisticas y cache por generacion; no relee
 los importes del crudo ni altera catalogo, tablas BigQuery o la ingesta.
+
+Los nuevos pedidos usan snapshot v3: agregan las referencias sin codigo
+confirmadas en Contratos, con contexto completo e importes/cantidad congelados.
+Se seleccionan y concilian por fuente, cuenta, hoja, mes, titulo completo, artista
+y canal; cualquier discrepancia conserva el ingreso sin asignar. El destino
+economico no reemplaza el ISRC nativo ni fusiona el item con otro asset. Los
+pedidos v1 y v2 conservan su lector anterior. Ver reglas rectoras de asociados.
+En una publicacion de codigo se actualiza primero el Job lector y despues la API
+que crea pedidos v3; ese orden queda en `cloudbuild.yaml`. No se migran decisiones
+ni se copian contratos desde las pruebas a produccion.
 Cada fila economica se cuenta una vez. Los asociados incluidos entran tambien
 al buscar el ISRC o titulo canonico. Mes/rango, fuente/cuenta y vigencias se aplican
 a ambos tipos de ingreso. Snapshots v1 ya pedidos conservan su lectura anterior.

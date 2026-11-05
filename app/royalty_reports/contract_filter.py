@@ -65,7 +65,12 @@ def filter_income(frame):
     native = pl.col('asset_isrc').fill_null('').str.contains(r'^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$') if 'asset_isrc' in columns else pl.lit(False)
     included, excluded = [], []
     temporary = []
-    for kind, field in [('UPC', 'product_upc'), ('VIDEO', 'video_id'), ('TRACK', 'track_id')]:
+    if any(json.loads(key)[0] == 'TEXT' for mode in ('included', 'excluded') for key in snapshot['associations'][mode]):
+        from app.contract_text_reference import with_reference_code
+        frame = with_reference_code(frame)
+        columns.add('_contract_text_code')
+        temporary.append('_contract_text_code')
+    for kind, field in [('UPC', 'product_upc'), ('VIDEO', 'video_id'), ('TRACK', 'track_id'), ('TEXT', '_contract_text_code')]:
         if field not in columns or not {'source', 'account'} <= columns:
             continue
         for mode, expressions in [('included', included), ('excluded', excluded)]:

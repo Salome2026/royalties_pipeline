@@ -13,6 +13,8 @@ encabezado fijo; se eliminaron los importes, el artista, las fechas y los datos
 personales del ejemplo. Los titulos largos ocupan varias lineas sin truncarse.
 Si no entran todos los temas, se repite el encabezado en las paginas siguientes;
 el total y los campos de cobro aparecen solamente al final.
+La version v2 conserva los titulos de origen con emojis mediante una fuente
+monocroma embebida y su licencia, sin modificar el texto del catalogo.
 
 El modo `artist_settlement` reutiliza `royalty_executive` y el contrato vigente
 de Cloud Run Jobs, sin migracion ni nuevas tablas. Aplica los mismos permisos
@@ -31,8 +33,13 @@ El porcentaje efectivo usa el importe sin redondear dividido por el neto del
 tema. El contractual muestra la participacion final del neto establecida por el
 contrato aplicable, incluidos contratos internos. Si hay varios porcentajes
 aplicables muestra `Variable`; si el neto es cero, el efectivo muestra `-`.
-Ante ingresos sin contrato cerrado, identidad asociada o vigencia aplicable,
-el trabajo falla con una explicacion: no emite una liquidacion incompleta.
+Los ingresos seleccionados sin contrato cerrado, asociacion confirmada o vigencia
+aplicable permanecen en la liquidacion con su neto y columnas contractuales vacias.
+No se inventan ceros ni porcentajes. El total suma solo la participacion con
+contrato aplicado; queda vacio si no hay cobertura. Los movimientos compensados
+de neto cero tambien permanecen visibles. Las referencias que comparten contrato
+mantienen su identidad propia. Si un item combina meses cubiertos y pendientes,
+el neto conserva todo el periodo y el importe aplica solo a los meses cubiertos.
 
 Son regalias devengadas del periodo, como el ejemplo; no calcula saldos luego
 de pagos anteriores ni registra una orden de pago en Finanzas.

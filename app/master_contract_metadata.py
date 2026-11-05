@@ -10,6 +10,11 @@ import unicodedata
 from app.master_contracts import parse_artists
 
 RULE_VERSION = "video-title-performers-v1"
+
+
+def contract_evidence(catalog, evidence, aliases, choices, claims):
+    from app.contract_text_reference import enrich_text_proposals
+    return enrich_text_proposals(infer_video_evidence(catalog, evidence), catalog, aliases, choices, claims)
 DISPLAY_MARKERS = {
     "video oficial", "official video", "official music video", "audio oficial",
     "official audio", "lyric video", "video clip oficial", "videoclip oficial",

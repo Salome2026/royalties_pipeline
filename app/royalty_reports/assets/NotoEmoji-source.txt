@@ -1,0 +1,7 @@
+Noto Emoji: monochrome fallback for original statement titles in artist PDFs.
+Only PDF presentation changes; catalog text and reference signatures are untouched.
+
+Upstream: https://github.com/google/fonts/tree/8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5/ofl/notoemoji
+Original file: NotoEmoji[wght].ttf
+SHA-256: de6c18832938afc99caf132b39d6a30a19bac7f2e812e28db2535b4608d27551
+License: SIL Open Font License 1.1, included in NotoEmoji-OFL.txt.

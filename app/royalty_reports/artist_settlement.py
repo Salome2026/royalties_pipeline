@@ -12,13 +12,15 @@ from pypdf import PdfReader, PdfWriter
 from reportlab.lib.colors import HexColor, black, white
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfgen import canvas
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Paragraph
 
 from app.royalty_reports.contracts import BuiltReport
 from app.royalty_reports.contractual import analyze_contractual_income, beneficiary_key, settle_amounts
 
 
-TEMPLATE_VERSION = "artist-settlement-v1"
+TEMPLATE_VERSION = "artist-settlement-v2"
 HEADER = Path(__file__).with_name("assets") / "artist_settlement_header.pdf"
 WIDTH, HEIGHT = 842, 595
 LEFT, RIGHT = 109.375, 732.625
@@ -27,23 +29,38 @@ ROW_HEIGHT = 15.75
 MONTHS = ("Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre")
 
 
+def title_markup(title: str) -> str:
+    """Keep the supplied title; embed monochrome glyphs absent from the form font."""
+    parts = []
+    for character in title:
+        # These are nonprinting emoji presentation/join controls, not title words.
+        if character in {"\ufe0f", "\ufe0e", "\u200d"}:
+            continue
+        try:
+            character.encode("cp1252")
+            parts.append(escape(character))
+        except UnicodeEncodeError:
+            if "StatementEmoji" not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(TTFont("StatementEmoji", str(HEADER.with_name("NotoEmoji.ttf"))))
+            parts.append('<font name="StatementEmoji">' + escape(character) + '</font>')
+    return "".join(parts)
+
+
 def individual_statement(snapshot: dict, income: list[dict]) -> dict:
     if len(snapshot.get("artists") or []) != 1:
         raise ValueError("La liquidación individual requiere exactamente un artista.")
     artist = snapshot["artists"][0]
     key = beneficiary_key(artist)
     data = analyze_contractual_income(snapshot, income)
-    if data["extra_codes"]:
-        raise ValueError("Hay ingresos sin contrato cerrado o sin vigencia aplicable. Revisalos antes de emitir la liquidación individual.")
     recipient = next((row for row in data["recipients"] if beneficiary_key(row["artist"]) == key), None)
-    if recipient is None:
+    if recipient is None and not data["extra_codes"]:
         raise ValueError("El artista seleccionado no tiene una participación individual en los contratos aplicables.")
     tracks = {row["isrc"]: row for row in data["tracks"]}
     amounts: dict[str, dict] = defaultdict(lambda: {"raw_amount": 0.0, "rates": set(), "all_rates": set(), "participant": False})
-    active_isrcs = {row.get("isrc") for row in income}
+    active_isrcs = {row.get("_contract_reference") or row.get("isrc") for row in income}
     for allocation in data["allocations"]:
         shares = [row for row in allocation["shares"] if beneficiary_key(row["artist"]) == key]
-        if allocation["isrc"] not in active_isrcs:
+        if allocation["isrc"] not in active_isrcs or not allocation["has_income"]:
             continue
         rate = sum(row["percent"] for row in shares)
         row = amounts[allocation["isrc"]]
@@ -56,14 +73,25 @@ def individual_statement(snapshot: dict, income: list[dict]) -> dict:
     rows = [{"isrc": isrc, "title": tracks[isrc]["title"], "net": tracks[isrc]["amount_usd"], **values}
             for isrc, values in amounts.items() if values["participant"]]
     rows.sort(key=lambda row: (beneficiary_key(row["title"]), row["isrc"]))
-    for row, amount in zip(rows, settle_amounts([row["raw_amount"] for row in rows], recipient["amount"])):
+    for row, amount in zip(rows, settle_amounts([row["raw_amount"] for row in rows], recipient["amount"] if recipient else 0)):
         row["amount"] = amount
         row["effective_percent"] = row["raw_amount"] / row["net"] * 100 if abs(row["net"]) > 1e-10 else None
         rates = row["rates"] or row["all_rates"]
         row["contract_percent"] = next(iter(rates)) if len(rates) == 1 else None
+    covered_items = {row["isrc"] for row in rows}
+    pending = {}
+    for extra in data["extra_codes"]:
+        if extra["code"] in covered_items:
+            continue
+        item = pending.setdefault(extra["code"], {"isrc": extra["code"], "title": extra["title"], "net": 0.0,
+            "amount": None, "effective_percent": None, "contract_percent": None, "pending": True})
+        item["net"] += extra["amount_usd"]
+    rows.extend(pending.values())
+    rows.sort(key=lambda row: (beneficiary_key(row["title"]), row["isrc"]))
     if not rows:
         raise ValueError("No hay temas con participación individual para el período seleccionado.")
-    return {"artist": artist, "rows": rows, "total": recipient["amount"]}
+    return {"artist": artist, "rows": rows, "total": recipient["amount"] if recipient and covered_items else None,
+        "has_pending": bool(data["extra_codes"])}
 
 
 def localized(value: float) -> str:
@@ -113,7 +141,7 @@ class IndividualPdf:
         self.c = canvas.Canvas(overlay, pagesize=(WIDTH, HEIGHT))
         chunks, chunk, used = [], [], 0.0
         for row in self.data["rows"]:
-            paragraph = Paragraph(escape(row["title"]), self.style)
+            paragraph = Paragraph(title_markup(row["title"]), self.style)
             _, height = paragraph.wrap(COLS[1]-COLS[0]-6, 500)
             height = max(ROW_HEIGHT, height + 4.5)
             if height > 280:
@@ -134,9 +162,9 @@ class IndividualPdf:
                 self.box(top, height, "#F6FAF9" if index % 2 == 0 else "#FFFFFF")
                 paragraph.drawOn(self.c, 112.375, HEIGHT-top-2.25-paragraph.height)
                 self.text("$" + localized(row["net"]), 502.375, top+11.39, color=HexColor("#1F2937"), align="right", max_width=70)
-                self.text("$" + localized(row["amount"]), 578.125, top+11.39, color=HexColor("#1F2937"), align="right", max_width=70)
-                effective = localized(row["effective_percent"])+"%" if row["effective_percent"] is not None else "-"
-                contractual = localized(row["contract_percent"])+"%" if row["contract_percent"] is not None else "Variable"
+                self.text("$" + localized(row["amount"]) if row["amount"] is not None else "", 578.125, top+11.39, color=HexColor("#1F2937"), align="right", max_width=70)
+                effective = localized(row["effective_percent"])+"%" if row["effective_percent"] is not None else ("" if row.get("pending") else "-")
+                contractual = localized(row["contract_percent"])+"%" if row["contract_percent"] is not None else ("" if row.get("pending") else "Variable")
                 self.text(effective, 618.75, top+11.39, align="center")
                 self.text(contractual, 694.5, top+11.39, align="center")
                 top += height
@@ -150,8 +178,8 @@ class IndividualPdf:
             if last:
                 self.box(top, 16.5, "#D0E0E3", right=581.125)
                 self.box(top, 16.5, "#F6FAF9", left=581.125)
-                self.text("Total del artista en el período", 502.375, top+12.18, "Helvetica-Bold", 9.75, "right", HexColor("#315D5A"))
-                self.text("$"+localized(self.data["total"]), 578.125, top+11.93, "Times-Bold", 10.725, "right", HexColor("#173B3A"), max_width=70)
+                self.text("Total con contrato aplicado" if self.data.get("has_pending") else "Total del artista en el período", 502.375, top+12.18, "Helvetica-Bold", 9.75, "right", HexColor("#315D5A"))
+                self.text("$"+localized(self.data["total"]) if self.data["total"] is not None else "", 578.125, top+11.93, "Times-Bold", 10.725, "right", HexColor("#173B3A"), max_width=70)
                 self.line(top); self.line(top+16.125)
                 top += 16.5
                 self.line(top+15.375); self.line(top+31.875)

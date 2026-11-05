@@ -1,4 +1,4 @@
-"""Additional contract income only; existing royalty readers are not changed."""
+"""Contract coverage of unassigned income; native identifiers remain authoritative."""
 from __future__ import annotations
 
 from collections import defaultdict
@@ -67,13 +67,14 @@ def _merge_statement_evidence(rows):
     merged = {}
     for row in rows:
         key = tuple(row[name] for name in ("kind", "code", "source", "account"))
-        item = merged.setdefault(key, {**row, "isrcs": set(), "titles": set(), "artists": set(),
+        item = merged.setdefault(key, {**row, "isrcs": set(), "titles": set(), "artists": set(), "source_contexts": set(),
                                        "native_ada_product": False})
-        for name in ("isrcs", "titles", "artists"):
+        for name in ("isrcs", "titles", "artists", "source_contexts"):
+            item.setdefault(name, set())
             item[name].update(row.get(name) or [])
         item["native_ada_product"] |= bool(row.get("native_ada_product"))
         item["has_unassigned_rows"] = bool(item.get("has_unassigned_rows")) or bool(row.get("has_unassigned_rows"))
-    return [{**item, **{name: sorted(item[name]) for name in ("isrcs", "titles", "artists")}}
+    return [{**item, **{name: sorted(item[name]) for name in ("isrcs", "titles", "artists", "source_contexts")}}
             for _, item in sorted(merged.items())]
 
 
@@ -91,7 +92,7 @@ def published_unassigned_income(release_id: str) -> tuple[list[dict], list[dict]
     # Keep identifiers together: expanding them before summing would multiply revenue.
     sql = f"""
     SELECT source, account, source_sheet, revenue_basis, artist, title, asset_isrc,
-      product_upc, video_id, track_id, catalog_number, product_type, release_title,content_type,content_origin,
+      product_upc, video_id, track_id, catalog_number, product_type, release_title,content_type,content_origin, channel_id,
       FORMAT_DATE('%Y-%m', statement_month) AS statement_period,
       SUM(amount_usd) AS amount_usd, COUNT(*) AS raw_rows
     FROM `{prefix}.royalty_statement_fact`
@@ -99,7 +100,7 @@ def published_unassigned_income(release_id: str) -> tuple[list[dict], list[dict]
       AND statement_month IS NOT NULL
       {STATEMENT_WINDOW}
     GROUP BY source, account, source_sheet, revenue_basis, artist, title, asset_isrc,
-      product_upc, video_id, track_id, catalog_number, product_type, release_title,content_type,content_origin, statement_period
+      product_upc, video_id, track_id, catalog_number, product_type, release_title,content_type,content_origin, channel_id, statement_period
     """
     rows = _statement_rows(client, config, sql)
     seed_sql = f"""
@@ -121,7 +122,7 @@ def published_unassigned_income(release_id: str) -> tuple[list[dict], list[dict]
     seeds = list({tuple(row[name] for name in seed_fields): row for row in seeds}.values())
     sql = f"""
     WITH facts AS (
-      SELECT source, account, asset_isrc, product_upc, video_id, track_id, catalog_number, title, artist, statement_month
+      SELECT source, account, asset_isrc, product_upc, video_id, track_id, catalog_number, title, artist, channel_id, source_sheet, statement_month
       FROM `{prefix}.royalty_statement_fact` WHERE release_id = @release_id
     ), codes AS (
       SELECT f.*, c.kind, c.value,
@@ -140,6 +141,7 @@ def published_unassigned_income(release_id: str) -> tuple[list[dict], list[dict]
       LOGICAL_OR(COALESCE(c.asset_isrc, '') = '') AS has_unassigned_rows,
       ARRAY_AGG(DISTINCT NULLIF(c.title, '') IGNORE NULLS) AS titles,
       ARRAY_AGG(DISTINCT NULLIF(c.artist, '') IGNORE NULLS) AS artists,
+      ARRAY_AGG(DISTINCT TO_JSON_STRING(STRUCT(c.title AS title, c.artist AS artist, c.channel_id AS channel_id, c.source_sheet AS source_sheet))) AS source_contexts,
       LOGICAL_OR(c.source = 'ada' AND COALESCE(c.asset_isrc, '') = ''
         AND COALESCE(c.catalog_number, '') != '') AS native_ada_product
     FROM codes c JOIN seeds s USING (kind, value, scope_source, scope_account)
@@ -157,7 +159,8 @@ def published_unassigned_income(release_id: str) -> tuple[list[dict], list[dict]
             ]) for row in seeds[start:start + 1000]])]
         evidence_rows.extend(_statement_rows(client, scoped, sql, alias="c", include_undated=True))
     evidence = _merge_statement_evidence(evidence_rows)
-    return rows, evidence
+    from app.contract_text_reference import text_evidence
+    return rows, evidence + text_evidence(rows)
 
 
 def read_choices(conn: Any) -> dict[str, list[dict]]:
@@ -179,10 +182,10 @@ def income_association_index(
         for decision in decisions:
             if decision.get("manual"):
                 kind, code, source, account = json.loads(decision["key"])
-                manual_roots[(kind, code, source, account) if kind == "TRACK" else (kind, code)].add(root)
+                manual_roots[(kind, code, source, account) if kind in {"TRACK", "TEXT"} else (kind, code)].add(root)
     for item in evidence:
         scope = (item["kind"], item["code"])
-        if item["kind"] == "TRACK":
+        if item["kind"] in {"TRACK", "TEXT"}:
             scope += (item["source"], item["account"])
         scopes[scope].append(item)
     target_evidence: dict[str, dict[str, dict]] = defaultdict(dict)
@@ -223,9 +226,8 @@ def income_association_index(
 def associated_income_isrc(row: dict, index: dict) -> str | None:
     if row.get("asset_isrc") or row.get('_income_product_pending') or (row["source"] == "ada" and row.get("catalog_number")):
         return None
-    keys = [association_key(kind, row[field], row["source"], row["account"])
-            for kind, field in [("UPC", "product_upc"), ("VIDEO", "video_id"), ("TRACK", "track_id")]
-            if row.get(field) and not (kind=='UPC' and row.get('_income_upc_pending'))]
+    from app.contract_text_reference import row_keys
+    keys = row_keys(row)
     roots = {root for key in keys for root in index["included"].get(key, [])}
     roots -= {root for key in keys for root in index["excluded"].get(key, [])}
     return next(iter(roots)) if len(roots) == 1 else None
@@ -249,9 +251,8 @@ def consolidate_associated_income(
         month = row.get("statement_period")
         if not month:
             continue
-        keys = [association_key(kind, row[field], row["source"], row["account"])
-                for kind, field in [("UPC", "product_upc"), ("VIDEO", "video_id"), ("TRACK", "track_id")]
-                if row.get(field)]
+        from app.contract_text_reference import row_keys
+        keys = row_keys(row)
         amount = float(row.get("amount_usd") or 0)
         months[root][month] += amount
         if month <= cutoff:

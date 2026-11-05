@@ -30,7 +30,7 @@ def identity_evidence(isrc: str, catalog_row: dict[str, Any], *, client: Any = N
     sql = f"""
     WITH facts AS (
       SELECT source, account, asset_isrc, product_upc, video_id, track_id,
-             title, artist, catalog_number, content_origin
+             title, artist, catalog_number, content_origin, channel_id, source_sheet
       FROM `{DEFAULT_PROJECT}.{DEFAULT_DATASET}.royalty_statement_fact`
       WHERE release_id = @release_id
     ), codes AS (
@@ -58,6 +58,7 @@ def identity_evidence(isrc: str, catalog_row: dict[str, Any], *, client: Any = N
       ARRAY_AGG(DISTINCT NULLIF(c.title, '') IGNORE NULLS ORDER BY NULLIF(c.title, '')) AS titles,
       ARRAY_AGG(DISTINCT NULLIF(c.artist, '') IGNORE NULLS ORDER BY NULLIF(c.artist, '')) AS artists,
       ARRAY_AGG(DISTINCT NULLIF(c.content_origin, '') IGNORE NULLS) AS content_origins,
+      ARRAY_AGG(DISTINCT TO_JSON_STRING(STRUCT(c.title AS title,c.artist AS artist,c.channel_id AS channel_id,c.source_sheet AS source_sheet))) AS source_contexts,
       LOGICAL_AND(COALESCE(c.content_origin, '') = 'UGC / Content ID') AS only_ugc_rows,
       LOGICAL_OR(COALESCE(c.asset_isrc, '') != '') AS has_identified_rows,
       LOGICAL_OR(COALESCE(c.asset_isrc, '') = '') AS has_unassigned_rows,
@@ -104,7 +105,7 @@ def split_codes(value: Any) -> list[str]:
 
 def decision_scope(key: str) -> tuple:
     values = json.loads(key)
-    return tuple(values if values[0] == "TRACK" else values[:2])
+    return tuple(values if values[0] in {"TRACK", "TEXT"} else values[:2])
 
 
 def unresolved_associations(items: list[dict], choices: list[dict]) -> list[str]:
@@ -120,7 +121,7 @@ def unresolved_associations(items: list[dict], choices: list[dict]) -> list[str]
             pending = choice["included"] and (
                 not item["selectable"] or choice.get("evidence_signature") != item["evidence_signature"])
         else:
-            pending = not item["automatic"] and (item["selectable"] or item.get("requires_review", False))
+            pending = item["kind"] != "TEXT" and not item["automatic"] and (item["selectable"] or item.get("requires_review", False))
         if pending:
             unresolved.append(item["code"])
     unresolved.extend(json.loads(choice["key"])[1] for choice in choices
@@ -149,6 +150,8 @@ def append_missing_choices(items: list[dict], choices: list[dict]) -> list[dict]
             "reason": "El codigo incluido ya no aparece en la evidencia publicada; descarta la asociacion antes de cerrar.",
             "evidence_signature": hashlib.sha256(("missing:" + choice["key"]).encode()).hexdigest(),
             "inference_rule": None,
+            **({"text_reference": choice["text_reference"], "manual": True,
+                "titles": [choice["text_reference"].get("title", "")]} if kind == "TEXT" and choice.get("text_reference") else {}),
         })
     return result
 
@@ -164,7 +167,7 @@ def candidates(
     reference_only: dict[tuple, bool] = {}
     for row in evidence:
         scope = (row["kind"], row["code"])
-        if row["kind"] == "TRACK":
+        if row["kind"] in {"TRACK", "TEXT"}:
             scope += (row["source"], row["account"])
         all_isrcs.setdefault(scope, set()).update(row.get("isrcs") or [])
         reference_only[scope] = reference_only.get(scope, True) and (
@@ -185,7 +188,7 @@ def candidates(
         # Manual video links allocate only rows lacking a native ISRC. Native
         # occurrences of the same video keep their own recording identity.
         manual_unassigned_video = manual and kind == "VIDEO" and row.get("has_unassigned_rows") is True
-        scope = (kind, code, source, account) if kind == "TRACK" else (kind, code)
+        scope = (kind, code, source, account) if kind in {"TRACK", "TEXT"} else (kind, code)
         observed = sorted(all_isrcs[scope])
         canonical = aliases.get(f"{kind}:{code}") if kind != "TRACK" else None
         inferred = isrc in (row.get("inferred_isrcs") or [])
@@ -225,7 +228,7 @@ def candidates(
         elif inferred and not exact:
             identity.append(row["inference_signature"])
         signature = hashlib.sha256(json.dumps(
-            identity,
+            identity + ([row.get("text_signature")] if kind == "TEXT" else []),
             sort_keys=True, separators=(",", ":"),
         ).encode()).hexdigest()
         included = automatic
@@ -259,10 +262,12 @@ def candidates(
             "reference_group": "ugc" if ugc_reference else "associated",
             "content_origins": origins,
             **({"manual": True} if manual else {}),
+            **({"text_reference": row["text_reference"], "related_video_ids": row.get("related_video_ids") or []}
+               if kind == "TEXT" else {}),
         })
     pending_codes = set(unresolved_associations(items, overrides))
     return sorted(items, key=lambda item: (item["code"] not in pending_codes,
-                                         {"UPC": 0, "TRACK": 1, "VIDEO": 2}[item["kind"]],
+                                         {"UPC": 0, "TRACK": 1, "VIDEO": 2, "TEXT": 3}[item["kind"]],
                                          item["code"], item["source"], item["account"]))
 
 
@@ -284,6 +289,8 @@ def validate_choices(choices: list[dict[str, Any]], previous: list[dict[str, Any
                 raise ValueError(item["reason"])
             if choice.get("evidence_signature") != item["evidence_signature"]:
                 raise ValueError("La evidencia cambió desde que la abriste. Actualizá los códigos asociados.")
+            if item["kind"] == "TEXT" and choice.get("text_reference") != item.get("text_reference"):
+                raise ValueError("La referencia de origen cambio. Volve a elegir el contrato.")
 
 
 def read_claims(conn: Any) -> dict[str, str]:

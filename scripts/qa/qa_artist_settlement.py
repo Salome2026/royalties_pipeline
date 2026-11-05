@@ -17,7 +17,7 @@ sys.path[:0] = [str(ROOT), str(ROOT / "scripts"), str(ROOT / "scripts/qa")]
 
 from fastapi import HTTPException
 from pypdf import PdfReader, PdfWriter
-from app.royalty_reports.artist_settlement import HEADER, IndividualPdf, individual_statement
+from app.royalty_reports.artist_settlement import HEADER, IndividualPdf, individual_statement, title_markup
 from app.royalty_reports.contracts import BuiltReport, ReportRequest
 from app.royalty_reports.contractual import analyze_contractual_income, beneficiary_key
 from app.royalty_reports.engine import ReportEngine
@@ -33,6 +33,12 @@ def artist_fixture():
 
 
 class SettlementTests(unittest.TestCase):
+    def test_original_emoji_titles_use_embedded_glyphs_without_changing_native_text(self):
+        title = 'Un nuevo tratamiento 🧍🏻 | Juli Savioli'
+        markup = title_markup(title)
+        self.assertIn('StatementEmoji', markup)
+        self.assertIn('🧍', markup)
+        self.assertEqual(title_markup('Canción & versión'), 'Canción &amp; versión')
     def test_individual_after_internal_contract(self):
         data = individual_statement(artist_fixture(), [income()])
         self.assertEqual(data["total"], 6)
@@ -72,14 +78,20 @@ class SettlementTests(unittest.TestCase):
         row = individual_statement(artist_fixture(), [income(100), income(-100)])["rows"][0]
         self.assertEqual((row["net"], row["amount"], row["effective_percent"], row["contract_percent"]), (0, 0, None, 6))
 
-    def test_missing_contract_or_identity_does_not_issue_partial_statement(self):
+    def test_missing_contract_or_identity_remains_visible_without_invented_allocation(self):
         for rows in [[income(), income(3, isrc=None)], [income(month="2025-12")],
                      [income(), income(100, isrc=None), income(-100, month="2026-02", isrc=None)]]:
-            with self.assertRaisesRegex(ValueError, "sin contrato"):
-                individual_statement(artist_fixture(), rows)
+            result = individual_statement(artist_fixture(), rows)
+            self.assertTrue(result['has_pending'])
+            self.assertAlmostEqual(sum(row['net'] for row in result['rows']), sum(row['amount_usd'] for row in rows))
+            pending = [row for row in result['rows'] if row.get('pending')]
+            self.assertTrue(pending)
+            self.assertTrue(all(row['amount'] is None and row['contract_percent'] is None and row['effective_percent'] is None for row in pending))
         snapshot = artist_fixture(); snapshot["contracts"][0]["is_closed"] = False
-        with self.assertRaisesRegex(ValueError, "sin contrato"):
-            individual_statement(snapshot, [income()])
+        result = individual_statement(snapshot, [income()])
+        self.assertEqual(result['rows'][0]['net'], 100)
+        self.assertIsNone(result['rows'][0]['amount'])
+        self.assertIsNone(result['total'])
         snapshot["artists"].append("Otro")
         with self.assertRaisesRegex(ValueError, "exactamente un artista"):
             individual_statement(snapshot, [income()])

@@ -1,4 +1,4 @@
-export type AssociationChoice = { key: string; included: boolean; evidence_signature: string; manual?: boolean };
+export type AssociationChoice = { key: string; included: boolean; evidence_signature: string; manual?: boolean; text_reference?: Record<string, string> };
 export type Association = AssociationChoice & {
   kind: string; code: string; source: string; account: string; titles: string[]; artists: string[];
   isrcs: string[]; automatic: boolean; status: string; selectable: boolean; reason: string;
@@ -12,7 +12,7 @@ export type AssociationValidation = { loading: boolean; pending: number; error: 
 
 export function associationScope(key: string): string {
   const values = JSON.parse(key) as string[];
-  return JSON.stringify(values[0] === "TRACK" ? values : values.slice(0, 2));
+  return JSON.stringify(["TRACK", "TEXT"].includes(values[0]) ? values : values.slice(0, 2));
 }
 
 export function associationState(item: Association, choices: AssociationChoice[]) {
@@ -25,7 +25,7 @@ export function associationState(item: Association, choices: AssociationChoice[]
     return { included: valid, status: valid ? "confirmed" : "pending", pending: !valid };
   }
   if (item.automatic && item.selectable && !item.requires_review) return { included: true, status: "automatic", pending: false };
-  return { included: false, status: item.selectable ? "pending" : "blocked", pending: item.selectable || !!item.requires_review };
+  return { included: false, status: item.selectable ? "pending" : "blocked", pending: item.kind !== "TEXT" && (item.selectable || !!item.requires_review) };
 }
 
 export function pendingAssociationCodes(items: Association[], choices: AssociationChoice[]): string[] {
@@ -60,7 +60,7 @@ export function associationGroupState(group: AssociationGroup, choices: Associat
   const states = group.items.map((item) => associationState(item, choices));
   const pending = states.some((state) => state.pending);
   const included = states.every((state) => state.included);
-  const status = pending ? "pending" : included ? (states.every((state) => state.status === "automatic") ? "automatic" : "confirmed")
+  const status = pending || states.some((state) => state.status === "pending") ? "pending" : included ? (states.every((state) => state.status === "automatic") ? "automatic" : "confirmed")
     : states.every((state) => state.status === "excluded") ? "excluded" : "blocked";
   return { included, pending, status, automatic: group.items.every((item) => item.automatic),
     selectable: group.items.every((item) => item.selectable) };

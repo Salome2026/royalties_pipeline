@@ -126,7 +126,7 @@ class ContractPdf:
         for index, row in enumerate(d["tracks"][:5]):
             y = 307 - index * 39
             self.text(row["title"], 544, y, 9, True, width=W - 588)
-            self.text(row["isrc"], 544, y - 15, 8, color=style.MUTED)
+            self.text(row.get("display_isrc", row["isrc"]), 544, y - 15, 8, color=style.MUTED)
             self.text(style._money(row["amount_usd"]), W - 44, y - 15, 9, True, align="right")
             if index < 4:
                 self.line(544, y - 25, W - 44)

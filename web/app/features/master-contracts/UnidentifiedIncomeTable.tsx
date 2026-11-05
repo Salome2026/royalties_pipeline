@@ -5,6 +5,7 @@ import { Link2 } from "lucide-react";
 
 export type UnidentifiedIncome = {
   id: string; kind: string; code: string | null; title: string; artist: string;
+  association_supported?: boolean;
   amount_usd: number; video_url: string | null; first_month: string | null; last_month: string | null;
   source_accounts: Array<{ source: string; account: string }>;
   candidates: Array<{ isrc: string; title: string; artists: string; statuses: string[]; reasons: string[] }>;

@@ -27,7 +27,7 @@ export function AssociateIncomeDialog({ reference, canApprove, onClose, onSaved 
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [searched, setSearched] = useState(false);
-  const supported = !!reference.code && ["VIDEO", "TRACK", "UPC"].includes(reference.kind);
+  const supported = reference.association_supported ?? (!!reference.code && ["VIDEO", "TRACK", "UPC"].includes(reference.kind));
   const endpoint = `/api/master-contracts/unidentified/${encodeURIComponent(reference.id)}/association`;
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
@@ -88,7 +88,7 @@ export function AssociateIncomeDialog({ reference, canApprove, onClose, onSaved 
       </div>
       {busy && <p className={styles.auditLine} role="status">Verificando...</p>}
       {preview && <div className={styles.linkDestination}><span>Destino</span><strong>{preview.target.title}</strong><small>{preview.target.isrc}</small>
-        <p>El contrato quedara abierto para revision. Sus porcentajes se conservan.</p>
+        <p>El contrato quedara abierto para revision. Sus porcentajes se conservan. La referencia mantiene su identidad en el catalogo.</p>
         {preview.target.closed && !canApprove && <p className={styles.warning}>Necesitas permiso de aprobacion para reabrir este contrato.</p>}</div>}
     </>}
     {error && <p className={styles.warning} role="alert">{error}</p>}

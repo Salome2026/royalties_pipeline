@@ -98,6 +98,10 @@ def allocation_rows(agreement: dict, split: dict) -> list[dict]:
 
 def analyze_contractual_income(snapshot: dict, income: list[dict]) -> dict[str, Any]:
     catalog = {row["isrc"]: row for row in snapshot["catalog"]}
+    for row in income:
+        if row.get("_contract_reference") and row.get("_contract_isrc") in catalog:
+            catalog[row["_contract_reference"]] = {"isrc": row["_contract_reference"],
+                "title": row.get("title") or "Sin título", "contract_isrc": row["_contract_isrc"], "display_isrc": ""}
     contracts = {row["isrc"]: row for row in snapshot["contracts"]}
     monthly: dict[str, float] = defaultdict(float)
     by_isrc: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
@@ -122,16 +126,17 @@ def analyze_contractual_income(snapshot: dict, income: list[dict]) -> dict[str, 
         units += float(row.get("units") or 0)
         raw_rows += int(row.get("raw_rows") or 0)
         sources.add(row.get("source"))
-        if row.get("isrc") in catalog:
-            by_isrc[row["isrc"]][month] += amount
+        item = row.get("_contract_reference") or row.get("isrc")
+        if item in catalog:
+            by_isrc[item][month] += amount
         else:
-            unassigned(row.get("isrc") or row.get("upc") or f"TEXT:{row.get('title') or ''}", row.get("title") or "Sin título", month, amount, "Sin contrato de ISRC asociado")
+            unassigned(row.get("isrc") or row.get("upc") or row.get("_income_reference") or f"TEXT:{row.get('title') or ''}", row.get("title") or "Sin título", month, amount, "Sin contrato de ISRC asociado")
 
     beneficiaries: dict[str, dict] = {}
     allocations = []
     covered = 0.0
     for isrc, track in catalog.items():
-        saved = contracts.get(isrc) or {}
+        saved = contracts.get(track.get("contract_isrc") or isrc) or {}
         split = saved.get("split") or {}
         agreements = split.get("agreements") or []
         error = "Sin contrato cerrado con vigencia definida"
@@ -151,7 +156,8 @@ def analyze_contractual_income(snapshot: dict, income: list[dict]) -> dict[str, 
             end = _period_end(agreement["effective_until"]) if agreement.get("effective_until") else _period_start(snapshot["as_of"])
             amount = sum(value for month, value in by_isrc[isrc].items() if start <= _period_start(month) <= end)
             covered += amount
-            allocations.append({"isrc": isrc, "amount_usd": amount, "shares": shares, "version": saved["version"]})
+            allocations.append({"isrc": isrc, "amount_usd": amount, "shares": shares, "version": saved["version"],
+                "has_income": any(start <= _period_start(month) <= end for month in by_isrc[isrc])})
             for share in shares:
                 key = beneficiary_key(share["artist"])
                 recipient = beneficiaries.setdefault(key, {"artist": share["artist"], "raw_amount_usd": 0.0, "partner": False, "components": [0.0, 0.0, 0.0]})
@@ -180,6 +186,6 @@ def analyze_contractual_income(snapshot: dict, income: list[dict]) -> dict[str, 
         row["display_amount"] = amount
     return {"total": round_money(total), "covered": round_money(covered), "pending": round_money(pending_total),
             "recipients": recipients, "extra_codes": extras, "monthly": sorted(monthly.items()),
-            "units": units, "raw_rows": raw_rows, "sources": len(sources), "catalog_count": len(catalog),
-            "income_isrc_count": len(by_isrc), "allocations": allocations,
+            "units": units, "raw_rows": raw_rows, "sources": len(sources), "catalog_count": len(snapshot["catalog"]),
+            "income_isrc_count": sum(bool(by_isrc[row["isrc"]]) for row in snapshot["catalog"]), "allocations": allocations,
             "tracks": sorted([{**track, "amount_usd": sum(by_isrc[isrc].values())} for isrc, track in catalog.items()], key=lambda row: -row["amount_usd"])}

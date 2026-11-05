@@ -161,7 +161,7 @@ class ContractIncomeTests(unittest.TestCase):
             self.assertEqual(result["amount_usd"], 125)
             self.assertEqual(result["statement_income"], [{"statement_month": "2026-06", "amount_usd": 125.}])
         self.assertEqual(detail["first_statement_date"], "2026-06-01")
-        self.assertFalse(detail["reports_effective"])
+        self.assertTrue(detail["reports_effective"])
 
     def test_release_mismatch_and_sqlite_rejected_without_reading_economics(self):
         published_unassigned_income.cache_clear()
