@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 import polars as pl
 from scripts.lib.catalog_artist_dictionary import display_credit, search_terms
+from scripts.lib.dashgo_video_identity import compile_video_groups, with_video_groups, SUMMARY_VIDEO, SUMMARY_TITLE
 try:
     from lib.product_income import scan_income
 except ModuleNotFoundError:
@@ -602,7 +603,11 @@ def report_identity_expr(columns: set[str]) -> pl.Expr:
             normalized_artist,
         ]))
     )
-    return pl.coalesce([separate_channel_video_expr(columns), catalog_key, fallback_identity]).alias("_report_identity")
+    summary_video = (
+        pl.concat_str([pl.lit("VIDEO:"), pl.col(SUMMARY_VIDEO)])
+        if SUMMARY_VIDEO in columns else pl.lit(None, dtype=pl.String)
+    )
+    return pl.coalesce([summary_video, separate_channel_video_expr(columns), catalog_key, fallback_identity]).alias("_report_identity")
 
 
 DASHGO_GROUP_TITLE = "Agrupación por ingresos menores a 10 centavos"
@@ -674,6 +679,9 @@ def build_track_summary_lf(base_lf: pl.LazyFrame, *, include_identity: bool = Fa
         (_summary_text_expr(columns, ["dsp_normalized"]) == "YouTube")
         & (_summary_text_expr(columns, ["content_origin_normalized"]) == "Video / Channel")
     ).fill_null(False)
+    best_title = pl.col("_summary_title").sort_by(pl.col("amount_usd").abs(), descending=True).drop_nulls().first()
+    if SUMMARY_TITLE in columns:
+        best_title = pl.coalesce([pl.col(SUMMARY_TITLE).drop_nulls().first(), best_title])
 
     grouped = (
         base_lf
@@ -690,11 +698,7 @@ def build_track_summary_lf(base_lf: pl.LazyFrame, *, include_identity: bool = Fa
         .agg([
             *(dashgo_summary_metadata(columns) if include_dashgo_metadata else []),
             pl.col("_summary_channel_video").all().alias("_all_channel_video"),
-            pl.col("_summary_title")
-            .sort_by(pl.col("amount_usd").abs(), descending=True)
-            .drop_nulls()
-            .first()
-            .alias("track_statement_style"),
+            best_title.alias("track_statement_style"),
             pl.col("_summary_artist")
             .sort_by(pl.col("amount_usd").abs(), descending=True)
             .drop_nulls()
@@ -1508,14 +1512,23 @@ def build_report_tables(
     detail_mode: str = DETAIL_MODE_LIMITED,
     contract_snapshot: dict | None = None,
     contract_columns: str = "all",
+    _dashgo_video_groups: pl.DataFrame | None = None,
 ) -> dict[str, pd.DataFrame]:
+    if _dashgo_video_groups is None:
+        from app.royalty_scope import is_wml
+        evidence_path = standardized_path if standardized_path.exists() else song_path
+        _dashgo_video_groups = (
+            compile_video_groups(pl.scan_parquet(evidence_path))
+            if not is_wml() and evidence_path.exists() else pl.DataFrame()
+        )
     if (standardized_path.exists() and standardized_path.stat().st_size>128*1024*1024
             and '_income_allocated' not in pl.scan_parquet(standardized_path).collect_schema().names()):
         from lib.product_income import current_index,use_product_income
         with use_product_income(current_index(standardized_path)),tempfile.TemporaryDirectory(prefix='royalty-selection-') as temporary:
             selected=prepare_keyword_source(standardized_path,Path(temporary)/'selected_income.parquet',keywords,mode)
             return build_report_tables(keywords,mode,raw_limit,start_month,end_month,period_basis,song_path,selected,
-                exclude_isrcs,source,account,detail_mode,contract_snapshot,contract_columns)
+                exclude_isrcs,source,account,detail_mode,contract_snapshot,contract_columns,
+                _dashgo_video_groups=_dashgo_video_groups)
     period_column = "statement_period" if period_basis == "statement_period" else "transaction_month"
     period_label = PERIOD_BASIS_LABELS.get(period_column, period_column)
     excluded_isrcs = normalize_isrcs(exclude_isrcs)
@@ -1567,6 +1580,7 @@ def build_report_tables(
                     "video_id",
                     "video_id_source",
                     "channel_id",
+                    "Track Title",
                     "report_territory",
                     "track_statement_style",
                     "asset_title_statement",
@@ -1603,6 +1617,7 @@ def build_report_tables(
         # All summaries and optional contract columns consume one frozen selection.
         # Do not repeat the wide keyword/catalog/policy scan for every worksheet.
         statement_base_lf = statement_base_lf.collect(engine='streaming').lazy()
+        summary_base_lf = with_video_groups(statement_base_lf, _dashgo_video_groups)
         metrics_lf = statement_base_lf.select([
             pl.len().alias("song_level_rows"),
             pl.sum("amount_usd").alias("song_level_amount_usd"),
@@ -1638,7 +1653,7 @@ def build_report_tables(
             .sort("report_territory")
         )
 
-        track_summary_lf = build_track_summary_lf(statement_base_lf, include_identity=contract_snapshot is not None, include_dashgo_metadata=True)
+        track_summary_lf = build_track_summary_lf(summary_base_lf, include_identity=contract_snapshot is not None, include_dashgo_metadata=True)
 
         raw_matches_lf, raw_detail_columns = build_filtered_raw_detail_lf(
             keywords=keywords,
@@ -1713,7 +1728,7 @@ def build_report_tables(
 
         if contract_snapshot is not None:
             from app.royalty_reports.excel_contracts import enrich_tables
-            enrich_tables(tables, track_summary, statement_base_lf, contract_snapshot, keywords, contract_columns)
+            enrich_tables(tables, track_summary, summary_base_lf, contract_snapshot, keywords, contract_columns)
 
         tables["resumen por tema"] = present_dashgo_summary(tables["resumen por tema"], track_summary)
 
@@ -1786,6 +1801,7 @@ def build_report_tables(
         .sort("period_month")
     )
 
+    song = with_video_groups(song.lazy(), _dashgo_video_groups).collect()
     track_summary = build_track_summary_lf(song.lazy(), include_identity=contract_snapshot is not None, include_dashgo_metadata=True).collect()
 
     raw_sample = pd.DataFrame()
@@ -1884,7 +1900,8 @@ def build_report_tables(
         from app.royalty_reports.excel_contracts import enrich_tables
         if not standardized_path.exists():
             raise ValueError("Falta el detalle publicado para verificar las vigencias de los contratos.")
-        enrich_tables(tables, track_summary, raw_matches_lf, contract_snapshot, keywords, contract_columns)
+        enrich_tables(tables, track_summary, with_video_groups(raw_matches_lf, _dashgo_video_groups),
+                      contract_snapshot, keywords, contract_columns)
 
     tables["resumen por tema"] = present_dashgo_summary(tables["resumen por tema"], track_summary)
 

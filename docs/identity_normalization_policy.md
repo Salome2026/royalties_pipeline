@@ -152,6 +152,35 @@ Rules:
 The visible `Resumen por tema` therefore has one row per resolved catalog item.
 The row detail remains available in the report for source-level audit.
 
+### DashGo video summaries from complete source context
+
+The candidate of 2026-11-04 recognizes an uncoded DashGo observation and an
+observation with a native video as the same summary video only when the full
+pinned history establishes one video for the same account, valid native channel
+and complete title. Only whitespace is normalized in the title comparison;
+accents, words and version labels remain significant. All native video IDs at
+that context are inspected, including occurrences carrying an ISRC. A competing
+ID vetoes the relationship. A coded video observation without ISRC or UPC and
+an uncoded observation must both exist; these are not inferred recording aliases.
+
+Missing channel/account, incomplete or generic titles, invalid native IDs,
+`Auto generated asset` placeholders and text-embedded tokens cannot establish
+this relationship. Two distinct ISRCs, native products and unrelated platform
+references keep their identities. Zero-income observations retain their units.
+
+The derived video key is used only for the track summary and for locating its
+original contractual fragments. It is compiled before keyword/period filters
+from the report's immutable input, so a month with only Ads has the same identity.
+No native identifier, catalog row, detail row, amount, unit or business dimension
+is overwritten. Store/monetization/origin summaries keep their independent cuts.
+Contract allocation still checks each original fragment and accepted decision;
+grouping a summary never grants contractual coverage to an uncovered observation.
+
+The common table builder serves Excel, Google Sheets and income PDF. Contractual
+PDFs and individual settlements keep their separate association/query rules.
+Publication was authorized on 2026-11-04 after verification in a copy. See
+`dashgo_pipeline_notes.md` for evidence and the deployment certificate.
+
 ## UPC to ISRC derived identity
 
 UPC-to-ISRC mapping is allowed only as a derived identity, never as a raw data

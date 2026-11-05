@@ -195,3 +195,34 @@ business_dimensions.json, native_monetization_unresolved_profiles.json,
 multiple_recordings_per_video.json y same_title_distinct_recordings.json bajo
 la carpeta de evidencia indicada arriba. La definicion es propuesta para revision;
 no instala asociaciones nuevas ni define contratos.
+
+## Videos con distinta monetizacion en Resumen por tema, candidata 2026-11-04
+
+Ruben pide reunir en Resumen por tema los ingresos del mismo video aunque
+DashGo informe Ads y Premium por separado. El detalle y los cortes por
+monetizacion/origen se conservan. Compartir contrato sigue siendo una relacion
+independiente: no demuestra por si solo que dos items sean el mismo asset.
+
+`scripts/lib/dashgo_video_identity.py` compila la evidencia de la version completa
+antes de seleccionar meses o palabras. Exige cuenta/canal nativo/titulo completo
+compatibles, un unico VideoId observado y una contraparte nativa sin ISRC/UPC.
+Los identificadores competidores de todo el historico vetan la coincidencia.
+La regla no contiene artistas, temas, videos, canales ni periodos fijos.
+Los titulos genericos/incompletos y Auto generated asset quedan fuera; no se
+convierte un token textual en VideoId nativo. ISRC/productos conservan su nivel.
+
+El constructor comun agrega solo una clave derivada al resumen. Las ventas,
+campos originales, detalle y dimensiones permanecen iguales. Los fragmentos
+contractuales usan esa clave para conciliar el resumen, pero resuelven cada
+contrato por sus identificadores/decisiones originales: no trasladan cobertura
+desde Premium a Ads. No se modifica ni guarda una asociacion contractual.
+
+Alcance de prueba: todos los 35 archivos disponibles de mawzrecords, sin filtro
+por artista; ambos ejes temporales y columnas de contratos. Evidencia y
+comparacion en
+`C:/royalties_pipeline/staging/catalogo_lectura/20261104_dashgo_video_summary_copy`.
+Regresiones en `qa_dashgo_report_summary.py`, ya incluida en Cloud Build.
+Publicacion autorizada por Ruben el 2026-11-04. El despliegue y las comprobaciones
+antes/despues se certifican en
+`C:/royalties_pipeline/staging/catalogo_lectura/20261104_dashgo_video_summary_release/certification.json`.
+El catalogo y los datos productivos no se reconstruyen ni se modifican.
