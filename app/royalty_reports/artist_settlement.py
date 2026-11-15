@@ -209,10 +209,10 @@ class IndividualPdf:
         return path
 
 
-def build_individual_pdf(request, job: dict, output_dir: Path) -> BuiltReport:
+def build_individual_pdf(request, job: dict, output_dir: Path, *, archive=None) -> BuiltReport:
     from app.royalty_reports.contract_query import query_contract_income
     manifest = job["input_manifest"]
     snapshot = manifest["contract_snapshot"]
-    income = query_contract_income(request, manifest, job["policy_snapshot"])
+    income = query_contract_income(request, manifest, job["policy_snapshot"], **({"archive": archive} if archive is not None else {}))
     data = individual_statement(snapshot, income)
     return BuiltReport(output_path=IndividualPdf(data, snapshot, request).build(output_dir), content_type="application/pdf")

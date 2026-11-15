@@ -24,10 +24,11 @@ from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import quote
 
 import polars as pl
 from fastapi import FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from google.cloud import storage
 from pydantic import BaseModel, Field
 from app.royalty_scope import is_wml, MARTS as SCOPE_MARTS, RELEASE as SCOPE_RELEASE, wml_release_prefix, WML_DATASET
@@ -98,7 +99,7 @@ from app.report_jobs import (
     list_report_jobs,
     set_report_job_execution,
 )
-from app.royalty_reports.delivery import create_signed_download_url
+from app.royalty_reports.delivery import create_signed_blob_download_url, create_signed_download_url
 from app.royalty_reports.launcher import CloudRunReportJobLauncher
 from app.royalty_reports.manifests import build_gcs_input_manifest
 from app.royalty_reports.reconciliation import reconcile_report_job_if_stale
@@ -939,18 +940,60 @@ ParticipationPreset = Literal["last_month", "last_3_months", "last_year", "all_h
 
 
 @asynccontextmanager
-async def api_lifespan(_: FastAPI):
+async def api_lifespan(application: FastAPI):
+    from app.royalty_reports.bigquery_backend import deployment
+
     open_operational_db_pool(wait=True)
     try:
         if operational_db_settings().driver == "postgres":
             with operational_connect() as conn:
                 ensure_digital_income_view_selection_table(conn)
-        yield
+        backend = getattr(application.state, "royalty_report_backend", None)
+        if backend is None and deployment.configured():
+            backend = deployment.api_backend()
+            application.state.royalty_report_backend = backend
+            application.state.royalty_report_pilot = True
+        if backend is not None:
+            backend.start()
+        try:
+            yield
+        finally:
+            if backend is not None:
+                backend.stop()
     finally:
         close_operational_db_pool()
 
 
 app = FastAPI(title="VPO Corp Royalties API", version="0.1.0", lifespan=api_lifespan)
+
+def royalty_report_backend():
+    return getattr(app.state, "royalty_report_backend", None)
+
+
+def royalty_report_intake_backend(username: str, output: str | None = None):
+    backend = royalty_report_backend()
+    if backend is not None and getattr(app.state, "royalty_report_pilot", False):
+        from app.royalty_reports.bigquery_backend.deployment import available_formats
+
+        formats = available_formats(backend.shared_state, username, "wml" if is_wml() else "regular")
+        return backend if (output in formats if output is not None else formats) else None
+    control = getattr(app.state, "royalty_report_intake", None)
+    if backend is None or control is None:
+        return backend
+    mode = control()
+    if mode == "bigquery" or (mode == "parquet" and is_wml()):
+        return backend
+    if mode == "parquet":
+        return None
+    raise HTTPException(status_code=503, detail="El motor de nuevos reportes no está disponible.")
+
+
+def report_preview_context(backend):
+    try:
+        return backend.capture("wml" if is_wml() else "regular")
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
 
 def require_api_key(x_vpo_api_key: str | None) -> None:
     if not VPO_API_KEY or VPO_API_KEY == "change-me":
@@ -2062,6 +2105,9 @@ def publish_required_marts_to_gcs() -> dict:
         filename for filename in optional_fuga
         if (BASE / "warehouse" / "marts" / filename).exists()
     ]]
+    report_preview_close = os.environ.get("VPO_REPORT_PREVIEW_REGULAR_CLOSE") == "1"
+    if report_preview_close:
+        publication_files.append(CATALOG_RELEASE_METADATA_FILE)
     for filename in publication_files:
         local_path = BASE / "warehouse" / "marts" / filename
         if not local_path.exists():
@@ -2073,8 +2119,13 @@ def publish_required_marts_to_gcs() -> dict:
             "size_mb": round(local_path.stat().st_size / 1024 / 1024, 2),
         })
     from app.catalog_participant_review import publish_with_participant_review
-    release = publish_with_participant_review(bucket, prefix, uploads,
-        publisher=publish_mart_release, connection_factory=operational_connect)
+    if report_preview_close:
+        from scripts.qa.royalty_bigquery_regular_close import close_handoff
+        release = close_handoff(bucket, prefix, uploads, publish_with_participant_review,
+                                operational_connect, load_distributor_policy_document(), load_catalog_status)
+    else:
+        release = publish_with_participant_review(bucket, prefix, uploads,
+            publisher=publish_mart_release, connection_factory=operational_connect)
 
     return {
         "ok": True,
@@ -7430,6 +7481,8 @@ def process_source_monitor(
 def canonical_royalty_report_params(
     request: RoyaltyReportJobRequest,
     policy_snapshot: dict[str, Any],
+    *,
+    complete_detail: bool = False,
 ) -> dict[str, Any]:
     params = request.model_dump(exclude={"output", "executive_mode", "contract_artists", "include_contracts", "contract_columns"})
     params["keywords"] = normalize_keywords(params.get("keywords") or [])
@@ -7445,6 +7498,9 @@ def canonical_royalty_report_params(
         params.pop('distribution_contract_numbers', None)
     if request.output in {"excel", "google_sheet"} and not params["keywords"] and not request.distribution_contract_numbers and not is_wml():
         raise HTTPException(status_code=400, detail="Ingresá una palabra clave o un número de contrato.")
+    for month in (request.start_month, request.end_month):
+        if month and (not re.fullmatch(r"[0-9]{4}-(0[1-9]|1[0-2])", month) or month.startswith("0000")):
+            raise HTTPException(status_code=400, detail="El período debe contener meses válidos.")
     if request.start_month and request.end_month and request.start_month > request.end_month:
         raise HTTPException(status_code=400, detail="El periodo desde no puede ser mayor que hasta.")
     if request.executive_mode in {"contractual", "artist_settlement"}:
@@ -7491,10 +7547,17 @@ def canonical_royalty_report_params(
     if request.output == "executive_pdf":
         params["raw_limit"] = 0
         params["detail_mode"] = "limited"
+    elif complete_detail and (request.output != "excel" or params.get("detail_mode") != "top_countries"):
+        params["raw_limit"] = 0
+        params["detail_mode"] = "full"
     return params
 
 
 def require_report_job_access(username: str, job: dict[str, Any], action: Literal["access", "create"] = "access") -> dict:
+    if royalty_report_backend() is not None:
+        scope = "wml" if is_wml() else "regular"
+        if (job.get("params") or {}).get("royalty_scope", "regular") != scope:
+            raise HTTPException(status_code=404, detail="Reporte no encontrado.")
     with operational_connect() as conn:
         permission = require_module_permission(conn, username, "royalty_reports", action)
         if (job.get("params") or {}).get("executive_mode") in {"contractual", "artist_settlement"} or (job.get("params") or {}).get("include_contracts") or (job.get('params') or {}).get('distribution_contract_numbers'):
@@ -7528,6 +7591,16 @@ def royalty_report_detail_count(
         if request.distribution_contract_numbers:
             require_contract_report_permission(conn, username)
 
+    backend = royalty_report_intake_backend(username, request.output)
+    if backend is not None:
+        captured = report_preview_context(backend)
+        params = canonical_royalty_report_params(request, captured[3], complete_detail=True)
+        try:
+            rows = backend.detail_count(captured, params)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"rows": rows, "excel_max_data_rows": EXCEL_MAX_DATA_ROWS,
+                "exceeds_excel_limit": rows > EXCEL_MAX_DATA_ROWS}
     policy_snapshot = load_distributor_policy_document()
     params = canonical_royalty_report_params(request, policy_snapshot)
     if request.distribution_contract_numbers:
@@ -7605,9 +7678,11 @@ def royalty_distribution_contract_options(x_vpo_api_key: str | None = Header(def
                                           x_vpo_username: str | None = Header(default=None)):
     require_api_key(x_vpo_api_key)
     from app.distribution_contracts import list_distribution_contracts
+    username = clean_username(x_vpo_username or '')
     with operational_connect() as conn:
-        require_contract_report_permission(conn, clean_username(x_vpo_username or ''))
-        items = list_distribution_contracts(conn)
+        require_contract_report_permission(conn, username)
+        backend = royalty_report_intake_backend(username)
+        items = backend.distribution_options("regular") if backend is not None else list_distribution_contracts(conn)
     return {'items': [{'number': row['number'], 'label': row['label'], 'sublabel': row['sublabel']} for row in items]}
 
 
@@ -7620,6 +7695,9 @@ def royalty_contract_options(
     username = clean_username(x_vpo_username or "")
     with operational_connect() as conn:
         require_contract_report_permission(conn, username)
+        backend = royalty_report_intake_backend(username)
+        if backend is not None:
+            return {"artists": backend.contract_options("regular")}
         from app.royalty_reports.contract_snapshot import stored_contracts, contract_artist_names, published_contract_catalog
         contracts = stored_contracts(conn)
     client = gcs_client()
@@ -7642,6 +7720,17 @@ def create_royalty_report_job(
         require_module_permission(conn, username, "royalty_reports", "create")
         if request.executive_mode in {"contractual", "artist_settlement"} or request.include_contracts or request.distribution_contract_numbers:
             require_contract_report_permission(conn, username)
+
+    backend = royalty_report_intake_backend(username, request.output)
+    if backend is not None:
+        captured = report_preview_context(backend)
+        policy = captured[3]
+        params = canonical_royalty_report_params(request, policy, complete_detail=True)
+        try:
+            manifest = backend.job_manifest(captured, params)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return queue_royalty_report(username, request.output, params, manifest, policy, backend=backend)
 
     policy_snapshot = load_distributor_policy_document()
     policy_version = int(policy_snapshot.get("policy_version") or 0)
@@ -7718,28 +7807,40 @@ def create_royalty_report_job(
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    report_key = {
-        "excel": "royalty_keyword",
-        "executive_pdf": "royalty_executive",
-        "google_sheet": "royalty_google_sheet",
-    }[request.output]
+    return queue_royalty_report(username, request.output, params, input_manifest, policy_snapshot)
+
+
+def queue_royalty_report(username, output, params, manifest, policy, *, backend=None):
+    report_key = {"excel": "royalty_keyword", "executive_pdf": "royalty_executive",
+                  "google_sheet": "royalty_google_sheet"}[output]
     job, created = create_or_reuse_report_job(
-        requested_by=username,
-        report_key=report_key,
-        output_format=request.output,
-        params=params,
-        input_manifest=input_manifest,
-        policy_snapshot=policy_snapshot,
-        policy_version=policy_version,
+        requested_by=username, report_key=report_key, output_format=output, params=params,
+        input_manifest=manifest, policy_snapshot=policy, policy_version=int(policy["policy_version"]),
     )
+    job_id = int(job["id"])
     if created:
         try:
-            operation_name = CloudRunReportJobLauncher.from_environment().run(int(job["id"]))
-            set_report_job_execution(int(job["id"]), operation_name)
+            if backend is None:
+                if getattr(app.state, "royalty_report_pilot", False):
+                    set_report_job_execution(job_id, None, engine_version="parquet", only_if_queued=True)
+                operation = CloudRunReportJobLauncher.from_environment().run(job_id)
+                set_report_job_execution(job_id, operation, only_if_queued=True)
+            else:
+                execution = backend.execution_name(job_id)
+                set_report_job_execution(job_id, execution, engine_version="bigquery")
+                operation = backend.launch(job_id)
+                if operation != execution:
+                    set_report_job_execution(job_id, operation, only_if_queued=True)
         except Exception as exc:
-            fail_report_job(int(job["id"]), f"No se pudo iniciar Cloud Run Job: {exc}")
+            fail_report_job(job_id, f"No se pudo iniciar el trabajo de reporte: {exc}")
             raise HTTPException(status_code=500, detail="No se pudo iniciar el reporte.") from exc
-    return {"item": get_report_job(int(job["id"])), "reused": not created}
+    item = get_report_job(job_id)
+    return {"item": backend.public_job(item) if backend else item, "reused": not created}
+
+
+def report_job_status_item(job):
+    backend = royalty_report_backend()
+    return backend.public_job(job) if backend is not None else reconcile_report_job_if_stale(job)
 
 
 @app.get("/reports/jobs")
@@ -7759,7 +7860,7 @@ def recent_royalty_report_jobs(
     requested_by = None if permission.get("is_admin") else username
     return {
         "items": [
-            reconcile_report_job_if_stale(job)
+            report_job_status_item(job)
             for job in list_report_jobs(requested_by, limit=limit,royalty_scope='wml' if is_wml() else 'regular')
             if (job.get("params") or {}).get("royalty_scope","regular") == ("wml" if is_wml() else "regular")
             if not ((job.get("params") or {}).get("executive_mode") in {"contractual", "artist_settlement"} or (job.get("params") or {}).get("include_contracts") or (job.get('params') or {}).get('distribution_contract_numbers')) or permission.get("is_admin") or can_read_contracts
@@ -7781,12 +7882,13 @@ def royalty_report_job_status(
     if job is None:
         raise HTTPException(status_code=404, detail="Reporte no encontrado.")
     require_report_job_access(username, job)
-    return {"item": reconcile_report_job_if_stale(job)}
+    return {"item": report_job_status_item(job)}
 
 
 @app.get("/reports/jobs/{job_id}/download")
 def royalty_report_job_download(
     job_id: int,
+    file: Literal["primary", "detail"] = "primary",
     x_vpo_api_key: str | None = Header(default=None),
     x_vpo_username: str | None = Header(default=None),
 ) -> dict[str, Any]:
@@ -7802,7 +7904,62 @@ def royalty_report_job_download(
     if artifact is None or artifact.get("status") != "completed":
         raise HTTPException(status_code=409, detail="El reporte todavia no esta listo.")
     output_uri = str(artifact.get("output_uri") or "")
+    backend = royalty_report_backend()
+    if backend is not None and backend.shared_state is not None and output_uri.startswith("report-bundle://"):
+        try:
+            blob, item = backend.shared_state.download(job_id, file, output_uri)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=410, detail=str(exc)) from exc
+        if getattr(app.state, "royalty_report_pilot", False):
+            url = create_signed_blob_download_url(
+                client=gcs_client(), blob=blob, filename=item["name"],
+                expiration_minutes=VPO_REPORT_DOWNLOAD_TTL_MINUTES,
+                signer_service_account=VPO_REPORT_SIGNER_SERVICE_ACCOUNT,
+            )
+            return {"url": url, "expires_in_seconds": VPO_REPORT_DOWNLOAD_TTL_MINUTES * 60}
+
+        def download_chunks():
+            chunk_size = 8 * 1024 * 1024
+            with blob.open("rb", chunk_size=chunk_size) as stream:
+                yield from iter(lambda: stream.read(chunk_size), b"")
+
+        headers = {
+            "Content-Disposition": "attachment; filename*=UTF-8''" + quote(item["name"], safe=""),
+            "Cache-Control": "private, no-store",
+        }
+        # Larger downloads must be chunked so Cloud Run can stream them.
+        if item["bytes"] < 32 * 1024 * 1024:
+            headers["Content-Length"] = str(item["bytes"])
+        return StreamingResponse(download_chunks(), media_type=item["content_type"], headers=headers)
+    if backend is not None and output_uri == f"report-preview://{job_id}":
+        try:
+            path, item = backend.download(job_id, file)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=410, detail=str(exc)) from exc
+        return FileResponse(path, media_type=item["content_type"], filename=item["name"])
+    if file != "primary":
+        raise HTTPException(status_code=404, detail="El reporte no tiene ese archivo.")
     filename = Path(str(artifact.get("result_filename") or "reporte")).name
+    if (backend is not None and backend.shared_state is not None
+            and output_uri.startswith(f"gs://{backend.shared_state.bucket.name}/")
+            and getattr(app.state, "royalty_report_intake", None) is not None):
+        # Only the private copy serves the legacy artifact without its production signer.
+        _, key = output_uri.removeprefix("gs://").split("/", 1)
+        if key != f"reports/jobs/{job_id}/{filename}":
+            raise HTTPException(status_code=410, detail="El archivo anterior ya no está disponible.")
+        blob = backend.shared_state.bucket.get_blob(key)
+        if blob is None or (blob.metadata or {}).get("vpo-sha256") != job["result_sha256"]:
+            raise HTTPException(status_code=410, detail="El archivo anterior ya no está disponible.")
+
+        def stream_legacy():
+            with blob.open("rb", chunk_size=8 * 1024 * 1024) as stream:
+                yield from iter(lambda: stream.read(8 * 1024 * 1024), b"")
+
+        return StreamingResponse(
+            stream_legacy(), media_type=artifact["result_content_type"],
+            headers={"Content-Disposition": "attachment; filename*=UTF-8''" + quote(filename, safe=""),
+                     "Cache-Control": "private, no-store"},
+        )
     try:
         url = create_signed_download_url(
             client=gcs_client(),
@@ -7822,8 +7979,25 @@ def royalty_report_job_download(
 def royalty_report_options(
     refresh_cache: bool = False,
     x_vpo_api_key: str | None = Header(default=None),
+    x_vpo_username: str | None = Header(default=None),
 ) -> dict:
     require_api_key(x_vpo_api_key)
+    username = clean_username(x_vpo_username or "")
+    scope = "wml" if is_wml() else "regular"
+    backend = royalty_report_backend()
+    if backend is not None and getattr(app.state, "royalty_report_pilot", False):
+        from app.royalty_reports.bigquery_backend.deployment import available_formats
+
+        formats = available_formats(backend.shared_state, username, scope)
+    else:
+        backend = royalty_report_intake_backend(username)
+        formats = ("excel", "executive_pdf", "google_sheet") if backend is not None else ()
+    if backend is not None and formats:
+        try:
+            options = backend.source_options(scope)
+            return {**options, "bigquery_outputs": formats}
+        except (ValueError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
     marts = ensure_marts(refresh_cache=refresh_cache, filenames=[SONG_FILE])
     base = pl.scan_parquet(marts[SONG_FILE])
     available = (
@@ -7859,6 +8033,7 @@ def royalty_report_options(
             or f"{source.upper()} / {account.replace('_', ' ').title()}",
         })
     return {
+        "bigquery_outputs": [],
         "sources": sorted({item["source"] for item in source_accounts}),
         "source_accounts": source_accounts,
         "excel_contracts_supported": not is_wml(),

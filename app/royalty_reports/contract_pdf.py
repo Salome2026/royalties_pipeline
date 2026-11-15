@@ -206,13 +206,13 @@ class ContractPdf:
         return path
 
 
-def build_contractual_pdf(request, job: dict, output_dir: Path):
+def build_contractual_pdf(request, job: dict, output_dir: Path, *, archive=None):
     from app.royalty_reports.contract_query import query_contract_income
     from app.royalty_reports.contractual import analyze_contractual_income
     from app.royalty_reports.contracts import BuiltReport
     manifest = job["input_manifest"]
     snapshot = manifest["contract_snapshot"]
-    income = query_contract_income(request, manifest, job["policy_snapshot"])
+    income = query_contract_income(request, manifest, job["policy_snapshot"], **({"archive": archive} if archive is not None else {}))
     data = analyze_contractual_income(snapshot, income)
     path = ContractPdf(data, snapshot, manifest, request).build(output_dir)
     return BuiltReport(output_path=path, content_type="application/pdf")

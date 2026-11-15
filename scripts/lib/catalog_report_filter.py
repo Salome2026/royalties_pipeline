@@ -282,7 +282,9 @@ def catalog_alias_lookup(catalog_path: Path | None = None, *, catalog: pl.DataFr
 def catalog_status_for_reports(status_path: Path | None = None) -> pl.DataFrame:
     from app.royalty_scope import is_wml, STATUS
     override = STATUS.get() if is_wml() else None
-    status_path = status_path or current_catalog_status_path()
+    # An explicit frozen WML snapshot, including [], is authoritative. It does
+    # not require, consult or fall back to a different status file.
+    status_path = status_path or (current_catalog_status_path() if override is None else None)
     if override is None and not status_path.exists():
         return pl.DataFrame({
             "catalog_key": pl.Series([], dtype=pl.Utf8),
@@ -292,7 +294,7 @@ def catalog_status_for_reports(status_path: Path | None = None) -> pl.DataFrame:
             "catalog_status_notes": pl.Series([], dtype=pl.Utf8),
         })
 
-    status = pl.read_parquet(status_path)
+    status = pl.DataFrame(override) if override is not None else pl.read_parquet(status_path)
     if status.is_empty():
         return pl.DataFrame({
             "catalog_key": pl.Series([], dtype=pl.Utf8),

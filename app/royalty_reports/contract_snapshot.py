@@ -32,7 +32,8 @@ def published_contract_catalog(client, manifest: dict) -> list[dict]:
 
 
 def freeze_contract_associations(snapshot: dict, frame: pl.DataFrame, contracts: list[dict], release_id: str,
-                                *, input_manifest: dict, ranking_guard: frozenset[str] | None = None) -> dict:
+                                *, input_manifest: dict, ranking_guard: frozenset[str] | None = None,
+                                unassigned_income=None, release_metadata=None) -> dict:
     from app.master_contract_income import associated_income_isrc, income_association_index, published_unassigned_income
     from app.master_contract_metadata import contract_evidence, with_external_titles
     from app.contract_text_reference import context
@@ -43,19 +44,25 @@ def freeze_contract_associations(snapshot: dict, frame: pl.DataFrame, contracts:
         raise ValueError("Falta la version publicada para validar los codigos asociados.")
     if input_manifest.get("release_id") != release_id:
         raise ValueError("El detalle de identidades y el catalogo deben tener la misma version.")
-    entry = require_manifest_object(input_manifest, "standardized_raw_all_sources.parquet")
-    rows, evidence = published_unassigned_income(release_id)
+    if unassigned_income is None:
+        require_manifest_object(input_manifest, "standardized_raw_all_sources.parquet")
+        unassigned_income = published_unassigned_income(release_id)
+    elif ranking_guard is None:
+        raise ValueError("Falta la validación de identidades de la publicación.")
+    rows, evidence = unassigned_income
     aliases = {row["alias_catalog_key"]: row["catalog_key"]
                for row in catalog_alias_lookup(catalog=frame).to_dicts()}
     choices = {row["isrc"]: row["split"].get("code_association_overrides") or [] for row in contracts}
     claims = {choice["key"]: root for root, values in choices.items() for choice in values if choice.get("included")}
     catalog_rows = frame.to_dicts()
     metadata_entry = input_manifest.get("objects", {}).get("catalog_release_metadata.parquet")
-    if metadata_entry:
+    if release_metadata is None and metadata_entry:
         from google.cloud import storage
         metadata_bytes = storage.Client().bucket(input_manifest["bucket"]).blob(
             metadata_entry["object"], generation=int(metadata_entry["generation"])).download_as_bytes()
-        catalog_rows = with_external_titles(catalog_rows, pl.read_parquet(BytesIO(metadata_bytes)).to_dicts())
+        release_metadata = pl.read_parquet(BytesIO(metadata_bytes))
+    if release_metadata is not None:
+        catalog_rows = with_external_titles(catalog_rows, release_metadata.to_dicts())
     index = income_association_index(contract_evidence(catalog_rows, evidence, aliases, choices, claims), aliases, choices, claims)
     codes: dict[str, set[tuple[str, str]]] = {}
     for row in evidence:
@@ -89,7 +96,10 @@ def freeze_contract_associations(snapshot: dict, frame: pl.DataFrame, contracts:
               if len(values) == 1 and next(iter(values)) in selected}
     if owners:
         include_upc = any(json.loads(key)[4] == "UPC" for key in owners)
-        unsafe = ranking_guard if ranking_guard is not None else unsafe_ranking_slot_keys(input_manifest["bucket"], entry["object"], int(entry["generation"]), include_upc=include_upc)
+        if ranking_guard is None:
+            entry = require_manifest_object(input_manifest, "standardized_raw_all_sources.parquet")
+            ranking_guard = unsafe_ranking_slot_keys(input_manifest["bucket"], entry["object"], int(entry["generation"]), include_upc=include_upc)
+        unsafe = ranking_guard
         owners = {key: value for key, value in owners.items() if key not in unsafe}
     return {**snapshot, "schema_version": 3,
             "associations": {"release_id": release_id, "ranking_layout": "artist-title-isrc-upc-id-v1",

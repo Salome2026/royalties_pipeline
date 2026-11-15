@@ -77,6 +77,10 @@ def validate_original_csv_batch(source: str, output: Path, selected: list[dict],
         raise ValueError("La salida no conserva archivo y huella para verificar sus identificadores originales.")
     result = []
     for item in selected:
+        # These SoundOn files are retained for audit. The economic input already
+        # contains the amounts and deliberately has no rows for these files.
+        if source == "soundon" and item["kind"] in {"summary", "discovery_mode"}:
+            continue
         path = available[(item["file_name"], item["file_hash"])]
         if path.suffix.casefold() != ".csv":
             raise ValueError("Formato no certificado por el control CSV: " + path.name)

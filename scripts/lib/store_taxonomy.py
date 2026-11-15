@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import polars as pl
 
+from scripts.lib.report_precision import exact_sum as _exact_sum, stable_sum as _stable_sum
+
 
 NOT_REPORTED = "No informado"
 
@@ -328,13 +330,13 @@ def build_normalized_store_summary(
         for column in STORE_SUMMARY_GROUP_COLUMNS
     ])
 
-    aggregations = [pl.sum(amount_column).alias("amount_usd")]
+    aggregations = [_stable_sum(amount_column).alias("amount_usd")]
     if units_column in normalized_columns:
         aggregations.append(
             pl.col(units_column)
             .cast(pl.Float64, strict=False)
             .fill_null(0.0)
-            .sum()
+            .map_batches(lambda s: _exact_sum(s.to_list()), return_dtype=pl.Float64, returns_scalar=True)
             .alias("units")
         )
     if include_rows:

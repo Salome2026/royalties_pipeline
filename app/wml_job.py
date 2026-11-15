@@ -113,15 +113,31 @@ def reconcile_bigquery(client,project: str,dataset: str,release_id: str,paths: d
         if local['rows']!=cloud['rows'] or abs(local['amount']-cloud['amount'])>0.0001 or abs(local['amount']-total)>0.0001:
             raise RuntimeError('No concilia el agregado WML '+key)
 
-def load_bigquery(bucket,folder: Path,summary: dict,package: dict,*,project: str,dataset: str,location: str,client=None) -> None:
+def require_isolated_destination(bucket,client,project: str,dataset: str) -> None:
+    if (not re.fullmatch(r'report_app_test_ingest_[0-9]{8}',dataset)
+            or bucket.name!=f'{project}-wml-ingest-test-{dataset[-8:]}'):
+        raise ValueError('El Job WML de prueba requiere un bucket y dataset aislados.')
+    target=client.get_dataset(f'{project}.{dataset}')
+    if (target.labels.get('scope')!='isolated_app_test'
+            or bucket.labels.get('scope')!='isolated_app_test'
+            or not bucket.iam_configuration.uniform_bucket_level_access_enabled
+            or bucket.iam_configuration.public_access_prevention!='enforced'):
+        raise ValueError('El bucket y dataset no tienen las protecciones de la prueba WML.')
+
+
+def load_bigquery(bucket,folder: Path,summary: dict,package: dict,*,project: str,dataset: str,location: str,
+                  client=None,isolated_test: bool=False) -> None:
     regular=os.environ.get('VPO_BIGQUERY_DATASET','royalties_analytics')
-    if dataset==regular or dataset!=WML_DATASET:
+    if not isolated_test and (dataset==regular or dataset!=WML_DATASET):
         raise ValueError('La publicación WML requiere su dataset exclusivo royalties_wml.')
     if not re.fullmatch(r'[a-z][a-z0-9-]{4,62}',project):raise ValueError('Proyecto WML inválido.')
     if not re.fullmatch(r'[A-Za-z0-9-]+',location):raise ValueError('Región BigQuery inválida.')
     client=client or bigquery.Client(project=project,location=location)
     query=lambda sql:client.query(sql,location=location).result()
-    client.get_dataset(f'{project}.{dataset}')
+    if isolated_test:
+        require_isolated_destination(bucket,client,project,dataset)
+    else:
+        client.get_dataset(f'{project}.{dataset}')
     schema=(ROOT/'sql/bigquery/analytics_schema.sql').read_text()
     # The Job can write only WML; dataset creation belongs to administrative provisioning.
     query(schema[schema.index('CREATE TABLE'):].format(project=project,dataset=dataset,location=location))
@@ -177,9 +193,17 @@ def load_bigquery(bucket,folder: Path,summary: dict,package: dict,*,project: str
         finish_reconciliation(paths)
         for table in stages.values():client.delete_table(f'{project}.{dataset}.{table}',not_found_ok=True)
 
-def main() -> None:
-    token=os.environ.get('VPO_WML_RUN_TOKEN','')
+def main(*,token=None,bucket=None,bigquery_client=None,dataset=WML_DATASET,isolated_test=False,
+         before_publish=None) -> None:
+    token=token or os.environ.get('VPO_WML_RUN_TOKEN','')
     if not re.fullmatch(r'[a-f0-9]{32}',token):raise ValueError('Falta la ejecución WML autorizada.')
+    if before_publish is not None and not isolated_test:
+        raise ValueError('El publicador de reportes requiere el entorno aislado.')
+    project=os.environ.get('VPO_BIGQUERY_PROJECT','vpo-corp-royalties')
+    if isolated_test:
+        if bucket is None or bigquery_client is None:
+            raise ValueError('Faltan los recursos aislados del Job WML.')
+        require_isolated_destination(bucket,bigquery_client,project,dataset)
     state=settings();config=state['config']
     if token!=config.get('run_token'):raise ValueError('Esta ejecución WML ya no es vigente.')
     actor='wml-cloud-job'
@@ -187,7 +211,8 @@ def main() -> None:
         print('WML: ejecución ya completada; no se reconstruyen datos.');return
     merge_config({'processing_status':'running','processing_execution':os.environ.get('CLOUD_RUN_EXECUTION')},actor=actor,run_token=token)
     try:
-        bucket_name=os.environ['VPO_WML_BUCKET'];bucket=storage.Client().bucket(bucket_name)
+        if bucket is None:
+            bucket=storage.Client().bucket(os.environ['VPO_WML_BUCKET'])
         document=input_manifest(bucket,config['input_manifest'])
         with tempfile.TemporaryDirectory(prefix='wml-ingest-') as temporary:
             root=Path(temporary);inputs=root/'inputs';inputs.mkdir()
@@ -221,8 +246,11 @@ def main() -> None:
                 summary=ingest(inputs,root/'output');folder=root/'output/releases'/summary['release_id']
             if summary['fingerprint']!=document['fingerprint']:raise RuntimeError('La ingesta WML cambió de versión.')
             package=publish_package(bucket,folder,summary)
-            load_bigquery(bucket,folder,summary,package,project=os.environ.get('VPO_BIGQUERY_PROJECT','vpo-corp-royalties'),
-                dataset=WML_DATASET,location=os.environ.get('VPO_BIGQUERY_LOCATION','US'))
+            load_bigquery(bucket,folder,summary,package,project=project,
+                dataset=dataset,location=os.environ.get('VPO_BIGQUERY_LOCATION','US'),
+                client=bigquery_client,isolated_test=isolated_test)
+            if before_publish is not None:
+                before_publish(summary['release_id'],config['input_manifest'])
             # This single Postgres commit switches all readers to the same validated BQ/GCS release.
             merge_config({'published_release_id':summary['release_id'],'published_at':datetime.now(timezone.utc).isoformat(),
                 'processing_status':'completed','processing_error':None,'semesters':summary['semesters'],

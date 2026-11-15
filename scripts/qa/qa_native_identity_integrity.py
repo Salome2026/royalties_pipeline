@@ -7,7 +7,7 @@ import polars as pl
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from lib.native_csv import read_native_csv
-from lib.native_identity_integrity import compare_original_frame, fingerprint, validate_original_witnesses
+from lib.native_identity_integrity import compare_original_frame, fingerprint, validate_original_csv_batch, validate_original_witnesses
 
 
 class NativeIdentityIntegrityTests(unittest.TestCase):
@@ -95,6 +95,25 @@ class NativeIdentityIntegrityTests(unittest.TestCase):
             with self.subTest(source=source):
                 with self.assertRaises(ValueError):
                     compare_original_frame(pl.DataFrame({field: ["0012"]}), pl.DataFrame({"other": ["0012"]}), source)
+
+    def test_soundon_audit_files_do_not_require_economic_rows(self):
+        from lib.ingestion_controls import checksum
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            records, inputs = [], {}
+            original = pl.DataFrame({"Track ID": ["00012"], "ISRC": ["QZTVM2212749"]})
+            for kind in ("my_royalty", "summary", "discovery_mode"):
+                path = root / f"{kind}.csv"
+                original.write_csv(path)
+                inputs[path] = checksum(path)
+                records.append({"kind": kind, "file_name": path.name, "file_hash": inputs[path],
+                                "account": "soundon", "period": "2026-09"})
+            output = root / "soundon.parquet"
+            original.with_columns(pl.lit(records[0]["file_name"]).alias("statement_file_name"),
+                                  pl.lit(records[0]["file_hash"]).alias("statement_file_hash")).write_parquet(output)
+            proof, = validate_original_csv_batch("soundon", output, records, inputs)
+            self.assertEqual(proof["file_name"], records[0]["file_name"])
+            self.assertEqual(proof["rows"], 1)
 
     def test_invalid_csv_is_not_silently_admitted(self):
         with tempfile.TemporaryDirectory() as folder:

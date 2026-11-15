@@ -155,39 +155,39 @@ def unsafe_ranking_slot_keys(bucket_name: str, object_name: str, generation: int
     if not bucket_name or not object_name or not isinstance(generation, int) or generation <= 0:
         raise ValueError("A bucket, object and positive pinned generation are required.")
     blob = storage.Client().bucket(bucket_name).blob(object_name, generation=generation)
-    keys: set[str] = set()
     with blob.open("rb", chunk_size=64 * 1024) as stream:
-        parquet = pq.ParquetFile(stream)
-        columns = set(parquet.schema_arrow.names)
-        if not {"source", "account", "statement_period"}.issubset(columns) or not (
-            columns & set((*_PRODUCER_VIDEO, *_PRODUCER_UPC))
-        ):
-            return frozenset()
-        probe_columns = sorted(columns & set((*_PRODUCER_ISRC, *_FACT_VIDEO, *_PRODUCER_SHEET)))
-        if not probe_columns:
-            probe_columns = ["source"]
-        remaining = sorted((columns & _IDENTITY_COLUMNS) - set(probe_columns))
-        for number in range(parquet.metadata.num_row_groups):
-            group = parquet.metadata.row_group(number)
-            paths = [group.column(index).path_in_schema for index in range(group.num_columns)]
-            if not include_upc and _native_id_layout(group, paths):
-                continue
-            if _all_native(group, paths, "asset_isrc", r"[A-Z]{2}[A-Z0-9]{3}[0-9]{7}"):
-                continue
-            if not (columns & set(_PRODUCER_SHEET[1:])) and _all_native(
-                group, paths, "video_id", r"[A-Za-z0-9_-]{11}"):
-                continue
-            # Most rows have a primary ISRC or native video ID. Inspect only those
-            # that can exercise different fallback precedence in the two producers.
-            probe = parquet.read_row_group(number, columns=probe_columns)
-            indices = _needs_guard_indices(pl.from_arrow(probe))
-            if not indices:
-                continue
-            frame = pl.from_arrow(probe.take(indices))
-            if remaining:
-                extra = parquet.read_row_group(number, columns=remaining).take(indices)
-                frame = frame.hstack(pl.from_arrow(extra))
-            for start in range(0, frame.height, 65536):
-                keys.update(json.dumps(list(row), separators=(",", ":"))
-                            for row in _unsafe_slots(frame.slice(start, 65536)))
+        return unsafe_parquet_ranking_keys(pq.ParquetFile(stream), include_upc=include_upc)
+
+
+def unsafe_parquet_ranking_keys(parquet, *, include_upc=True) -> frozenset[str]:
+    columns = set(parquet.schema_arrow.names)
+    if not {"source", "account", "statement_period"}.issubset(columns) or not (
+        columns & set((*_PRODUCER_VIDEO, *_PRODUCER_UPC))
+    ):
+        return frozenset()
+    keys: set[str] = set()
+    probe_columns = sorted(columns & set((*_PRODUCER_ISRC, *_FACT_VIDEO, *_PRODUCER_SHEET))) or ["source"]
+    remaining = sorted((columns & _IDENTITY_COLUMNS) - set(probe_columns))
+    for number in range(parquet.metadata.num_row_groups):
+        group = parquet.metadata.row_group(number)
+        paths = [group.column(index).path_in_schema for index in range(group.num_columns)]
+        if not include_upc and _native_id_layout(group, paths):
+            continue
+        if _all_native(group, paths, "asset_isrc", r"[A-Z]{2}[A-Z0-9]{3}[0-9]{7}"):
+            continue
+        if not (columns & set(_PRODUCER_SHEET[1:])) and _all_native(
+            group, paths, "video_id", r"[A-Za-z0-9_-]{11}"):
+            continue
+        # Inspect the rows that can exercise different fallback precedence.
+        probe = parquet.read_row_group(number, columns=probe_columns)
+        indices = _needs_guard_indices(pl.from_arrow(probe))
+        if not indices:
+            continue
+        frame = pl.from_arrow(probe.take(indices))
+        if remaining:
+            extra = parquet.read_row_group(number, columns=remaining).take(indices)
+            frame = frame.hstack(pl.from_arrow(extra))
+        for start in range(0, frame.height, 65536):
+            keys.update(json.dumps(list(row), separators=(",", ":"))
+                        for row in _unsafe_slots(frame.slice(start, 65536)))
     return frozenset(keys)

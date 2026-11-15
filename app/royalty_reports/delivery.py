@@ -33,6 +33,19 @@ def create_signed_download_url(
     bucket_name, object_name = parse_gcs_uri(output_uri)
     blob = client.bucket(bucket_name).blob(object_name)
     blob.reload(client)
+    return create_signed_blob_download_url(client=client, blob=blob, filename=filename,
+                                           expiration_minutes=expiration_minutes,
+                                           signer_service_account=signer_service_account)
+
+
+def create_signed_blob_download_url(
+    *,
+    client: storage.Client,
+    blob: storage.Blob,
+    filename: str,
+    expiration_minutes: int,
+    signer_service_account: str | None = None,
+) -> str:
     if not blob.generation:
         raise FileNotFoundError("El archivo del reporte ya no esta disponible.")
 

@@ -22,9 +22,11 @@ def _billing_limit(exc):
             or "Query exceeded limit for bytes billed:" in str(exc))
 
 
-def _statement_rows(client, config, sql, *, alias="", include_undated=False):
+def _statement_rows(client, config, sql, *, fact_table=None, location=DEFAULT_LOCATION, alias="", include_undated=False):
     """Fall back to disjoint partitions without increasing the query budget."""
     from google.api_core.exceptions import GoogleAPICallError
+
+    fact_table = fact_table or f"{DEFAULT_PROJECT}.{DEFAULT_DATASET}.royalty_statement_fact"
 
     def read(predicate="", start=None, end=None):
         scoped = bigquery.QueryJobConfig.from_api_repr(config.to_api_repr())
@@ -33,19 +35,18 @@ def _statement_rows(client, config, sql, *, alias="", include_undated=False):
                 bigquery.ScalarQueryParameter("window_start", "DATE", start),
                 bigquery.ScalarQueryParameter("window_end", "DATE", end)]
         return [dict(row) for row in client.query(sql.replace(STATEMENT_WINDOW, predicate),
-            job_config=scoped, location=DEFAULT_LOCATION).result(timeout=60)]
+            job_config=scoped, location=location).result(timeout=60)]
 
     try:
         return read()
     except GoogleAPICallError as exc:
         if not _billing_limit(exc):
             raise
-    prefix = f"{DEFAULT_PROJECT}.{DEFAULT_DATASET}"
     months = [row["month"] for row in client.query(f"""
         SELECT DISTINCT DATE_TRUNC(statement_month, MONTH) AS month
-        FROM `{prefix}.royalty_statement_fact` WHERE release_id=@release_id
+        FROM `{fact_table}` WHERE release_id=@release_id
           AND statement_month IS NOT NULL ORDER BY month
-        """, job_config=config, location=DEFAULT_LOCATION).result(timeout=60)]
+        """, job_config=config, location=location).result(timeout=60)]
     column = (alias + "." if alias else "") + "statement_month"
     predicate = f"AND {column} >= @window_start AND {column} < @window_end"
     rows = []
@@ -89,25 +90,38 @@ def published_unassigned_income(release_id: str) -> tuple[list[dict], list[dict]
         job_config=config, location=DEFAULT_LOCATION).result(timeout=30)), None)
     if published is None or published["release_id"] != release_id:
         raise RuntimeError("El catálogo y BigQuery todavía no tienen la misma versión publicada.")
+    return unassigned_income_for_release(client, release_id)
+
+
+def unassigned_income_for_release(client, release_id, *, fact_table=None, location=DEFAULT_LOCATION) -> tuple[list[dict], list[dict]]:
+    import re
+
+    table_options = {"fact_table": fact_table, "location": location} if fact_table is not None else {}
+    fact_table = fact_table or f"{DEFAULT_PROJECT}.{DEFAULT_DATASET}.royalty_statement_fact"
+    if not re.fullmatch(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_]+\.[A-Za-z0-9_]+", fact_table):
+        raise ValueError("Tabla de evidencia contractual inválida.")
+    config = bigquery.QueryJobConfig(maximum_bytes_billed=5_000_000_000, query_parameters=[
+        bigquery.ScalarQueryParameter("release_id", "STRING", release_id),
+    ])
     # Keep identifiers together: expanding them before summing would multiply revenue.
     sql = f"""
     SELECT source, account, source_sheet, revenue_basis, artist, title, asset_isrc,
       product_upc, video_id, track_id, catalog_number, product_type, release_title,content_type,content_origin, channel_id,
       FORMAT_DATE('%Y-%m', statement_month) AS statement_period,
       SUM(amount_usd) AS amount_usd, COUNT(*) AS raw_rows
-    FROM `{prefix}.royalty_statement_fact`
+    FROM `{fact_table}`
     WHERE release_id = @release_id AND COALESCE(asset_isrc, '') = ''
       AND statement_month IS NOT NULL
       {STATEMENT_WINDOW}
     GROUP BY source, account, source_sheet, revenue_basis, artist, title, asset_isrc,
       product_upc, video_id, track_id, catalog_number, product_type, release_title,content_type,content_origin, channel_id, statement_period
     """
-    rows = _statement_rows(client, config, sql)
+    rows = _statement_rows(client, config, sql, **table_options)
     seed_sql = f"""
     SELECT DISTINCT c.kind, c.value,
       IF(c.kind = 'TRACK', s.source, '') AS scope_source,
       IF(c.kind = 'TRACK', s.account, '') AS scope_account
-    FROM `{prefix}.royalty_statement_fact` s, UNNEST([
+    FROM `{fact_table}` s, UNNEST([
       STRUCT('UPC' AS kind, s.product_upc AS value),
       STRUCT('VIDEO' AS kind, s.video_id AS value),
       STRUCT('TRACK' AS kind, s.track_id AS value)
@@ -117,13 +131,13 @@ def published_unassigned_income(release_id: str) -> tuple[list[dict], list[dict]
     """
     # Discover membership over the entire release first. Keeping this scan in
     # the evidence CTE repeats its full-history read in every output window.
-    seeds = _statement_rows(client, config, seed_sql, alias="s", include_undated=True)
+    seeds = _statement_rows(client, config, seed_sql, alias="s", include_undated=True, **table_options)
     seed_fields = ("kind", "value", "scope_source", "scope_account")
     seeds = list({tuple(row[name] for name in seed_fields): row for row in seeds}.values())
     sql = f"""
     WITH facts AS (
       SELECT source, account, asset_isrc, product_upc, video_id, track_id, catalog_number, title, artist, channel_id, source_sheet, statement_month
-      FROM `{prefix}.royalty_statement_fact` WHERE release_id = @release_id
+      FROM `{fact_table}` WHERE release_id = @release_id
     ), codes AS (
       SELECT f.*, c.kind, c.value,
         IF(c.kind = 'TRACK', source, '') AS scope_source,
@@ -157,7 +171,7 @@ def published_unassigned_income(release_id: str) -> tuple[list[dict], list[dict]
             "seed_codes", "STRUCT", [bigquery.StructQueryParameter(None, *[
                 bigquery.ScalarQueryParameter(name, "STRING", row[name]) for name in seed_fields
             ]) for row in seeds[start:start + 1000]])]
-        evidence_rows.extend(_statement_rows(client, scoped, sql, alias="c", include_undated=True))
+        evidence_rows.extend(_statement_rows(client, scoped, sql, alias="c", include_undated=True, **table_options))
     evidence = _merge_statement_evidence(evidence_rows)
     from app.contract_text_reference import text_evidence
     return rows, evidence + text_evidence(rows)

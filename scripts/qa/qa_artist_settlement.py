@@ -123,6 +123,7 @@ class SettlementTests(unittest.TestCase):
         guard = unittest.mock.Mock(side_effect=HTTPException(403, "Contratos no autorizados"))
         namespace = {"Any": Any, "Literal": Literal, "HTTPException": HTTPException,
             "operational_connect": lambda: nullcontext(None), "require_module_permission": lambda *args: {"is_admin": True},
+            "royalty_report_backend": lambda: None,
             "require_contract_report_permission": guard}
         exec(compile(ast.Module(body=nodes, type_ignores=[]), "settlement-permissions", "exec"), namespace)
         with self.assertRaises(HTTPException):

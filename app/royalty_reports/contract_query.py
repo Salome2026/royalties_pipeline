@@ -109,7 +109,7 @@ def association_query_parameter(snapshot: dict, request):
     return bigquery.ArrayQueryParameter("associated_codes", struct_type, values)
 
 
-def query_contract_income(request, manifest: dict, policy: dict) -> list[dict]:
+def query_contract_income(request, manifest: dict, policy: dict, *, archive=None) -> list[dict]:
     release = manifest.get("release_id")
     snapshot = manifest.get("contract_snapshot") or {}
     version = snapshot.get("schema_version")
@@ -125,7 +125,18 @@ def query_contract_income(request, manifest: dict, policy: dict) -> list[dict]:
     dashboard = manifest.get("catalog_dashboard") or {}
     ranking_table = "royalty_catalog_dashboard" if dashboard else "royalty_dashboard_rankings"
     ranking_release = dashboard.get("release_id") or release
-    client = bigquery.Client(project=project, location=os.environ.get("VPO_BIGQUERY_LOCATION", "US"))
+    if archive is None:
+        client = bigquery.Client(project=project, location=os.environ.get("VPO_BIGQUERY_LOCATION", "US"))
+        table = f"{project}.{dataset}.{ranking_table}"
+    else:
+        client, table = archive
+    net = f"COALESCE(amount_usd, 0) * ({personalization_factor_sql(policy)})"
+    units = "COALESCE(units, 0)"
+    occurrences = "COALESCE(raw_rows, 0)"
+    gross = "COALESCE(amount_usd, 0)"
+    grouping = ""
+    if archive is None:
+        net, units, occurrences, gross = (f"SUM({expression})" for expression in (net, units, occurrences, gross))
     norm = r"REGEXP_REPLACE(NORMALIZE_AND_CASEFOLD(COALESCE(search_text, ''), NFD), r'\pM', '')"
     prefix = "CONCAT(LOWER(COALESCE(artist, '')), ' ', LOWER(COALESCE(title, '')), ' ', LOWER(COALESCE(isrc, '')), ' ', LOWER(COALESCE(upc, '')), ' ')"
     code_column = f", IF(STARTS_WITH(search_text, {prefix}), SPLIT(SUBSTR(search_text, LENGTH({prefix}) + 1), ' ')[SAFE_OFFSET(0)], NULL) AS serialized_code" if version >= 2 else ""
@@ -141,14 +152,17 @@ def query_contract_income(request, manifest: dict, policy: dict) -> list[dict]:
  AND ((code.kind = 'UPC' AND code.code = ranking.upc AND ranking.serialized_code = '')
  OR (code.kind = 'ID' AND code.code = ranking.serialized_code) TEXT_SCOPE)))""".replace("TEXT_SCOPE", text_scope) if version >= 2 else ""
     identity_columns = (", source_sheet, search_text, normalized_search" + (", channel_id" if version >= 3 else "")) if version >= 2 else ""
-    gross_column = ", SUM(COALESCE(amount_usd, 0)) AS gross_amount_usd" if version >= 2 else ""
+    if archive is None:
+        grouping = f"""GROUP BY isrc, upc, artist, title, source, account, statement_month {identity_columns}
+ORDER BY statement_month, isrc, upc, title, artist, source, account"""
+    gross_column = f", {gross} AS gross_amount_usd" if version >= 2 else ""
     keyword_scope = """(COALESCE(ARRAY_LENGTH(@keywords), 0) = 0 OR EXISTS (
  SELECT 1 FROM UNNEST(@keywords) token WHERE STRPOS(normalized_search, token) > 0))""" if version == 1 else "TRUE"
     # Keep the original eligible ranking measures, search text, units and net discounts.
     sql = rf"""
 WITH base AS (
  SELECT *, {norm} AS normalized_search {code_column}
- FROM `{project}.{dataset}.{ranking_table}`
+ FROM `{table}`
  WHERE release_id = @release_id
    AND (@source IS NULL OR source = @source) AND (@account IS NULL OR account = @account)
    AND (@start_month IS NULL OR statement_month >= @start_month)
@@ -156,8 +170,8 @@ WITH base AS (
 )
 SELECT isrc, upc, artist, title, source, account {identity_columns},
  FORMAT_DATE('%Y-%m', statement_month) AS statement_month,
- SUM(COALESCE(amount_usd, 0) * ({personalization_factor_sql(policy)})) AS amount_usd,
- SUM(COALESCE(units, 0)) AS units, SUM(COALESCE(raw_rows, 0)) AS raw_rows {gross_column}
+ {net} AS amount_usd,
+ {units} AS units, {occurrences} AS raw_rows {gross_column}
 FROM base AS ranking
 WHERE (isrc IN UNNEST(@isrcs) OR EXISTS (
  SELECT 1 FROM UNNEST(@artists) token
@@ -165,8 +179,7 @@ WHERE (isrc IN UNNEST(@isrcs) OR EXISTS (
  OR STRPOS(REGEXP_REPLACE(normalized_search, r'[\s_-]+', ''), REGEXP_REPLACE(token, r'[\s_-]+', '')) > 0)
  {association_scope})
  AND {keyword_scope}
-GROUP BY isrc, upc, artist, title, source, account, statement_month {identity_columns}
-ORDER BY statement_month, isrc, upc, title, artist, source, account
+{grouping}
 """
     params = [bigquery.ScalarQueryParameter("release_id", "STRING", ranking_release),
               bigquery.ArrayQueryParameter("isrcs", "STRING", [row["isrc"] for row in snapshot["catalog"]]),
@@ -180,7 +193,11 @@ ORDER BY statement_month, isrc, upc, title, artist, source, account
         params.append(association_query_parameter(snapshot, request))
     result = client.query(sql, job_config=bigquery.QueryJobConfig(query_parameters=params,
                           maximum_bytes_billed=int(os.environ.get("VPO_BIGQUERY_MAX_BYTES_BILLED", "5000000000")))).result(timeout=300)
-    rows = [dict(row.items()) for row in result]
+    if archive is None:
+        rows = [dict(row.items()) for row in result]
+    else:
+        from app.royalty_reports.bigquery_backend.contract_totals import read_exact_groups
+        rows = read_exact_groups(result, version, client._credentials)
     if version >= 2:
         rows = select_associated_rankings(rows, request, snapshot)
     if getattr(request, 'distribution_contract_numbers', ()):

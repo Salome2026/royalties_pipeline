@@ -69,6 +69,8 @@ def _percentage(value: float) -> str:
 
 
 def _safe_text(value: object, fallback: str = "-") -> str:
+    if value is None or pd.isna(value):
+        return fallback
     text = str(value or "").replace("\ufffd", "").strip()
     return text or fallback
 
@@ -190,7 +192,8 @@ def _track_rows(frame: pd.DataFrame) -> list[dict]:
     ]
 
 
-def _draw_monthly_chart(c: canvas.Canvas, rows: list[tuple[str, float]], x: float, y: float, w: float, h: float) -> None:
+def _draw_monthly_chart(c: canvas.Canvas, rows: list[tuple[str, float]], x: float, y: float, w: float, h: float,
+                        *, prevent_label_overlap: bool = False) -> None:
     if not rows:
         _label(c, "Sin datos mensuales", x + 8, y + h / 2, 9)
         return
@@ -242,11 +245,55 @@ def _draw_monthly_chart(c: canvas.Canvas, rows: list[tuple[str, float]], x: floa
     for index, (point_x, point_y) in enumerate(points):
         c.setFillColor(TEAL if amounts[index] >= 0 else ACCENT)
         c.circle(point_x, point_y, 2.6, stroke=0, fill=1)
-        if index in point_indexes:
+        if not prevent_label_overlap and index in point_indexes:
             c.setFont("VpoSans-Bold", 6.7)
             c.setFillColor(INK)
             label_y = point_y + 7 if amounts[index] >= 0 else point_y - 12
             c.drawCentredString(point_x, label_y, _money(amounts[index]))
+
+    font, size = "VpoSans-Bold", 6.7
+    occupied = []
+    placements = []
+
+    def touches_plot(box):
+        left, bottom, right, top = box
+        for (ax, ay), (bx, by) in zip(points, points[1:]):
+            start, end = max(left, ax), min(right, bx)
+            if start <= end:
+                lo = ay + (by - ay) * (start - ax) / (bx - ax)
+                hi = ay + (by - ay) * (end - ax) / (bx - ax)
+                if max(lo, hi) >= bottom - 1 and min(lo, hi) <= top + 1:
+                    return True
+        return any(left - 3 <= px <= right + 3 and bottom - 3 <= py <= top + 3 for px, py in points)
+
+    for index in sorted(point_indexes) if prevent_label_overlap else ():
+        point_x, point_y = points[index]
+        label = _money(amounts[index])
+        half = c.stringWidth(label, font, size) / 2
+        label_x = min(max(point_x, x + half + 2), x + w - half - 2)
+        ideal = point_y + 7 if amounts[index] >= 0 else point_y - 12
+        floor, ceiling = y + 17, y + h - 9
+        choices = [min(max(ideal + offset, floor), ceiling) for offset in (0, 12, -12, 24, -24, 36, -36)]
+        choices += [floor + i * 3 for i in range(int((ceiling - floor) / 3) + 1)]
+        choices = sorted(dict.fromkeys(choices), key=lambda candidate: abs(candidate - ideal))
+        for label_y in choices:
+            box = (label_x - half - 2, label_y - 3, label_x + half + 2, label_y + 8)
+            if not touches_plot(box) and all(box[2] <= old[0] or old[2] <= box[0] or box[3] <= old[1] or old[3] <= box[1]
+                   for old in occupied):
+                occupied.append(box)
+                break
+        else:
+            label_y = min(max(ideal, floor), ceiling)
+        placements.append((label, label_x, label_y, point_x, point_y, ideal))
+    for _, label_x, label_y, point_x, point_y, ideal in placements:
+        if abs(label_x - point_x) > 1 or abs(label_y - ideal) > 1:
+            c.setStrokeColor(LINE)
+            c.setLineWidth(0.45)
+            c.line(point_x, point_y, label_x, label_y - 3 if label_y > point_y else label_y + 8)
+    for label, label_x, label_y, _, _, _ in placements:
+        c.setFont(font, size)
+        c.setFillColor(INK)
+        c.drawCentredString(label_x, label_y, label)
 
     tick_step = max(1, math.ceil(len(rows) / 6))
     tick_indexes = list(range(0, len(rows), tick_step))
@@ -363,7 +410,8 @@ def build_executive_royalty_pdf(
 
     _value(c, "Evolucion mensual", left_x + 16, panel_y + panel_h - 28, 12.5)
     _label(c, f"Neto por mes de {basis_label.lower()}", left_x + 16, panel_y + panel_h - 44, 8)
-    _draw_monthly_chart(c, monthly_rows, left_x + 16, panel_y + 32, left_w - 32, panel_h - 96)
+    _draw_monthly_chart(c, monthly_rows, left_x + 16, panel_y + 32, left_w - 32, panel_h - 96,
+                        prevent_label_overlap=True)
 
     _value(c, "Plataformas", middle_x + 16, panel_y + panel_h - 28, 12.5)
     _label(c, "Participacion sobre el neto", middle_x + 16, panel_y + panel_h - 44, 8)

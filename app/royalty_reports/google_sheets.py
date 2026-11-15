@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import gzip
 import json
 import os
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from google.oauth2 import service_account
@@ -23,9 +26,22 @@ class GoogleSheetReportError(RuntimeError):
 
 
 def google_credentials(scopes: list[str]):
+    ephemeral_json = os.environ.get("GOOGLE_OAUTH_EPHEMERAL_JSON", "")
     oauth_token_json = os.environ.get("GOOGLE_OAUTH_TOKEN_JSON", "")
     service_account_json = os.environ.get("GCS_SERVICE_ACCOUNT_JSON", "")
     credentials_file = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
+
+    if ephemeral_json:
+        try:
+            temporary = json.loads(ephemeral_json)
+            expiry = datetime.fromisoformat(temporary["expiry"])
+            token = temporary["token"]
+            if (expiry.tzinfo is None or expiry <= datetime.now(timezone.utc)
+                    or not isinstance(token, str) or not token):
+                raise ValueError("invalid or expired")
+        except (TypeError, ValueError, KeyError) as exc:
+            raise GoogleSheetReportError("La autorización temporal de Google Sheets no está vigente.") from exc
+        return UserCredentials(token=token, scopes=scopes, expiry=expiry.astimezone(timezone.utc).replace(tzinfo=None))
 
     if oauth_token_json:
         try:
@@ -71,6 +87,49 @@ def dataframe_values(dataframe) -> list[list[object]]:
     return values
 
 
+VALUE_BATCH_MAX_BYTES = 1_800_000
+VALUE_BATCH_MAX_ROWS = 10_000
+VALUE_WRITE_MIN_INTERVAL_SECONDS = 1.1
+
+
+def dataframe_value_batches(
+    dataframe,
+    *,
+    max_bytes: int = VALUE_BATCH_MAX_BYTES,
+    max_rows: int = VALUE_BATCH_MAX_ROWS,
+):
+    """Yield contiguous A1 start rows and bounded bodies, without a detail limit."""
+    if max_bytes <= 0 or max_rows <= 0:
+        raise ValueError("Los límites del bloque deben ser positivos.")
+
+    def rows():
+        yield list(dataframe.columns)
+        for offset in range(0, len(dataframe.index), VALUE_BATCH_MAX_ROWS):
+            # Reuse the original conversion on bounded slices, including nulls,
+            # NumPy values and duplicated public headers.
+            yield from dataframe_values(dataframe.iloc[offset:offset + VALUE_BATCH_MAX_ROWS])[1:]
+
+    empty_body_bytes = len(json.dumps({"values": []}).encode("utf-8"))
+    first_row = 1
+    batch = []
+    body_bytes = empty_body_bytes
+    for row in rows():
+        row_bytes = len(json.dumps(row).encode("utf-8"))
+        if empty_body_bytes + row_bytes > max_bytes:
+            raise GoogleSheetReportError("Una fila supera el tamaño máximo de un bloque de Sheets.")
+        separator_bytes = 2 if batch else 0
+        if batch and (len(batch) >= max_rows or body_bytes + separator_bytes + row_bytes > max_bytes):
+            yield first_row, batch
+            first_row += len(batch)
+            batch = []
+            body_bytes = empty_body_bytes
+            separator_bytes = 0
+        batch.append(row)
+        body_bytes += separator_bytes + row_bytes
+    if batch:
+        yield first_row, batch
+
+
 def video_code_link_request(dataframe, sheet_id: int) -> dict | None:
     if not {"Codigo", "Tipo codigo"}.issubset(dataframe.columns):
         return None
@@ -99,13 +158,15 @@ def sheet_title(keywords: list[str], start_month: str | None, end_month: str | N
     return f"VPO Royalties - {keyword_part}{period_part}"
 
 
-def column_width(column_name: str, dataframe) -> int:
+def column_width(column_name: str, dataframe, column_index: int | None = None) -> int:
     lower_name = column_name.lower()
     sample_values = [str(column_name)]
-    if column_name in dataframe.columns:
+    if column_index is None:
+        column_index = next((i for i, name in enumerate(dataframe.columns) if name == column_name), None)
+    if column_index is not None:
         sample_values.extend(
             str(value)
-            for value in dataframe[column_name].head(80).fillna("").tolist()
+            for value in dataframe.iloc[:, column_index].head(80).fillna("").tolist()
         )
 
     max_len = max((len(value) for value in sample_values), default=10)
@@ -148,12 +209,33 @@ def column_width(column_name: str, dataframe) -> int:
     return int(min(max(calculated, min_width), max_width))
 
 
+GOOGLE_SHEETS_CELL_CAPACITY = 20_000_000
+DEFAULT_GRID_ROWS = 1000
+DEFAULT_GRID_COLUMNS = 26
+
+
+def complete_sheet_grid(tables):
+    if not tables:
+        raise GoogleSheetReportError('No hay hojas para entregar.')
+    return {name:{"rowCount":max(DEFAULT_GRID_ROWS,len(frame.index)+1),
+                  "columnCount":max(DEFAULT_GRID_COLUMNS,len(frame.columns))}
+            for name,frame in tables.items()}
+
+
 def create_google_sheet(
     tables,
     keywords: list[str],
     start_month: str | None,
     end_month: str | None,
 ) -> str:
+    grid_plan=complete_sheet_grid(tables)
+    required=sum(grid['rowCount']*grid['columnCount'] for grid in grid_plan.values())
+    if required>GOOGLE_SHEETS_CELL_CAPACITY:
+        formatted=lambda value:f'{value:,}'.replace(',','.')
+        raise GoogleSheetReportError(
+            f'El informe completo necesita {formatted(required)} celdas y Google Sheets admite '
+            f'{formatted(GOOGLE_SHEETS_CELL_CAPACITY)}. Elegí Excel para conservar el detalle completo.'
+        )
     credentials = google_credentials(GOOGLE_API_SCOPES)
     sheets_service = google_build("sheets", "v4", credentials=credentials, cache_discovery=False)
     drive_service = google_build("drive", "v3", credentials=credentials, cache_discovery=False)
@@ -225,21 +307,51 @@ def create_google_sheet(
         spreadsheet_id = spreadsheet["spreadsheetId"]
         spreadsheet_url = spreadsheet["spreadsheetUrl"]
 
+    metadata = sheets_service.spreadsheets().get(
+        spreadsheetId=spreadsheet_id,
+        fields="sheets.properties(sheetId,title,gridProperties)",
+    ).execute()
+    properties_by_title = {sheet["properties"]["title"]: sheet["properties"] for sheet in metadata["sheets"]}
+    grid_requests = []
+    for sheet_name, grid in grid_plan.items():
+        current = properties_by_title[sheet_name]
+        grid_requests.append({"updateSheetProperties": {
+            "properties": {"sheetId": current["sheetId"], "gridProperties": grid},
+            "fields": "gridProperties(rowCount,columnCount)",
+        }})
+    # A write whose start row is outside the existing grid is rejected, even
+    # though an A1 write can expand it. Reserve the complete grid before blocks.
+    sheets_service.spreadsheets().batchUpdate(
+        spreadsheetId=spreadsheet_id, body={"requests": grid_requests},
+    ).execute(num_retries=5)
+
+    last_write_started = None
     for sheet_name, dataframe in tables.items():
-        values = dataframe_values(dataframe)
-        if not values:
-            continue
-        try:
-            sheets_service.spreadsheets().values().update(
-                spreadsheetId=spreadsheet_id,
-                range=f"'{sheet_name}'!A1",
-                valueInputOption="USER_ENTERED",
-                body={"values": values},
-            ).execute()
-        except HttpError as exc:
-            raise GoogleSheetReportError(
-                f"Google Sheets write failed on {sheet_name}: {exc.reason}"
-            ) from exc
+        for first_row, values in dataframe_value_batches(dataframe):
+            if last_write_started is not None:
+                remaining = VALUE_WRITE_MIN_INTERVAL_SECONDS - (time.monotonic() - last_write_started)
+                if remaining > 0:
+                    time.sleep(remaining)
+            last_write_started = time.monotonic()
+            quoted_name = sheet_name.replace("'", "''")
+            try:
+                # Retrying the same explicit range with the same body does not
+                # append or duplicate rows after an uncertain response.
+                request = sheets_service.spreadsheets().values().update(
+                    spreadsheetId=spreadsheet_id,
+                    range=f"'{quoted_name}'!A{first_row}",
+                    valueInputOption="USER_ENTERED",
+                    body={"values": values},
+                )
+                plain = request.body.encode("utf-8") if isinstance(request.body, str) else request.body
+                request.body = gzip.compress(plain, mtime=0)
+                request.headers["content-encoding"] = "gzip"
+                request.headers["content-length"] = str(len(request.body))
+                request.execute(num_retries=5)
+            except HttpError as exc:
+                raise GoogleSheetReportError(
+                    f"Google Sheets write failed on {sheet_name}: {exc.reason}"
+                ) from exc
 
     metadata = sheets_service.spreadsheets().get(
         spreadsheetId=spreadsheet_id,
@@ -304,16 +416,6 @@ def create_google_sheet(
                         "fields": "gridProperties.frozenRowCount",
                     }
                 },
-                {
-                    "autoResizeDimensions": {
-                        "dimensions": {
-                            "sheetId": sheet_id,
-                            "dimension": "COLUMNS",
-                            "startIndex": 0,
-                            "endIndex": column_count,
-                        }
-                    }
-                },
             ]
         )
         requests.append(
@@ -342,7 +444,7 @@ def create_google_sheet(
                             "startIndex": idx,
                             "endIndex": idx + 1,
                         },
-                        "properties": {"pixelSize": column_width(str(column_name), dataframe)},
+                        "properties": {"pixelSize": column_width(str(column_name), dataframe, idx)},
                         "fields": "pixelSize",
                     }
                 }

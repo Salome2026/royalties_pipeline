@@ -12,6 +12,7 @@ export type RoyaltyReportSourceAccount = {
 };
 
 export type RoyaltyReportOptions = {
+  bigquery_outputs?: (RoyaltyReportOutput | "google_sheet")[];
   excel_contracts_supported?: boolean;
   artist_settlement_supported?: boolean;
   sources: string[];
@@ -60,6 +61,7 @@ export type RoyaltyReportJob = {
   updated_at: string | null;
   expires_at: string | null;
   download_ready: boolean;
+  download_files?: { part: "primary" | "detail"; name: string }[];
 };
 
 async function responseError(response: Response, fallback: string) {
@@ -103,11 +105,11 @@ export async function createRoyaltyReportJob(payload: RoyaltyReportPayload, outp
   return data.item as RoyaltyReportJob;
 }
 
-export async function requestRoyaltyDetailCount(payload: RoyaltyReportPayload) {
+export async function requestRoyaltyDetailCount(payload: RoyaltyReportPayload, output: RoyaltyReportJobOutput = "excel") {
   const response = await fetch("/api/report-detail-count", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...payload, output: "excel" }),
+    body: JSON.stringify({ ...payload, output }),
   });
   if (!response.ok) throw await responseError(response, "No se pudo calcular la cantidad de filas.");
   return response.json() as Promise<RoyaltyDetailCount>;
@@ -127,6 +129,6 @@ export async function requestRecentRoyaltyReportJobs(limit = 8) {
   return (data.items || []) as RoyaltyReportJob[];
 }
 
-export function royaltyReportJobDownloadUrl(jobId: number) {
-  return `/api/report?job_id=${encodeURIComponent(jobId)}&download=1`;
+export function royaltyReportJobDownloadUrl(jobId: number, part: "primary" | "detail" = "primary") {
+  return `/api/report?job_id=${encodeURIComponent(jobId)}&download=1&file=${part}`;
 }

@@ -4,6 +4,7 @@ fastexcel
 google-api-python-client
 google-auth-oauthlib
 google-cloud-bigquery
+google-cloud-bigquery-storage==2.43.0
 google-cloud-storage
 httpx
 openpyxl

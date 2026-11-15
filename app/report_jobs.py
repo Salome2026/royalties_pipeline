@@ -210,9 +210,10 @@ def list_report_jobs(requested_by: str | None, limit: int = 10, *, royalty_scope
 
 def set_report_job_execution(
     job_id: int,
-    execution_name: str,
+    execution_name: str | None,
     *,
     engine_version: str | None = None,
+    only_if_queued: bool = False,
 ) -> None:
     def update(conn):
         conn.execute(
@@ -221,25 +222,28 @@ def set_report_job_execution(
             SET execution_name = %s,
                 engine_version = COALESCE(%s, engine_version),
                 updated_at = now()
-            WHERE id = %s
+            WHERE id = %s AND (NOT %s OR status = 'queued')
             """,
-            (execution_name, engine_version, job_id),
+            (execution_name, engine_version, job_id, only_if_queued),
         )
     _db_retry(update)
 
 
-def claim_report_job(job_id: int) -> dict[str, Any] | None:
+def claim_report_job(job_id: int, *, execution_name: str | None = None, task_attempt: int = 0) -> dict[str, Any] | None:
     def claim(conn):
         row = conn.execute(
             """
             UPDATE report_runs
             SET status = 'running', progress_stage = 'preparing',
                 started_at = COALESCE(started_at, now()), updated_at = now(),
-                attempt_count = attempt_count + 1, error_message = NULL
-            WHERE id = %s AND status = 'queued'
+                attempt_count = attempt_count + 1, error_message = NULL,
+                execution_name = COALESCE(%s, execution_name)
+            WHERE id = %s AND (status = 'queued' OR (
+                status = 'running' AND execution_name = %s AND attempt_count = %s AND %s > 0
+            ))
             RETURNING *
             """,
-            (job_id,),
+            (execution_name, job_id, execution_name, task_attempt, task_attempt),
         ).fetchone()
         return (
             report_job_item(row, include_execution_context=True)

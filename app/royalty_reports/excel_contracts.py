@@ -11,12 +11,15 @@ from zoneinfo import ZoneInfo
 
 import polars as pl
 
+from scripts.lib.report_precision import exact_sum as _exact_sum, stable_sum as _stable_sum
+
 from app.master_contracts import parse_artists, validate_split, _period_start, _period_end
 from app.master_contract_income import associated_income_isrc
 from app.royalty_reports.contractual import allocation_rows, beneficiary_key
 
 
-def freeze_snapshot(frame: pl.DataFrame, contracts: list[dict], manifest: dict) -> dict:
+def freeze_snapshot(frame: pl.DataFrame, contracts: list[dict], manifest: dict, *,
+                    published_evidence=None, release_metadata=None, allocation_document=None) -> dict:
     from app.master_contract_income import income_association_index, published_unassigned_income
     from app.master_contract_metadata import contract_evidence, with_external_titles
     from scripts.lib.catalog_report_filter import catalog_alias_lookup
@@ -25,22 +28,27 @@ def freeze_snapshot(frame: pl.DataFrame, contracts: list[dict], manifest: dict) 
     release = manifest.get("release_id")
     if not release:
         raise ValueError("Falta la version publicada para verificar el reparto del Excel.")
-    _, evidence = published_unassigned_income(release)
     catalog = frame.to_dicts()
-    metadata = manifest.get("objects", {}).get("catalog_release_metadata.parquet")
-    if metadata:
-        content = storage.Client().bucket(manifest["bucket"]).blob(
-            metadata["object"], generation=int(metadata["generation"])).download_as_bytes()
-        catalog = with_external_titles(catalog, pl.read_parquet(BytesIO(content)).to_dicts())
+    from scripts.lib.product_income import FILE, use_product_income
+    if published_evidence is None:
+        _, published_evidence = published_unassigned_income(release)
+        metadata = manifest.get("objects", {}).get("catalog_release_metadata.parquet")
+        if metadata:
+            content = storage.Client().bucket(manifest["bucket"]).blob(
+                metadata["object"], generation=int(metadata["generation"])).download_as_bytes()
+            release_metadata = pl.read_parquet(BytesIO(content))
+        allocation = manifest.get('objects', {}).get(FILE)
+        if allocation:
+            content = storage.Client().bucket(manifest['bucket']).blob(
+                allocation['object'], generation=int(allocation['generation'])).download_as_bytes()
+            allocation_document = json.loads(content)
+    if release_metadata is not None:
+        catalog = with_external_titles(catalog, release_metadata.to_dicts())
     choices = {row["isrc"]: row["split"].get("code_association_overrides") or [] for row in contracts}
     claims = {choice["key"]: root for root, items in choices.items() for choice in items if choice.get("included")}
-    from scripts.lib.product_income import FILE,use_product_income
-    allocation=manifest.get('objects',{}).get(FILE)
-    document=json.loads(storage.Client().bucket(manifest['bucket']).blob(allocation['object'],
-        generation=int(allocation['generation'])).download_as_bytes()) if allocation else None
-    with use_product_income(document):
+    with use_product_income(allocation_document):
         aliases = {row["alias_catalog_key"]: row["catalog_key"] for row in catalog_alias_lookup(catalog=frame).to_dicts()}
-        index = income_association_index(contract_evidence(catalog, evidence, aliases, choices, claims), aliases, choices, claims)
+        index = income_association_index(contract_evidence(catalog, published_evidence, aliases, choices, claims), aliases, choices, claims)
     fields = ("catalog_key", "asset_isrc", "artist_statement", "catalog_artists")
     return {"schema_version": 1, "kind": "excel_contract_columns", "release_id": release,
         "captured_at": datetime.now(timezone.utc).isoformat(),
@@ -94,7 +102,7 @@ def reference_fragments(frame: pl.LazyFrame) -> pl.DataFrame:
         *[(pl.col(name).cast(pl.Boolean,strict=False).fill_null(False) if name in columns else pl.lit(False)).alias(name)
           for name in ('_income_product_pending','_income_upc_pending')],
         pl.col("amount_usd"),
-    ).group_by(keys).agg(pl.col("amount_usd").sum()).collect(engine="streaming")
+    ).group_by(keys).agg(_stable_sum("amount_usd")).collect(engine="streaming")
 
 
 def _credit_names(row: dict) -> list[str]:
@@ -170,7 +178,7 @@ def participant_columns(summary: pl.DataFrame, fragments: pl.DataFrame, snapshot
         identity = row["_report_identity"]
         pieces = by_identity.get(identity, [])
         row_keys = register(catalog.get(identity, []) or parse_artists(row.get("artist_statement_style") or "", "catalog"))
-        amounts = defaultdict(float)
+        amounts = defaultdict(list)
         rates = defaultdict(set)
         applied = False
         for piece in pieces:
@@ -199,12 +207,13 @@ def participant_columns(summary: pl.DataFrame, fragments: pl.DataFrame, snapshot
                     row_keys.add(key)
                     combined[key] += float(share["percent"]) / 100
                 for key, percent in combined.items():
-                    amounts[key] += value * percent
+                    amounts[key].append(value * percent)
                 for key in row_keys:
                     rates[key].add(combined.get(key, 0.0))
                 break
+        amounts = defaultdict(float, {k: _exact_sum(v) for k, v in amounts.items()})
         total = float(row.get("amount_usd") or 0)
-        reconciled = bool(pieces) and math.isclose(sum(float(p["amount_usd"] or 0) for p in pieces), total, rel_tol=1e-9, abs_tol=0.00001)
+        reconciled = bool(pieces) and math.isclose(_exact_sum(float(p["amount_usd"] or 0) for p in pieces), total, rel_tol=1e-9, abs_tol=0.00001)
         cells = {}
         if applied and reconciled:
             for key in row_keys:

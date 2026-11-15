@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pandas as pd
 import polars as pl
+
+from scripts.lib.report_precision import stable_pick as _stable_pick, stable_series_sum as _stable_series_sum, stable_sum as _stable_sum
 from scripts.lib.catalog_artist_dictionary import display_credit, search_terms
 from scripts.lib.dashgo_video_identity import compile_video_groups, with_video_groups, SUMMARY_VIDEO, SUMMARY_TITLE
 try:
@@ -362,6 +364,9 @@ def filter_report_keyword_values(frame: pl.DataFrame,keywords: list[str],mode: s
             if name in scoped and name not in ordinary:found=found & ada
             mask=mask | found
             if mask.all():break
+        # An unresolved product retains its own UPC; it has no allocated origin
+        # text. Keep this separate from ordinary track-level UPC search.
+        mask=mask | frame.select(pending_upc_match_expr(columns,keyword)).to_series()
         result=mask if result is None else (result & mask if mode=='all' else result | mask)
         if mode=='all' and not result.any():return frame.head(0)
         if mode!='all' and result.all():return frame
@@ -462,6 +467,15 @@ def exclude_isrc_expr(columns: set[str], excluded_isrcs: list[str]) -> pl.Expr:
     return ~excluded
 
 
+def pending_upc_match_expr(columns: set[str],keyword: str) -> pl.Expr:
+    from lib.product_income import normalized_upc,product_key_expr
+    upc=normalized_upc(keyword)
+    if upc is None or '_income_upc_pending' not in columns:
+        return pl.lit(False)
+    return (pl.col('_income_upc_pending').fill_null(False)
+            & (product_key_expr(columns)==pl.lit('UPC:'+upc))).fill_null(False)
+
+
 def contains_expr(columns: set[str], search_columns: list[str], keyword: str) -> pl.Expr:
     exprs = []
     normalized_keyword = normalize_search_text(keyword)
@@ -472,6 +486,7 @@ def contains_expr(columns: set[str], search_columns: list[str], keyword: str) ->
     for col in ["catalog_number", "gpid", "Catalog Number", "Catalogue Number", "GPID"]:
         if col in columns:
             exprs.append((ada_source_expr(columns) & contains_search_expr(pl.col(col), normalized_keyword)).fill_null(False))
+    exprs.append(pending_upc_match_expr(columns,keyword))
 
     if not exprs:
         return pl.lit(False)
@@ -637,7 +652,7 @@ def present_dashgo_summary(table: pd.DataFrame, summary: pl.DataFrame) -> pd.Dat
         selected = result.loc[indices]
         row = {column: None for column in table.columns}
         for column in measures:
-            row[column] = selected[column].sum(min_count=1)
+            row[column] = _stable_series_sum(selected[column],min_count=1)
         for column, aggregate in (("Desde", min), ("Hasta", max)):
             dates = selected[column].dropna().tolist()
             row[column] = aggregate(dates) if dates else None
@@ -679,9 +694,9 @@ def build_track_summary_lf(base_lf: pl.LazyFrame, *, include_identity: bool = Fa
         (_summary_text_expr(columns, ["dsp_normalized"]) == "YouTube")
         & (_summary_text_expr(columns, ["content_origin_normalized"]) == "Video / Channel")
     ).fill_null(False)
-    best_title = pl.col("_summary_title").sort_by(pl.col("amount_usd").abs(), descending=True).drop_nulls().first()
+    best_title = _stable_pick("_summary_title")
     if SUMMARY_TITLE in columns:
-        best_title = pl.coalesce([pl.col(SUMMARY_TITLE).drop_nulls().first(), best_title])
+        best_title = pl.coalesce([pl.col(SUMMARY_TITLE).drop_nulls().sort().first(), best_title])
 
     grouped = (
         base_lf
@@ -699,10 +714,7 @@ def build_track_summary_lf(base_lf: pl.LazyFrame, *, include_identity: bool = Fa
             *(dashgo_summary_metadata(columns) if include_dashgo_metadata else []),
             pl.col("_summary_channel_video").all().alias("_all_channel_video"),
             best_title.alias("track_statement_style"),
-            pl.col("_summary_artist")
-            .sort_by(pl.col("amount_usd").abs(), descending=True)
-            .drop_nulls()
-            .first()
+            _stable_pick("_summary_artist")
             .alias("artist_statement_style"),
             pl.col("_trusted_original_code")
             .drop_nulls()
@@ -716,18 +728,12 @@ def build_track_summary_lf(base_lf: pl.LazyFrame, *, include_identity: bool = Fa
             .sort()
             .str.join(" | ")
             .alias("content_types"),
-            pl.col("_trusted_original_code")
-            .sort_by(pl.col("amount_usd").abs(), descending=True)
-            .drop_nulls()
-            .first()
+            _stable_pick("_trusted_original_code")
             .alias("_best_original_code"),
-            pl.col("_summary_code_source")
-            .sort_by(pl.col("amount_usd").abs(), descending=True)
-            .drop_nulls()
-            .first()
+            _stable_pick("_summary_code_source")
             .alias("_best_code_source"),
-            pl.sum("amount_usd").alias("amount_usd"),
-            pl.sum("units").alias("units"),
+            _stable_sum("amount_usd").alias("amount_usd"),
+            _stable_sum("units").alias("units"),
             pl.min("period_month").alias("first_month"),
             pl.max("period_month").alias("last_month"),
         ])
@@ -1159,8 +1165,10 @@ def build_filtered_raw_detail_lf(
     exclude_isrcs: list[str] | None = None,
     source: str | None = None,
     account: str | None = None,
+    raw: pl.LazyFrame | None = None,
 ) -> tuple[pl.LazyFrame, set[str]]:
-    columns = existing_columns(standardized_path)
+    columns = existing_columns(standardized_path) if raw is None else set(raw.collect_schema().names())
+    income = scan_income(standardized_path) if raw is None else raw
     period_column = "statement_period" if period_basis == "statement_period" else "transaction_month"
     raw_filter = build_filter(columns, SEARCH_COLUMNS_STANDARDIZED, keywords, mode)
     excluded = normalize_isrcs(exclude_isrcs)
@@ -1172,7 +1180,7 @@ def build_filtered_raw_detail_lf(
                         add_period_filter(
                             add_match_text(
                                 add_source_account_filter(
-                                    scan_income(standardized_path).filter(raw_filter).with_row_index('_report_detail_position'),
+                                    income.filter(raw_filter).with_row_index('_report_detail_position'),
                                     columns,
                                     source,
                                     account,
@@ -1312,7 +1320,7 @@ def build_report_detail(
     )
     top_countries = (
         ranked_matches_lf.group_by("report_territory")
-        .agg(pl.sum("amount_usd").fill_null(0).alias("amount_usd"))
+        .agg(_stable_sum("amount_usd").fill_null(0).alias("amount_usd"))
         .sort("amount_usd", descending=True)
         .limit(TOP_COUNTRY_LIMIT)
         .collect(engine="streaming")
@@ -1363,8 +1371,8 @@ def build_report_detail(
         .group_by("_aggregate_group")
         .agg(
             pl.len().alias("lines"),
-            pl.sum("amount_usd").alias("amount_usd"),
-            pl.sum("units").alias("units"),
+            _stable_sum("amount_usd").alias("amount_usd"),
+            _stable_sum("units").alias("units"),
         )
         .collect(engine="streaming")
     )
@@ -1497,6 +1505,86 @@ def add_wml_reference_annex(tables: dict, matched_isrcs: set[str]) -> dict:
     return tables
 
 
+def build_summary_selection(raw, standardized_cols, *, keywords, mode, start_month, end_month,
+                            period_column, source, account, excluded_isrcs):
+    raw_filter = build_filter(standardized_cols, SEARCH_COLUMNS_STANDARDIZED, keywords, mode)
+
+    return (
+        add_report_code(
+            normalize_report_usage(
+                normalize_report_store(
+                    normalize_report_units(
+                        add_period_filter(
+                            add_source_account_filter(
+                                raw.filter(raw_filter),
+                                standardized_cols,
+                                source,
+                                account,
+                            ),
+                            standardized_cols,
+                            start_month,
+                            end_month,
+                            period_column,
+                        ),
+                        standardized_cols,
+                    ),
+                    standardized_cols,
+                ),
+                standardized_cols,
+            ),
+            standardized_cols,
+        )
+        .pipe(lambda frame: filter_reportable_generation(frame, standardized_cols))
+        .pipe(lambda frame: apply_report_net_personalization(frame))
+        .filter(exclude_isrc_expr(standardized_cols, excluded_isrcs))
+        .select([
+            col for col in [
+                "source",
+                "account",
+                "statement_period",
+                "transaction_month",
+                "report_code",
+                "report_code_source",
+                "asset_isrc",
+                "video_id",
+                "video_id_source",
+                "channel_id",
+                "Track Title",
+                "report_territory",
+                "track_statement_style",
+                "asset_title_statement",
+                "artist_statement_style",
+                "asset_artist_statement",
+                "content_type",
+                "dsp_normalized",
+                "monetization_normalized",
+                "content_origin_normalized",
+                "classification_status",
+                "store_raw",
+                "usage_type",
+                "amount_usd",
+                "units",
+                "territory",
+                "source_sheet",
+                "revenue_basis",
+                "catalog_key",
+                "catalog_business_status",
+                "product_upc", "UPC Code", "UPC", "Video ID", "VideoId", "track_id",
+                "Label Track ID", "Track ID", "gpid", "source_asset_id", "catalog_number",
+                '_income_product_pending','_income_upc_pending',
+            ]
+            if col in standardized_cols or col in {"store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory", "catalog_key", "catalog_business_status", "video_id", "video_id_source", "channel_id", "dsp_normalized", "monetization_normalized", "content_origin_normalized", "classification_status"}
+        ])
+        .with_columns([
+            pl.lit(None).cast(pl.Utf8).alias("content_type")
+            if "content_type" not in standardized_cols
+            else pl.col("content_type"),
+            pl.col(period_column).cast(pl.Utf8).alias("period_month"),
+        ])
+    )
+
+
+
 def build_report_tables(
     keywords: list[str],
     mode: str,
@@ -1513,7 +1601,8 @@ def build_report_tables(
     contract_snapshot: dict | None = None,
     contract_columns: str = "all",
     _dashgo_video_groups: pl.DataFrame | None = None,
-) -> dict[str, pd.DataFrame]:
+    spooled_selection=None,
+) -> dict:
     if _dashgo_video_groups is None:
         from app.royalty_scope import is_wml
         evidence_path = standardized_path if standardized_path.exists() else song_path
@@ -1528,108 +1617,40 @@ def build_report_tables(
             selected=prepare_keyword_source(standardized_path,Path(temporary)/'selected_income.parquet',keywords,mode)
             return build_report_tables(keywords,mode,raw_limit,start_month,end_month,period_basis,song_path,selected,
                 exclude_isrcs,source,account,detail_mode,contract_snapshot,contract_columns,
-                _dashgo_video_groups=_dashgo_video_groups)
+                _dashgo_video_groups=_dashgo_video_groups, spooled_selection=spooled_selection)
     period_column = "statement_period" if period_basis == "statement_period" else "transaction_month"
     period_label = PERIOD_BASIS_LABELS.get(period_column, period_column)
     excluded_isrcs = normalize_isrcs(exclude_isrcs)
 
-    song_cols = existing_columns(song_path)
-    song_filter = build_filter(song_cols, SEARCH_COLUMNS_SONG, keywords, mode)
     standardized_cols = existing_columns(standardized_path)
 
-    if period_column == "statement_period":
-        raw_filter = build_filter(standardized_cols, SEARCH_COLUMNS_STANDARDIZED, keywords, mode)
-
-        statement_base_lf = (
-            add_report_code(
-                normalize_report_usage(
-                    normalize_report_store(
-                        normalize_report_units(
-                            add_period_filter(
-                                add_source_account_filter(
-                                    scan_income(standardized_path).filter(raw_filter),
-                                    standardized_cols,
-                                    source,
-                                    account,
-                                ),
-                                standardized_cols,
-                                start_month,
-                                end_month,
-                                period_column,
-                            ),
-                            standardized_cols,
-                        ),
-                        standardized_cols,
-                    ),
-                    standardized_cols,
-                ),
-                standardized_cols,
-            )
-            .pipe(lambda frame: filter_reportable_generation(frame, standardized_cols))
-            .pipe(lambda frame: apply_report_net_personalization(frame))
-            .filter(exclude_isrc_expr(standardized_cols, excluded_isrcs))
-            .select([
-                col for col in [
-                    "source",
-                    "account",
-                    "statement_period",
-                    "transaction_month",
-                    "report_code",
-                    "report_code_source",
-                    "asset_isrc",
-                    "video_id",
-                    "video_id_source",
-                    "channel_id",
-                    "Track Title",
-                    "report_territory",
-                    "track_statement_style",
-                    "asset_title_statement",
-                    "artist_statement_style",
-                    "asset_artist_statement",
-                    "content_type",
-                    "dsp_normalized",
-                    "monetization_normalized",
-                    "content_origin_normalized",
-                    "classification_status",
-                    "store_raw",
-                    "usage_type",
-                    "amount_usd",
-                    "units",
-                    "territory",
-                    "source_sheet",
-                    "revenue_basis",
-                    "catalog_key",
-                    "catalog_business_status",
-                    "product_upc", "UPC Code", "UPC", "Video ID", "VideoId", "track_id",
-                    "Label Track ID", "Track ID", "gpid", "source_asset_id", "catalog_number",
-                    '_income_product_pending','_income_upc_pending',
-                ]
-                if col in standardized_cols or col in {"store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory", "catalog_key", "catalog_business_status", "video_id", "video_id_source", "channel_id", "dsp_normalized", "monetization_normalized", "content_origin_normalized", "classification_status"}
-            ])
-            .with_columns([
-                pl.lit(None).cast(pl.Utf8).alias("content_type")
-                if "content_type" not in standardized_cols
-                else pl.col("content_type"),
-                pl.col(period_column).cast(pl.Utf8).alias("period_month"),
-            ])
-        )
-
+    # Both calendars summarize the same complete original-movement selection.
+    # A pre-aggregated song table cannot preserve every native keyword, transfer
+    # or confirmed reference used by the detail.
+    if period_column in {"statement_period", "transaction_month"}:
+        if spooled_selection is None:
+            statement_base_lf = build_summary_selection(
+                scan_income(standardized_path), standardized_cols, keywords=keywords, mode=mode,
+                start_month=start_month, end_month=end_month, period_column=period_column,
+                source=source, account=account, excluded_isrcs=excluded_isrcs,
+            ).collect(engine="streaming").lazy()
+        else:
+            statement_base_lf = pl.scan_parquet(spooled_selection.summary)
         # All summaries and optional contract columns consume one frozen selection.
         # Do not repeat the wide keyword/catalog/policy scan for every worksheet.
-        statement_base_lf = statement_base_lf.collect(engine='streaming').lazy()
         summary_base_lf = with_video_groups(statement_base_lf, _dashgo_video_groups)
         metrics_lf = statement_base_lf.select([
             pl.len().alias("song_level_rows"),
-            pl.sum("amount_usd").alias("song_level_amount_usd"),
-            pl.sum("units").alias("song_level_units"),
+            _stable_sum("amount_usd").alias("song_level_amount_usd"),
+            _stable_sum("units").alias("song_level_units"),
         ])
 
         monthly_summary_lf = (
             statement_base_lf
             .group_by(["period_month"])
             .agg([
-                pl.sum("amount_usd").alias("amount_usd"),
-                pl.sum("units").alias("units"),
+                _stable_sum("amount_usd").alias("amount_usd"),
+                _stable_sum("units").alias("units"),
                 pl.len().alias("rows"),
             ])
             .sort("period_month")
@@ -1647,25 +1668,26 @@ def build_report_tables(
             )
             .group_by(["report_territory"])
             .agg([
-                pl.sum("amount_usd").alias("amount_usd"),
-                pl.sum("units").alias("units"),
+                _stable_sum("amount_usd").alias("amount_usd"),
+                _stable_sum("units").alias("units"),
             ])
             .sort("report_territory")
         )
 
         track_summary_lf = build_track_summary_lf(summary_base_lf, include_identity=contract_snapshot is not None, include_dashgo_metadata=True)
 
-        raw_matches_lf, raw_detail_columns = build_filtered_raw_detail_lf(
-            keywords=keywords,
-            mode=mode,
-            start_month=start_month,
-            end_month=end_month,
-            period_basis=period_basis,
-            standardized_path=standardized_path,
-            exclude_isrcs=excluded_isrcs,
-            source=source,
-            account=account,
-        )
+        if spooled_selection is None:
+            raw_matches_lf, raw_detail_columns = build_filtered_raw_detail_lf(
+                keywords=keywords,
+                mode=mode,
+                start_month=start_month,
+                end_month=end_month,
+                period_basis=period_basis,
+                standardized_path=standardized_path,
+                exclude_isrcs=excluded_isrcs,
+                source=source,
+                account=account,
+            )
 
         metrics = metrics_lf.collect()
         song_rows = int(metrics["song_level_rows"][0])
@@ -1697,13 +1719,13 @@ def build_report_tables(
         store_summary = store_summary_lf.collect()
         territory_summary = territory_summary_lf.collect()
         track_summary = track_summary_lf.collect()
-        raw_sample = build_report_detail(
+        raw_sample = spooled_selection.detail if spooled_selection is not None else build_report_detail(
             raw_matches_lf,
             raw_detail_columns,
             keywords=keywords,
             detail_mode=detail_mode,
             raw_limit=raw_limit,
-            include_statement_metadata=True,
+            include_statement_metadata=period_column == "statement_period",
         )
 
         tables = {
@@ -1739,6 +1761,8 @@ def build_report_tables(
         matched=set(statement_base_lf.select('asset_isrc').unique().collect()['asset_isrc'].drop_nulls().to_list()) if is_wml() else set()
         return add_wml_reference_annex(tables,matched)
     else:
+        song_cols = existing_columns(song_path)
+        song_filter = build_filter(song_cols, SEARCH_COLUMNS_SONG, keywords, mode)
         song = (
             add_report_code(
                 normalize_report_units(
@@ -1794,8 +1818,8 @@ def build_report_tables(
         song
         .group_by(["period_month"])
         .agg([
-            pl.sum("amount_usd").alias("amount_usd"),
-            pl.sum("units").alias("units"),
+            _stable_sum("amount_usd").alias("amount_usd"),
+            _stable_sum("units").alias("units"),
             pl.len().alias("rows"),
         ])
         .sort("period_month")
@@ -1861,8 +1885,8 @@ def build_report_tables(
             )
             .group_by(["report_territory"])
             .agg([
-                pl.sum("amount_usd").alias("amount_usd"),
-                pl.sum("units").alias("units"),
+                _stable_sum("amount_usd").alias("amount_usd"),
+                _stable_sum("units").alias("units"),
             ])
             .sort("report_territory")
             .collect()
@@ -1885,8 +1909,8 @@ def build_report_tables(
             "end_month": end_month or "",
             "excluded_isrcs": ", ".join(excluded_isrcs),
             "song_level_rows": song.height,
-            "song_level_amount_usd": song["amount_usd"].sum(),
-            "song_level_units": song["units"].sum(),
+            "song_level_amount_usd": _stable_series_sum(song["amount_usd"]),
+            "song_level_units": _stable_series_sum(song["units"]),
             "raw_sample_rows": len(raw_sample),
             "generated_at": datetime.now().isoformat(timespec="seconds"),
         }])),

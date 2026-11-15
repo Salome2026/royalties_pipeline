@@ -74,19 +74,22 @@ def load_distributor_policy_document() -> dict[str, Any]:
         return wml_policy()
     _require_postgres()
     with operational_connect() as conn:
-        settings_row = conn.execute(
-            "SELECT * FROM distributor_policy_settings WHERE singleton_id = 1"
-        ).fetchone()
-        rows = conn.execute(
-            """
-            SELECT policy_id, source, account, display_name, policy_payload,
-                   report_net_adjustment_pct, active, policy_version, updated_by, updated_at
-            FROM distributor_account_policies
-            WHERE active = TRUE
-            ORDER BY source, account
-            """
-        ).fetchall()
+        return read_distributor_policy_document(conn)
 
+
+def read_distributor_policy_document(conn) -> dict[str, Any]:
+    settings_row = conn.execute(
+        "SELECT * FROM distributor_policy_settings WHERE singleton_id = 1"
+    ).fetchone()
+    rows = conn.execute(
+        """
+        SELECT policy_id, source, account, display_name, policy_payload,
+               report_net_adjustment_pct, active, policy_version, updated_by, updated_at
+        FROM distributor_account_policies
+        WHERE active = TRUE
+        ORDER BY source, account
+        """
+    ).fetchall()
     if settings_row is None:
         raise RuntimeError("Distributor policy settings are not initialized in Cloud SQL.")
     if not rows:

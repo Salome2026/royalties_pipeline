@@ -64,6 +64,12 @@ def install(api: Any) -> None:
         try:
             state=await run_in_threadpool(request_context,path,request.headers.get('x-vpo-api-key'),request.headers.get('x-vpo-username'))
             with use_scope('wml',release_id=state['config'].get('published_release_id')):
+                if (path.startswith(('/reports/jobs', '/reports/royalty/'))
+                        and getattr(api.app.state, 'royalty_report_backend', None) is not None):
+                    response = await call_next(request)
+                    response.headers['X-VPO-Royalty-Scope'] = 'wml'
+                    response.headers['X-VPO-Amount-Basis'] = 'wml_contractual_base_100'
+                    return response
                 # These small, isolated files also anchor report/catalog identity.
                 paths=await run_in_threadpool(api.ensure_marts,False,['catalog_master.parquet','catalog_status.parquet','wml_isrc_references.parquet'])
                 from app.royalty_scope import MARTS,STATUS

@@ -80,7 +80,8 @@ def main():
             else:
                 raise AssertionError((column, value))
         previous = root / "existing.parquet"
-        previous.write_bytes(b"prior-release")
+        detail.write_parquet(previous)
+        previous_bytes = previous.read_bytes()
         broken = root / "SoundOn_royalty_monthly_statement_2026_08_My Royalty.csv"
         raw.write_csv(broken)
         original_paths = ingest.INPUT_DIR, ingest.OUTPUT_PATH, ingest.TEMP_DIR
@@ -89,7 +90,7 @@ def main():
             try:
                 ingest.main()
             except RuntimeError:
-                assert previous.read_bytes() == b"prior-release"
+                assert previous.read_bytes() == previous_bytes
             else:
                 raise AssertionError("Failed input replaced the previous mart")
         finally:

@@ -32,6 +32,20 @@ type Props = {
   onMessage: (message: Message | null) => void;
 };
 
+function ReportDownloadLinks({ job }: { job: RoyaltyReportJob }) {
+  const files = job.download_files ?? [{ part: "primary" as const, name: job.result_filename || "" }];
+  return (
+    <span className={styles.downloadLinks}>
+      {files.map((file) => (
+        <a key={file.part} href={royaltyReportJobDownloadUrl(job.id, file.part)} title={file.name}>
+          <Download size={16} aria-hidden="true" />
+          {file.part === "detail" ? "CSV de detalle" : job.output_format === "executive_pdf" ? "PDF" : "Excel"}
+        </a>
+      ))}
+    </span>
+  );
+}
+
 export function RoyaltyReportModule({ onMessage }: Props) {
   const [output, setOutput] = useState<RoyaltyReportOutput>("excel");
   const [executiveMode, setExecutiveMode] = useState<"income" | "contractual" | "artist_settlement">("income");
@@ -117,20 +131,7 @@ export function RoyaltyReportModule({ onMessage }: Props) {
         if (!active) return;
         setActiveJob(job);
         setRecentJobs((items) => [job, ...items.filter((item) => item.id !== job.id)].slice(0, 8));
-        if (job.status === "completed") {
-          if (job.output_format === "google_sheet" && job.result_url) {
-            setLastSheetUrl(job.result_url);
-            onMessage({ type: "ok", text: "Google Sheet terminado y disponible." });
-          } else {
-            setLastFile(job.result_filename || "Reporte listo");
-            onMessage({ type: "ok", text: "Reporte terminado. La descarga ya está disponible." });
-            if (!downloadedJobs.current.has(job.id)) {
-              downloadedJobs.current.add(job.id);
-              window.location.href = royaltyReportJobDownloadUrl(job.id);
-            }
-          }
-          return;
-        }
+        if (job.status === "completed") return;
         if (job.status === "failed") {
           onMessage({ type: "error", text: job.error_message || "El reporte no pudo completarse." });
           return;
@@ -149,6 +150,27 @@ export function RoyaltyReportModule({ onMessage }: Props) {
       if (timer) clearTimeout(timer);
     };
   }, [activeJob?.id, activeJob?.status, onMessage]);
+
+  useEffect(() => {
+    if (!activeJob || activeJob.status !== "completed" || downloadedJobs.current.has(activeJob.id)) return;
+    downloadedJobs.current.add(activeJob.id);
+    if (activeJob.output_format === "google_sheet" && activeJob.result_url) {
+      setLastSheetUrl(activeJob.result_url);
+      onMessage({ type: "ok", text: "Google Sheet terminado y disponible." });
+      return;
+    }
+    setLastFile(activeJob.result_filename || "Reporte listo");
+    onMessage({ type: "ok", text: "Reporte terminado. La descarga ya está disponible." });
+    const files = activeJob.download_files ?? [{ part: "primary" as const, name: activeJob.result_filename || "" }];
+    for (const file of files) {
+      const link = document.createElement("a");
+      link.href = royaltyReportJobDownloadUrl(activeJob.id, file.part);
+      link.download = file.name;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
+  }, [activeJob, onMessage]);
 
   useEffect(() => {
     if (!pendingFullReport) return;
@@ -185,6 +207,8 @@ export function RoyaltyReportModule({ onMessage }: Props) {
     setArtistSearch("");
     onMessage(null);
   }
+
+  const bigQueryExcel = options?.bigquery_outputs?.includes("excel") ?? false;
 
   function buildPayload(): RoyaltyReportPayload | null {
     const resolved = resolvePeriod(period, "monthly_report");
@@ -291,14 +315,14 @@ export function RoyaltyReportModule({ onMessage }: Props) {
     payload: RoyaltyReportPayload,
     requestedOutput: RoyaltyReportOutput | "google_sheet",
   ) {
-    if (payload.detail_mode !== "full") {
+    if (payload.detail_mode !== "full" || options?.bigquery_outputs?.includes(requestedOutput)) {
       await startReport(payload, requestedOutput);
       return;
     }
 
     setCountingRows(true);
     try {
-      const count = await requestRoyaltyDetailCount(payload);
+      const count = await requestRoyaltyDetailCount(payload, requestedOutput);
       if (count.exceeds_excel_limit) {
         onMessage({
           type: "error",
@@ -491,21 +515,23 @@ export function RoyaltyReportModule({ onMessage }: Props) {
                     <option value="all">Todas las palabras</option>
                   </select>
                 </div>
-                <div className={styles.field}>
-                  <label htmlFor="royalty_raw_limit">Cantidad máxima de filas</label>
-                  <input
-                    id="royalty_raw_limit"
-                    type="number"
-                    min="0"
-                    max="50000"
-                    step="1"
-                    value={rawLimit}
-                    disabled={detailMode !== "limited"}
-                    onChange={(event) => setRawLimit(event.target.value)}
-                  />
-                  <small>Ingrese un valor entre 0 y 50.000. Use 0 para generar solo los resúmenes.</small>
-                  {wml && <small>Los resúmenes incluyen todo el alcance elegido. Este límite solo recorta las filas del detalle.</small>}
-                </div>
+                {!bigQueryExcel && (
+                  <div className={styles.field}>
+                    <label htmlFor="royalty_raw_limit">Cantidad máxima de filas</label>
+                    <input
+                      id="royalty_raw_limit"
+                      type="number"
+                      min="0"
+                      max="50000"
+                      step="1"
+                      value={rawLimit}
+                      disabled={detailMode !== "limited"}
+                      onChange={(event) => setRawLimit(event.target.value)}
+                    />
+                    <small>Ingrese un valor entre 0 y 50.000. Use 0 para generar solo los resúmenes.</small>
+                    {wml && <small>Los resúmenes incluyen todo el alcance elegido. Este límite solo recorta las filas del detalle.</small>}
+                  </div>
+                )}
                 <div className={styles.detailOptions} aria-label="Opciones de detalle">
                   <label className={detailMode === "top_countries" ? styles.detailOptionActive : ""}>
                     <input
@@ -519,19 +545,22 @@ export function RoyaltyReportModule({ onMessage }: Props) {
                       <small>Incluye Spotify y YouTube en detalle. Las demás plataformas y países se muestran consolidados.</small>
                     </span>
                   </label>
-                  <label className={detailMode === "full" ? styles.detailOptionActive : ""}>
-                    <input
-                      type="checkbox"
-                      checked={detailMode === "full"}
-                      onChange={(event) => setDetailMode(event.target.checked ? "full" : "limited")}
-                    />
-                    <Rows3 size={17} aria-hidden="true" />
-                    <span>
-                      <strong>Incluir todas las filas del detalle</strong>
-                      <small>Genera el detalle completo, sin aplicar el límite indicado arriba.</small>
-                    </span>
-                  </label>
+                  {!bigQueryExcel && (
+                    <label className={detailMode === "full" ? styles.detailOptionActive : ""}>
+                      <input
+                        type="checkbox"
+                        checked={detailMode === "full"}
+                        onChange={(event) => setDetailMode(event.target.checked ? "full" : "limited")}
+                      />
+                      <Rows3 size={17} aria-hidden="true" />
+                      <span>
+                        <strong>Incluir todas las filas del detalle</strong>
+                        <small>Genera el detalle completo, sin aplicar el límite indicado arriba.</small>
+                      </span>
+                    </label>
+                  )}
                 </div>
+                {bigQueryExcel && <p className={styles.detailNote}>Si el detalle completo supera la capacidad de Excel, se descarga en un CSV junto al Excel de resúmenes.</p>}
               </>
             )}
           </aside>
@@ -553,7 +582,7 @@ export function RoyaltyReportModule({ onMessage }: Props) {
               </span>
             </div>
             {activeJob.status === "completed" && activeJob.output_format !== "google_sheet" && (
-              <a href={royaltyReportJobDownloadUrl(activeJob.id)}><Download size={16} aria-hidden="true" /> Descargar</a>
+              <ReportDownloadLinks job={activeJob} />
             )}
             {activeJob.status === "completed" && activeJob.output_format === "google_sheet" && activeJob.result_url && (
               <a href={activeJob.result_url} target="_blank" rel="noreferrer"><ExternalLink size={16} aria-hidden="true" /> Abrir</a>
@@ -596,7 +625,7 @@ export function RoyaltyReportModule({ onMessage }: Props) {
                   <span>{job.params.distribution_contract_numbers?.length ? `Contratos ${job.params.distribution_contract_numbers.join(", ")}${job.params.keywords?.length ? ` · ${job.params.keywords.join(", ")}` : ""}` : job.params.contract_artists?.join(", ") || job.params.keywords?.join(", ") || "Todas las regalías"} · #{job.id}</span>
                 </div>
                 <span className={styles.recentState}>{job.status === "completed" ? "Listo" : job.status === "failed" ? "Error" : job.status === "running" ? "Procesando" : "En cola"}</span>
-                {job.status === "completed" && job.output_format !== "google_sheet" && <a href={royaltyReportJobDownloadUrl(job.id)} aria-label={`Descargar reporte ${job.id}`}><Download size={16} /></a>}
+                {job.status === "completed" && job.output_format !== "google_sheet" && <ReportDownloadLinks job={job} />}
                 {job.status === "completed" && job.output_format === "google_sheet" && job.result_url && <a href={job.result_url} target="_blank" rel="noreferrer" aria-label={`Abrir reporte ${job.id}`}><ExternalLink size={16} /></a>}
               </div>
             ))}

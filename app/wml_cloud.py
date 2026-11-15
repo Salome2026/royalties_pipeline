@@ -73,13 +73,11 @@ def input_manifest(bucket, pointer: dict) -> dict:
         raise ValueError('La versión de transformación o la entrada WML cambió. Volvé a preparar los TXT.')
     return document
 
-def launch_processing(*,client_factory,bucket_name: str,actor: str) -> dict:
-    from google.auth import default
-    from google.auth.transport.requests import AuthorizedSession
+def launch_processing(*,client_factory,bucket_name: str,actor: str,dispatch=None,input_pointer=None) -> dict:
     project=os.environ.get('VPO_WML_JOB_PROJECT') or os.environ.get('VPO_REPORT_JOB_PROJECT','')
     location=os.environ.get('VPO_WML_JOB_LOCATION') or os.environ.get('VPO_REPORT_JOB_LOCATION','')
     job=os.environ.get('VPO_WML_JOB_NAME','').strip()
-    if not project or not location or not job:raise RuntimeError('El Cloud Run Job de WML no está configurado.')
+    if dispatch is None and (not project or not location or not job):raise RuntimeError('El Cloud Run Job de WML no está configurado.')
     state=settings()
     if not state['installed']:raise RuntimeError('Primero instalá la migración WML en Cloud SQL.')
     if state['config'].get('processing_status') in {'queued','running'}:
@@ -89,8 +87,10 @@ def launch_processing(*,client_factory,bucket_name: str,actor: str) -> dict:
             merge_config({'processing_status':'failed','processing_error':'La ejecución anterior superó el tiempo máximo.'},actor=actor)
     bucket=client_factory().bucket(bucket_name)
     local=Path(__file__).resolve().parents[1]/'input_raw/wml'
-    pointer=stage_inputs(local,client_factory=client_factory,bucket_name=bucket_name) if local.exists() else json.loads(
-        bucket.blob(f'{INPUT_PREFIX}/latest.json').download_as_text())
+    pointer=input_pointer
+    if pointer is None:
+        pointer=stage_inputs(local,client_factory=client_factory,bucket_name=bucket_name) if local.exists() else json.loads(
+            bucket.blob(f'{INPUT_PREFIX}/latest.json').download_as_text())
     document=input_manifest(bucket,pointer)
     release_id='wml-'+document['fingerprint'][:24]
     if state['config'].get('published_release_id')==release_id:
@@ -99,19 +99,25 @@ def launch_processing(*,client_factory,bucket_name: str,actor: str) -> dict:
     merge_config({'processing_status':'queued','run_token':token,'processing_started_at':datetime.now(timezone.utc).isoformat(),
         'processing_error':None,'pending_release_id':release_id,'input_manifest':pointer},actor=actor,claim=token)
     try:
-        credentials,_=default(scopes=['https://www.googleapis.com/auth/cloud-platform'])
-        response=AuthorizedSession(credentials).post(
-            f'https://run.googleapis.com/v2/projects/{project}/locations/{location}/jobs/{job}:run',
-            json={'overrides':{'containerOverrides':[{'env':[
-                {'name':'VPO_WML_RUN_TOKEN','value':token},{'name':'VPO_WML_BUCKET','value':bucket_name}]}]}},timeout=30)
-        response.raise_for_status()
-        operation=response.json().get('name')
+        if dispatch is None:
+            from google.auth import default
+            from google.auth.transport.requests import AuthorizedSession
+            credentials,_=default(scopes=['https://www.googleapis.com/auth/cloud-platform'])
+            response=AuthorizedSession(credentials).post(
+                f'https://run.googleapis.com/v2/projects/{project}/locations/{location}/jobs/{job}:run',
+                json={'overrides':{'containerOverrides':[{'env':[
+                    {'name':'VPO_WML_RUN_TOKEN','value':token},{'name':'VPO_WML_BUCKET','value':bucket_name}]}]}},timeout=30)
+            response.raise_for_status()
+            operation=response.json().get('name')
+        else:
+            operation=dispatch(token)
         if not operation:raise RuntimeError('Cloud Run no devolvió una ejecución WML.')
         merge_config({'processing_operation':operation},actor=actor,run_token=token)
         return {'reused':False,'release_id':release_id,'operation':operation,'data_rebuilt':True}
     except Exception:
         # A timeout after dispatch is ambiguous; retain the token so a started Job can finish.
         confirmed_rejection=bool('response' in locals() and response.status_code>=400)
-        merge_config({'processing_status':'failed' if confirmed_rejection else 'queued',
-            'processing_error':'Cloud Run rechazó el inicio.' if confirmed_rejection else 'No se pudo confirmar el inicio. La ejecución conservará su identificador hasta resolver el estado.'},actor=actor,run_token=token)
+        if dispatch is None:
+            merge_config({'processing_status':'failed' if confirmed_rejection else 'queued',
+                'processing_error':'Cloud Run rechazó el inicio.' if confirmed_rejection else 'No se pudo confirmar el inicio. La ejecución conservará su identificador hasta resolver el estado.'},actor=actor,run_token=token)
         raise

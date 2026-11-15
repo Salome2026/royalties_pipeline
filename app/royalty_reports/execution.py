@@ -4,6 +4,7 @@ import logging
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 
 from app.report_jobs import (
     claim_report_job,
@@ -16,6 +17,13 @@ from app.royalty_reports.engine import ReportEngine, ReportRuntime
 
 
 REPORT_HEARTBEAT_INTERVAL_SECONDS = 60.0
+
+
+@dataclass(frozen=True)
+class CloudReportAttempt:
+    execution: str
+    index: int
+    max_retries: int
 
 
 @contextmanager
@@ -42,8 +50,8 @@ def report_job_heartbeat(job_id: int, interval_seconds: float | None = None) -> 
             logging.warning("El heartbeat del reporte %s no se detuvo a tiempo", job_id)
 
 
-def execute_report_job(job_id: int, runtime: ReportRuntime) -> dict | None:
-    job = claim_report_job(job_id)
+def execute_report_job(job_id: int, runtime: ReportRuntime, *, cloud_attempt: CloudReportAttempt | None = None) -> dict | None:
+    job = claim_report_job(job_id, execution_name=cloud_attempt.execution, task_attempt=cloud_attempt.index) if cloud_attempt else claim_report_job(job_id)
     if job is None:
         return get_report_job(job_id)
     try:
@@ -59,5 +67,7 @@ def execute_report_job(job_id: int, runtime: ReportRuntime) -> dict | None:
             result_sha256=result.result_sha256,
         )
     except Exception as exc:
+        if cloud_attempt and cloud_attempt.index < cloud_attempt.max_retries:
+            raise
         fail_report_job(job_id, str(exc))
     return get_report_job(job_id)

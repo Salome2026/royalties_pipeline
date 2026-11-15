@@ -778,3 +778,6 @@
     width: min(320px, calc(100dvw - 72px));
   }
 }
+
+.detailNote { margin: 0; font-size: 0.85rem; }
+.downloadLinks { display: flex; flex-wrap: wrap; gap: 0.5rem; }

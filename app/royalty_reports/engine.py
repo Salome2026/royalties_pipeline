@@ -34,6 +34,7 @@ class ReportRuntime:
     create_google_sheet: GoogleSheetBuilder
     upload_artifact: ArtifactUploader
     report_stage: StageReporter
+    build_pinned: Callable[[ReportRequest, dict], ReportBuildResult] | None = None
 
 
 class ReportEngine:
@@ -44,6 +45,10 @@ class ReportEngine:
         params = dict(job.get("params") or {})
         normalized_keywords = self.runtime.normalize_keywords(params.get("keywords") or [])
         request = ReportRequest.from_job(job, keywords=normalized_keywords)
+        if (job.get("input_manifest") or {}).get("report_publication"):
+            if self.runtime.build_pinned is None:
+                raise RuntimeError("Este trabajo requiere el lector de BigQuery de su publicación.")
+            return self.runtime.build_pinned(request, job)
         from app.royalty_reports.contract_filter import require_filter, use_filter
         contract_filter = None
         if request.distribution_contract_numbers:
