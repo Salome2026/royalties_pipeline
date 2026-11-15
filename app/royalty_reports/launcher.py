@@ -21,10 +21,10 @@ class CloudRunReportJobLauncher:
     session_factory: SessionFactory = AuthorizedSession
 
     @classmethod
-    def from_environment(cls) -> "CloudRunReportJobLauncher":
+    def from_environment(cls, *, job_name: str | None = None) -> "CloudRunReportJobLauncher":
         project = os.environ.get("VPO_REPORT_JOB_PROJECT", "").strip()
         location = os.environ.get("VPO_REPORT_JOB_LOCATION", "").strip()
-        job_name = os.environ.get("VPO_REPORT_JOB_NAME", "").strip()
+        job_name = job_name or os.environ.get("VPO_REPORT_JOB_NAME", "").strip()
         if not project or not location or not job_name:
             raise RuntimeError("El Cloud Run Job de reportes no esta configurado.")
         return cls(project=project, location=location, job_name=job_name)

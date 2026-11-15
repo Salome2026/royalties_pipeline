@@ -41,7 +41,7 @@ class FakeSession:
         return FakeResponse(self.payloads[url.rsplit("/", 1)[-1]])
 
 
-def reader_for(payloads):
+def reader_for(payloads, *, bigquery_job_name=""):
     session = FakeSession(payloads)
     reader = reconciliation.CloudRunReportExecutionReader(
         "project",
@@ -49,6 +49,7 @@ def reader_for(payloads):
         "vpo-royalty-report-job",
         credentials_provider=lambda **kwargs: (object(), None),
         session_factory=lambda credentials: session,
+        bigquery_job_name=bigquery_job_name,
     )
     return reader, session
 
@@ -80,6 +81,16 @@ def check_cloud_run_states() -> None:
     result = reader.inspect(OPERATION)
     assert result is not None and result.succeeded and result.completed_at == NOW
     assert len(session.calls) == 2
+
+    bigquery_job = "vpo-royalty-report-bigquery-job"
+    bigquery_execution = bigquery_job + "-abcd"
+    resource = f"projects/project/locations/us-central1/jobs/{bigquery_job}/executions/{bigquery_execution}"
+    reader, session = reader_for({
+        "1234-abcd": {"done": True, "response": {"name": resource}},
+        bigquery_execution: {"runningCount": 1},
+    }, bigquery_job_name=bigquery_job)
+    assert reader.inspect(OPERATION) is None
+    assert session.calls[-1] == f"https://run.googleapis.com/v2/{resource}"
 
     reader, _ = reader_for({EXECUTION: {"runningCount": 1}})
     assert reader.inspect(EXECUTION) is None

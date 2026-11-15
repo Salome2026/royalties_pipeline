@@ -31,6 +31,7 @@ class CloudRunReportExecutionReader:
     job_name: str
     credentials_provider: Callable = google.auth.default
     session_factory: Callable = AuthorizedSession
+    bigquery_job_name: str = ""
 
     @classmethod
     def from_environment(cls) -> CloudRunReportExecutionReader:
@@ -39,7 +40,7 @@ class CloudRunReportExecutionReader:
         job_name = os.environ.get("VPO_REPORT_JOB_NAME", "").strip()
         if not project or not location or not job_name:
             raise RuntimeError("El Cloud Run Job de reportes no esta configurado.")
-        return cls(project, location, job_name)
+        return cls(project, location, job_name, bigquery_job_name=os.getenv("VPO_REPORT_BIGQUERY_JOB_NAME", "").strip())
 
     def inspect(self, execution_name: str) -> ExecutionOutcome | None:
         credentials, _ = self.credentials_provider(
@@ -58,18 +59,17 @@ class CloudRunReportExecutionReader:
                 return ExecutionOutcome(False, None, str(error.get("message") or ""))
             execution_name = str((operation.get("response") or {}).get("name") or "")
 
-        execution_prefix = (
-            f"projects/{self.project}/locations/{self.location}/jobs/"
-            f"{self.job_name}/executions/"
-        )
-        if execution_name.startswith(execution_prefix):
-            short_name = execution_name[len(execution_prefix):]
+        for job_name in dict.fromkeys((self.job_name, self.bigquery_job_name)):
+            if not job_name:
+                continue
+            prefix = f"projects/{self.project}/locations/{self.location}/jobs/{job_name}/executions/"
+            short_name = execution_name.removeprefix(prefix)
+            if re.fullmatch(re.escape(job_name) + r"-[a-z0-9]+", short_name):
+                break
         else:
-            short_name = execution_name
-        if not re.fullmatch(re.escape(self.job_name) + r"-[a-z0-9]+", short_name):
             raise ValueError("Nombre de ejecucion de reporte invalido.")
 
-        execution = self._get(session, execution_prefix + short_name)
+        execution = self._get(session, prefix + short_name)
         completed_at = _parse_time(execution.get("completionTime"))
         if completed_at is None:
             return None

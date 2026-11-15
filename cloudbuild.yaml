@@ -88,6 +88,20 @@ steps:
       - --region=${_REGION}
       - --quiet
 
+  - id: Deploy BigQuery report Job
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - jobs
+      - update
+      - ${_REPORT_BIGQUERY_JOB}
+      - --image=${_IMAGE_REPOSITORY}/vpo-corp-platform:${COMMIT_SHA}
+      - --cpu=8
+      - --memory=32Gi
+      - --region=${_REGION}
+      - --quiet
+
   - id: Deploy API
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     entrypoint: gcloud
@@ -100,7 +114,7 @@ steps:
       - --image=${_IMAGE_REPOSITORY}/vpo-corp-platform:${COMMIT_SHA}
       - --labels=managed-by=cloud-build,commit-sha=${COMMIT_SHA}
       - --set-cloudsql-instances=${_CLOUDSQL_CONNECTION_NAME}
-      - --update-env-vars=VPO_CLOUDSQL_CONNECTION_NAME=${_CLOUDSQL_CONNECTION_NAME},VPO_POSTGRES_APPLICATION_NAME=vpo-corp-api,VPO_POSTGRES_POOL_MIN_SIZE=1,VPO_POSTGRES_POOL_MAX_SIZE=4,VPO_POSTGRES_POOL_TIMEOUT_SECONDS=10,VPO_POSTGRES_POOL_MAX_WAITING=16,VPO_POSTGRES_POOL_MAX_LIFETIME_SECONDS=1800,VPO_POSTGRES_POOL_MAX_IDLE_SECONDS=300,VPO_ROYALTIES_DASHBOARD_BACKEND=bigquery,VPO_ROYALTIES_DASHBOARD_BIGQUERY_FALLBACK=1,VPO_BIGQUERY_PROJECT=vpo-corp-royalties,VPO_BIGQUERY_DATASET=royalties_analytics,VPO_BIGQUERY_LOCATION=US,VPO_BIGQUERY_MAX_BYTES_BILLED=5000000000,VPO_CATALOG_REFRESH_JOB=vpo-catalog-refresh,VPO_CATALOG_EVENT_AUDIENCE=https://vpo-corp-api-259971998447.us-central1.run.app/catalog/refresh-event,VPO_CATALOG_EVENT_SERVICE_ACCOUNT=vpo-marts-publisher@vpo-corp-royalties.iam.gserviceaccount.com,VPO_REPORT_PUBLICATION_PROFILE=live,VPO_REPORT_PUBLICATION_BUCKET=${_REPORT_PUBLICATION_BUCKET},VPO_REPORT_PUBLICATION_DATASET=${_REPORT_PUBLICATION_DATASET},VPO_REPORT_PUBLICATION_NAMESPACE=royalty_reports
+      - --update-env-vars=VPO_CLOUDSQL_CONNECTION_NAME=${_CLOUDSQL_CONNECTION_NAME},VPO_POSTGRES_APPLICATION_NAME=vpo-corp-api,VPO_POSTGRES_POOL_MIN_SIZE=1,VPO_POSTGRES_POOL_MAX_SIZE=4,VPO_POSTGRES_POOL_TIMEOUT_SECONDS=10,VPO_POSTGRES_POOL_MAX_WAITING=16,VPO_POSTGRES_POOL_MAX_LIFETIME_SECONDS=1800,VPO_POSTGRES_POOL_MAX_IDLE_SECONDS=300,VPO_ROYALTIES_DASHBOARD_BACKEND=bigquery,VPO_ROYALTIES_DASHBOARD_BIGQUERY_FALLBACK=1,VPO_BIGQUERY_PROJECT=vpo-corp-royalties,VPO_BIGQUERY_DATASET=royalties_analytics,VPO_BIGQUERY_LOCATION=US,VPO_BIGQUERY_MAX_BYTES_BILLED=5000000000,VPO_CATALOG_REFRESH_JOB=vpo-catalog-refresh,VPO_CATALOG_EVENT_AUDIENCE=https://vpo-corp-api-259971998447.us-central1.run.app/catalog/refresh-event,VPO_CATALOG_EVENT_SERVICE_ACCOUNT=vpo-marts-publisher@vpo-corp-royalties.iam.gserviceaccount.com,VPO_REPORT_PUBLICATION_PROFILE=live,VPO_REPORT_PUBLICATION_BUCKET=${_REPORT_PUBLICATION_BUCKET},VPO_REPORT_PUBLICATION_DATASET=${_REPORT_PUBLICATION_DATASET},VPO_REPORT_PUBLICATION_NAMESPACE=royalty_reports,VPO_REPORT_BIGQUERY_JOB_NAME=${_REPORT_BIGQUERY_JOB}
       - --update-secrets=SPOTIFY_CLIENT_ID=spotify-client-id:latest,SPOTIFY_CLIENT_SECRET=spotify-client-secret:latest,YOUTUBE_API_KEY=youtube-api-key:latest
       - --max=2
       - --region=${_REGION}
@@ -127,6 +141,7 @@ steps:
         EXPECTED_IMAGE="${_IMAGE_REPOSITORY}/vpo-corp-platform:${COMMIT_SHA}"
         API_IMAGE="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --format='value(spec.template.spec.containers[0].image)')"
         JOB_IMAGE="$(gcloud run jobs describe "${_REPORT_JOB}" --region="${_REGION}" --format='value(spec.template.spec.template.spec.containers[0].image)')"
+        BIGQUERY_JOB_IMAGE="$(gcloud run jobs describe "${_REPORT_BIGQUERY_JOB}" --region="${_REGION}" --format='value(spec.template.spec.template.spec.containers[0].image)')"
         WML_IMAGE="$(gcloud run jobs describe "${_WML_INGEST_JOB}" --region="${_REGION}" --format='value(spec.template.spec.template.spec.containers[0].image)')"
         LATEST_REVISION="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --format='value(status.latestReadyRevisionName)')"
         SERVING_REVISION="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --flatten='status.traffic[]' --format='value(status.traffic.revisionName,status.traffic.percent)' | awk '$$2 == 100 { print $$1 }')"
@@ -138,6 +153,7 @@ steps:
         test "$${CATALOG_IMAGE}" = "$${EXPECTED_IMAGE}"
         test "$${API_IMAGE}" = "$${EXPECTED_IMAGE}"
         test "$${JOB_IMAGE}" = "$${EXPECTED_IMAGE}"
+        test "$${BIGQUERY_JOB_IMAGE}" = "$${EXPECTED_IMAGE}"
         test "$${WML_IMAGE}" = "$${EXPECTED_IMAGE}"
         test "$${SERVING_REVISION}" = "$${LATEST_REVISION}"
         test "$${SERVING_COMMIT}" = "${COMMIT_SHA}"
@@ -162,6 +178,7 @@ substitutions:
   _IMAGE_REPOSITORY: us-central1-docker.pkg.dev/vpo-corp-royalties/cloud-run-source-deploy/royalties_pipeline
   _REGION: us-central1
   _REPORT_JOB: vpo-royalty-report-job
+  _REPORT_BIGQUERY_JOB: vpo-royalty-report-bigquery-job
   _REPORT_PUBLICATION_BUCKET: vpo-corp-royalties-report-publications
   _REPORT_PUBLICATION_DATASET: royalty_report_publications
   _WML_INGEST_JOB: vpo-wml-91230-ingest

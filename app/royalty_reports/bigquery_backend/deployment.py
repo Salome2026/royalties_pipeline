@@ -80,7 +80,9 @@ def api_backend():
     published = publications()
     return BigQueryReportBackend(
         published, shared_state=published.state, watch_inbox=False,
-        dispatch_job=CloudRunReportJobLauncher.from_environment().run,
+        dispatch_job=CloudRunReportJobLauncher.from_environment(
+            job_name=os.getenv("VPO_REPORT_BIGQUERY_JOB_NAME", "").strip(),
+        ).run,
         reconcile_job=reconcile_report_job_if_stale, live_contracts=True,
     )
 
