@@ -128,9 +128,9 @@ steps:
         API_IMAGE="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --format='value(spec.template.spec.containers[0].image)')"
         JOB_IMAGE="$(gcloud run jobs describe "${_REPORT_JOB}" --region="${_REGION}" --format='value(spec.template.spec.template.spec.containers[0].image)')"
         WML_IMAGE="$(gcloud run jobs describe "${_WML_INGEST_JOB}" --region="${_REGION}" --format='value(spec.template.spec.template.spec.containers[0].image)')"
-        TRAFFIC="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --format='value(status.traffic[0].percent)')"
         LATEST_REVISION="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --format='value(status.latestReadyRevisionName)')"
-        SERVING_REVISION="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --format='value(status.traffic[0].revisionName)')"
+        SERVING_REVISION="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --flatten='status.traffic[]' --format='value(status.traffic.revisionName,status.traffic.percent)' | awk '$$2 == 100 { print $$1 }')"
+        test -n "$${SERVING_REVISION}"
         SERVING_COMMIT="$(gcloud run revisions describe "$${SERVING_REVISION}" --region="${_REGION}" --format='value(metadata.labels.commit-sha)')"
         SERVICE_URL="$(gcloud run services describe "${_API_SERVICE}" --region="${_REGION}" --format='value(status.url)')"
 
@@ -139,7 +139,6 @@ steps:
         test "$${API_IMAGE}" = "$${EXPECTED_IMAGE}"
         test "$${JOB_IMAGE}" = "$${EXPECTED_IMAGE}"
         test "$${WML_IMAGE}" = "$${EXPECTED_IMAGE}"
-        test "$${TRAFFIC}" = "100"
         test "$${SERVING_REVISION}" = "$${LATEST_REVISION}"
         test "$${SERVING_COMMIT}" = "${COMMIT_SHA}"
 
