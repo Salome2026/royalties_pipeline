@@ -145,6 +145,11 @@ class BigQueryReportBackend:
         pin, release, paths, policy = captured
         manifest = {"release_id": release["source_release_id"], "royalty_scope": release["scope"], "report_publication": pin}
         if self.live_contracts:
+            if release["scope"] == "wml":
+                from app.royalty_workspace_store import records
+
+                manifest["catalog_status_snapshot"] = [row["payload"] for row in records("catalog_status").values()]
+                return manifest
             from .contract_capture import capture_contracts
             with self.context(release, paths, manifest, policy):
                 return capture_contracts(manifest, params, release, paths)
@@ -208,7 +213,9 @@ class BigQueryReportBackend:
     def context(self, release, paths, manifest, policy):
         marts = self.marts(paths)
         scope = release["scope"]
-        status = pl.read_parquet(marts["catalog_status.parquet"]).to_dicts() if scope == "wml" else None
+        status = manifest.get("catalog_status_snapshot")
+        if scope == "wml" and status is None:
+            status = pl.read_parquet(marts["catalog_status.parquet"]).to_dicts()
         allocation = read_json(marts["product_income_allocations.json"])
         with use_scope(scope, marts=marts, release_id=release["source_release_id"], catalog_status=status), \
                 use_filter(manifest.get("distribution_contract_filter")), use_product_income(allocation), \

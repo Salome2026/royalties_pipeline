@@ -23,13 +23,17 @@ def configured() -> bool:
 
 
 def pilot_formats(config, username: str, scope: str) -> tuple[str, ...]:
-    if not isinstance(config, dict) or config.get("mode") != "pilot" or not username:
+    if not isinstance(config, dict) or not username:
         return ()
-    users, scopes, formats = (config.get(key) for key in ("users", "scopes", "formats"))
+    mode = config.get("mode")
+    if mode not in ("pilot", "enabled"):
+        return ()
+    users = config.get("users", [])
+    scopes, formats = (config.get(key) for key in ("scopes", "formats"))
     if not all(isinstance(items, list) and all(isinstance(item, str) for item in items)
                for items in (users, scopes, formats)):
         return ()
-    if username.casefold() not in {user.casefold() for user in users} or scope not in scopes:
+    if scope not in scopes or (mode == "pilot" and username.casefold() not in {user.casefold() for user in users}):
         return ()
     return tuple(output for output in ("excel", "executive_pdf", "google_sheet") if output in formats)
 
@@ -64,7 +68,7 @@ def available_formats(state: SharedReportState, username: str, scope: str) -> tu
         if formats and state.live:
             from .live_publication import matches_current_cut
 
-            if scope != "regular" or not matches_current_cut(state):
+            if not matches_current_cut(state, scope):
                 return ()
         return formats
     except (GoogleAPICallError, OperationalError, PublicationError, ValueError):

@@ -102,6 +102,16 @@ steps:
       - --region=${_REGION}
       - --quiet
 
+  - id: Deploy report publisher and video context Jobs
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -ceu
+      - |
+        for JOB in "${_REPORT_PUBLICATION_JOB}" "${_VIDEO_CONTEXT_JOB}"; do
+          gcloud run jobs update "$${JOB}" --image="${_IMAGE_REPOSITORY}/vpo-corp-platform:${COMMIT_SHA}" --region="${_REGION}" --quiet
+        done
+
   - id: Deploy API
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     entrypoint: gcloud
@@ -155,6 +165,9 @@ steps:
         test "$${JOB_IMAGE}" = "$${EXPECTED_IMAGE}"
         test "$${BIGQUERY_JOB_IMAGE}" = "$${EXPECTED_IMAGE}"
         test "$${WML_IMAGE}" = "$${EXPECTED_IMAGE}"
+        for JOB in "${_REPORT_PUBLICATION_JOB}" "${_VIDEO_CONTEXT_JOB}"; do
+          test "$(gcloud run jobs describe "$${JOB}" --region="${_REGION}" --format='value(spec.template.spec.template.spec.containers[0].image)')" = "$${EXPECTED_IMAGE}"
+        done
         test "$${SERVING_REVISION}" = "$${LATEST_REVISION}"
         test "$${SERVING_COMMIT}" = "${COMMIT_SHA}"
 
@@ -179,6 +192,8 @@ substitutions:
   _REGION: us-central1
   _REPORT_JOB: vpo-royalty-report-job
   _REPORT_BIGQUERY_JOB: vpo-royalty-report-bigquery-job
+  _REPORT_PUBLICATION_JOB: vpo-royalty-report-publication
+  _VIDEO_CONTEXT_JOB: vpo-video-context-refresh
   _REPORT_PUBLICATION_BUCKET: vpo-corp-royalties-report-publications
   _REPORT_PUBLICATION_DATASET: royalty_report_publications
   _WML_INGEST_JOB: vpo-wml-91230-ingest

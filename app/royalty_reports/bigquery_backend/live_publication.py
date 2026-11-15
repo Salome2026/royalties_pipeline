@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -16,10 +17,12 @@ from google.cloud import bigquery, storage
 import requests
 
 from app.operational_db import operational_connect
+from app.royalty_scope import RELEASE, WML_DATASET, WML_FILES, WML_OPTIONAL_FILES, wml_policy, wml_release_prefix
+from app.royalty_workspace_store import settings as wml_settings
 from scripts.lib.distributor_policy_store import read_distributor_policy_document
 from scripts.lib.mart_release import validate_release_manifest
-from .publication import LIVE_BUCKET, LIVE_DATASET, LIVE_NAMESPACE, PROJECT, PublicationError, digest, write_json
-from .publication_input import CONTEXT, MARTS, prepare_regular
+from .publication import LIVE_BUCKET, LIVE_DATASET, LIVE_NAMESPACE, PROJECT, PublicationError, digest, file_sha, write_json
+from .publication_input import CONTEXT, MARTS, load_component, prepare_regular, reconcile_input
 from .shared_state import SharedReportPublications, SharedReportState
 
 
@@ -27,6 +30,7 @@ SOURCE_BUCKET = "vpo-corp-royalties-marts"
 SOURCE_PREFIX = "marts"
 MUTABLE_INPUTS = ("catalog_status.parquet", "catalog_release_metadata.parquet")
 REQUIRED_INPUTS = (*MARTS.values(), "catalog_master.parquet", "product_income_allocations.json", "native_identity_proofs.json")
+WML_COMPONENTS = {kind: MARTS[kind] for kind in ("raw", "song")}
 
 
 @contextmanager
@@ -74,11 +78,26 @@ def publication_id(sources):
     return f"regular_live_{digest(sources)[:32]}"
 
 
-def matches_current_cut(state):
-    active = state.read("active/regular.json")
+def wml_source_manifest(bucket, release_id):
+    if bucket.name != SOURCE_BUCKET:
+        raise PublicationError("El origen de la publicación WML es inválido.")
+    return bucket.get_blob(f"{wml_release_prefix(release_id)}/release_manifest.json")
+
+
+def wml_publication_id(release_id, manifest_generation):
+    return f"wml_live_{digest({'release_id': release_id, 'generation': int(manifest_generation)})[:32]}"
+
+
+def matches_current_cut(state, scope="regular"):
+    active = state.read(f"active/{scope}.json")
     if active is None:
         return False
-    sources, _ = capture_source(state.bucket.client.bucket(SOURCE_BUCKET))
+    bucket = state.bucket.client.bucket(SOURCE_BUCKET)
+    if scope == "wml":
+        release_id = RELEASE.get()
+        manifest = wml_source_manifest(bucket, release_id) if release_id else None
+        return manifest is not None and active["id"] == wml_publication_id(release_id, manifest.generation)
+    sources, _ = capture_source(bucket)
     return active["id"] == publication_id(sources)
 
 
@@ -128,6 +147,83 @@ def prepare_current(pub, source_bucket, *, connection=policy_connection, cache=N
     return pinned
 
 
+def prepare_current_wml(pub, source_bucket):
+    """Publish the WML version already reconciled and accepted by the ingestion job."""
+    if not pub.live:
+        raise PublicationError("La publicación WML requiere su destino operativo.")
+    pub.check_dataset(pub.client.get_dataset(pub.dataset))
+    release_id = wml_settings()["config"].get("published_release_id")
+    if not release_id:
+        return None
+    manifest = wml_source_manifest(source_bucket, release_id)
+    if manifest is None:
+        raise PublicationError("Falta el cierre publicado de WML.")
+    generation = int(manifest.generation)
+    identity = wml_publication_id(release_id, generation)
+    current = pub.read_active("wml")
+    if current and current["id"] == identity:
+        return pub.checked(pub.pin("wml"))
+
+    expected_files = (*WML_FILES, *WML_OPTIONAL_FILES, "wml_manifest.json")
+    package = validate_release_manifest(
+        json.loads(manifest.download_as_bytes(if_generation_match=generation)), expected_files,
+    )
+    prefix = wml_release_prefix(release_id) + "/files/"
+    files = {name: package["files"][name] for name in expected_files}
+    if (package["release_id"] != release_id or package["royalty_scope"] != "wml"
+            or any(not re.fullmatch(re.escape(prefix) + r"[a-f0-9]{64}/" + re.escape(name), entry["object_name"])
+                   for name, entry in files.items())):
+        raise PublicationError("Los archivos publicados no corresponden a la versión de WML.")
+    check = pub.client.query(
+        f"SELECT status, manifest_generation FROM `{PROJECT}.{WML_DATASET}.analytics_releases` WHERE release_id=@release",
+        job_config=bigquery.QueryJobConfig(labels=pub.labels, query_parameters=[
+            bigquery.ScalarQueryParameter("release", "STRING", release_id),
+        ]),
+    ).result(timeout=60)
+    if [(row.status, int(row.manifest_generation)) for row in check] != [("ready", generation)]:
+        raise PublicationError("El cierre analítico de WML no concilia con el manifiesto vigente.")
+
+    folder = pub.root / "contexts" / identity
+    policy = wml_policy()
+    download_inputs(source_bucket, {**package, "files": files}, policy, folder)
+    ready = pub.read_ready(identity)
+    if ready is None:
+        from app.wml_job import immutable_upload
+
+        def upload(path):
+            target = f"{pub.state.namespace}/prepared/{identity}/{path.name}"
+            return f"gs://{pub.state.bucket.name}/{immutable_upload(pub.state.bucket, target, path).name}"
+
+        components = {kind: load_component(pub, source_bucket, package, folder, kind, name, upload=upload)[0]
+                      for kind, name in WML_COMPONENTS.items()}
+        roles = {f"marts/{name}": name for name in (*WML_OPTIONAL_FILES, "catalog_master.parquet",
+                                                     "catalog_status.parquet", "wml_isrc_references.parquet")}
+        roles.update({"publication/source_manifest.json": "release_manifest.json",
+                      "policy/policy_snapshot.json": CONTEXT["policy/policy_snapshot.json"]})
+        context = {"scope": "wml", "policy_version": policy["policy_version"], "artifacts": [
+            {"role": role, "path": (folder / name).relative_to(pub.root).as_posix(),
+             "sha256": file_sha(folder / name)}
+            for role, name in sorted(roles.items())
+        ]}
+        release = {"scope": "wml", "source_release_id": release_id, "publication_id": identity,
+                   "manifest_generation": generation, "sequence": current["sequence"] + 1 if current else 1,
+                   "context": context, "context_id": digest(context), "components": components}
+        ready = pub.prepare(release)
+    else:
+        release = ready["release"]
+
+    reconciliation = {kind: reconcile_input(pub, release["components"][kind], folder / name,
+                                           table=pub.component_table(release, kind))
+                      for kind, name in WML_COMPONENTS.items()}
+    latest = wml_source_manifest(source_bucket, release_id)
+    if (wml_settings()["config"].get("published_release_id") != release_id
+            or latest is None or int(latest.generation) != generation):
+        raise PublicationError("El cierre de WML cambió durante la publicación.")
+    pub.activate(release)
+    print(json.dumps({"wml_reconciliation": reconciliation}), flush=True)
+    return pub.checked(pub.pin("wml"))
+
+
 def main():
     client = storage.Client(project=PROJECT)
     state = SharedReportState(client, LIVE_BUCKET, LIVE_NAMESPACE, live=True)
@@ -148,18 +244,30 @@ def main():
         return
     published = SharedReportPublications(bigquery.Client(project=PROJECT, location="US"),
                                         Path("/tmp/vpo-report/publisher"), LIVE_DATASET, state)
+    source_bucket = client.bucket(SOURCE_BUCKET)
+    failed = []
     with policy_connection() as lock:
         if not lock.execute("SELECT pg_try_advisory_lock(20261114, 2) AS acquired").fetchone()["acquired"]:
             print("Ya hay una publicación de reportes en preparación.", flush=True)
             return
         lock.commit()
         try:
-            release = prepare_current(published, client.bucket(SOURCE_BUCKET))
+            for scope, prepare in (("regular", prepare_current), ("wml", prepare_current_wml)):
+                try:
+                    release = prepare(published, source_bucket)
+                except Exception:
+                    failed.append(scope)
+                    logging.exception("Falló la publicación de reportes del ámbito %s", scope)
+                    continue
+                if release is not None:
+                    print(json.dumps({"scope": scope, "publication_id": release["publication_id"],
+                                      "source_release_id": release["source_release_id"],
+                                      "rows": {kind: item["source_binding"]["rows"]
+                                               for kind, item in release["components"].items()}}), flush=True)
         finally:
             lock.execute("SELECT pg_advisory_unlock(20261114, 2)")
-    print(json.dumps({"publication_id": release["publication_id"], "source_release_id": release["source_release_id"],
-                      "rows": {kind: entry["source_binding"]["rows"] for kind, entry in release["components"].items()}}),
-          flush=True)
+    if failed:
+        raise PublicationError(f"Falló la publicación de {', '.join(failed)}.")
 
 
 if __name__ == "__main__":
