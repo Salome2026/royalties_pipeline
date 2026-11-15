@@ -1624,10 +1624,9 @@ def build_report_tables(
 
     standardized_cols = existing_columns(standardized_path)
 
-    # Both calendars summarize the same complete original-movement selection.
-    # A pre-aggregated song table cannot preserve every native keyword, transfer
-    # or confirmed reference used by the detail.
-    if period_column in {"statement_period", "transaction_month"}:
+    # Statement summaries follow individual movements. Consumption uses the
+    # published song-level rows for its overall, monthly, and track summaries.
+    if period_column == "statement_period":
         if spooled_selection is None:
             statement_base_lf = build_summary_selection(
                 scan_income(standardized_path), standardized_cols, keywords=keywords, mode=mode,
@@ -1892,7 +1891,7 @@ def build_report_tables(
             .collect()
         )
 
-        raw_sample = build_report_detail(
+        raw_sample = spooled_selection.detail if spooled_selection is not None else build_report_detail(
             raw_matches_lf,
             raw_cols,
             keywords=keywords,

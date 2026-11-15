@@ -283,9 +283,15 @@ class BigQueryReportBackend:
         params["keywords"] = list(params["keywords"])
         country_detail = request.output_format == "excel" and request.detail_mode == "top_countries"
         complete = request.output_format in {"excel", "google_sheet"} and not country_detail
+        summary_inputs = {}
         if request.executive_mode == "income":
             prepared, groups, spool = self.selection(release, params, complete=complete,
                 manifest=manifest, paths=paths, policy=policy)
+            if request.period_basis == "transaction_month":
+                summary_inputs["song_path"] = read_source(
+                    self.publications, release, "song", params, report, prepared.parent,
+                    export_bucket=self.export_bucket,
+                )
         set_report_job_stage(request.job_id, "building")
         with TemporaryDirectory(dir=output_root) as temp_name:
             output = Path(temp_name)
@@ -297,7 +303,8 @@ class BigQueryReportBackend:
                     detail_mode = "top_countries" if country_detail else "full" if complete else "limited"
                     tables = report.build_report_tables(**params, raw_limit=0, detail_mode=detail_mode,
                         standardized_path=prepared, _dashgo_video_groups=groups, spooled_selection=spool,
-                        contract_snapshot=manifest.get("excel_contract_snapshot"), contract_columns=request.contract_columns)
+                        contract_snapshot=manifest.get("excel_contract_snapshot"), contract_columns=request.contract_columns,
+                        **summary_inputs)
                     if request.output_format == "google_sheet":
                         self.publications.checked(pin)
                         set_report_job_stage(request.job_id, "uploading")

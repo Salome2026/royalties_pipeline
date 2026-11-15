@@ -18,7 +18,7 @@ def source_query(table, kind, manifest, params, report):
                  bigquery.ScalarQueryParameter("source_object", "STRING", manifest["source_id"])]
     searches = []
     keyword_predicates = []
-    if kind == "raw":
+    if kind in {"raw", "song"}:
         period = aliases[params["period_basis"]]
         for bound, operator in [("start_month", ">="), ("end_month", "<=")]:
             if params.get(bound):
@@ -28,7 +28,7 @@ def source_query(table, kind, manifest, params, report):
             if params.get(name):
                 filters.append(f"LOWER(TRIM(CAST(`{aliases[name]}` AS STRING)))=@{name}")
                 arguments.append(bigquery.ScalarQueryParameter(name, "STRING", params[name].strip().lower()))
-        if params["keywords"]:
+        if kind == "raw" and params["keywords"]:
             ordinary = [name for name in report.SEARCH_COLUMNS_STANDARDIZED if name in aliases]
             scoped = [name for name in ["catalog_number", "gpid", "Catalog Number", "Catalogue Number", "GPID"]
                       if name in aliases and name not in ordinary and hasattr(report, "ada_source_expr")]
