@@ -7519,14 +7519,14 @@ def canonical_royalty_report_params(
                 raise HTTPException(status_code=400, detail="El período debe contener meses válidos.")
 
     if request.include_contracts:
-        if request.output != "excel" or request.executive_mode != "income" or is_wml():
-            raise HTTPException(status_code=400, detail="Las columnas contractuales solo estan disponibles en el Excel de regalias.")
+        if request.output not in {"excel", "google_sheet"} or request.executive_mode != "income" or is_wml():
+            raise HTTPException(400, "Las columnas contractuales están disponibles en Excel y Google Sheets de regalías habituales.")
         params.update(include_contracts=True, contract_columns=request.contract_columns)
     if request.include_associated:
         from app.royalty_reports.keyword_associations import exact_isrc
 
         if not request.include_contracts:
-            raise HTTPException(400, "Incluir asociados requiere el Excel con contratos.")
+            raise HTTPException(400, "Incluir asociados requiere Incluir contratos.")
         if not any(exact_isrc(keyword) for keyword in params["keywords"]):
             raise HTTPException(400, "Ingresá un ISRC completo en Palabras clave para incluir sus asociados.")
         params["include_associated"] = True
@@ -7598,7 +7598,7 @@ def royalty_report_detail_count(
         raise HTTPException(status_code=401, detail="Usuario requerido.")
     with operational_connect() as conn:
         require_module_permission(conn, username, "royalty_reports", "create")
-        if request.distribution_contract_numbers or request.include_associated:
+        if request.distribution_contract_numbers or request.include_contracts or request.include_associated:
             require_contract_report_permission(conn, username)
 
     backend = royalty_report_intake_backend(username, request.output)
@@ -7817,7 +7817,7 @@ def create_royalty_report_job(
         try:
             input_manifest["excel_contract_snapshot"] = capture_excel_contract_snapshot(input_manifest)
         except Exception as exc:
-            raise HTTPException(status_code=503, detail="No se pudieron validar los contratos del Excel. Volve a intentar.") from exc
+            raise HTTPException(status_code=503, detail="No se pudieron validar los contratos del reporte. Volvé a intentar.") from exc
 
     if request.distribution_contract_numbers:
         try:
@@ -8019,7 +8019,7 @@ def royalty_report_options(
     if backend is not None and formats:
         try:
             options = backend.source_options(scope)
-            return {**options, "bigquery_outputs": formats}
+            return {**options, "bigquery_outputs": formats, "google_sheet_contracts_supported": scope == "regular"}
         except (ValueError, FileNotFoundError) as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
     marts = ensure_marts(refresh_cache=refresh_cache, filenames=[SONG_FILE])
@@ -8061,6 +8061,7 @@ def royalty_report_options(
         "sources": sorted({item["source"] for item in source_accounts}),
         "source_accounts": source_accounts,
         "excel_contracts_supported": not is_wml(),
+        "google_sheet_contracts_supported": not is_wml(),
         "excel_associated_search_supported": not is_wml(),
         "artist_settlement_supported": not is_wml(),
     }

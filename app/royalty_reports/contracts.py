@@ -72,11 +72,11 @@ class ReportRequest:
         include_associated = params.get("include_associated", False)
         contract_columns = params.get("contract_columns", "all")
         if not isinstance(include_contracts, bool) or contract_columns not in {"matching", "all"}:
-            raise ValueError("La seleccion de contratos del Excel no es valida.")
-        if include_contracts and (output_format != "excel" or royalty_scope != "regular" or executive_mode != "income"):
-            raise ValueError("Las columnas contractuales solo estan disponibles en el Excel de regalias.")
+            raise ValueError("La selección de contratos del reporte no es válida.")
+        if include_contracts and (output_format not in {"excel", "google_sheet"} or royalty_scope != "regular" or executive_mode != "income"):
+            raise ValueError("Las columnas contractuales están disponibles en Excel y Google Sheets de regalías habituales.")
         if not isinstance(include_associated, bool) or (include_associated and not include_contracts):
-            raise ValueError("Incluir asociados requiere el Excel con contratos.")
+            raise ValueError("Incluir asociados requiere Incluir contratos.")
         if include_associated:
             from app.royalty_reports.keyword_associations import exact_isrc
 

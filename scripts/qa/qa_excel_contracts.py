@@ -178,13 +178,15 @@ class ExcelContractTests(unittest.TestCase):
         self.assertNotIn("contract_artists", new)
         self.assertEqual(new["period_basis"], "transaction_month")
 
-    def test_non_excel_and_wml_cannot_enable_enrichment(self):
+    def test_pdf_and_wml_cannot_enable_enrichment(self):
         ns = canonical_functions()
         model, canonical = ns["RoyaltyReportJobRequest"], ns["canonical_royalty_report_params"]
-        for output in ("google_sheet", "executive_pdf"):
-            with self.assertRaises(HTTPException): canonical(model(output=output, keywords=["Artista"], include_contracts=True), {})
+        with self.assertRaises(HTTPException):
+            canonical(model(output="executive_pdf", keywords=["Artista"], include_contracts=True), {})
         ns["is_wml"] = lambda: True
-        with self.assertRaises(HTTPException): canonical(model(keywords=["Artista"], include_contracts=True), {})
+        for output in ("excel", "google_sheet"):
+            with self.assertRaises(HTTPException):
+                canonical(model(output=output, keywords=["Artista"], include_contracts=True), {})
 
     def test_request_defaults_preserve_ordinary_jobs(self):
         job = {"id": 1, "report_key": "royalty_keyword", "output_format": "excel", "params": {"keywords": ["art"]}}

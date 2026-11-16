@@ -14,6 +14,7 @@ export type RoyaltyReportSourceAccount = {
 export type RoyaltyReportOptions = {
   bigquery_outputs?: (RoyaltyReportOutput | "google_sheet")[];
   excel_contracts_supported?: boolean;
+  google_sheet_contracts_supported?: boolean;
   excel_associated_search_supported?: boolean;
   artist_settlement_supported?: boolean;
   sources: string[];
@@ -92,11 +93,11 @@ export async function requestDistributionReportContracts(): Promise<Distribution
 
 export async function createRoyaltyReportJob(payload: RoyaltyReportPayload, output: RoyaltyReportJobOutput) {
   const body = { ...payload, output };
-  if (output !== "excel") {
+  if (output === "executive_pdf") {
     delete body.include_contracts;
     delete body.contract_columns;
   }
-  if (output !== "excel" || !body.include_contracts) delete body.include_associated;
+  if (!body.include_contracts) delete body.include_associated;
   const response = await fetch("/api/report", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

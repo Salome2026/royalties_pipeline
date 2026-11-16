@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from fastapi import HTTPException
+import openpyxl
 import polars as pl
 
 from scripts.qa.qa_excel_contracts import ISRC, canonical_functions, report, row, snapshot
@@ -14,7 +15,9 @@ from app.contract_text_reference import reference_code
 from app.master_contract_associations import association_key
 from app.royalty_reports.bigquery_backend.archive_query import association_candidates
 from app.royalty_reports.bigquery_backend.selection import write_selection
-from app.royalty_reports.contracts import ReportRequest
+from app.royalty_reports.builders import build_registered_report
+from app.royalty_reports.contracts import ReportInputs, ReportRequest
+from app.royalty_reports.google_sheets import dataframe_values
 from app.royalty_reports.keyword_associations import candidate_keys, report_index, use_keyword_associations
 from lib.distributor_policy_store import use_distributor_policy_snapshot
 
@@ -29,12 +32,17 @@ class KeywordAssociationTests(unittest.TestCase):
         canonical = functions["canonical_royalty_report_params"]
         fields = {"keywords": [ISRC.lower(), "Palabra adicional"], "include_contracts": True}
         self.assertNotIn("include_associated", canonical(model(**fields), {}))
-        params = canonical(model(**fields, include_associated=True), {})
-        self.assertTrue(params["include_associated"])
-        job = {"id": 1, "report_key": "royalty_keyword", "output_format": "excel", "params": params}
-        self.assertTrue(ReportRequest.from_job(job, keywords=params["keywords"]).include_associated)
+        for output, report_key in (("excel", "royalty_keyword"), ("google_sheet", "royalty_google_sheet")):
+            with self.subTest(output=output):
+                params = canonical(model(**fields, output=output, include_associated=True), {})
+                self.assertTrue(params["include_contracts"])
+                self.assertTrue(params["include_associated"])
+                job = {"id": 1, "report_key": report_key, "output_format": output, "params": params}
+                request = ReportRequest.from_job(job, keywords=params["keywords"])
+                self.assertTrue(request.include_contracts)
+                self.assertTrue(request.include_associated)
         for invalid in ({**fields, "include_contracts": False}, {**fields, "keywords": [ISRC[:7]]},
-                        {**fields, "output": "executive_pdf"}, {**fields, "output": "google_sheet"}):
+                        {**fields, "output": "executive_pdf"}):
             with self.assertRaises(HTTPException):
                 canonical(model(**invalid, include_associated=True), {})
         functions["is_wml"] = lambda: True
@@ -112,6 +120,38 @@ class KeywordAssociationTests(unittest.TestCase):
                             self.assertAlmostEqual(summary["Importe Artista"].sum(), 8.04)
                             self.assertNotIn("Importe Artista - Tema video (Video Oficial)", summary.columns)
                             self.assertEqual(output["resumen general"].iloc[0]["Filas raw"], 5)
+
+                inputs = ReportInputs(raw, raw, root / "absent", root / "reports", state)
+                params = {"keywords": [ISRC], "period_basis": "statement_period", "detail_mode": "full",
+                          "include_contracts": True, "include_associated": True}
+                captured = {}
+
+                def capture_sheet(tables, *_args):
+                    captured.update(tables)
+                    return "https://sheets.example/report"
+
+                with use_keyword_associations(report_index(manifest, True, [ISRC])):
+                    for output, key in (("google_sheet", "royalty_google_sheet"), ("excel", "royalty_keyword")):
+                        request = ReportRequest.from_job({"id": 1, "report_key": key, "output_format": output,
+                                                          "params": params}, keywords=[ISRC])
+                        result = build_registered_report(request, inputs, create_google_sheet=capture_sheet)
+                summary = captured["resumen por tema"]
+                self.assertAlmostEqual(summary["Importe Artista"].sum(), 8.04)
+                self.assertEqual(len(captured["detalle"]), 5)
+                workbook = openpyxl.load_workbook(result.output_path, read_only=True, data_only=True)
+                try:
+                    def row_key(row):
+                        return tuple(format(value, ".12g") if isinstance(value, (int, float)) else value
+                                     for value in row)
+
+                    for name in ("resumen por tema", "detalle"):
+                        excel_rows = [["" if value is None else value for value in row]
+                                      for row in workbook[name].values]
+                        sheet_rows = dataframe_values(captured[name])
+                        self.assertEqual(excel_rows[0], sheet_rows[0])
+                        self.assertCountEqual(map(row_key, excel_rows[1:]), map(row_key, sheet_rows[1:]))
+                finally:
+                    workbook.close()
 
     def test_archive_uses_code_scope_and_preserves_extension_and_text_candidates(self):
         state = snapshot()

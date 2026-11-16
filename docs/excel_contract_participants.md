@@ -1,4 +1,4 @@
-# Participantes contractuales opcionales en Excel
+# Participantes contractuales opcionales en Excel y Google Sheets
 
 En Reporte de regalias, Incluir contratos comienza en No. Esa opcion conserva
 los parametros canonicos anteriores, el generador y los permisos existentes.
@@ -50,10 +50,11 @@ Los porcentajes reflejan el periodo completo; si hay cobertura parcial incluyen
 solo el ingreso efectivamente cubierto. Ante neto cero y reparto efectivo no
 representable como porcentaje, se conserva el importe y el porcentaje queda vacio.
 
-Crear, consultar o descargar un Excel con contratos requiere los mismos permisos
-de contratos que el PDF contractual. Los archivos antiguos no se reescriben.
-El selector se habilita solo cuando la API anuncia soporte; el frontend elimina
-estos parametros al generar PDF o Google Sheets. WML conserva su lectura al 100%.
+Crear o consultar un reporte con contratos en Excel o Google Sheets requiere los
+mismos permisos que el PDF contractual. La descarga del Excel aplica el mismo
+control. Ambos formatos respetan Incluir contratos, Mostrar reparto e Incluir
+asociados cuando la API anuncia soporte. La creación del PDF usa sus propios
+parámetros. Los archivos antiguos se conservan y WML mantiene su lectura al 100%.
 
 Pruebas: scripts/qa/qa_excel_contracts.py,
 scripts/qa/qa_report_keyword_associations.py y web/scripts/qa_excel_contracts.mjs.

@@ -59,14 +59,14 @@ def freeze_snapshot(frame: pl.DataFrame, contracts: list[dict], manifest: dict, 
 
 def require_snapshot(snapshot: dict | None) -> dict:
     if not snapshot or snapshot.get("schema_version") != 1 or snapshot.get("kind") != "excel_contract_columns":
-        raise ValueError("Falta la copia de contratos del pedido de Excel.")
+        raise ValueError("Falta la copia de contratos del reporte.")
     if not snapshot.get("release_id") or not snapshot.get("as_of"):
         raise ValueError("La copia de contratos no tiene version o fecha.")
     if not isinstance(snapshot.get("contracts"), list) or not isinstance(snapshot.get("catalog"), list):
-        raise ValueError("La copia de contratos del Excel esta incompleta.")
+        raise ValueError("La copia de contratos del reporte está incompleta.")
     index = snapshot.get("associations") or {}
     if any(not isinstance(index.get(name), dict) for name in ("included", "excluded")):
-        raise ValueError("Falta la validacion de asociados del Excel.")
+        raise ValueError("Falta la validación de asociados del reporte.")
     return snapshot
 
 

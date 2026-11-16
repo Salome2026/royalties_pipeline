@@ -49,12 +49,15 @@ def royalty_report_scope_label(source: str | None, account: str | None) -> str:
     return "Todas las distribuidoras"
 
 
+def contract_table_options(request: ReportRequest, inputs: ReportInputs) -> dict:
+    if not request.include_contracts:
+        return {}
+    from app.royalty_reports.excel_contracts import require_snapshot
+
+    return {"contract_snapshot": require_snapshot(inputs.contract_snapshot), "contract_columns": request.contract_columns}
+
+
 def build_keyword_excel(request: ReportRequest, inputs: ReportInputs) -> BuiltReport:
-    extra = {}
-    if request.include_contracts:
-        from app.royalty_reports.excel_contracts import require_snapshot
-        require_snapshot(inputs.contract_snapshot)
-        extra = {"contract_snapshot": inputs.contract_snapshot, "contract_columns": request.contract_columns}
     output_path = build_report(
         keywords=list(request.keywords),
         mode=request.mode,
@@ -68,7 +71,7 @@ def build_keyword_excel(request: ReportRequest, inputs: ReportInputs) -> BuiltRe
         output_dir=inputs.output_dir,
         source=request.source,
         account=request.account,
-        **extra,
+        **contract_table_options(request, inputs),
     )
     return BuiltReport(
         output_path=Path(output_path),
@@ -119,6 +122,7 @@ def build_google_sheet(
         standardized_path=inputs.standardized_path,
         source=request.source,
         account=request.account,
+        **contract_table_options(request, inputs),
     )
     result_url = create_google_sheet(
         tables,

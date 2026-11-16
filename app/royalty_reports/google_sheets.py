@@ -385,6 +385,7 @@ def create_google_sheet(
         sheet_id = sheet_id_by_title[sheet_name]
         column_count = max(1, len(dataframe.columns))
         row_count = max(1, len(dataframe.index) + 1)
+        contract_formats = dataframe.attrs.get("contract_formats", {})
         if sheet_name == "resumen por tema":
             video_links = video_code_link_request(dataframe, sheet_id)
             if video_links:
@@ -449,7 +450,10 @@ def create_google_sheet(
                     }
                 }
             )
-            if column_name in amount_headers:
+            contract_format = contract_formats.get(idx + 1)
+            if contract_format == "0.00%":
+                number_format = {"type": "PERCENT", "pattern": contract_format}
+            elif contract_format == "$#,##0.00" or column_name in amount_headers:
                 number_format = {"type": "CURRENCY", "pattern": "$#,##0.00"}
             elif column_name in integer_headers:
                 number_format = {"type": "NUMBER", "pattern": "#,##0"}

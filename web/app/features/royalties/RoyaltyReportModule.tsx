@@ -358,6 +358,10 @@ export function RoyaltyReportModule({ onMessage }: Props) {
     resetResults();
     const payload = buildPayload();
     if (!payload) return;
+    if (payload.include_contracts && !options?.google_sheet_contracts_supported) {
+      onMessage({ type: "error", text: "El reparto en Google Sheets aún no está disponible. Recargá la pantalla." });
+      return;
+    }
     await requestReport(payload, "google_sheet");
   }
 
