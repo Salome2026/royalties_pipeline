@@ -1,6 +1,7 @@
 """Conservative SQL preselection of the original report movements."""
 
 from google.cloud import bigquery
+from app.royalty_reports.keyword_associations import CODE_FIELDS
 from scripts.lib.text_search import search_regex_pattern
 from .projection import bigquery_schema
 
@@ -8,7 +9,34 @@ from .projection import bigquery_schema
 WHITESPACE = "[\\x09-\\x0D \\x{0085}\\x{00A0}\\x{1680}\\x{2000}-\\x{200A}\\x{2028}\\x{2029}\\x{202F}\\x{205F}\\x{3000}]"
 
 
-def source_query(table, kind, manifest, params, report):
+def association_candidates(manifest, aliases, keys):
+    """Pull native code candidates, then validate full reference context in the worker."""
+    names = {field["name"] for field in manifest["fields"]}
+
+    def text(name):
+        return f"TRIM(CAST(`{aliases[name]}` AS STRING))"
+
+    if not {"source", "account"}.issubset(aliases):
+        return "TRUE", []
+    options = ["k.kind = 'TEXT'"]
+    for kind, fields in CODE_FIELDS.items():
+        if any(field in names and field not in aliases for field in fields):
+            options.append(f"k.kind = '{kind}'")
+            continue
+        matches = [f"{text(field)} = k.code" for field in fields if field in aliases]
+        if matches:
+            options.append(f"(k.kind = '{kind}' AND (" + " OR ".join(matches) + "))")
+    fields = ("kind", "code", "source", "account")
+    values = [bigquery.StructQueryParameter(None, *[
+        bigquery.ScalarQueryParameter(field, "STRING", value) for field, value in zip(fields, key)
+    ]) for key in keys]
+    option = " OR ".join(options)
+    predicate = (f"EXISTS (SELECT 1 FROM UNNEST(@associated_keys) k WHERE "
+                 f"{text('source')} = k.source AND {text('account')} = k.account AND ({option}))")
+    return predicate, [bigquery.ArrayQueryParameter("associated_keys", "STRUCT", values)]
+
+
+def source_query(table, kind, manifest, params, report, *, associated_keys=()):
     fields = [field["name"] for field in bigquery_schema(manifest)]
     selected = ", ".join(f"`{name}`" for name in fields)
     aliases = {field["name"]: field["column"] for field in manifest["fields"] if field["column"]}
@@ -58,7 +86,12 @@ def source_query(table, kind, manifest, params, report):
     if searches:
         sql += " , searchable AS (SELECT *, " + ", ".join(searches) + " FROM base)\n"
         sql += f"SELECT {selected} FROM searchable WHERE "
-        sql += (" AND " if params["mode"] == "all" else " OR ").join(keyword_predicates)
+        predicate = (" AND " if params["mode"] == "all" else " OR ").join(keyword_predicates)
+        if kind == "raw" and associated_keys:
+            extra, extra_args = association_candidates(manifest, aliases, associated_keys)
+            predicate = f"({predicate}) OR ({extra})"
+            arguments.extend(extra_args)
+        sql += predicate
     else:
         sql += f"SELECT {selected} FROM base"
     sql += " ORDER BY _origin_position"

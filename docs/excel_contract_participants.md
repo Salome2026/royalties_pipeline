@@ -6,8 +6,23 @@ No hace consultas de contratos, no fija snapshots nuevos y no agrega columnas.
 
 Con Si, Mostrar reparto permite todos los involucrados o los nombres coincidentes
 con las palabras de busqueda. No requiere seleccionar un artista exacto. La
-busqueda original sigue seleccionando los ingresos; los contratos no filtran,
-agregan, fusionan ni eliminan resultados. El limite del detalle no limita el reparto.
+busqueda original sigue seleccionando los ingresos. El limite del detalle no
+limita el reparto.
+
+Con Incluir contratos activo, Incluir asociados permite ampliar la búsqueda de
+cada ISRC completo ingresado en Palabras clave. Empieza en No. Con Sí, se suman
+al alcance los movimientos con una asociación aceptada y un destino contractual
+único en la copia fijada al solicitar el reporte. Las otras palabras y el modo
+de coincidencia se aplican igual. Siguen vigentes los filtros de distribuidora,
+cuenta, período y contrato de distribución. Las propuestas pendientes,
+exclusiones y destinos en disputa quedan fuera de la ampliación.
+
+Para la búsqueda ampliada se usa la selección de movimientos con su contexto
+original en resumen, detalle y conteo, tanto por consumo como por statement.
+Así se conserva la hoja, el canal y la identidad de referencias textuales que
+podrían diferir en los agregados de consumo. Cada movimiento entra una sola
+vez. El asociado conserva su identidad y su código de origen. El reparto se
+calcula con las reglas vigentes del contrato, cuando corresponda.
 
 Solo resumen por tema agrega dos columnas por participante: su nombre, con el
 porcentaje efectivo sobre el ingreso de esa fila, y `Importe <nombre>`, en USD.
@@ -40,4 +55,5 @@ de contratos que el PDF contractual. Los archivos antiguos no se reescriben.
 El selector se habilita solo cuando la API anuncia soporte; el frontend elimina
 estos parametros al generar PDF o Google Sheets. WML conserva su lectura al 100%.
 
-Pruebas: scripts/qa/qa_excel_contracts.py y web/scripts/qa_excel_contracts.mjs.
+Pruebas: scripts/qa/qa_excel_contracts.py,
+scripts/qa/qa_report_keyword_associations.py y web/scripts/qa_excel_contracts.mjs.

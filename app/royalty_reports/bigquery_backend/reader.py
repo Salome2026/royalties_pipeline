@@ -111,7 +111,7 @@ def order_completed_files(target, positions, rows):
     sorted_path.replace(positions);source_path.replace(target)
 
 
-def read_source(publications, release, kind, params, report, folder, *, export_bucket=None):
+def read_source(publications, release, kind, params, report, folder, *, export_bucket=None, associated_keys=()):
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
     manifest = release["components"][kind]["manifest"]
@@ -128,7 +128,7 @@ def read_source(publications, release, kind, params, report, folder, *, export_b
     candidate = dict(params, mode="any")
     table = publications.component_table(release, kind)
     with use_scope(release["scope"], marts=marts, release_id=release["source_release_id"]):
-        sql, arguments = source_query(table, kind, manifest, candidate, report)
+        sql, arguments = source_query(table, kind, manifest, candidate, report, associated_keys=associated_keys)
     if kind == "raw" and candidate["keywords"]:
         products = list(read_json(marts["product_income_allocations.json"])["products"])
         if products:

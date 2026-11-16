@@ -17,13 +17,21 @@ try {
   const enriched = { ...original, include_contracts: true, contract_columns: "matching" };
   await api.createRoyaltyReportJob(enriched, "excel");
   assert.deepEqual(JSON.parse(calls.at(-1).options.body), { ...enriched, output: "excel" });
+  const associated = { ...enriched, keywords: ["QT5M52695720"], include_associated: true };
+  await api.createRoyaltyReportJob(associated, "excel");
+  assert.deepEqual(JSON.parse(calls.at(-1).options.body), { ...associated, output: "excel" });
+  await api.createRoyaltyReportJob({ ...original, include_associated: true }, "excel");
+  assert.deepEqual(JSON.parse(calls.at(-1).options.body), { ...original, output: "excel" });
   for (const output of ["google_sheet", "executive_pdf"]) {
     await api.createRoyaltyReportJob(enriched, output);
     assert.deepEqual(JSON.parse(calls.at(-1).options.body), { ...original, output });
+    await api.createRoyaltyReportJob(associated, output);
+    assert.equal(JSON.parse(calls.at(-1).options.body).include_associated, undefined);
   }
   const ui = fs.readFileSync(new URL("../app/features/royalties/RoyaltyReportModule.tsx", import.meta.url), "utf8");
   assert.match(ui, /\[includeContracts, setIncludeContracts\] = useState\(false\)/);
   assert.match(ui, /royalty_include_contracts/);
+  assert.match(ui, /royalty_include_associated/);
   assert.match(ui, /disabled=\{!options\?\.excel_contracts_supported\}/);
   assert.match(ui, /Coincidentes con la búsqueda/);
   assert.match(ui, /Todos los involucrados/);

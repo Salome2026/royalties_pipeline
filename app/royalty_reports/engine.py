@@ -50,6 +50,7 @@ class ReportEngine:
                 raise RuntimeError("Este trabajo requiere el lector de BigQuery de su publicación.")
             return self.runtime.build_pinned(request, job)
         from app.royalty_reports.contract_filter import require_filter, use_filter
+        from app.royalty_reports.keyword_associations import report_index, use_keyword_associations
         contract_filter = None
         if request.distribution_contract_numbers:
             contract_filter = require_filter((job.get('input_manifest') or {}).get('distribution_contract_filter'),
@@ -104,7 +105,8 @@ class ReportEngine:
         self.runtime.report_stage(request.job_id, "building")
         from app.royalty_scope import use_scope
         allocation = json.loads(marts[PRODUCT_INCOME_FILE].read_text(encoding="utf-8")) if PRODUCT_INCOME_FILE in marts else None
-        with use_filter(contract_filter), use_product_income(allocation), use_scope(request.royalty_scope,marts=marts,
+        keyword_index = report_index(job.get("input_manifest") or {}, request.include_associated, request.keywords)
+        with use_filter(contract_filter), use_keyword_associations(keyword_index), use_product_income(allocation), use_scope(request.royalty_scope,marts=marts,
                        catalog_status=job.get('input_manifest',{}).get('catalog_status_snapshot')), use_distributor_policy_snapshot(policy_snapshot):
             built = build_registered_report(
                 request,

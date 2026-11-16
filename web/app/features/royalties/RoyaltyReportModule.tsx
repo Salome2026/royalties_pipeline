@@ -50,6 +50,7 @@ export function RoyaltyReportModule({ onMessage }: Props) {
   const [output, setOutput] = useState<RoyaltyReportOutput>("excel");
   const [executiveMode, setExecutiveMode] = useState<"income" | "contractual" | "artist_settlement">("income");
   const [includeContracts, setIncludeContracts] = useState(false);
+  const [includeAssociated, setIncludeAssociated] = useState(false);
   const [contractColumns, setContractColumns] = useState<"matching" | "all">("all");
   const [contractArtists, setContractArtists] = useState<string[]>([]);
   const [artistOptions, setArtistOptions] = useState<string[]>([]);
@@ -217,6 +218,12 @@ export function RoyaltyReportModule({ onMessage }: Props) {
       return null;
     }
     const terms = keywords.split(/[;,]/).map((item) => item.trim()).filter(Boolean);
+    const expandAssociations = output === "excel" && !wml && includeContracts && includeAssociated
+      && options?.excel_associated_search_supported;
+    if (expandAssociations && !terms.some((term) => /^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$/i.test(term))) {
+      onMessage({ type: "error", text: "Ingresá un ISRC completo en Palabras clave para incluir sus asociados." });
+      return null;
+    }
     const contracts = parseContractNumbers(wml ? "" : contractNumbers);
     if (contracts.error) {
       onMessage({ type: "error", text: contracts.error });
@@ -268,6 +275,7 @@ export function RoyaltyReportModule({ onMessage }: Props) {
       period_basis: contractual ? "statement_period" : periodBasis,
       ...(contractual ? { executive_mode: executiveMode, contract_artists: artists } : {}),
       ...(output === "excel" && !wml && includeContracts ? { include_contracts: true, contract_columns: contractColumns } : {}),
+      ...(expandAssociations ? { include_associated: true } : {}),
       mode: matchMode,
       raw_limit: Number.isFinite(parsedRawLimit) ? parsedRawLimit : 0,
       detail_mode: output === "excel" ? detailMode : "limited",
@@ -466,11 +474,25 @@ export function RoyaltyReportModule({ onMessage }: Props) {
               <>
                 <div className={styles.field}>
                   <label htmlFor="royalty_include_contracts">Incluir contratos</label>
-                  <select id="royalty_include_contracts" value={includeContracts ? "yes" : "no"} onChange={(event) => setIncludeContracts(event.target.value === "yes")}>
+                  <select id="royalty_include_contracts" value={includeContracts ? "yes" : "no"} onChange={(event) => {
+                    const include = event.target.value === "yes";
+                    setIncludeContracts(include);
+                    if (!include) setIncludeAssociated(false);
+                  }}>
                     <option value="no">No</option>
                     <option value="yes" disabled={!options?.excel_contracts_supported}>Sí</option>
                   </select>
                 </div>
+                {includeContracts && options?.excel_associated_search_supported && (
+                  <div className={styles.field}>
+                    <label htmlFor="royalty_include_associated">Incluir asociados</label>
+                    <select id="royalty_include_associated" value={includeAssociated ? "yes" : "no"} onChange={(event) => setIncludeAssociated(event.target.value === "yes")}>
+                      <option value="no">No</option>
+                      <option value="yes">Sí</option>
+                    </select>
+                    <small>Incluye las referencias confirmadas para los ISRC de Palabras clave.</small>
+                  </div>
+                )}
                 {includeContracts && (
                   <div className={styles.field}>
                     <label htmlFor="royalty_contract_columns">Mostrar reparto</label>

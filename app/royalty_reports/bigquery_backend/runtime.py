@@ -24,6 +24,7 @@ from app.royalty_reports.google_sheets import (
     complete_sheet_grid,
     create_google_sheet,
 )
+from app.royalty_reports.keyword_associations import candidate_keys, report_index, use_keyword_associations
 from app.royalty_scope import use_scope, wml_policy
 from lib.distributor_policy_store import use_distributor_policy_snapshot
 from scripts import build_keyword_royalty_report as report
@@ -207,7 +208,8 @@ class BigQueryReportBackend:
             for row in rows if row.source and row.account
         ]
         return {"sources": sorted({item["source"] for item in accounts}), "source_accounts": accounts,
-                "excel_contracts_supported": scope == "regular", "artist_settlement_supported": scope == "regular"}
+                "excel_contracts_supported": scope == "regular", "excel_associated_search_supported": scope == "regular",
+                "artist_settlement_supported": scope == "regular"}
 
     @contextmanager
     def context(self, release, paths, manifest, policy):
@@ -222,17 +224,19 @@ class BigQueryReportBackend:
                 use_distributor_policy_snapshot(policy):
             yield
 
-    def selection(self, release, params, *, complete, manifest, paths, policy, count_only=False):
+    def selection(self, release, params, *, complete, manifest, paths, policy, count_only=False, keyword_index=None):
         release_key = digest(release)
-        key = digest({"release": release_key, "params": params, "filter": manifest.get("distribution_contract_filter")})
+        key = digest({"release": release_key, "params": params, "filter": manifest.get("distribution_contract_filter"),
+                      **({"keyword_associations": keyword_index} if keyword_index is not None else {})})
         folder = self.root / "selections" / key
         with self.lock:
             lock = self.cache_locks.setdefault(key, Lock())
         with lock:
-            raw = read_source(self.publications, release, "raw", params, report, folder, export_bucket=self.export_bucket)
+            raw = read_source(self.publications, release, "raw", params, report, folder,
+                              export_bucket=self.export_bucket, associated_keys=candidate_keys(keyword_index, params["keywords"]))
             prepared = folder / "prepared.parquet"
             marker = folder / "prepared.json"
-            with self.context(release, paths, manifest, policy):
+            with self.context(release, paths, manifest, policy), use_keyword_associations(keyword_index):
                 if marker.exists():
                     if read_json(marker)["sha256"] != file_sha(prepared):
                         raise PublicationError("Cambió la selección preparada.")
@@ -265,7 +269,9 @@ class BigQueryReportBackend:
         _, release, paths, policy = captured
         manifest = self.job_manifest(captured, params)
         selection = {key: params.get(key) for key in SOURCE_KEYS}
-        _, _, spool = self.selection(release, selection, complete=True, manifest=manifest, paths=paths, policy=policy, count_only=True)
+        keyword_index = report_index(manifest, params.get("include_associated", False), selection["keywords"])
+        _, _, spool = self.selection(release, selection, complete=True, manifest=manifest, paths=paths,
+                                     policy=policy, count_only=True, keyword_index=keyword_index)
         return spool.detail.count if spool else 0
 
     def build(self, request, job):
@@ -288,13 +294,14 @@ class BigQueryReportBackend:
         set_report_job_stage(request.job_id, "reading_data")
         params = {key: getattr(request, key) for key in SOURCE_KEYS}
         params["keywords"] = list(params["keywords"])
+        keyword_index = report_index(manifest, request.include_associated, params["keywords"])
         country_detail = request.output_format == "excel" and request.detail_mode == "top_countries"
         complete = request.output_format in {"excel", "google_sheet"} and not country_detail
         summary_inputs = {}
         if request.executive_mode == "income":
             prepared, groups, spool = self.selection(release, params, complete=complete,
-                manifest=manifest, paths=paths, policy=policy)
-            if request.period_basis == "transaction_month":
+                manifest=manifest, paths=paths, policy=policy, keyword_index=keyword_index)
+            if request.period_basis == "transaction_month" and keyword_index is None:
                 summary_inputs["song_path"] = read_source(
                     self.publications, release, "song", params, report, prepared.parent,
                     export_bucket=self.export_bucket,
@@ -302,7 +309,7 @@ class BigQueryReportBackend:
         set_report_job_stage(request.job_id, "building")
         with TemporaryDirectory(dir=output_root) as temp_name:
             output = Path(temp_name)
-            with self.context(release, paths, manifest, policy):
+            with self.context(release, paths, manifest, policy), use_keyword_associations(keyword_index):
                 if request.executive_mode != "income":
                     built = self._contractual_pdf(request, job, release, output)
                     files = [artifact(built.output_path, built.content_type)]

@@ -32,6 +32,7 @@ class ReportRequest:
     executive_mode: str = "income"
     royalty_scope: str = 'regular'
     include_contracts: bool = False
+    include_associated: bool = False
     contract_columns: str = "all"
     distribution_contract_numbers: tuple[int, ...] = ()
 
@@ -68,11 +69,19 @@ class ReportRequest:
         if executive_mode == "artist_settlement" and len(params.get("contract_artists") or []) != 1:
             raise ValueError("La liquidación individual requiere exactamente un artista.")
         include_contracts = params.get("include_contracts", False)
+        include_associated = params.get("include_associated", False)
         contract_columns = params.get("contract_columns", "all")
         if not isinstance(include_contracts, bool) or contract_columns not in {"matching", "all"}:
             raise ValueError("La seleccion de contratos del Excel no es valida.")
         if include_contracts and (output_format != "excel" or royalty_scope != "regular" or executive_mode != "income"):
             raise ValueError("Las columnas contractuales solo estan disponibles en el Excel de regalias.")
+        if not isinstance(include_associated, bool) or (include_associated and not include_contracts):
+            raise ValueError("Incluir asociados requiere el Excel con contratos.")
+        if include_associated:
+            from app.royalty_reports.keyword_associations import exact_isrc
+
+            if not any(exact_isrc(keyword) for keyword in keywords):
+                raise ValueError("Ingresá un ISRC completo en Palabras clave para incluir sus asociados.")
 
         detail_mode_value = str(params.get("detail_mode") or "limited")
         if detail_mode_value not in {"limited", "top_countries", "full"}:
@@ -95,6 +104,7 @@ class ReportRequest:
             executive_mode=executive_mode,
             royalty_scope=royalty_scope,
             include_contracts=include_contracts,
+            include_associated=include_associated,
             contract_columns=contract_columns,
             distribution_contract_numbers=tuple(numbers),
         )

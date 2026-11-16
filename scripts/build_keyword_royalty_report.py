@@ -342,9 +342,16 @@ def existing_columns(path: Path) -> set[str]:
     return set(scan_income(path).collect_schema().names())
 
 
+def scan_report_income(path: Path, keywords: list[str]) -> pl.LazyFrame:
+    from app.royalty_reports.keyword_associations import with_keyword_associations
+
+    return with_keyword_associations(scan_income(path), keywords)
+
+
 def filter_report_keyword_values(frame: pl.DataFrame,keywords: list[str],mode: str) -> pl.DataFrame:
     """Apply the existing search to distinct values, avoiding repeated text normalization."""
     if not keywords or frame.is_empty():return frame
+    from app.royalty_reports.keyword_associations import associated_match
     columns=set(frame.columns)
     ordinary=[name for name in SEARCH_COLUMNS_STANDARDIZED if name in columns]
     scoped=[name for name in ['catalog_number','gpid','Catalog Number','Catalogue Number','GPID'] if name in columns]
@@ -366,7 +373,7 @@ def filter_report_keyword_values(frame: pl.DataFrame,keywords: list[str],mode: s
             if mask.all():break
         # An unresolved product retains its own UPC; it has no allocated origin
         # text. Keep this separate from ordinary track-level UPC search.
-        mask=mask | frame.select(pending_upc_match_expr(columns,keyword)).to_series()
+        mask=mask | frame.select(pending_upc_match_expr(columns,keyword) | associated_match(columns, keyword)).to_series()
         result=mask if result is None else (result & mask if mode=='all' else result | mask)
         if mode=='all' and not result.any():return frame.head(0)
         if mode!='all' and result.all():return frame
@@ -377,6 +384,7 @@ def prepare_keyword_source(source: Path, output: Path, keywords: list[str], mode
     """Materialize a bounded, already allocated selection for the report job only."""
     import pyarrow.parquet as pq
     from lib.product_income import current_index,allocate_income,MEASURES
+    from app.royalty_reports.keyword_associations import ASSOCIATED_ISRC, CURRENT as KEYWORD_ASSOCIATIONS, with_keyword_associations
     index=current_index(source)
     signature=(source.stat().st_size,source.stat().st_mtime_ns)
     schema=dict(pl.scan_parquet(source).collect_schema())
@@ -388,6 +396,8 @@ def prepare_keyword_source(source: Path, output: Path, keywords: list[str], mode
             '_income_product_pending':pl.Boolean,'_income_upc_pending':pl.Boolean,
             '_income_origin_search':pl.String,'_income_original_isrc':pl.String})
     schema['_income_allocated']=pl.Boolean
+    with_associations = KEYWORD_ASSOCIATIONS.get() is not None
+    output_schema = {**schema, ASSOCIATED_ISRC: pl.String} if with_associations else schema
     output.parent.mkdir(parents=True,exist_ok=True)
     paths=[output.with_name(output.stem+'.native.parquet'),output.with_name(output.stem+'.products.parquet')]
     writers=[None,None]
@@ -402,7 +412,9 @@ def prepare_keyword_source(source: Path, output: Path, keywords: list[str], mode
             if CURRENT.get() is not None:
                 from lib.catalog_report_filter import with_catalog_report_status
                 frame=filter_income(with_catalog_report_status(frame.lazy())).select(list(schema)).collect(engine='streaming')
-            frame=filter_report_keyword_values(frame,keywords,mode).cast(schema,strict=False)
+            if with_associations:
+                frame = with_keyword_associations(frame.lazy(), keywords).collect(engine="streaming")
+            frame=filter_report_keyword_values(frame,keywords,mode).cast(output_schema,strict=False)
             candidate=pl.col('_income_allocated').is_not_null()
             for part,condition in enumerate([~candidate,candidate]):
                 selected=frame.filter(condition)
@@ -425,7 +437,7 @@ def prepare_keyword_source(source: Path, output: Path, keywords: list[str], mode
                 combined.write_batch(batch)
     finally:
         if combined is not None:combined.close()
-    if combined is None:pl.DataFrame(schema=schema).write_parquet(output)
+    if combined is None:pl.DataFrame(schema=output_schema).write_parquet(output)
     return output
 
 
@@ -499,7 +511,10 @@ def contains_expr(columns: set[str], search_columns: list[str], keyword: str) ->
 
 
 def build_filter(columns: set[str], search_columns: list[str], keywords: list[str], mode: str) -> pl.Expr:
-    exprs = [contains_expr(columns, search_columns, keyword) for keyword in keywords]
+    from app.royalty_reports.keyword_associations import associated_match
+
+    exprs = [contains_expr(columns, search_columns, keyword) | associated_match(columns, keyword)
+             for keyword in keywords]
 
     if not exprs:
         return pl.lit(True)
@@ -1167,8 +1182,8 @@ def build_filtered_raw_detail_lf(
     account: str | None = None,
     raw: pl.LazyFrame | None = None,
 ) -> tuple[pl.LazyFrame, set[str]]:
-    columns = existing_columns(standardized_path) if raw is None else set(raw.collect_schema().names())
-    income = scan_income(standardized_path) if raw is None else raw
+    income = scan_report_income(standardized_path, keywords) if raw is None else raw
+    columns = set(income.collect_schema().names())
     period_column = "statement_period" if period_basis == "statement_period" else "transaction_month"
     raw_filter = build_filter(columns, SEARCH_COLUMNS_STANDARDIZED, keywords, mode)
     excluded = normalize_isrcs(exclude_isrcs)
@@ -1507,6 +1522,8 @@ def add_wml_reference_annex(tables: dict, matched_isrcs: set[str]) -> dict:
 
 def build_summary_selection(raw, standardized_cols, *, keywords, mode, start_month, end_month,
                             period_column, source, account, excluded_isrcs):
+    from app.royalty_reports.keyword_associations import ASSOCIATED_ISRC
+
     raw_filter = build_filter(standardized_cols, SEARCH_COLUMNS_STANDARDIZED, keywords, mode)
 
     return (
@@ -1571,7 +1588,7 @@ def build_summary_selection(raw, standardized_cols, *, keywords, mode, start_mon
                 "catalog_business_status",
                 "product_upc", "UPC Code", "UPC", "Video ID", "VideoId", "track_id",
                 "Label Track ID", "Track ID", "gpid", "source_asset_id", "catalog_number",
-                '_income_product_pending','_income_upc_pending',
+                '_income_product_pending','_income_upc_pending', ASSOCIATED_ISRC,
             ]
             if col in standardized_cols or col in {"store", "store_raw", "usage_type", "usage_raw", "report_code", "report_code_source", "report_territory", "catalog_key", "catalog_business_status", "video_id", "video_id_source", "channel_id", "dsp_normalized", "monetization_normalized", "content_origin_normalized", "classification_status"}
         ])
@@ -1603,6 +1620,8 @@ def build_report_tables(
     _dashgo_video_groups: pl.DataFrame | None = None,
     spooled_selection=None,
 ) -> dict:
+    from app.royalty_reports.keyword_associations import CURRENT as KEYWORD_ASSOCIATIONS
+
     if _dashgo_video_groups is None:
         from app.royalty_scope import is_wml
         evidence_path = standardized_path if standardized_path.exists() else song_path
@@ -1624,12 +1643,14 @@ def build_report_tables(
 
     standardized_cols = existing_columns(standardized_path)
 
-    # Statement summaries follow individual movements. Consumption uses the
-    # published song-level rows for its overall, monthly, and track summaries.
-    if period_column == "statement_period":
+    # The expanded search needs the original per-movement context even when
+    # the report groups by consumption month. The ordinary report keeps its
+    # existing song-level consumption summary.
+    if period_column == "statement_period" or KEYWORD_ASSOCIATIONS.get() is not None:
         if spooled_selection is None:
+            raw = scan_report_income(standardized_path, keywords)
             statement_base_lf = build_summary_selection(
-                scan_income(standardized_path), standardized_cols, keywords=keywords, mode=mode,
+                raw, set(raw.collect_schema().names()), keywords=keywords, mode=mode,
                 start_month=start_month, end_month=end_month, period_column=period_column,
                 source=source, account=account, excluded_isrcs=excluded_isrcs,
             ).collect(engine="streaming").lazy()

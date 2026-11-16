@@ -77,32 +77,21 @@ def _text(columns: set[str], names: tuple[str, ...]) -> pl.Expr:
 
 
 def reference_fragments(frame: pl.LazyFrame) -> pl.DataFrame:
-    from app.contract_text_reference import TITLE_FIELDS, ARTIST_FIELDS
+    from app.royalty_reports.keyword_associations import ASSOCIATED_ISRC, reference_expressions
     from scripts.build_keyword_royalty_report import report_identity_expr
     columns = set(frame.collect_schema().names())
-    track = pl.when(_text(columns, ("source",)) == "ada").then(
-        _text(columns, ("source_asset_id", "catalog_number"))).otherwise(
-        _text(columns, ("track_id", "Label Track ID", "Track ID", "gpid")))
-    keys = ["identity", "source", "account", "statement_period", "asset_isrc",
-            "product_upc", "video_id", "track_id", "catalog_number", "source_sheet", "channel_id", "title", "artist", "product_type", '_income_product_pending','_income_upc_pending']
+    fields = reference_expressions(columns)
+    fields.pop("content_type")
+    for field in ("source", "account", "source_sheet", "channel_id", "title", "artist", "product_type"):
+        fields[field] = fields[field].fill_null("")
+    if ASSOCIATED_ISRC in columns:
+        fields[ASSOCIATED_ISRC] = pl.col(ASSOCIATED_ISRC)
     return frame.select(
         report_identity_expr(columns).alias("identity"),
-        *[_text(columns, (name,)).fill_null("").alias(name) for name in ("source", "account")],
         _text(columns, ("statement_period",)).str.slice(0, 7).alias("statement_period"),
-        _text(columns, ("asset_isrc", "isrc", "ISRC", "Asset ISRC")).alias("asset_isrc"),
-        _text(columns, ("product_upc", "UPC Code", "UPC")).alias("product_upc"),
-        _text(columns, ("video_id", "Video ID", "VideoId")).alias("video_id"),
-        track.alias("track_id"),
-        _text(columns, ("catalog_number",)).alias("catalog_number"),
-        *[_text(columns, names).fill_null("").alias(name) for name, names in (
-            ("source_sheet", ("source_sheet",)), ("channel_id", ("channel_id", "Channel ID", "ChannelId", "YOUTUBE CHANNEL ID")),
-            ("title", TITLE_FIELDS),
-            ("artist", ARTIST_FIELDS),
-            ("product_type", ("product_type", "asset_product_type")))],
-        *[(pl.col(name).cast(pl.Boolean,strict=False).fill_null(False) if name in columns else pl.lit(False)).alias(name)
-          for name in ('_income_product_pending','_income_upc_pending')],
+        *[expr.alias(name) for name, expr in fields.items()],
         pl.col("amount_usd"),
-    ).group_by(keys).agg(_stable_sum("amount_usd")).collect(engine="streaming")
+    ).group_by("identity", "statement_period", *fields).agg(_stable_sum("amount_usd")).collect(engine="streaming")
 
 
 def _credit_names(row: dict) -> list[str]:
@@ -132,14 +121,19 @@ def _contract_names(split: dict) -> list[str]:
 
 def participant_columns(summary: pl.DataFrame, fragments: pl.DataFrame, snapshot: dict,
                         keywords: list[str], scope: str) -> tuple[list[str], list[dict]]:
+    from app.royalty_reports.keyword_associations import ASSOCIATED_ISRC
+
     require_snapshot(snapshot)
     if scope not in {"all", "matching"}:
         raise ValueError("La seleccion de participantes del Excel no es valida.")
     contracts = {row["isrc"]: row for row in snapshot["contracts"]}
     catalog = defaultdict(list)
+    structured_credits = defaultdict(list)
     for row in snapshot["catalog"]:
         key = row.get("catalog_key") or ("ISRC:" + row["asset_isrc"] if row.get("asset_isrc") else "")
         catalog[key].extend(_credit_names(row))
+        if isinstance(row.get("catalog_artists"), list):
+            structured_credits[key].extend(_credit_names(row))
     by_identity = defaultdict(list)
     for item in fragments.to_dicts():
         by_identity[item["identity"]].append(item)
@@ -177,13 +171,19 @@ def participant_columns(summary: pl.DataFrame, fragments: pl.DataFrame, snapshot
     for row in summary.to_dicts():
         identity = row["_report_identity"]
         pieces = by_identity.get(identity, [])
-        row_keys = register(catalog.get(identity, []) or parse_artists(row.get("artist_statement_style") or "", "catalog"))
+        if any(piece.get(ASSOCIATED_ISRC) for piece in pieces):
+            # A distributor can put the full video title in the artist field.
+            # The associated contract already supplies the verified recipients.
+            row_keys = register(structured_credits.get(identity, []))
+        else:
+            row_keys = register(catalog.get(identity, []) or parse_artists(row.get("artist_statement_style") or "", "catalog"))
         amounts = defaultdict(list)
         rates = defaultdict(set)
         applied = False
         for piece in pieces:
             root = identity[5:] if identity.startswith("ISRC:") else (
-                piece.get("asset_isrc") or associated_income_isrc(piece, snapshot["associations"]))
+                piece.get("asset_isrc") or piece.get(ASSOCIATED_ISRC)
+                or associated_income_isrc(piece, snapshot["associations"]))
             if not root:
                 continue
             row_keys |= register(catalog.get("ISRC:" + root, []))

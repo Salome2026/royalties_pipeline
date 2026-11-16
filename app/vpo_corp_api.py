@@ -307,6 +307,7 @@ class RoyaltyReportJobRequest(BaseModel):
     executive_mode: Literal["income", "contractual", "artist_settlement"] = "income"
     contract_artists: list[str] = Field(default_factory=list, max_length=20)
     include_contracts: bool = False
+    include_associated: bool = False
     contract_columns: Literal["matching", "all"] = "all"
     distribution_contract_numbers: list[int] = Field(default_factory=list, max_length=100)
     keywords: list[str] = Field(default_factory=list, max_length=100)
@@ -7484,7 +7485,8 @@ def canonical_royalty_report_params(
     *,
     complete_detail: bool = False,
 ) -> dict[str, Any]:
-    params = request.model_dump(exclude={"output", "executive_mode", "contract_artists", "include_contracts", "contract_columns"})
+    params = request.model_dump(exclude={"output", "executive_mode", "contract_artists", "include_contracts",
+                                         "include_associated", "contract_columns"})
     params["keywords"] = normalize_keywords(params.get("keywords") or [])
     if request.distribution_contract_numbers:
         from app.royalty_reports.contract_filter import normalize_numbers
@@ -7520,6 +7522,14 @@ def canonical_royalty_report_params(
         if request.output != "excel" or request.executive_mode != "income" or is_wml():
             raise HTTPException(status_code=400, detail="Las columnas contractuales solo estan disponibles en el Excel de regalias.")
         params.update(include_contracts=True, contract_columns=request.contract_columns)
+    if request.include_associated:
+        from app.royalty_reports.keyword_associations import exact_isrc
+
+        if not request.include_contracts:
+            raise HTTPException(400, "Incluir asociados requiere el Excel con contratos.")
+        if not any(exact_isrc(keyword) for keyword in params["keywords"]):
+            raise HTTPException(400, "Ingresá un ISRC completo en Palabras clave para incluir sus asociados.")
+        params["include_associated"] = True
 
     source = str(params.get("source") or "").strip().lower() or None
     account = str(params.get("account") or "").strip().lower() or None
@@ -7588,7 +7598,7 @@ def royalty_report_detail_count(
         raise HTTPException(status_code=401, detail="Usuario requerido.")
     with operational_connect() as conn:
         require_module_permission(conn, username, "royalty_reports", "create")
-        if request.distribution_contract_numbers:
+        if request.distribution_contract_numbers or request.include_associated:
             require_contract_report_permission(conn, username)
 
     backend = royalty_report_intake_backend(username, request.output)
@@ -7603,8 +7613,8 @@ def royalty_report_detail_count(
                 "exceeds_excel_limit": rows > EXCEL_MAX_DATA_ROWS}
     policy_snapshot = load_distributor_policy_document()
     params = canonical_royalty_report_params(request, policy_snapshot)
-    if request.distribution_contract_numbers:
-        return distribution_filter_detail_count(request, params)
+    if request.distribution_contract_numbers or request.include_associated:
+        return contract_filtered_detail_count(params)
     try:
         rows = query_royalty_detail_count_bigquery(
             keywords=params["keywords"],
@@ -7649,14 +7659,34 @@ def capture_distribution_filter(numbers, manifest, snapshot=None):
     return freeze_filter(numbers, templates, snapshot)
 
 
-def distribution_filter_detail_count(request, params):
+def capture_excel_contract_snapshot(manifest):
+    from app.royalty_reports.contract_snapshot import published_catalog_frame, stored_contracts
+    from app.royalty_reports.excel_contracts import freeze_snapshot
+
+    frame = published_catalog_frame(gcs_client(), manifest)
+    with operational_connect() as conn:
+        conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        contracts = stored_contracts(conn)
+    return freeze_snapshot(frame, contracts, manifest)
+
+
+def contract_filtered_detail_count(params):
     from app.royalty_reports.contract_filter import use_filter
+    from app.royalty_reports.keyword_associations import report_index, use_keyword_associations
+    from app.royalty_reports.manifests import REPORT_INPUT_FILENAMES
     from scripts.build_keyword_royalty_report import count_report_detail_rows
     from app.royalty_scope import use_scope
     from scripts.lib.product_income import FILE, use_product_income
-    manifest = build_gcs_input_manifest(client=gcs_client(), bucket_name=GCS_BUCKET, prefix=GCS_PREFIX)
+    include_associated = params.get("include_associated", False)
+    filenames = (*REPORT_INPUT_FILENAMES, CATALOG_RELEASE_METADATA_FILE) if include_associated else REPORT_INPUT_FILENAMES
+    manifest = build_gcs_input_manifest(client=gcs_client(), bucket_name=GCS_BUCKET, prefix=GCS_PREFIX, filenames=filenames)
     try:
-        snapshot = capture_distribution_filter(params['distribution_contract_numbers'], manifest)
+        contracts = capture_excel_contract_snapshot(manifest) if include_associated else None
+        if contracts is not None:
+            manifest["excel_contract_snapshot"] = contracts
+        numbers = params.get("distribution_contract_numbers")
+        snapshot = capture_distribution_filter(numbers, manifest, contracts) if numbers else None
+        index = report_index(manifest, include_associated, params["keywords"])
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     filenames = [STANDARDIZED_FILE, CATALOG_MASTER_FILE, 'catalog_status.parquet']
@@ -7666,7 +7696,7 @@ def distribution_filter_detail_count(request, params):
     if mart_release_cache().status().get('active_release_id') != manifest['release_id']:
         raise HTTPException(409, 'Los datos publicados cambiaron; volvé a calcular el detalle.')
     allocation = json.loads(marts[FILE].read_text(encoding='utf-8')) if FILE in marts else None
-    with use_scope('regular', marts=marts), use_product_income(allocation), use_filter(snapshot):
+    with use_scope('regular', marts=marts), use_product_income(allocation), use_filter(snapshot), use_keyword_associations(index):
         rows = count_report_detail_rows(keywords=params['keywords'], mode=params['mode'],
             start_month=params['start_month'], end_month=params['end_month'], period_basis=params['period_basis'],
             standardized_path=marts[STANDARDIZED_FILE], source=params['source'], account=params['account'])
@@ -7784,14 +7814,8 @@ def create_royalty_report_job(
             raise HTTPException(status_code=503, detail="No se pudieron validar los codigos asociados del PDF. Volve a intentar.") from exc
 
     if request.include_contracts:
-        from app.royalty_reports.contract_snapshot import published_catalog_frame, stored_contracts
-        from app.royalty_reports.excel_contracts import freeze_snapshot
         try:
-            frame = published_catalog_frame(gcs_client(), input_manifest)
-            with operational_connect() as conn:
-                conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-                contracts = stored_contracts(conn)
-            input_manifest["excel_contract_snapshot"] = freeze_snapshot(frame, contracts, input_manifest)
+            input_manifest["excel_contract_snapshot"] = capture_excel_contract_snapshot(input_manifest)
         except Exception as exc:
             raise HTTPException(status_code=503, detail="No se pudieron validar los contratos del Excel. Volve a intentar.") from exc
 
@@ -8037,6 +8061,7 @@ def royalty_report_options(
         "sources": sorted({item["source"] for item in source_accounts}),
         "source_accounts": source_accounts,
         "excel_contracts_supported": not is_wml(),
+        "excel_associated_search_supported": not is_wml(),
         "artist_settlement_supported": not is_wml(),
     }
 
