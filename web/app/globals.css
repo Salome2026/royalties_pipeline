@@ -1928,6 +1928,50 @@ button:disabled:hover {
   font-size: 15px;
 }
 
+.management-rates {
+  max-width: 430px;
+  margin: 12px 0;
+}
+
+.management-rates div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding: 8px 0;
+}
+
+.management-rates dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.management-change {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+  margin: 12px 0;
+}
+
+.management-change label {
+  width: 158px;
+  max-width: 100%;
+}
+
+.management-change input {
+  width: 100%;
+  min-width: 0;
+}
+
+.management-change-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
 .policy-flags {
   display: flex;
   flex-wrap: wrap;

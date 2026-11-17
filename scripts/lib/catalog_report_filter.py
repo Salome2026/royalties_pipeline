@@ -5,6 +5,8 @@ from pathlib import Path
 
 import polars as pl
 
+from .distributor_adjustment import adjustment_rules
+
 try:
     from lib.ada_identity import ada_catalog_key_expr
 except ModuleNotFoundError:
@@ -533,22 +535,29 @@ def apply_report_net_personalization(
     if amount_col not in schema:
         return lf
     policy = load_distributor_policy_document()
-    personalization = policy.get("report_personalization") or {}
-    if not bool(personalization.get("enabled", False)):
+    rules = list(adjustment_rules(policy))
+    if not (policy.get("report_personalization") or {}).get("enabled"):
         return lf
 
     source = row_source_expr(schema)
     account = row_account_expr(schema)
     factor = pl.lit(1.0)
-    for entry in reversed(policy.get("entries", [])):
-        policy_source = str(entry.get("source") or "").strip().lower().replace(" ", "_")
-        policy_account = str(entry.get("account") or "").strip().lower().replace(" ", "_")
-        adjustment = float(entry.get("report_net_adjustment_pct") or 0.0)
-        if not policy_source or not policy_account or adjustment == 0:
-            continue
+    month_col = next((name for name in ("statement_period", "statement_month") if name in schema), None)
+    for policy_source, policy_account, base, schedule in reversed(rules):
+        account_factor = pl.lit(1 - base / 100)
+        if schedule:
+            if month_col is None:
+                raise ValueError("Falta el mes de statement para aplicar la vigencia de management.")
+            month = pl.col(month_col).cast(pl.Utf8).str.slice(0, 7)
+            for item in schedule:
+                account_factor = (
+                    pl.when(month >= item["from_statement"])
+                    .then(pl.lit(1 - item["percent"] / 100))
+                    .otherwise(account_factor)
+                )
         factor = (
             pl.when((source == policy_source) & (account == policy_account))
-            .then(pl.lit(1 - adjustment / 100))
+            .then(account_factor)
             .otherwise(factor)
         )
 

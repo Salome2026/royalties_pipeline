@@ -10,6 +10,7 @@ from typing import Any, Iterable
 from google.cloud import bigquery
 
 from app.dashboard_rank_page import RankPage, rank_snapshot
+from scripts.lib.distributor_adjustment import adjustment_rules
 
 
 DEFAULT_PROJECT = os.environ.get("VPO_BIGQUERY_PROJECT", "vpo-corp-royalties")
@@ -59,20 +60,20 @@ def month_text(value: date | None) -> str | None:
     return value.strftime("%Y-%m") if value else None
 
 
-def personalization_factor_sql(policy_document: dict[str, Any]) -> str:
-    personalization = policy_document.get("report_personalization") or {}
-    if not bool(personalization.get("enabled", False)):
-        return "1.0"
+def personalization_factor_sql(policy_document: dict[str, Any], *, row_alias: str = "") -> str:
+    prefix = f"{row_alias}." if row_alias else ""
     clauses: list[str] = []
-    for entry in reversed(policy_document.get("entries") or []):
-        source = str(entry.get("source") or "").strip().lower().replace(" ", "_")
-        account = str(entry.get("account") or "").strip().lower().replace(" ", "_")
-        adjustment = float(entry.get("report_net_adjustment_pct") or 0.0)
-        if not source or not account or adjustment == 0:
-            continue
-        factor = 1 - adjustment / 100
+    for source, account, base, schedule in adjustment_rules(policy_document):
+        factor = f"{1 - base / 100:.12f}"
+        if schedule:
+            effective = " ".join(
+                f"WHEN {prefix}statement_month >= DATE '{item['from_statement']}-01' "
+                f"THEN {1 - item['percent'] / 100:.12f}"
+                for item in reversed(schedule)
+            )
+            factor = f"CASE {effective} ELSE {factor} END"
         clauses.append(
-            f"WHEN source = '{sql_string(source)}' AND account = '{sql_string(account)}' THEN {factor:.12f}"
+            f"WHEN {prefix}source = '{sql_string(source)}' AND {prefix}account = '{sql_string(account)}' THEN {factor}"
         )
     if not clauses:
         return "1.0"

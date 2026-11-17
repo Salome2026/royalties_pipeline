@@ -13,6 +13,7 @@ if str(BASE) not in sys.path:
     sys.path.insert(0, str(BASE))
 
 from app.operational_db import operational_connect, operational_db_settings
+from .distributor_adjustment import adjustment_percent, adjustment_schedule
 
 
 POLICY_SCHEMA_VERSION = 1
@@ -202,9 +203,16 @@ def update_report_personalization(
     updated_by: str,
 ) -> dict[str, Any]:
     _require_postgres()
-    requested = {str(item["policy_id"]): float(item["report_net_adjustment_pct"]) for item in accounts}
-    if any(value < 0 or value > 100 for value in requested.values()):
-        raise ValueError("Distributor adjustment percentages must be between 0 and 100.")
+    requested = {}
+    for item in accounts:
+        policy_id = str(item["policy_id"])
+        if policy_id in requested:
+            raise ValueError("La misma cuenta no se puede configurar dos veces.")
+        base = item.get("report_net_adjustment_pct")
+        requested[policy_id] = (
+            adjustment_percent(base) if base is not None else None,
+            adjustment_schedule(item.get("schedule_additions") or []),
+        )
 
     with operational_connect() as conn:
         settings_row = conn.execute(
@@ -213,24 +221,38 @@ def update_report_personalization(
         if settings_row is None:
             raise RuntimeError("Distributor policy settings are not initialized in Cloud SQL.")
         before = load_document_in_transaction(conn)
-        available_rows = conn.execute(
-            "SELECT policy_id FROM distributor_account_policies WHERE active = TRUE FOR UPDATE"
-        ).fetchall()
-        available = {row["policy_id"] for row in available_rows}
-        missing = sorted(set(requested) - available)
+        available = {row["policy_id"]: row for row in before["entries"]}
+        missing = sorted(set(requested) - set(available))
         if missing:
             raise KeyError(f"Unknown distributor policies: {', '.join(missing)}")
 
         version = int(settings_row["policy_version"]) + 1
-        for policy_id, adjustment in requested.items():
+        import json
+        updates = []
+        for policy_id, (adjustment, additions) in requested.items():
+            entry = available[policy_id]
+            base = entry["report_net_adjustment_pct"]
+            schedule = adjustment_schedule(entry.get("report_adjustment_schedule") or [])
+            if adjustment is not None and adjustment != base and (schedule or additions):
+                raise ValueError("El porcentaje historico no se puede cambiar al agregar o usar vigencias.")
+            if schedule and additions and additions[0]["from_statement"] <= schedule[-1]["from_statement"]:
+                raise ValueError("El nuevo cambio debe ser posterior a la ultima vigencia guardada.")
+            if additions or (adjustment is not None and adjustment != base):
+                updates.append((policy_id, base if adjustment is None else adjustment, additions, schedule))
+        if not updates and enabled == before["report_personalization"]["enabled"]:
+            return before
+        for policy_id, adjustment, additions, schedule in updates:
             conn.execute(
                 """
                 UPDATE distributor_account_policies
                 SET report_net_adjustment_pct = %s, policy_version = %s,
+                    policy_payload = CASE WHEN %s THEN
+                        jsonb_set(policy_payload, '{report_adjustment_schedule}', %s::jsonb)
+                        ELSE policy_payload END,
                     updated_by = %s, updated_at = now()
                 WHERE policy_id = %s
                 """,
-                (adjustment, version, updated_by, policy_id),
+                (adjustment, version, bool(additions), json.dumps(schedule + additions), updated_by, policy_id),
             )
         conn.execute(
             """
@@ -251,8 +273,8 @@ def update_report_personalization(
             (
                 version,
                 updated_by,
-                __import__("json").dumps(before),
-                __import__("json").dumps(after),
+                json.dumps(before),
+                json.dumps(after),
             ),
         )
 

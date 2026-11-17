@@ -467,9 +467,15 @@ class CustomRoyaltyReportRequest(BaseModel):
     exclude_related_videos: bool = False
 
 
+class DistributorAdjustmentChangeRequest(BaseModel):
+    from_statement: str = Field(pattern=r"^[0-9]{4}-(0[1-9]|1[0-2])$")
+    percent: float = Field(ge=0.0, le=100.0)
+
+
 class DistributorPersonalizationAccountRequest(BaseModel):
     policy_id: str = Field(..., min_length=1, max_length=160)
-    report_net_adjustment_pct: float = Field(default=0.0, ge=0.0, le=100.0)
+    report_net_adjustment_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    schedule_additions: list[DistributorAdjustmentChangeRequest] = Field(default_factory=list, max_length=100)
 
 
 class DistributorPersonalizationRequest(BaseModel):
@@ -8377,6 +8383,7 @@ def distributor_config_overview(
         policy_with_defaults = {
             **policy,
             "report_net_adjustment_pct": float(policy.get("report_net_adjustment_pct") or 0.0),
+            "report_adjustment_schedule": policy.get("report_adjustment_schedule") or [],
         }
         related_dictionary = [
             item for item in dictionary_entries
@@ -8462,7 +8469,9 @@ def update_distributor_personalization(
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except (RuntimeError, ValueError) as exc:
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return {
         "ok": True,
@@ -8833,13 +8842,13 @@ def master_contract_income_baseline() -> pl.DataFrame:
         path = build_royalties_dashboard_summary_mart(marts[STANDARDIZED_FILE])
     else:
         path = ensure_marts(filenames=[ROYALTIES_DASHBOARD_SUMMARY_FILE])[ROYALTIES_DASHBOARD_SUMMARY_FILE]
-    baseline = contract_statement_baseline(pl.scan_parquet(path), CONTRACT_ANALYSIS_CUTOFF_MONTH)
-    adjusted = apply_report_net_personalization(baseline.lazy(), set(baseline.columns), amount_col="amount_usd")
-    return adjusted.group_by("asset_isrc").agg([
+    adjusted = apply_report_net_personalization(pl.scan_parquet(path))
+    baseline = contract_statement_baseline(adjusted, CONTRACT_ANALYSIS_CUTOFF_MONTH)
+    return baseline.group_by("asset_isrc").agg([
         pl.sum("amount_usd").alias("amount_usd"),
         pl.min("first_statement_month").alias("first_statement_month"),
         pl.max("last_statement_month").alias("last_statement_month"),
-    ]).collect()
+    ])
 
 
 def master_contract_source_accounts() -> pl.DataFrame:

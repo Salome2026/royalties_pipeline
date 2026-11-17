@@ -305,7 +305,7 @@ def base_query(context: dict, policy: dict, beneficiary: str | None, *, measure:
     for name in DIMENSIONS:
         params.append(bigquery.ScalarQueryParameter("drill_" + name, "DATE" if name == "month" else "STRING",
             month_date(drill[name]) if name == "month" and drill.get(name) else drill.get(name)))
-    factor = personalization_factor_sql(policy)
+    factor = personalization_factor_sql(policy, row_alias="n")
     period_col = "transaction_month" if period_basis == "transaction_month" else "statement_month"
     amount = "COALESCE(r.percent,0) / 100" if measure == "contractual" else "1.0"
     # Restricted users are scoped to canonical tracks before any output, never by a caller's title substring.

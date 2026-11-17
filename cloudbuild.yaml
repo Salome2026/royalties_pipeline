@@ -41,6 +41,7 @@ steps:
       - scripts.qa.qa_report_contract_filter
       - scripts.qa.qa_report_keyword_associations
       - scripts.qa.qa_contract_text_reference
+      - scripts.qa.qa_distributor_adjustment
       - -q
 
   - id: Push

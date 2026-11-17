@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, CircleDollarSign, FileDown, LayoutDashboard, Pencil, Printer, RefreshCw, RotateCcw, Save, Search, ShieldCheck, SlidersHorizontal, Table2, Trash2, Rows3, Youtube } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CircleDollarSign, FileDown, LayoutDashboard, Pencil, Plus, Printer, RefreshCw, RotateCcw, Save, Search, ShieldCheck, SlidersHorizontal, Table2, Trash2, Rows3, X, Youtube } from "lucide-react";
 import { PeriodControl } from "./components/PeriodControl";
 import { BookingDashboard, type BookingAgendaEvent } from "./components/BookingDashboard";
 import { VpoHome } from "./components/VpoHome";
@@ -1122,6 +1122,9 @@ type ContractCutoff = {
   notes: string;
 };
 
+type DistributorAdjustmentChange = { from_statement: string; percent: number };
+type DistributorAdjustmentDraft = { month: string; percent: string };
+
 type DistributorAccountPolicy = {
   policy_id: string;
   source: string;
@@ -1140,6 +1143,7 @@ type DistributorAccountPolicy = {
   contract_cutoff_id: string | null;
   shares_policy: string;
   report_net_adjustment_pct?: number;
+  report_adjustment_schedule?: DistributorAdjustmentChange[];
   sheet_rules: Record<string, Record<string, boolean | string>>;
   notes: string;
   statement_dictionary: StatementDictionaryEntry[];
@@ -2240,7 +2244,7 @@ export default function Home() {
   const [distributorConfigSource, setDistributorConfigSource] = useState("");
   const [distributorConfigAccountId, setDistributorConfigAccountId] = useState("");
   const [distributorPersonalizationEnabled, setDistributorPersonalizationEnabled] = useState(false);
-  const [distributorAdjustmentDrafts, setDistributorAdjustmentDrafts] = useState<Record<string, string>>({});
+  const [distributorAdjustmentDrafts, setDistributorAdjustmentDrafts] = useState<Record<string, DistributorAdjustmentDraft>>({});
   const [distributorPersonalizationSaving, setDistributorPersonalizationSaving] = useState(false);
   const [bookingLoading, setBookingLoading] = useState(false);
   const [bookingItems, setBookingItems] = useState<BookingShow[]>([]);
@@ -4178,12 +4182,7 @@ export default function Home() {
       const data = await response.json();
       setDistributorConfig(data);
       setDistributorPersonalizationEnabled(Boolean(data.report_personalization?.enabled));
-      setDistributorAdjustmentDrafts(Object.fromEntries(
-        (data.accounts || []).map((account: DistributorAccountPolicy) => [
-          account.policy_id,
-          String(Number(account.report_net_adjustment_pct || 0)),
-        ]),
-      ));
+      setDistributorAdjustmentDrafts({});
       if (!distributorConfigAccountId && data.accounts?.length) {
         setDistributorConfigAccountId(data.accounts[0].policy_id);
       }
@@ -4194,14 +4193,13 @@ export default function Home() {
     }
   }
 
-  function parseDistributorAdjustment(value: string) {
-    const normalized = String(value || "0").replace(/\./g, "").replace(",", ".").trim();
-    const parsed = Number(normalized || "0");
-    return Number.isFinite(parsed) ? parsed : NaN;
-  }
-
-  function updateDistributorAdjustment(policyId: string, value: string) {
-    setDistributorAdjustmentDrafts((current) => ({ ...current, [policyId]: value }));
+  function updateDistributorAdjustment(policyId: string, draft: DistributorAdjustmentDraft | null) {
+    setDistributorAdjustmentDrafts((current) => {
+      const next = { ...current };
+      if (draft) next[policyId] = draft;
+      else delete next[policyId];
+      return next;
+    });
   }
 
   async function saveDistributorPersonalization() {
@@ -4211,15 +4209,21 @@ export default function Home() {
     }
     setDistributorPersonalizationSaving(true);
     try {
-      const accounts = (distributorConfig?.accounts || []).map((account) => {
-        const pct = parseDistributorAdjustment(distributorAdjustmentDrafts[account.policy_id] ?? "0");
-        if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
-          throw new Error(`Porcentaje invalido en ${account.display_name}.`);
+      const accounts = (distributorConfig?.accounts || []).flatMap((account) => {
+        const draft = distributorAdjustmentDrafts[account.policy_id];
+        if (!draft) return [];
+        const last = account.report_adjustment_schedule?.at(-1)?.from_statement;
+        if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(draft.month) || (last && draft.month <= last)) {
+          throw new Error(`Elegí un mes posterior a la última vigencia de ${account.display_name}.`);
         }
-        return {
+        const pct = Number(draft.percent.replace(",", "."));
+        if (!/^\d+(?:[.,]\d+)?$/.test(draft.percent.trim()) || !Number.isFinite(pct) || pct < 0 || pct > 100) {
+          throw new Error(`Ingresá un porcentaje de 0 a 100 para ${account.display_name}.`);
+        }
+        return [{
           policy_id: account.policy_id,
-          report_net_adjustment_pct: pct,
-        };
+          schedule_additions: [{ from_statement: draft.month, percent: pct }],
+        }];
       });
       const response = await fetch("/api/distributor-config", {
         method: "PATCH",
@@ -4235,7 +4239,7 @@ export default function Home() {
         return;
       }
       setRoyaltiesDashboard(null);
-      setMessage({ type: "ok", text: "Porcentajes guardados. El dashboard y los nuevos reportes ya usan esta configuracion." });
+      setMessage({ type: "ok", text: "Configuración de management guardada." });
       await loadDistributorConfig();
     } catch (error) {
       const text = error instanceof Error ? error.message : "No se pudo guardar la personalizacion.";
@@ -6832,13 +6836,10 @@ export default function Home() {
   const selectedDistributorAccount = distributorConfigAccounts.find((account) => account.policy_id === distributorConfigAccountId)
     || distributorConfigAccounts[0]
     || null;
-  const selectedDistributorAdjustmentPct = selectedDistributorAccount
-    ? parseDistributorAdjustment(distributorAdjustmentDrafts[selectedDistributorAccount.policy_id] ?? String(selectedDistributorAccount.report_net_adjustment_pct || 0))
-    : 0;
+  const selectedDistributorSchedule = selectedDistributorAccount?.report_adjustment_schedule || [];
+  const selectedDistributorDraft = selectedDistributorAccount ? distributorAdjustmentDrafts[selectedDistributorAccount.policy_id] : undefined;
+  const distributorAdjustmentEditable = Boolean(currentUser?.canEdit) && !distributorPersonalizationSaving;
   const selectedDistributorRealAmount = selectedDistributorAccount?.account_impact_stats?.amount_usd || 0;
-  const selectedDistributorAdjustedAmount = Number.isFinite(selectedDistributorAdjustmentPct)
-    ? selectedDistributorRealAmount * (1 - selectedDistributorAdjustmentPct / 100)
-    : selectedDistributorRealAmount;
   const selectedDistributorRulePreview = selectedDistributorAccount?.rule_preview || null;
   const selectedDictionaryEntries = selectedDistributorAccount?.statement_dictionary || [];
   const selectedReportImpacts = (distributorConfig?.report_templates || []).filter((template) => {
@@ -8153,8 +8154,7 @@ export default function Home() {
                 <section className="subpanel">
                   <div className="subpanel-title">
                     <div>
-                      <h2>Personalizacion de reportes</h2>
-                      <p>Ajusta el neto ya informado por la distribuidora. No modifica el dato real ni los marts.</p>
+                      <h2>Management</h2>
                     </div>
                     <label className="inline-check">
                       <input
@@ -8172,38 +8172,55 @@ export default function Home() {
                       <strong>{money(selectedDistributorRealAmount)}</strong>
                     </div>
                     <div>
-                      <span>Ajuste VPO</span>
-                      <input
-                        id={`distributor_adjustment_${selectedDistributorAccount.policy_id}`}
-                        inputMode="decimal"
-                        value={distributorAdjustmentDrafts[selectedDistributorAccount.policy_id] ?? String(selectedDistributorAccount.report_net_adjustment_pct || 0)}
-                        onChange={(event) => updateDistributorAdjustment(selectedDistributorAccount.policy_id, event.target.value)}
-                        disabled={!currentUser?.canEdit || distributorPersonalizationSaving}
-                        aria-label="Porcentaje de ajuste del neto para reportes"
-                      />
-                      <small>% sobre neto</small>
-                    </div>
-                    <div>
-                      <span>Neto personalizado</span>
-                      <strong>{money(selectedDistributorAdjustedAmount)}</strong>
-                    </div>
-                    <div>
                       <span>Estado</span>
                       <strong>{distributorPersonalizationEnabled ? "Activo" : "Inactivo"}</strong>
                     </div>
                   </div>
+                  <dl className="management-rates">
+                    <div>
+                      <dt>{selectedDistributorSchedule.length ? `Antes del statement ${selectedDistributorSchedule[0].from_statement}` : "Todos los statements"}</dt>
+                      <dd>{(selectedDistributorAccount.report_net_adjustment_pct ?? 0).toLocaleString("es-AR")}%</dd>
+                    </div>
+                    {selectedDistributorSchedule.map((change) => (
+                      <div key={change.from_statement}>
+                        <dt>Desde el statement {change.from_statement}</dt>
+                        <dd>{change.percent.toLocaleString("es-AR")}%</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  {selectedDistributorDraft && (
+                    <div className="management-change">
+                      <label>
+                        Desde qué statement
+                        <input type="month" value={selectedDistributorDraft.month} disabled={!distributorAdjustmentEditable}
+                          onChange={(event) => updateDistributorAdjustment(selectedDistributorAccount.policy_id, { ...selectedDistributorDraft, month: event.target.value })} />
+                      </label>
+                      <label>
+                        % de management
+                        <input inputMode="decimal" value={selectedDistributorDraft.percent} disabled={!distributorAdjustmentEditable}
+                          onChange={(event) => updateDistributorAdjustment(selectedDistributorAccount.policy_id, { ...selectedDistributorDraft, percent: event.target.value })} />
+                      </label>
+                      <button type="button" className="secondary management-change-button" title="Cancelar cambio" aria-label="Cancelar cambio"
+                        disabled={!distributorAdjustmentEditable} onClick={() => updateDistributorAdjustment(selectedDistributorAccount.policy_id, null)}>
+                        <X size={16} aria-hidden="true" />
+                      </button>
+                    </div>
+                  )}
                   <div className="button-row">
+                    {!selectedDistributorDraft && (
+                      <button type="button" className="secondary management-change-button" disabled={!distributorAdjustmentEditable}
+                        onClick={() => updateDistributorAdjustment(selectedDistributorAccount.policy_id, { month: "", percent: "" })}>
+                        <Plus size={16} aria-hidden="true" /> Agregar cambio
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={saveDistributorPersonalization}
                       disabled={!currentUser?.canEdit || distributorPersonalizationSaving || !distributorConfig}
                     >
-                      {distributorPersonalizationSaving ? "Guardando..." : "Guardar porcentajes"}
+                      {distributorPersonalizationSaving ? "Guardando..." : "Guardar"}
                     </button>
                   </div>
-                  <p className="field-help">
-                    Si esta apagado, los reportes usan el neto real. Si esta prendido, cada cuenta usa su porcentaje configurado.
-                  </p>
                 </section>
 
                 <div className="grid">
