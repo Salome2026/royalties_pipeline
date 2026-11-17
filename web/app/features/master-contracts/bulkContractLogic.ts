@@ -10,7 +10,7 @@ export function detailAgreements(detail: ContractModel) {
   return visibleAgreements(detail.split.agreements, detail.split, detail.first_statement_date);
 }
 
-// Only economic terms travel. Identity, associations, notes, periods and other agreements belong to the target.
+// Copy the model's terms and distribution reference. Track-specific details stay with the target.
 export function applyContractModel(model: ContractModel, modelIndex: number, target: ContractDetail, targetIndex: number,
   from: string | null, until: string | null): Split {
   const source = detailAgreements(model)[modelIndex];
@@ -24,6 +24,8 @@ export function applyContractModel(model: ContractModel, modelIndex: number, tar
     contract_kind: source.contract_kind, master_pool_percent: source.master_pool_percent,
     company_name: source.company_name, owner_split_mode: source.owner_split_mode,
     distribution_recipients: structuredClone(source.distribution_recipients),
+    distribution_contract_number: source.distribution_contract_number,
+    distribution_contract_version: source.distribution_contract_version,
     owners: structuredClone(source.owners), allocation,
     effective_from: from, effective_until: until,
   };

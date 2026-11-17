@@ -42,12 +42,17 @@ assert(modelErrors({ ...detail, version: 0 }, 0).length);
 assert(modelErrors({ ...detail, participant_proposal: { added: { x: ["Nuevo"] } } }, 0).length);
 const distribution = structuredClone(detail);
 distribution.split.agreements[0] = { ...agreement, allocation_model: "pools", master_pool_percent: 70,
-  distribution_recipients: [{ name: "Indyana", percent: 40 }, { name: "Socio", percent: 30 }] };
+  distribution_recipients: [{ name: "Indyana", percent: 40 }, { name: "Socio", percent: 30 }],
+  distribution_contract_number: 10013, distribution_contract_version: 2 };
 const copiedDistribution = applyContractModel(distribution, 0, target, 1, "2025-06-01", null);
 assert.deepEqual(copiedDistribution.agreements[1].distribution_recipients, distribution.split.agreements[0].distribution_recipients);
+assert.equal(copiedDistribution.agreements[1].distribution_contract_number, 10013);
+assert.equal(copiedDistribution.agreements[1].distribution_contract_version, 2);
 assert.deepEqual(closingErrors(copiedDistribution), []);
 const copiedFlat = applyContractModel(detail, 0, { ...target, split: copiedDistribution }, 1, "2025-06-01", null);
 assert.equal(copiedFlat.agreements[1].distribution_recipients, undefined);
+assert.equal(copiedFlat.agreements[1].distribution_contract_number, undefined);
+assert.equal(copiedFlat.agreements[1].distribution_contract_version, undefined);
 // No pre-existing saved contract is required when defining a group contract.
 const fresh = { ...structuredClone(detail), version: 0, closed: false };
 assert.deepEqual(modelErrors(fresh, 0, true), []);
