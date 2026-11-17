@@ -10,6 +10,8 @@ En ADA, un UPC ausente también puede recuperarse para la asignación si el mism
 
 `product_income_allocations.json` contiene la composición verificada, las referencias de evidencia, los contextos nativos de producto y una huella. Se reconstruye sobre todo el histórico admitido al cerrar cada ingesta/publicación. Reutiliza composiciones verificadas de la versión anterior; los nuevos UPC se consultan con las credenciales de metadata existentes. La falta de servicio deja el ingreso original visible, sin adivinar relaciones. Una contradicción nueva invalida la asignación anterior. No se consulta Spotify al abrir un informe.
 
+Una composición confirmada contra la ficha de la distribuidora y sus ISRC se registra en `scripts/lib/product_income_confirmed_compositions.json`. La confirmación identifica el UPC exacto y las fichas incompletas que ya se revisaron. Las otras fichas del UPC y los ISRC observados siguen participando en el control de contradicciones.
+
 ## Lecturas del sistema
 
 - Excel por keyword, Google Sheets, PDF de ingresos y reportes por títulos utilizan la misma vista. La búsqueda contempla el texto original del producto y el ISRC/tema de destino. Los ingresos del producto resuelto se suman al ISRC; el producto sin resolver conserva su fila.

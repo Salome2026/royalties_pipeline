@@ -21,6 +21,7 @@ sys.modules.setdefault("lib.product_income", sys.modules[__name__])
 
 FILE = "product_income_allocations.json"
 RULE = "product-income-equal-tracks-v1"
+CONFIRMED_COMPOSITIONS = Path(__file__).with_name("product_income_confirmed_compositions.json")
 _INDEX: ContextVar[dict | None] = ContextVar("product_income_index", default=None)
 _PINNED: ContextVar[bool] = ContextVar("product_income_pinned", default=False)
 ISRC = re.compile(r"^[A-Z]{2}[A-Z0-9]{3}[0-9]{7}$")
@@ -389,6 +390,7 @@ def compile_index(source: Path, *, albums: dict[str, dict], tracks: dict[str, di
     for key, isrc in observations.iter_rows():
         observed[key].add(isrc)
     by_isrc = {r["asset_isrc"]: r for r in (catalog.to_dicts() if catalog is not None else []) if r.get("asset_isrc")}
+    confirmed = json.loads(CONFIRMED_COMPOSITIONS.read_text(encoding="utf-8")) if scope == "regular" else {}
     products = {}
     if prior_index is not None:
         validate_index(prior_index)
@@ -428,6 +430,17 @@ def compile_index(source: Path, *, albums: dict[str, dict], tracks: dict[str, di
                         " & ".join(a["name"] for a in full.get("artists", item.get("artists", [])))})
             if len(resolved) == total:
                 evidence.append({"album_id": album["id"], "tracks": resolved})
+        if key in confirmed:
+            decision = confirmed[key]
+            approved_tracks = []
+            for position, track in enumerate(decision["tracks"], 1):
+                canonical = by_isrc.get(track["isrc"], {})
+                approved_tracks.append({**track, "position": position,
+                    "title": canonical.get("track_title") or track["title"],
+                    "artist": canonical.get("catalog_artist_statement") or canonical.get("artist_statement")})
+            reviewed_albums = {decision["album_id"], *decision["incomplete_album_ids"]}
+            evidence = [{"album_id": decision["album_id"], "tracks": approved_tracks},
+                        *(proof for proof in evidence if proof["album_id"] not in reviewed_albums)]
         if not evidence and fetch is not None and target is not None:
             original_upc = seeds.filter(pl.col("key") == key)["upc"].drop_nulls().to_list()
             new_albums, new_tracks = fetch(original_upc[0] if original_upc else native_upcs.get(key,target))

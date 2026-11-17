@@ -282,6 +282,36 @@ class AllocationTests(unittest.TestCase):
             doc=compile_index(source,albums={},tracks={},prior_index=prior)
             self.assertEqual(doc['products']['UPC:08718521191726']['reason'],'contradictory_composition')
 
+    def test_confirmed_composition_replaces_only_reviewed_incomplete_album(self):
+        from lib.product_income import CONFIRMED_COMPOSITIONS
+
+        key = 'UPC:00790522526248'
+        decision = json.loads(CONFIRMED_COMPOSITIONS.read_text(encoding='utf-8'))[key]
+        codes = [track['isrc'] for track in decision['tracks']]
+        upc = '790522526248'
+        partial = [code for code in codes if code != 'QZGLS2526357']
+        items = [{'id': code, 'name': code, 'external_ids': {'isrc': code}} for code in partial]
+        incomplete = {'id': decision['incomplete_album_ids'][0], 'external_ids': {'upc': upc},
+                      'total_tracks': len(items), 'tracks': {'items': items, 'total': len(items), 'next': None}}
+        originals = [sale(product_upc=upc, product_type='Album', amount_usd=4.301641)]
+        originals.extend(sale(product_upc=upc, asset_isrc=code) for code in codes)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'raw.parquet'
+            frame = pl.DataFrame(originals)
+            frame.write_parquet(path)
+            doc = compile_index(path, albums={'incomplete': incomplete}, tracks={})
+            self.assertEqual([track['isrc'] for track in doc['products'][key]['tracks']], codes)
+            allocated = allocate_income(frame.lazy(), doc).collect().filter(pl.col('_income_allocated'))
+            self.assertEqual(allocated.height, 14)
+            self.assertAlmostEqual(allocated['amount_usd'].sum(), 4.301641)
+            self.assertAlmostEqual(allocated['units'].sum(), 1.)
+            competing = {**incomplete, 'id': 'new-edition'}
+            conflict = compile_index(path, albums={'competing': competing}, tracks={})
+            self.assertEqual(conflict['products'][key]['reason'], 'contradictory_composition')
+            pl.DataFrame([*originals, sale(product_upc=upc, asset_isrc='XXAAA2600001')]).write_parquet(path)
+            conflict = compile_index(path, albums={'incomplete': incomplete}, tracks={})
+            self.assertEqual(conflict['products'][key]['reason'], 'contradictory_composition')
+
     def test_missing_ada_upc_uses_unique_native_product_binding_and_rejects_reuse(self):
         with tempfile.TemporaryDirectory() as tmp:
             source=Path(tmp)/'raw.parquet'

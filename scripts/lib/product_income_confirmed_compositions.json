@@ -1,0 +1,24 @@
+{
+  "UPC:00790522526248": {
+    "title": "ASCENSO",
+    "source": "ONErpm / gusty_dj. Orden de la ficha confirmado el 2026-11-17 y conciliado con los ISRC del mismo UPC en los statements de ONErpm.",
+    "album_id": "2ARnyooHVWa7e4ypKJ830S",
+    "incomplete_album_ids": ["4a6MqElWPfbJUmr7ZVaRr8"],
+    "tracks": [
+      {"title": "LA INTRO", "isrc": "QZGLS2526356"},
+      {"title": "DIVINA", "isrc": "QZGLS2526357"},
+      {"title": "HECHIZADO", "isrc": "QZGLS2526358"},
+      {"title": "QUE SE SAQUE TODO", "isrc": "QZGLS2526359"},
+      {"title": "MODELITO", "isrc": "QZGLS2526360"},
+      {"title": "PROVOCA", "isrc": "QZGLS2526361"},
+      {"title": "SE PEGÓ Y LO SINTIÓ", "isrc": "QZGLS2526362"},
+      {"title": "PRUMM", "isrc": "QZGLS2526363"},
+      {"title": "GÁRGOLA", "isrc": "QZGLS2526364"},
+      {"title": "BOBO", "isrc": "QZGLS2526365"},
+      {"title": "SEÑORA", "isrc": "QZGLS2526366"},
+      {"title": "MATEMOS LAS GANAS", "isrc": "QZGLS2526367"},
+      {"title": "MI AMOR", "isrc": "QZGLS2526368"},
+      {"title": "GUSTOS CAROS", "isrc": "QZGLS2526369"}
+    ]
+  }
+}
