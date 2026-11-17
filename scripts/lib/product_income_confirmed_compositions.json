@@ -1,4 +1,22 @@
 {
+  "UPC:00655857984999": {
+    "title": "Cumbia Que Adora",
+    "source": "Consulta de Apple para el UPC 655857984999 del 2026-11-17. Las 10 posiciones concilian con los ISRC informados por ONErpm / mawzrecords para ese UPC.",
+    "album_id": "apple:1815334165",
+    "incomplete_album_ids": [],
+    "tracks": [
+      {"title": "Cumbia Que Adora", "isrc": "ARBF32000036"},
+      {"title": "Digno", "isrc": "ARBF32000037"},
+      {"title": "Hay Libertad", "isrc": "ARBF32000038"},
+      {"title": "Una Esperanza (feat. Enrique Gomez)", "isrc": "ARBF32000039"},
+      {"title": "No Llores Más", "isrc": "ARBF32000040"},
+      {"title": "Mi Mejor Adoración", "isrc": "ARBF32000041"},
+      {"title": "Me Seduces", "isrc": "ARBF32000042"},
+      {"title": "Creo En Tí", "isrc": "ARBF32000043"},
+      {"title": "Abre Los Cielos", "isrc": "ARBF32000044"},
+      {"title": "Loco Por Vos", "isrc": "ARBF32000045"}
+    ]
+  },
   "UPC:00790522526248": {
     "title": "ASCENSO",
     "source": "ONErpm / gusty_dj. Orden de la ficha confirmado el 2026-11-17 y conciliado con los ISRC del mismo UPC en los statements de ONErpm.",
