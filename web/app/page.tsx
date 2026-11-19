@@ -2958,6 +2958,7 @@ export default function Home() {
   }, [visibleCommissionSettlementRows]);
 
   const commissionPeriodLabel = commissionResolvedPeriod.label === "Todo" ? "Todos los meses" : commissionResolvedPeriod.label;
+  const commissionSettlementNote = "Comisiones ya pagadas muestra el ingreso de Indyana por shows con comisión de booking ya pagada. Neto Shows es el importe al que se aplica el porcentaje de cada artista para calcular la comisión del empleado.";
 
   function escapePrintHtml(value: unknown) {
     return String(value ?? "")
@@ -2982,15 +2983,15 @@ export default function Home() {
             <td><strong>${escapePrintHtml(item.artist)}</strong></td>
             <td class="number">${item.shows}</td>
             <td class="money">${escapePrintHtml(ars(item.indyanaTotal))}</td>
-            <td class="money">${escapePrintHtml(ars(item.baseAmount))}</td>
             <td class="money">${escapePrintHtml(ars(item.nonCommissionable))}</td>
+            <td class="money">${escapePrintHtml(ars(item.baseAmount))}</td>
             <td class="number">${escapePrintHtml(item.priorityOrder || "-")}</td>
             <td class="number">${escapePrintHtml(pct(item.percent))}</td>
             <td class="money strong">${escapePrintHtml(ars(item.commissionAmount))}</td>
             <td>${escapePrintHtml(item.notes)}<span>${escapePrintHtml(item.ruleNotes)}</span></td>
           </tr>
         `).join("")
-      : `<tr><td colspan="9">Sin movimientos para los filtros seleccionados.</td></tr>`;
+      : `<tr><td colspan="10">Sin movimientos para los filtros seleccionados.</td></tr>`;
 
     const searchLabel = commissionSettlementSearch.trim()
       ? `Busqueda aplicada: ${commissionSettlementSearch.trim()}`
@@ -3131,25 +3132,26 @@ export default function Home() {
             </div>
           </header>
           <section class="kpis">
-            <div class="kpi"><span>Shows incluidos</span><strong>${commissionTotals.shows}</strong></div>
-            <div class="kpi"><span>Indyana total</span><strong>${escapePrintHtml(ars(commissionTotals.indyanaTotal))}</strong></div>
-            <div class="kpi"><span>Base empleado</span><strong>${escapePrintHtml(ars(commissionTotals.baseAmount))}</strong></div>
-            <div class="kpi"><span>Excluido general</span><strong>${escapePrintHtml(ars(commissionTotals.nonCommissionable))}</strong></div>
+            <div class="kpi"><span>Cantidad de shows</span><strong>${commissionTotals.shows}</strong></div>
+            <div class="kpi"><span>Shows</span><strong>${escapePrintHtml(ars(commissionTotals.indyanaTotal))}</strong></div>
+            <div class="kpi"><span>Comisiones ya pagadas</span><strong>${escapePrintHtml(ars(commissionTotals.nonCommissionable))}</strong></div>
+            <div class="kpi"><span>Neto Shows</span><strong>${escapePrintHtml(ars(commissionTotals.baseAmount))}</strong></div>
             <div class="kpi total"><span>Comision calculada</span><strong>${escapePrintHtml(ars(commissionTotals.commissionAmount))}</strong></div>
           </section>
+          <p class="note">${escapePrintHtml(commissionSettlementNote)}</p>
           <table>
             <thead>
               <tr>
                 <th style="width: 8%;">Mes</th>
-                <th style="width: 17%;">Artista</th>
-                <th style="width: 7%;">Shows</th>
-                <th style="width: 12%;">Indyana total</th>
-                <th style="width: 12%;">Base empleado</th>
-                <th style="width: 12%;">Excluido general</th>
-                <th style="width: 7%;">Orden</th>
-                <th style="width: 8%;">%</th>
-                <th style="width: 12%;">Comision</th>
-                <th style="width: 12%;">Notas</th>
+                <th style="width: 15%;">Artista</th>
+                <th style="width: 7%;">Cantidad de shows</th>
+                <th style="width: 11%;">Shows</th>
+                <th style="width: 13%;">Comisiones ya pagadas</th>
+                <th style="width: 11%;">Neto Shows</th>
+                <th style="width: 6%;">Orden</th>
+                <th style="width: 5%;">%</th>
+                <th style="width: 11%;">Comision</th>
+                <th style="width: 13%;">Notas</th>
               </tr>
             </thead>
             <tbody>${rowsHtml}</tbody>
@@ -8904,26 +8906,27 @@ export default function Home() {
                     <strong>{commissionPeriodLabel}</strong>
                   </div>
                   <div>
-                    <span>Shows incluidos</span>
+                    <span>Cantidad de shows</span>
                     <strong>{commissionTotals.shows}</strong>
                   </div>
                   <div>
-                    <span>Indyana total</span>
+                    <span>Shows</span>
                     <strong>{ars(commissionTotals.indyanaTotal)}</strong>
                   </div>
-                  <div>
-                    <span>Base empleado</span>
-                    <strong>{ars(commissionTotals.baseAmount)}</strong>
-                  </div>
                   <div className={commissionTotals.nonCommissionable > 0 ? "warn" : ""}>
-                    <span>Excluido general</span>
+                    <span>Comisiones ya pagadas</span>
                     <strong>{ars(commissionTotals.nonCommissionable)}</strong>
+                  </div>
+                  <div>
+                    <span>Neto Shows</span>
+                    <strong>{ars(commissionTotals.baseAmount)}</strong>
                   </div>
                   <div className="commission-total">
                     <span>Comision calculada</span>
                     <strong>{ars(commissionTotals.commissionAmount)}</strong>
                   </div>
                 </div>
+                <p className="field-help">{commissionSettlementNote}</p>
 
                 <div className="commission-table-toolbar">
                   <div className="commission-search">
@@ -8958,10 +8961,10 @@ export default function Home() {
                       <tr>
                         <th>Mes</th>
                         <th>Artista</th>
+                        <th>Cantidad de shows</th>
                         <th>Shows</th>
-                        <th>Indyana total</th>
-                        <th>Base empleado</th>
-                        <th>Excluido general</th>
+                        <th>Comisiones ya pagadas</th>
+                        <th>Neto Shows</th>
                         <th>Orden</th>
                         <th>% empleado</th>
                         <th>Comision</th>
@@ -8975,8 +8978,8 @@ export default function Home() {
                           <td><strong>{item.artist}</strong></td>
                           <td>{item.shows}</td>
                           <td>{ars(item.indyanaTotal)}</td>
-                          <td>{ars(item.baseAmount)}</td>
                           <td className={item.nonCommissionable > 0 ? "amount-warn" : ""}>{ars(item.nonCommissionable)}</td>
+                          <td>{ars(item.baseAmount)}</td>
                           <td>{item.priorityOrder || "-"}</td>
                           <td>{pct(item.percent)}</td>
                           <td><strong>{ars(item.commissionAmount)}</strong></td>
